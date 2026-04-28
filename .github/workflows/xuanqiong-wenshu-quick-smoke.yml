@@ -1,0 +1,70 @@
+name: Xuanqiong Wenshu Quick Smoke
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  quick-and-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      XUANQIONG_WENSHU_BACKEND_HOST: 127.0.0.1
+      XUANQIONG_WENSHU_BACKEND_PORT: 8013
+      XUANQIONG_WENSHU_FRONTEND_HOST: 127.0.0.1
+      XUANQIONG_WENSHU_FRONTEND_PORT: 5174
+      PYTHONUTF8: 1
+      PYTHONIOENCODING: utf-8
+      OPENAI_API_KEY: test-key-for-smoke
+      OPENAI_API_BASE_URL: https://api.openai.com/v1
+      OPENAI_MODEL_NAME: gpt-4o-mini
+      SECRET_KEY: ci-secret-key-for-xuanqiong-wenshu-smoke-only
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend dependencies
+        shell: pwsh
+        run: |
+          python -m venv backend/.venv
+          backend/.venv/Scripts/python.exe -m pip install --upgrade pip
+          backend/.venv/Scripts/python.exe -m pip install -r backend/requirements.txt
+          backend/.venv/Scripts/python.exe -m pip install -r backend/requirements-dev.txt
+
+      - name: Install frontend dependencies
+        shell: pwsh
+        run: npm --prefix frontend ci
+
+      - name: Run quick verification
+        shell: pwsh
+        run: ./verify.ps1 quick
+
+      - name: Start formal stack
+        shell: pwsh
+        run: ./start.ps1
+
+      - name: Run smoke verification
+        shell: pwsh
+        run: ./verify.ps1 smoke
+
+      - name: Stop formal stack
+        if: always()
+        shell: pwsh
+        run: ./stop.ps1
