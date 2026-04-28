@@ -315,7 +315,7 @@ Write-Host "后端：$backendBaseUrl" -ForegroundColor Gray
 Write-Host "前端：$frontendBaseUrl" -ForegroundColor Gray
 Write-Host "后端 .env：$backendEnvPath" -ForegroundColor Gray
 
-$dbProvider = Get-DotEnvValue -Path $backendEnvPath -Name 'DB_PROVIDER' -Default 'sqlite'
+$dbProvider = Get-EnvValue -Names @('DB_PROVIDER') -Default (Get-DotEnvValue -Path $backendEnvPath -Name 'DB_PROVIDER' -Default 'sqlite')
 if ($dbProvider -eq 'mysql') {
     Invoke-ExternalStep '按需启动本地 MySQL' {
         & $powershellRunner -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repo 'tools\start_local_mysql.ps1')

@@ -24,6 +24,8 @@ jobs:
       OPENAI_API_BASE_URL: https://api.openai.com/v1
       OPENAI_MODEL_NAME: gpt-4o-mini
       SECRET_KEY: ci-secret-key-for-xuanqiong-wenshu-smoke-only
+      DB_PROVIDER: sqlite
+      SQLITE_DB_PATH: storage/xuanqiong_wenshu_ci.db
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

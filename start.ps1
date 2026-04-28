@@ -28,6 +28,7 @@ $backendHost = Get-EnvValue -Names @('XUANQIONG_WENSHU_BACKEND_HOST') -Default '
 $backendPortValue = Get-EnvValue -Names @('XUANQIONG_WENSHU_BACKEND_PORT') -Default '8013'
 $frontendHost = Get-EnvValue -Names @('XUANQIONG_WENSHU_FRONTEND_HOST') -Default '127.0.0.1'
 $frontendPortValue = Get-EnvValue -Names @('XUANQIONG_WENSHU_FRONTEND_PORT') -Default '5174'
+$dbProvider = Get-EnvValue -Names @('DB_PROVIDER') -Default 'mysql'
 
 $env:XUANQIONG_WENSHU_BACKEND_HOST = $backendHost
 $env:XUANQIONG_WENSHU_BACKEND_PORT = $backendPortValue
@@ -155,10 +156,14 @@ foreach ($proc in $nodeProcesses) {
     } catch {}
 }
 
-Write-Host "`n[2/5] start local MySQL..." -ForegroundColor Cyan
-& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repo 'tools\start_local_mysql.ps1')
-if ($LASTEXITCODE -ne 0) {
-    throw 'Local MySQL startup failed'
+if ($dbProvider -eq 'mysql') {
+    Write-Host "`n[2/5] start local MySQL..." -ForegroundColor Cyan
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repo 'tools\start_local_mysql.ps1')
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Local MySQL startup failed'
+    }
+} else {
+    Write-Host "`n[2/5] skip local MySQL (DB_PROVIDER=$dbProvider)" -ForegroundColor DarkGray
 }
 
 Write-Host "`n[3/5] start backend..." -ForegroundColor Cyan
