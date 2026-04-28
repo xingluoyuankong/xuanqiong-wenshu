@@ -346,7 +346,7 @@ if ($Suite -in @('quick', 'full')) {
 
     Push-Location $backendDir
     try {
-        Invoke-ExternalStep '运行后端 phase4 pytest' { & .\.venv\Scripts\python.exe -m pytest app/services/test_phase4_integration.py }
+        Invoke-ExternalStep '运行后端 phase4 pytest' { & .\.venv\Scripts\python.exe -m pytest app/services }
     } finally {
         Pop-Location
     }
