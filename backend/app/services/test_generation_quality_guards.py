@@ -304,6 +304,35 @@ class TestGenerationQualityGuards:
         assert gate["blockers"] == []
         assert gate["consistency_unresolved_count"] == 0
 
+    def test_structural_quality_gate_does_not_block_scene_keyword_miss_when_other_signals_pass(self):
+        gate = PipelineOrchestrator._build_structural_quality_gate(
+            {
+                "self_critique_after_consistency": {
+                    "final_score": 82.0,
+                    "critical_count": 0,
+                    "major_count": 1,
+                },
+                "consistency_repair": {
+                    "is_consistent": True,
+                    "post_fix_check": {"violations": []},
+                },
+                "story_progression_guard": {
+                    "word_count": 1822,
+                    "dialogue_marker_count": 28,
+                    "mission_hit_count": 5,
+                    "expected_dialogue": True,
+                    "static_description_risk": False,
+                    "scene_count": 3,
+                    "scene_fulfillment_rate": 0.3333,
+                    "dialogue_changes_state": True,
+                    "ending_pressure_passed": True,
+                },
+            }
+        )
+
+        assert gate["passed"] is True
+        assert "scene_fulfillment_weak" not in {item["code"] for item in gate["blockers"]}
+
     def test_structural_quality_gate_recomputes_story_progression_after_enrichment_like_revision(self):
         chapter_mission = {
             "chapter_purpose": "逼问真相",
@@ -592,6 +621,19 @@ class TestGenerationQualityGuards:
         assert guard["dialogue_changes_state"] is True
         assert guard["ending_pressure_passed"] is True
         assert guard["quality_metric_snapshot"]["scene_count"] == 1
+
+    def test_ending_pressure_recognizes_survival_risk_without_punctuation_hook(self):
+        text = (
+            "\u4ed6\u770b\u89c1\u9000\u6f6e\u7ebf\u6574\u9f50\u5f97\u50cf\u88ab\u7cbe\u786e\u4e08\u91cf\uff0c"
+            "\u7901\u7f1d\u91cc\u8fd8\u5361\u7740\u4e00\u5757\u7edd\u975e\u73b0\u4ee3\u8239\u53ea\u80fd\u7559\u4e0b\u7684\u65e7\u6728\u7247\u3002"
+            "\u82e5\u8fd8\u628a\u8fd9\u91cc\u5f53\u6210\u7b49\u6551\u63f4\u7684\u6d77\u96be\u73b0\u573a\uff0c"
+            "\u4e0b\u4e00\u8f6e\u6da8\u6f6e\u4f1a\u5148\u628a\u4ed6\u6740\u6b7b\u5728\u8fd9\u7247\u4e0d\u81ea\u7136\u7684\u6f6e\u6c34\u91cc\u3002"
+        )
+
+        result = PipelineOrchestrator._evaluate_ending_pressure(text, chapter_mission={})
+
+        assert result["ending_pressure_passed"] is True
+        assert "\u4e0b\u4e00\u8f6e" in result["ending_pressure_hits"]
 
     def test_rag_continuity_injection_forces_previous_tail_and_open_hooks(self):
         injected = PipelineOrchestrator._inject_continuity_into_rag(

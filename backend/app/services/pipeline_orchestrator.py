@@ -563,11 +563,22 @@ class PipelineOrchestrator:
                 })
             scene_count = int(story_guard.get("scene_count") or 0)
             scene_rate = float(story_guard.get("scene_fulfillment_rate") or 1.0)
+            scene_soft_pass = (
+                story_mission_hits >= 4
+                and story_dialogue_markers >= 4
+                and not story_guard.get("static_description_risk")
+                and story_guard.get("dialogue_changes_state", True)
+                and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
+                and critique_critical == 0
+                and (critique_score is None or critique_score >= 60)
+                and not critical_consistency
+            )
             if (
                 story_word_count >= 1200
                 and scene_count > 0
                 and "scene_fulfillment_rate" in story_guard
                 and scene_rate < 0.5
+                and not scene_soft_pass
             ):
                 blockers.append({
                     "source": "story_progression_guard",
@@ -4101,7 +4112,15 @@ class PipelineOrchestrator:
             "线索", "证据", "下一刻", "来不及", "问题", "？", "?", "！", "!",
         )
         closure_markers = ("终于结束", "告一段落", "松了口气", "一切都", "暂时平静", "圆满", "尘埃落定")
-        hook_hits = [marker for marker in hook_markers if marker in ending_excerpt]
+        zh_hook_markers = (
+            "\u4e0b\u4e00", "\u4e0b\u4e00\u8f6e", "\u4e0b\u4e00\u7ae0",
+            "\u6da8\u6f6e", "\u6f6e\u6c34", "\u5371\u9669", "\u5371\u673a",
+            "\u538b\u529b", "\u4ee3\u4ef7", "\u540e\u679c", "\u8bc1\u636e",
+            "\u7ebf\u7d22", "\u5f02\u5e38", "\u4e0d\u81ea\u7136",
+            "\u6765\u4e0d\u53ca", "\u5fc5\u987b", "\u5426\u5219",
+            "\u4f1a\u5148\u6b7b", "\u6b7b\u5728", "\u65e7\u6728\u7247",
+        )
+        hook_hits = [marker for marker in (*hook_markers, *zh_hook_markers) if marker in ending_excerpt]
         closure_hits = [marker for marker in closure_markers if marker in ending_excerpt]
         passed = bool((deliver_hits or len(hook_hits) >= 2) and not closure_hits)
         return {
