@@ -320,6 +320,23 @@ def _is_recoverable_blueprint_schema(blueprint: Blueprint | None) -> bool:
     return has_novel_outline or has_chapter_outline
 
 
+def _is_recoverable_for_requested_blueprint_stage(
+    blueprint: Blueprint | None,
+    requested_stage: str | None,
+) -> bool:
+    if not _is_recoverable_blueprint_schema(blueprint):
+        return False
+
+    stage = str(requested_stage or "").strip().lower()
+    if stage == "chapter_outline":
+        chapter_outline = getattr(blueprint, "chapter_outline", None)
+        return isinstance(chapter_outline, list) and _has_complete_chapter_outline(chapter_outline)
+    if stage == "novel_outline":
+        novel_outline = getattr(blueprint, "novel_outline", None)
+        return isinstance(novel_outline, list) and len(novel_outline) > 0
+    return True
+
+
 def _scan_longform_structure_gaps(blueprint_data: Dict[str, Any]) -> Dict[str, Any]:
     world_setting = blueprint_data.get("world_setting") if isinstance(blueprint_data.get("world_setting"), dict) else {}
     system_slots = {
@@ -2304,7 +2321,7 @@ async def _recover_finished_blueprint_job_from_project(
     service = NovelService(session)
     project_schema = await service.get_project_schema(project_id, user_id)
     blueprint = project_schema.blueprint
-    if not _is_recoverable_blueprint_schema(blueprint):
+    if not _is_recoverable_for_requested_blueprint_stage(blueprint, job.get("force_stage")):
         return None
 
     recovered = _normalize_blueprint_job_payload(job)
@@ -2646,8 +2663,16 @@ async def _generate_blueprint_impl(
     project = await novel_service.ensure_project_owner(project_id, user_id)
     logger.info("项目 %s 开始生成蓝图", project_id)
 
+    existing_blueprint: Blueprint | None = None
+    try:
+        project_schema = await novel_service.get_project_schema(project_id, user_id)
+        if project_schema and project_schema.blueprint:
+            existing_blueprint = project_schema.blueprint
+    except Exception as exc:
+        logger.warning("Failed to load existing blueprint before generation: project=%s error=%s", project_id, exc)
+
     history_records = await novel_service.list_conversations(project_id)
-    if not history_records:
+    if not history_records and existing_blueprint is None:
         logger.warning("项目 %s 缺少对话历史，无法生成蓝图", project_id)
         raise HTTPException(status_code=400, detail="缺少对话历史，请先完成概念对话后再生成蓝图")
 
@@ -2685,7 +2710,7 @@ async def _generate_blueprint_impl(
         except (json.JSONDecodeError, AttributeError):
             continue
 
-    if not formatted_history:
+    if not formatted_history and existing_blueprint is None:
         logger.warning("项目 %s 对话历史格式异常，无法提取有效内容", project_id)
         raise HTTPException(
             status_code=400,
@@ -2854,13 +2879,24 @@ async def _generate_blueprint_impl(
     else:
         generated_stage = "chapter_outline"
 
-    blueprint_data = await _repair_blueprint_character_names(
-        llm_service=llm_service,
-        blueprint_data=blueprint_data,
-        user_id=user_id,
-        project_title=project.title,
-        progress_callback=progress_callback,
-    )
+    try:
+        blueprint_data = await _repair_blueprint_character_names(
+            llm_service=llm_service,
+            blueprint_data=blueprint_data,
+            user_id=user_id,
+            project_title=project.title,
+            progress_callback=progress_callback,
+        )
+    except Exception as exc:
+        if not _blueprint_has_valid_character_names(blueprint_data):
+            raise
+        logger.warning(
+            "Skip non-critical blueprint character-name repair after generation: project=%s error=%s",
+            project_id,
+            exc,
+        )
+        if progress_callback is not None:
+            await progress_callback("polishing", "角色命名附加修复失败，已保留现有有效角色名")
 
     if progress_callback is not None:
         await progress_callback("generating", "正在保存蓝图与项目状态")

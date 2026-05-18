@@ -110,6 +110,26 @@ class FakeBrokenRecoverService:
         )()
 
 
+class FakePartialRecoverService:
+    def __init__(self, session):
+        self.session = session
+
+    async def get_project_schema(self, project_id: str, user_id: int):
+        return type(
+            "ProjectSchema",
+            (),
+            {
+                "blueprint": Blueprint(
+                    title="只有总纲的蓝图",
+                    one_sentence_summary="可用内容",
+                    novel_outline=[{"stage": 1, "title": "旧馆删号", "summary": "总纲"}],
+                    chapter_outline=[],
+                    characters=[{"name": "林七"}],
+                )
+            },
+        )()
+
+
 class RetryThenSuccessLLMService:
     def __init__(self, response: str):
         self.response = response
@@ -3377,6 +3397,27 @@ async def test_finished_blueprint_job_does_not_recover_broken_project_blueprint(
             "status": "generating",
             "progress_stage": "generating",
             "progress_message": "正在生成",
+        },
+    )
+
+    assert recovered is None
+
+
+@pytest.mark.anyio
+async def test_chapter_outline_job_does_not_recover_from_total_outline_only(monkeypatch):
+    monkeypatch.setattr("app.api.routers.novels.NovelService", FakePartialRecoverService)
+
+    recovered = await _recover_finished_blueprint_job_from_project(
+        "project-partial",
+        session=None,
+        user_id=1,
+        job={
+            "run_id": "run-chapter-outline",
+            "project_id": "project-partial",
+            "status": "generating",
+            "progress_stage": "generating",
+            "progress_message": "正在生成章节大纲",
+            "force_stage": "chapter_outline",
         },
     )
 
