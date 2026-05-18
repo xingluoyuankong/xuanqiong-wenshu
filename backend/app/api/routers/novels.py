@@ -30,6 +30,7 @@ from ...schemas.user import User as UserSchema, UserInDB
 from ...models import BlueprintGenerationJob, NovelProject
 from ...services.export_service import ExportService
 from ...services.import_service import ImportService
+from ...services.generation_call_service import GenerationCallPolicy, call_generation_text, is_retryable_http_exception
 from ...services.llm_service import LLMService
 from ...services.novel_service import NovelService
 from ...services.prompt_service import PromptService
@@ -644,12 +645,7 @@ def _resolve_chapter_batch_timeout_seconds(blueprint_data: Dict[str, Any], batch
 
 
 def _is_retryable_http_exception(exc: HTTPException) -> bool:
-    if exc.status_code in {429, 502, 503, 504}:
-        return True
-    detail = exc.detail
-    if isinstance(detail, dict) and detail.get("retryable") is True:
-        return True
-    return False
+    return is_retryable_http_exception(exc)
 
 
 async def _call_llm_with_stage_retries(
@@ -670,31 +666,26 @@ async def _call_llm_with_stage_retries(
     progress_stage: str = "generating",
     retry_attempts: int = 2,
 ) -> str:
-    attempts = max(1, retry_attempts)
-    for attempt in range(1, attempts + 1):
-        try:
-            return await llm_service.get_llm_response(
-                system_prompt=system_prompt,
-                conversation_history=conversation_history,
-                temperature=temperature,
-                user_id=user_id,
-                timeout=timeout,
-                response_format=response_format,
-                max_tokens=max_tokens,
-                top_p=top_p,
-                allow_truncated_response=allow_truncated_response,
-                retry_same_model_once=retry_same_model_once,
-            )
-        except HTTPException as exc:
-            if attempt >= attempts or not _is_retryable_http_exception(exc):
-                raise
-            if progress_callback is not None:
-                await progress_callback(
-                    progress_stage,
-                    f"{stage_label}遇到上游抖动，正在进行第 {attempt}/{attempts - 1} 次重试",
-                )
-            await asyncio.sleep(min(8.0, 1.5 * attempt))
-    raise HTTPException(status_code=500, detail=f"{stage_label}失败，重试流程异常退出")
+    result = await call_generation_text(
+        llm_service=llm_service,
+        system_prompt=system_prompt,
+        conversation_history=conversation_history,
+        temperature=temperature,
+        user_id=user_id,
+        timeout=timeout,
+        policy=GenerationCallPolicy(
+            stage_label=stage_label,
+            progress_stage=progress_stage,
+            retry_attempts=retry_attempts,
+            response_format=response_format,
+            max_tokens=max_tokens,
+            top_p=top_p,
+            allow_truncated_response=allow_truncated_response,
+            retry_same_model_once=retry_same_model_once,
+        ),
+        progress_callback=progress_callback,
+    )
+    return result.text
 
 
 _WORLD_BIBLE_SLOT_GROUPS: List[Dict[str, Any]] = [

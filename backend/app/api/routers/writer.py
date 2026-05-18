@@ -65,6 +65,7 @@ from ...services.ai_review_service import AIReviewService
 from ...services.cache_service import CacheService
 from ...services.finalize_service import FinalizeService
 from ...services.foreshadowing_service import ForeshadowingService
+from ...services.generation_call_service import GenerationCallPolicy, GenerationJSONDecodeError, call_generation_json
 from ...services.enrichment_service import EnrichmentService
 from ...services.memory_layer_service import MemoryLayerService
 from ...utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
@@ -2114,7 +2115,7 @@ async def rewrite_chapter_outline(
     novel_service = NovelService(session)
     prompt_service = PromptService(session)
     llm_service = LLMService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    project = await novel_service.ensure_project_owner(project_id, current_user.id)
 
     outline = await novel_service.get_outline(project_id, request.chapter_number)
     if not outline:
@@ -2129,6 +2130,14 @@ async def rewrite_chapter_outline(
         )
 
     direction = (request.direction or "").strip() or "无额外方向"
+    neighbor_lines = []
+    for candidate in sorted(getattr(project, "outlines", []) or [], key=lambda item: item.chapter_number):
+        if abs(candidate.chapter_number - request.chapter_number) <= 2 and candidate.chapter_number != request.chapter_number:
+            neighbor_lines.append(
+                f"第 {candidate.chapter_number} 章《{candidate.title}》：{(candidate.summary or '').strip()[:260]}"
+            )
+    neighbor_context = "\n".join(neighbor_lines) if neighbor_lines else "暂无相邻章节大纲"
+
     user_prompt = f"""
 [章节号]
 第 {request.chapter_number} 章
@@ -2142,35 +2151,38 @@ async def rewrite_chapter_outline(
 [重写方向]
 {direction}
 
+[相邻章节连续性锚点]
+{neighbor_context}
+
 [硬性要求]
 1. 标题更有辨识度，建议 8-22 字。
 2. 摘要长度 160-360 字，必须包含：本章冲突、角色目标/阻碍、关键转折、章尾钩子。
 3. 保持与前后章节连续，不得胡乱跳剧情。
-4. 只输出 JSON，不要附加说明。
+4. 不要改变本章在前后两章之间承担的因果位置，不要新增无法承接的支线。
+5. 只输出 JSON，不要附加说明。
 """
 
     try:
         with LLMService.daily_limit_scope(f"rewrite_outline:{project_id}:{request.chapter_number}:{current_user.id}"):
-            response = await llm_service.get_llm_response(
+            json_result = await call_generation_json(
+                llm_service=llm_service,
                 system_prompt=rewrite_prompt,
                 conversation_history=[{"role": "user", "content": user_prompt}],
                 temperature=0.55,
                 user_id=current_user.id,
                 timeout=240.0,
-                response_format=None,
-                allow_truncated_response=True,
+                policy=GenerationCallPolicy(
+                    stage_label="章节大纲重写",
+                    retry_attempts=3,
+                    response_format="json_object",
+                    allow_truncated_response=True,
+                    json_repair_attempts=1,
+                ),
             )
-        cleaned = remove_think_tags(response)
-        normalized = unwrap_markdown_json(cleaned).strip()
-
-        parsed = {}
-        try:
-            parsed = json.loads(normalized)
-        except Exception:
-            parsed = {}
+        parsed = json_result.data
 
         rewritten_title = str(parsed.get("title") or request.title).strip()
-        rewritten_summary = str(parsed.get("summary") or normalized or request.summary).strip()
+        rewritten_summary = str(parsed.get("summary") or request.summary).strip()
         if len("".join(rewritten_summary.split())) < 80:
             rewritten_summary = request.summary
         if not rewritten_title:
@@ -2179,6 +2191,14 @@ async def rewrite_chapter_outline(
         outline.title = rewritten_title
         outline.summary = rewritten_summary
         await session.commit()
+    except GenerationJSONDecodeError as exc:
+        logger.warning(
+            "章节大纲重写返回 JSON 不可解析，保留原大纲: project_id=%s chapter=%s error=%s raw=%s",
+            project_id,
+            request.chapter_number,
+            exc,
+            exc.raw_text[:500],
+        )
     except HTTPException:
         raise
     except Exception as exc:

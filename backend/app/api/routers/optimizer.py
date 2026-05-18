@@ -5,7 +5,7 @@
 """
 import json
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -18,9 +18,9 @@ from ...models.novel import ChapterVersion
 from ...schemas.novel import Chapter as ChapterSchema
 from ...schemas.user import UserInDB
 from ...services.llm_service import LLMService
+from ...services.generation_call_service import GenerationCallPolicy, GenerationJSONDecodeError, call_generation_json
 from ...services.novel_service import NovelService
 from ...services.prompt_service import PromptService
-from ...utils.json_utils import remove_think_tags, unwrap_markdown_json
 
 router = APIRouter(prefix="/api/optimizer", tags=["Optimizer"])
 logger = logging.getLogger(__name__)
@@ -105,6 +105,80 @@ DEFAULT_RHYTHM_PROMPT = """# 节奏韵律优化专家
 }
 ```
 """
+
+
+def _compact_len(text: str) -> int:
+    return len("".join((text or "").split()))
+
+
+def _build_nearby_outline_context(project: Any, chapter_number: int, *, radius: int = 2) -> list[Dict[str, Any]]:
+    outlines = sorted(getattr(project, "outlines", []) or [], key=lambda item: item.chapter_number)
+    payload: list[Dict[str, Any]] = []
+    for outline in outlines:
+        distance = outline.chapter_number - chapter_number
+        if abs(distance) > radius:
+            continue
+        payload.append(
+            {
+                "chapter_number": outline.chapter_number,
+                "relative_position": "current" if distance == 0 else ("previous" if distance < 0 else "next"),
+                "title": outline.title,
+                "summary": (outline.summary or "")[:700],
+            }
+        )
+    return payload
+
+
+def _build_nearby_chapter_state(project: Any, chapter_number: int, *, radius: int = 1) -> list[Dict[str, Any]]:
+    chapters = sorted(getattr(project, "chapters", []) or [], key=lambda item: item.chapter_number)
+    payload: list[Dict[str, Any]] = []
+    for chapter in chapters:
+        distance = chapter.chapter_number - chapter_number
+        if abs(distance) > radius or distance == 0:
+            continue
+        selected = getattr(chapter, "selected_version", None)
+        payload.append(
+            {
+                "chapter_number": chapter.chapter_number,
+                "relative_position": "previous" if distance < 0 else "next",
+                "real_summary": (getattr(chapter, "real_summary", None) or "")[:600],
+                "ending_sample": ((getattr(selected, "content", None) or "")[-450:] if selected else ""),
+            }
+        )
+    return payload
+
+
+def _build_continuity_contract(project: Any, request: OptimizeRequest, original_content: str) -> Dict[str, Any]:
+    return {
+        "mode": "continuity_preserving_full_chapter_optimization",
+        "chapter_number": request.chapter_number,
+        "dimension": request.dimension,
+        "nearby_outlines": _build_nearby_outline_context(project, request.chapter_number),
+        "nearby_chapter_state": _build_nearby_chapter_state(project, request.chapter_number),
+        "original_opening_sample": original_content[:700],
+        "original_ending_sample": original_content[-700:],
+        "hard_rules": [
+            "必须返回完整章节正文，不要只返回被修改片段。",
+            "保留原章节的事件顺序、因果链、角色目标、章尾钩子和上下章承接点。",
+            "只在当前优化维度上改写表达，不新增无法在相邻章节承接的新支线。",
+            "可以润色句段和补强细节，但不能把连续场景切碎成互不相连的短块。",
+        ],
+    }
+
+
+def _continuity_guard_failure(original_content: str, optimized_content: str) -> Optional[str]:
+    original_len = _compact_len(original_content)
+    optimized_len = _compact_len(optimized_content)
+    if optimized_len < 80:
+        return "optimized content is too short"
+    if original_len >= 1200 and optimized_len < int(original_len * 0.72):
+        return f"optimized content shrank from {original_len} to {optimized_len} non-space chars"
+    if original_len >= 400 and optimized_len < int(original_len * 0.58):
+        return f"optimized content lost too much content ({optimized_len}/{original_len})"
+    stripped = (optimized_content or "").strip()
+    if stripped.startswith("{") and "optimized_content" in stripped[:300]:
+        return "optimized content still looks like raw JSON"
+    return None
 
 
 @router.post("/optimize", response_model=OptimizeResponse)
@@ -193,7 +267,8 @@ async def optimize_chapter(
     # 构建优化请求
     optimize_input = {
         "original_content": original_content,
-        "additional_notes": request.additional_notes or "无额外指令"
+        "additional_notes": request.additional_notes or "无额外指令",
+        "continuity_contract": _build_continuity_contract(project, request, original_content),
     }
     
     # 如果是心理活动优化，添加角色DNA信息
@@ -211,7 +286,8 @@ async def optimize_chapter(
     # 调用LLM进行优化
     try:
         with LLMService.daily_limit_scope(f"optimizer:{request.project_id}:{request.chapter_number}:{request.dimension}:{current_user.id}"):
-            response = await llm_service.get_llm_response(
+            json_result = await call_generation_json(
+                llm_service=llm_service,
                 system_prompt=optimizer_prompt,
                 conversation_history=[{
                     "role": "user",
@@ -220,19 +296,28 @@ async def optimize_chapter(
                 temperature=0.7,
                 user_id=current_user.id,
                 timeout=600.0,
+                policy=GenerationCallPolicy(
+                    stage_label="章节优化",
+                    retry_attempts=3,
+                    response_format="json_object",
+                    allow_truncated_response=True,
+                    json_repair_attempts=1,
+                ),
             )
-        
-        cleaned = remove_think_tags(response)
-        normalized = unwrap_markdown_json(cleaned)
-        
-        try:
-            result = json.loads(normalized)
-            optimized_content = result.get("optimized_content", cleaned)
-            optimization_notes = result.get("optimization_notes", "优化完成")
-        except json.JSONDecodeError:
-            # 如果无法解析JSON，将整个响应作为优化后的内容
-            optimized_content = cleaned
-            optimization_notes = "优化完成（响应格式非标准JSON）"
+        result = json_result.data
+        optimized_content = str(result.get("optimized_content") or "").strip()
+        optimization_notes = str(result.get("optimization_notes") or "优化完成").strip()
+        guard_failure = _continuity_guard_failure(original_content, optimized_content)
+        if guard_failure:
+            logger.warning(
+                "章节优化结果未通过连续性保护，返回原文: project=%s chapter=%s dimension=%s reason=%s",
+                request.project_id,
+                request.chapter_number,
+                request.dimension,
+                guard_failure,
+            )
+            optimized_content = original_content
+            optimization_notes = f"优化结果未通过连续性保护，已保留原文。原因: {guard_failure}"
         
         logger.info(
             "项目 %s 第 %s 章 %s 优化完成",
@@ -247,6 +332,20 @@ async def optimize_chapter(
             dimension=request.dimension
         )
         
+    except GenerationJSONDecodeError as exc:
+        logger.warning(
+            "章节优化返回 JSON 不可解析，返回原文: project=%s chapter=%s dimension=%s error=%s raw=%s",
+            request.project_id,
+            request.chapter_number,
+            request.dimension,
+            exc,
+            exc.raw_text[:500],
+        )
+        return OptimizeResponse(
+            optimized_content=original_content,
+            optimization_notes="优化结果格式异常，已保留原文以避免破坏章节连续性。",
+            dimension=request.dimension,
+        )
     except Exception as exc:
         logger.exception(
             "项目 %s 第 %s 章优化失败: %s",
