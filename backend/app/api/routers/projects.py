@@ -222,14 +222,18 @@ async def incremental_memory_update(
     await novel_service.ensure_project_owner(project_id, current_user.id)
 
     memory_service = MemoryLayerService(session, LLMService(session), PromptService(session))
-    result = await memory_service.incremental_memory_update(
-        project_id=project_id,
-        chapter_number=payload.chapter_number,
-        new_global_summary=payload.new_global_summary,
-        new_plot_arcs=payload.new_plot_arcs,
-        new_timeline_events=payload.new_timeline_events,
-        character_states=payload.character_states,
-    )
+    with LLMService.daily_limit_scope(
+        f"memory_incremental:{project_id}:{payload.chapter_number}:{int(current_user.id)}"
+    ):
+        result = await memory_service.incremental_memory_update(
+            project_id=project_id,
+            chapter_number=payload.chapter_number,
+            new_global_summary=payload.new_global_summary,
+            new_plot_arcs=payload.new_plot_arcs,
+            new_timeline_events=payload.new_timeline_events,
+            character_states=payload.character_states,
+            user_id=int(current_user.id),
+        )
     return {"project_id": project_id, "result": result}
 
 
@@ -277,10 +281,14 @@ async def compress_memory(
     await novel_service.ensure_project_owner(project_id, current_user.id)
 
     memory_service = MemoryLayerService(session, LLMService(session), PromptService(session))
-    result = await memory_service.compress_memory(
-        project_id=project_id,
-        preserve_chapters=payload.preserve_chapters,
-    )
+    with LLMService.daily_limit_scope(
+        f"memory_compress:{project_id}:{payload.preserve_chapters}:{int(current_user.id)}"
+    ):
+        result = await memory_service.compress_memory(
+            project_id=project_id,
+            preserve_chapters=payload.preserve_chapters,
+            user_id=int(current_user.id),
+        )
     return {"project_id": project_id, "result": result}
 
 

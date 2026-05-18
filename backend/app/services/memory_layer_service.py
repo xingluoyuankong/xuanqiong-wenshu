@@ -558,45 +558,46 @@ class MemoryLayerService:
         user_id: int
     ) -> Dict[str, Any]:
         """章节完成后更新记忆层"""
-        results = {
-            "character_states_updated": 0,
-            "timeline_events_added": 0,
-            "causal_chains_added": 0
-        }
-        
-        # 1. 提取并更新角色状态
-        character_states = await self.extract_character_states_from_chapter(
-            project_id, chapter_number, chapter_content, character_names, user_id
-        )
-        for state_data in character_states:
-            char_name = state_data.pop("character_name", None)
-            if char_name:
-                await self.update_character_state(
-                    project_id, char_name, chapter_number, state_data, auto_commit=False
-                )
-                results["character_states_updated"] += 1
-        
-        # 2. 提取并添加时间线事件
-        events = await self.extract_timeline_events_from_chapter(
-            project_id, chapter_number, chapter_content, user_id
-        )
-        for event_data in events:
-            await self.add_timeline_event(
-                project_id=project_id,
-                chapter_number=chapter_number,
-                **event_data
+        with LLMService.daily_limit_scope(f"memory_update:{project_id}:{chapter_number}:{user_id}"):
+            results = {
+                "character_states_updated": 0,
+                "timeline_events_added": 0,
+                "causal_chains_added": 0
+            }
+
+            # 1. 提取并更新角色状态
+            character_states = await self.extract_character_states_from_chapter(
+                project_id, chapter_number, chapter_content, character_names, user_id
             )
-            results["timeline_events_added"] += 1
-        
-        await self.db.commit()
+            for state_data in character_states:
+                char_name = state_data.pop("character_name", None)
+                if char_name:
+                    await self.update_character_state(
+                        project_id, char_name, chapter_number, state_data, auto_commit=False
+                    )
+                    results["character_states_updated"] += 1
 
-        logger.info(
-            f"项目 {project_id} 第 {chapter_number} 章记忆层更新完成: "
-            f"角色状态 {results['character_states_updated']}, "
-            f"时间线事件 {results['timeline_events_added']}"
-        )
+            # 2. 提取并添加时间线事件
+            events = await self.extract_timeline_events_from_chapter(
+                project_id, chapter_number, chapter_content, user_id
+            )
+            for event_data in events:
+                await self.add_timeline_event(
+                    project_id=project_id,
+                    chapter_number=chapter_number,
+                    **event_data
+                )
+                results["timeline_events_added"] += 1
 
-        return results
+            await self.db.commit()
+
+            logger.info(
+                f"项目 {project_id} 第 {chapter_number} 章记忆层更新完成: "
+                f"角色状态 {results['character_states_updated']}, "
+                f"时间线事件 {results['timeline_events_added']}"
+            )
+
+            return results
 
     async def check_consistency(
         self,
@@ -670,6 +671,7 @@ class MemoryLayerService:
         new_plot_arcs: Optional[Dict[str, Any]] = None,
         new_timeline_events: Optional[List[Dict[str, Any]]] = None,
         character_states: Optional[Dict[str, Any]] = None,
+        user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         增量更新记忆 - 追加而非全量替换（CoLong 核心机制）
@@ -717,7 +719,7 @@ class MemoryLayerService:
                 old_summary = memory.global_summary
                 combined = f"{old_summary}\n\n--- 第{chapter_number}章 ---\n\n{new_global_summary}"
                 if len(combined) > MAX_SUMMARY_LENGTH:
-                    combined = await self._compress_summary(combined)
+                    combined = await self._compress_summary(combined, user_id=user_id)
                 memory.global_summary = combined
             else:
                 memory.global_summary = new_global_summary
@@ -782,7 +784,12 @@ class MemoryLayerService:
             "chapter_number": chapter_number,
         }
 
-    async def _compress_summary(self, summary: str, max_length: int = 3000) -> str:
+    async def _compress_summary(
+        self,
+        summary: str,
+        max_length: int = 3000,
+        user_id: Optional[int] = None,
+    ) -> str:
         """压缩摘要 - 使用 LLM 生成简洁版"""
         if len(summary) <= max_length:
             return summary
@@ -796,7 +803,7 @@ class MemoryLayerService:
         try:
             response = await self.llm_service.generate(
                 prompt=prompt,
-                user_id=1,
+                user_id=user_id,
                 max_tokens=1000,
                 temperature=0.3
             )
@@ -841,55 +848,58 @@ class MemoryLayerService:
         self,
         project_id: str,
         preserve_chapters: int = 5,
+        user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """压缩记忆 - 合并旧版本以节省空间"""
-        from ..models.project_memory import ProjectMemory, ChapterSnapshot
+        with LLMService.daily_limit_scope(f"memory_compress:{project_id}:{preserve_chapters}:{user_id or 0}"):
+            from ..models.project_memory import ProjectMemory, ChapterSnapshot
 
-        # 1. 获取所有快照
-        result = await self.db.execute(
-            select(ChapterSnapshot).where(
-                ChapterSnapshot.project_id == project_id
-            ).order_by(ChapterSnapshot.created_at.desc(), ChapterSnapshot.id.desc())
-        )
-        all_snapshots = result.scalars().all()
-
-        if len(all_snapshots) <= preserve_chapters:
-            return {"compressed": False, "reason": "snapshots_count <= preserve_chapters"}
-
-        # 2. 保留最近的快照
-        keep_snapshots = all_snapshots[:preserve_chapters]
-        compress_snapshots = all_snapshots[preserve_chapters:]
-
-        # 3. 合并旧快照为压缩摘要
-        old_summaries = [s.global_summary_snapshot for s in compress_snapshots if s.global_summary_snapshot]
-        if old_summaries:
-            compressed_summary = await self._compress_summary(
-                "\n\n".join(old_summaries),
-                max_length=2000
+            # 1. 获取所有快照
+            result = await self.db.execute(
+                select(ChapterSnapshot).where(
+                    ChapterSnapshot.project_id == project_id
+                ).order_by(ChapterSnapshot.created_at.desc(), ChapterSnapshot.id.desc())
             )
-        else:
-            compressed_summary = None
+            all_snapshots = result.scalars().all()
 
-        # 4. 获取当前 memory 并更新
-        mem_result = await self.db.execute(
-            select(ProjectMemory).where(ProjectMemory.project_id == project_id)
-        )
-        memory = mem_result.scalar_one_or_none()
+            if len(all_snapshots) <= preserve_chapters:
+                return {"compressed": False, "reason": "snapshots_count <= preserve_chapters"}
 
-        if memory:
-            if compressed_summary:
-                old_summary = memory.global_summary or ""
-                memory.global_summary = f"[早期摘要]\n{compressed_summary}\n\n---\n\n{old_summary}"
-            memory.version = (memory.version or 0) + 1
+            # 2. 保留最近的快照
+            keep_snapshots = all_snapshots[:preserve_chapters]
+            compress_snapshots = all_snapshots[preserve_chapters:]
 
-        await self.db.commit()
+            # 3. 合并旧快照为压缩摘要
+            old_summaries = [s.global_summary_snapshot for s in compress_snapshots if s.global_summary_snapshot]
+            if old_summaries:
+                compressed_summary = await self._compress_summary(
+                    "\n\n".join(old_summaries),
+                    max_length=2000,
+                    user_id=user_id,
+                )
+            else:
+                compressed_summary = None
 
-        return {
-            "compressed": True,
-            "preserved_count": len(keep_snapshots),
-            "compressed_count": len(compress_snapshots),
-            "new_version": memory.version if memory else 0,
-        }
+            # 4. 获取当前 memory 并更新
+            mem_result = await self.db.execute(
+                select(ProjectMemory).where(ProjectMemory.project_id == project_id)
+            )
+            memory = mem_result.scalar_one_or_none()
+
+            if memory:
+                if compressed_summary:
+                    old_summary = memory.global_summary or ""
+                    memory.global_summary = f"[早期摘要]\n{compressed_summary}\n\n---\n\n{old_summary}"
+                memory.version = (memory.version or 0) + 1
+
+            await self.db.commit()
+
+            return {
+                "compressed": True,
+                "preserved_count": len(keep_snapshots),
+                "compressed_count": len(compress_snapshots),
+                "new_version": memory.version if memory else 0,
+            }
 
     async def rollback_to_version(
         self,

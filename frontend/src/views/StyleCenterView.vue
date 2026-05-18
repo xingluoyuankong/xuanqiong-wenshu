@@ -1,6 +1,6 @@
 <template>
   <div class="style-center-page">
-    <section class="style-center-hero">
+    <section class="style-center-hero xq-page-topbar xq-page-topbar--style">
       <div>
         <p class="style-center-hero__eyebrow">{{ '\u72ec\u7acb\u6587\u98ce\u4e2d\u5fc3 \u00b7 \u5916\u90e8\u4f5c\u54c1\u5b66\u4e60\u53f0' }}</p>
         <h1>{{ '\u5916\u90e8\u53c2\u8003\u6587\u98ce\u5e93' }}</h1>
@@ -1122,8 +1122,9 @@ onMounted(async () => {
   border-radius: 999px;
   font-size: 0.74rem;
   font-weight: 700;
-  color: #4338ca;
-  background: rgba(139, 92, 246, 0.12);
+  color: var(--xq-ui-primary, #2563eb);
+  background: rgba(239, 246, 255, 0.82);
+  border: 1px solid rgba(14, 165, 233, 0.24);
 }
 
 .pipeline-grid {
@@ -1201,18 +1202,21 @@ onMounted(async () => {
 }
 
 .mode-chip {
-  background: #f1f5f9;
-  color: #475569;
+  background: rgba(255,255,255,0.70);
+  color: var(--xq-ui-muted, #64748b);
+  border: 1px solid var(--xq-ui-border, rgba(148, 163, 184, 0.24));
 }
 
 .mode-chip--active {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.16), rgba(139, 92, 246, 0.16));
-  color: #4338ca;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.14), rgba(14, 165, 233, 0.12));
+  color: var(--xq-ui-primary, #2563eb);
+  border-color: rgba(14, 165, 233, 0.34);
 }
 
 .primary-btn {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  background: linear-gradient(135deg, var(--xq-ui-primary, #2563eb), var(--xq-ui-primary-2, #0891b2));
   color: white;
+  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.20);
 }
 
 .primary-btn:disabled {
@@ -1221,13 +1225,15 @@ onMounted(async () => {
 }
 
 .secondary-btn {
-  background: #eef2ff;
-  color: #4338ca;
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--xq-ui-primary, #2563eb);
+  border: 1px solid var(--xq-ui-border, rgba(148, 163, 184, 0.24));
 }
 
 .text-btn {
-  background: transparent;
-  color: #475569;
+  background: rgba(255, 255, 255, 0.46);
+  color: var(--xq-ui-muted, #64748b);
+  border: 1px solid transparent;
 }
 
 .text-btn--danger {

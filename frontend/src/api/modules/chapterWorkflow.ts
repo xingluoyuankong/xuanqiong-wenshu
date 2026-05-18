@@ -82,6 +82,12 @@ const request = async (url: string, options: RequestInit = {}) => {
         readText(requestIdFromHeader),
       retryable: typeof rawDetail?.retryable === 'boolean' ? rawDetail.retryable : undefined,
       responseSnippet: readText(responseSnippet),
+      rejectionSummary: rawDetail?.rejection_summary && typeof rawDetail.rejection_summary === 'object'
+        ? rawDetail.rejection_summary as Record<string, any>
+        : undefined,
+      missingChapters: Array.isArray(rawDetail?.missing_chapters)
+        ? rawDetail.missing_chapters.filter((item): item is number => typeof item === 'number')
+        : undefined,
     })
   }
 
@@ -107,6 +113,9 @@ const normalizeChapterVersion = (value: unknown) => {
       content: normalizeChapterContent(rawContent),
       style: typeof record.style === 'string' ? record.style : '标准',
       evaluation: typeof record.evaluation === 'string' ? record.evaluation : undefined,
+      metadata: record.metadata && typeof record.metadata === 'object'
+        ? record.metadata as Record<string, any>
+        : undefined,
     }
   }
 
@@ -196,12 +205,14 @@ export const evaluateChapter = (
   projectId: string,
   chapterNumber: number,
   versionIndex?: number,
+  versionId?: number,
   evaluateAll: boolean = false,
 ) => requestProject(`${WRITER_BASE}/${projectId}/chapters/evaluate`, {
   method: 'POST',
   body: JSON.stringify({
     chapter_number: chapterNumber,
     version_index: versionIndex,
+    version_id: versionId,
     evaluate_all: evaluateAll,
   }),
 })
@@ -210,11 +221,13 @@ export const selectChapterVersion = (
   projectId: string,
   chapterNumber: number,
   versionIndex: number,
+  versionId?: number,
 ) => requestProject(`${WRITER_BASE}/${projectId}/chapters/select`, {
   method: 'POST',
   body: JSON.stringify({
     chapter_number: chapterNumber,
     version_index: versionIndex,
+    version_id: versionId,
   }),
 })
 
@@ -222,11 +235,13 @@ export const deleteChapterVersion = (
   projectId: string,
   chapterNumber: number,
   versionIndex: number,
+  versionId?: number,
 ) => requestProject(`${WRITER_BASE}/${projectId}/chapters/delete-version`, {
   method: 'POST',
   body: JSON.stringify({
     chapter_number: chapterNumber,
     version_index: versionIndex,
+    version_id: versionId,
   }),
 })
 

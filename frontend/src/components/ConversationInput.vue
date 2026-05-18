@@ -5,12 +5,12 @@
       <p>正在准备下一轮问题...</p>
     </div>
 
-    <div v-else-if="uiControl.type === 'single_choice'" class="ci-stack">
+    <div v-else-if="isOptionControl" class="ci-stack">
       <section class="ci-section">
         <div class="ci-section__head">
           <div>
             <p class="ci-section__eyebrow">优先做选择</p>
-            <h3>先点最接近的方向，再补一句你真正想要的效果。</h3>
+            <h3>{{ isMultiChoiceControl ? '可以同时勾多个方向，再补一句你真正想要的效果。' : '先点最接近的方向，再补一句你真正想要的效果。' }}</h3>
           </div>
           <span class="ci-counter">已选 {{ selectedOptionIds.length }} 项</span>
         </div>
@@ -25,7 +25,7 @@
             @click="toggleOption(option.id, option.label)"
           >
             <span class="ci-option__title">{{ option.label }}</span>
-            <span class="ci-option__hint">{{ isSelected(option.id) ? '已选择' : '点击选择' }}</span>
+            <span class="ci-option__hint">{{ isSelected(option.id) ? '已选择' : (isMultiChoiceControl ? '点击加入' : '点击选择') }}</span>
           </button>
         </div>
       </section>
@@ -34,7 +34,7 @@
         <div class="ci-section__head">
           <div>
             <p class="ci-section__eyebrow">灵感快捷推荐</p>
-            <h3>不想手打时，先点几个常见推进点。</h3>
+            <h3>不想手打时，先点几个灵感维度，把世界、人物和冲突先钉住。</h3>
           </div>
         </div>
 
@@ -51,8 +51,8 @@
         </div>
 
         <div class="ci-mini-actions">
-          <button type="button" class="ci-mini-btn" @click="selectAllOptions">全选</button>
-          <button type="button" class="ci-mini-btn" @click="invertSelection">反选</button>
+          <button type="button" class="ci-mini-btn" @click="selectAllOptions">{{ isMultiChoiceControl ? '全选' : '选第一项' }}</button>
+          <button type="button" class="ci-mini-btn" @click="invertSelection">{{ isMultiChoiceControl ? '反选' : '切换下一项' }}</button>
           <button
             type="button"
             class="ci-mini-btn"
@@ -73,7 +73,7 @@
         </div>
       </section>
 
-      <form class="ci-composer" @submit.prevent="handleSingleChoiceSubmit">
+      <form class="ci-composer" @submit.prevent="handleOptionSubmit">
         <label class="ci-composer__label" for="single-choice-input">补充说明</label>
         <textarea
           id="single-choice-input"
@@ -81,13 +81,13 @@
           v-model="textInput"
           :placeholder="uiControl.placeholder || '可以继续补充要求，也可以只发送已选项'"
           class="ci-textarea"
-          rows="5"
+          rows="3"
           @input="handleTextareaInput"
         ></textarea>
 
         <div class="ci-composer__footer">
           <p class="ci-composer__hint">
-            先选方向，再补一句“为什么这样选”通常更稳定。
+            {{ isMultiChoiceControl ? '可以先组合几个方向，再补一句“为什么这样搭配”。' : '先选方向，再补一句“为什么这样选”通常更稳定。' }}
           </p>
           <button type="submit" class="ci-submit-btn" :disabled="!canSubmitSingleChoice">
             发送这一轮
@@ -109,7 +109,7 @@
         v-model="textInput"
         :placeholder="uiControl.placeholder || '请输入你的想法...'"
         class="ci-textarea"
-        rows="5"
+        rows="3"
         required
         @input="handleTextareaInput"
       ></textarea>
@@ -142,35 +142,23 @@ const selectedOptionIds = ref<string[]>([])
 const selectedOptionLabels = ref<string[]>([])
 
 const inspirationQuickTags = [
-  '高概念开局',
-  '主角隐藏身份',
-  '反派先赢一手',
-  '第一章埋大伏笔',
-  '感情线加速升温',
-  '世界观代价机制',
-  '时间线错位谜题',
-  '双线并行叙事',
-  '多阵营博弈',
-  '章尾反转钩子',
-  '误导线索再反杀',
-  '救赎线并行推进',
-  '强敌压境倒计时',
-  '身份错位修罗场',
-  '资源争夺战升级',
-  '关键证据反复易手',
-  '双主角立场分裂',
-  '配角黑化预警',
-  '世界观秘密揭露一角',
-  '本章必须情绪爆点',
-  '制造信任危机',
-  '以小事件折射大阴谋',
-  '章节结尾抛新问号',
-  '主角犯错引发连锁反应',
+  '主角最想守住什么？',
+  '这个世界最反常的规则是什么？',
+  '生存压力来自哪里？',
+  '修炼或成长要付出什么代价？',
+  '文明秩序靠什么维持？',
+  '日常生活最依赖哪种资源？',
+  '海域 / 地理环境最危险的地方是什么？',
+  '主角会遇到什么阵营或同盟？',
+  '最想先保住的核心画面是什么？',
+  '这个世界最不能触碰的禁忌是什么？',
 ]
 
-const MIN_ROWS = 5
-const MAX_ROWS = 8
+const MIN_ROWS = 3
+const MAX_ROWS = 5
 
+const isOptionControl = computed(() => props.uiControl?.type === 'single_choice' || props.uiControl?.type === 'multi_choice')
+const isMultiChoiceControl = computed(() => props.uiControl?.type === 'multi_choice')
 const canSubmitSingleChoice = computed(() => selectedOptionIds.value.length > 0 || !!textInput.value.trim())
 
 const adjustTextareaHeight = () => {
@@ -194,36 +182,59 @@ const isSelected = (id: string) => selectedOptionIds.value.includes(id)
 
 const selectAllOptions = () => {
   const options = props.uiControl?.options || []
-  selectedOptionIds.value = options.map((option) => option.id)
-  selectedOptionLabels.value = options.map((option) => option.label)
+  if (!options.length) return
+  if (!isMultiChoiceControl.value) {
+    selectedOptionIds.value = [options[0].id]
+    selectedOptionLabels.value = [options[0].label]
+    return
+  }
+  selectedOptionIds.value = options.map(option => option.id)
+  selectedOptionLabels.value = options.map(option => option.label)
 }
 
 const invertSelection = () => {
   const options = props.uiControl?.options || []
-  const nextIds: string[] = []
-  const nextLabels: string[] = []
-
-  for (const option of options) {
-    if (!selectedOptionIds.value.includes(option.id)) {
-      nextIds.push(option.id)
-      nextLabels.push(option.label)
-    }
-  }
-
-  selectedOptionIds.value = nextIds
-  selectedOptionLabels.value = nextLabels
-}
-
-const toggleOption = (id: string, label: string) => {
-  const index = selectedOptionIds.value.indexOf(id)
-  if (index >= 0) {
-    selectedOptionIds.value.splice(index, 1)
-    selectedOptionLabels.value.splice(index, 1)
+  if (!options.length) return
+  if (!isMultiChoiceControl.value) {
+    const currentId = selectedOptionIds.value[0]
+    const currentIndex = options.findIndex((option) => option.id === currentId)
+    const nextOption = options[(currentIndex + 1 + options.length) % options.length]
+    selectedOptionIds.value = [nextOption.id]
+    selectedOptionLabels.value = [nextOption.label]
     return
   }
 
-  selectedOptionIds.value.push(id)
-  selectedOptionLabels.value.push(label)
+  const selectedSet = new Set(selectedOptionIds.value)
+  const inverted = options.filter(option => !selectedSet.has(option.id))
+  selectedOptionIds.value = inverted.map(option => option.id)
+  selectedOptionLabels.value = inverted.map(option => option.label)
+}
+
+const toggleOption = (id: string, label: string) => {
+  if (!isMultiChoiceControl.value) {
+    if (selectedOptionIds.value[0] === id) {
+      selectedOptionIds.value = []
+      selectedOptionLabels.value = []
+      return
+    }
+
+    selectedOptionIds.value = [id]
+    selectedOptionLabels.value = [label]
+    return
+  }
+
+  const nextIds = [...selectedOptionIds.value]
+  const nextLabels = [...selectedOptionLabels.value]
+  const selectedIndex = nextIds.indexOf(id)
+  if (selectedIndex >= 0) {
+    nextIds.splice(selectedIndex, 1)
+    nextLabels.splice(selectedIndex, 1)
+  } else {
+    nextIds.push(id)
+    nextLabels.push(label)
+  }
+  selectedOptionIds.value = nextIds
+  selectedOptionLabels.value = nextLabels
 }
 
 const appendQuickTag = (tag: string) => {
@@ -250,14 +261,14 @@ const appendSelectedOptionsToInput = () => {
   nextTick(() => adjustTextareaHeight())
 }
 
-const handleSingleChoiceSubmit = () => {
+const handleOptionSubmit = () => {
   const selectedText = selectedOptionLabels.value.join('，')
   const manualText = textInput.value.trim()
   const combined = [selectedText, manualText].filter(Boolean).join('\n')
   if (!combined) return
 
   emit('submit', {
-    id: selectedOptionIds.value.length > 1 ? 'multi_choice' : selectedOptionIds.value[0] || 'text_input',
+    id: selectedOptionIds.value.length === 1 ? selectedOptionIds.value[0] : (selectedOptionIds.value.length > 1 ? 'multi_choice' : 'text_input'),
     value: combined,
     selected_ids: selectedOptionIds.value.length ? [...selectedOptionIds.value] : undefined,
   })
@@ -294,7 +305,7 @@ watch(
 <style scoped>
 .ci-shell {
   display: grid;
-  gap: 14px;
+  gap: 10px;
 }
 
 .ci-loading,
@@ -309,14 +320,14 @@ watch(
 .ci-loading {
   display: grid;
   place-items: center;
-  gap: 12px;
-  min-height: 180px;
+  gap: 10px;
+  min-height: 120px;
   color: #64748b;
 }
 
 .ci-loading__spinner {
-  width: 42px;
-  height: 42px;
+  width: 34px;
+  height: 34px;
   border-radius: 999px;
   border: 4px solid rgba(148, 163, 184, 0.2);
   border-top-color: #2563eb;
@@ -325,11 +336,11 @@ watch(
 
 .ci-stack {
   display: grid;
-  gap: 14px;
+  gap: 10px;
 }
 
 .ci-section {
-  padding: 18px;
+  padding: 12px;
 }
 
 .ci-section--subtle {
@@ -340,7 +351,7 @@ watch(
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   align-items: start;
 }
 
@@ -353,9 +364,9 @@ watch(
 }
 
 .ci-section__head h3 {
-  margin-top: 8px;
-  font-size: 1.02rem;
-  line-height: 1.5;
+  margin-top: 4px;
+  font-size: 0.92rem;
+  line-height: 1.35;
   font-weight: 700;
   color: #0f172a;
 }
@@ -363,8 +374,8 @@ watch(
 .ci-counter {
   display: inline-flex;
   align-items: center;
-  min-height: 32px;
-  padding: 0 12px;
+  min-height: 26px;
+  padding: 0 9px;
   border-radius: 999px;
   background: rgba(219, 234, 254, 0.9);
   color: #1d4ed8;
@@ -373,18 +384,19 @@ watch(
 }
 
 .ci-options {
-  margin-top: 16px;
+  margin-top: 10px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .ci-option {
   display: grid;
-  gap: 6px;
+  gap: 2px;
   text-align: left;
-  padding: 16px;
-  border-radius: 18px;
+  min-height: 44px;
+  padding: 9px 10px;
+  border-radius: 12px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(239, 246, 255, 0.8);
   color: #1e3a8a;
@@ -405,13 +417,14 @@ watch(
 }
 
 .ci-option__title {
-  font-size: 0.94rem;
+  font-size: 0.84rem;
+  line-height: 1.35;
   font-weight: 700;
 }
 
 .ci-option__hint {
-  font-size: 0.78rem;
-  opacity: 0.8;
+  font-size: 0.68rem;
+  opacity: 0.72;
 }
 
 .ci-tags,
@@ -431,10 +444,10 @@ watch(
 .ci-selected-tag {
   display: inline-flex;
   align-items: center;
-  min-height: 34px;
-  padding: 0 12px;
+  min-height: 28px;
+  padding: 0 9px;
   border-radius: 999px;
-  font-size: 0.82rem;
+  font-size: 0.75rem;
 }
 
 .ci-tag {
@@ -477,9 +490,9 @@ watch(
 }
 
 .ci-composer {
-  padding: 18px;
+  padding: 12px;
   display: grid;
-  gap: 14px;
+  gap: 10px;
 }
 
 .ci-composer--single {
@@ -494,14 +507,14 @@ watch(
 
 .ci-textarea {
   width: 100%;
-  min-height: 140px;
-  max-height: 320px;
-  padding: 16px 18px;
-  border-radius: 20px;
+  min-height: 84px;
+  max-height: 180px;
+  padding: 10px 12px;
+  border-radius: 14px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(248, 250, 252, 0.92);
   color: #0f172a;
-  line-height: 1.8;
+  line-height: 1.55;
   resize: none;
   outline: none;
   transition: border-color 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
@@ -531,9 +544,9 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 50px;
-  padding: 0 20px;
-  border-radius: 18px;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 12px;
   border: none;
   background: linear-gradient(135deg, #0f172a, #2563eb 58%, #0f766e);
   color: #fff;
@@ -561,17 +574,37 @@ watch(
   }
 }
 
-@media (max-width: 900px) {
+
+.ci-tags {
+  max-height: 72px;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-gutter: stable;
+}
+
+@media (max-width: 520px) {
   .ci-options {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 1280px) {
+  .ci-options {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .ci-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 640px) {
   .ci-section,
   .ci-composer {
-    padding: 14px;
-    border-radius: 20px;
+    padding: 12px;
+    border-radius: 16px;
   }
 
   .ci-composer__footer {

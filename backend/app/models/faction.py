@@ -19,6 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from ..db.base import Base
 
 LONG_TEXT_TYPE = Text().with_variant(LONGTEXT, "mysql")
+PROJECT_ID_TYPE = String(36).with_variant(String(36, collation="utf8mb4_unicode_ci"), "mysql")
 
 
 class Faction(Base):
@@ -28,7 +29,7 @@ class Faction(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[str] = mapped_column(
-        ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
     
     # ===== 基础信息 =====
@@ -69,7 +70,7 @@ class FactionRelationship(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[str] = mapped_column(
-        ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
     
     # ===== 关系双方 =====
@@ -106,7 +107,7 @@ class FactionMember(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[str] = mapped_column(
-        ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
     
     faction_id: Mapped[int] = mapped_column(

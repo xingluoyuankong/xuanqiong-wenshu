@@ -181,43 +181,44 @@ class ReaderSimulatorService:
         if reader_types is None:
             reader_types = list(ReaderType)
 
-        results: Dict[str, Any] = {
-            "overall_score": 0,
-            "reader_feedbacks": {},
-            "thrill_points": [],
-            "abandon_risks": [],
-            "hook_strength": {},
-            "recommendations": [],
-            "diagnostic_summary": {},
-        }
+        with LLMService.daily_limit_scope(f"reader_simulation:{chapter_number}:{user_id}:{len(reader_types)}"):
+            results: Dict[str, Any] = {
+                "overall_score": 0,
+                "reader_feedbacks": {},
+                "thrill_points": [],
+                "abandon_risks": [],
+                "hook_strength": {},
+                "recommendations": [],
+                "diagnostic_summary": {},
+            }
 
-        thrill_points = await self._detect_thrill_points(chapter_content, user_id)
-        results["thrill_points"] = thrill_points
+            thrill_points = await self._detect_thrill_points(chapter_content, user_id)
+            results["thrill_points"] = thrill_points
 
-        total_score = 0
-        for reader_type in reader_types:
-            feedback = await self._simulate_single_reader(
-                chapter_content=chapter_content,
-                chapter_number=chapter_number,
-                reader_type=reader_type,
-                thrill_points=thrill_points,
-                previous_summary=previous_summary,
-                user_id=user_id,
-            )
-            results["reader_feedbacks"][reader_type.value] = feedback
-            total_score += feedback.get("satisfaction", 50)
+            total_score = 0
+            for reader_type in reader_types:
+                feedback = await self._simulate_single_reader(
+                    chapter_content=chapter_content,
+                    chapter_number=chapter_number,
+                    reader_type=reader_type,
+                    thrill_points=thrill_points,
+                    previous_summary=previous_summary,
+                    user_id=user_id,
+                )
+                results["reader_feedbacks"][reader_type.value] = feedback
+                total_score += feedback.get("satisfaction", 50)
 
-        results["overall_score"] = round(total_score / max(len(reader_types), 1), 1)
-        results["abandon_risks"] = self._evaluate_abandon_risks(results["reader_feedbacks"])
-        results["hook_strength"] = await self._evaluate_hook_strength(chapter_content, user_id)
-        results["diagnostic_summary"] = self._aggregate_reader_diagnostics(results["reader_feedbacks"])
-        results["reader_stage_decision"] = {
-            "passed": results["overall_score"] >= 65 and not results["abandon_risks"],
-            "continue_ratio": results["diagnostic_summary"].get("continue_ratio", 0),
-            "top_issue_count": len(results["diagnostic_summary"].get("priority_issues", [])),
-        }
-        results["recommendations"] = self._generate_recommendations(results)
-        return results
+            results["overall_score"] = round(total_score / max(len(reader_types), 1), 1)
+            results["abandon_risks"] = self._evaluate_abandon_risks(results["reader_feedbacks"])
+            results["hook_strength"] = await self._evaluate_hook_strength(chapter_content, user_id)
+            results["diagnostic_summary"] = self._aggregate_reader_diagnostics(results["reader_feedbacks"])
+            results["reader_stage_decision"] = {
+                "passed": results["overall_score"] >= 65 and not results["abandon_risks"],
+                "continue_ratio": results["diagnostic_summary"].get("continue_ratio", 0),
+                "top_issue_count": len(results["diagnostic_summary"].get("priority_issues", [])),
+            }
+            results["recommendations"] = self._generate_recommendations(results)
+            return results
 
     async def _detect_thrill_points(self, chapter_content: str, user_id: int) -> List[Dict[str, Any]]:
         prompt = f"""请分析下面的章节内容，识别真正能刺激读者继续读下去的“爽点/强反馈点”。

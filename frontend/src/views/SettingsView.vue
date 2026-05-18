@@ -1,7 +1,7 @@
 ﻿<template>
   <div class="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 sm:px-6 lg:px-8">
     <div class="mx-auto max-w-6xl space-y-5">
-      <header class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+      <header class="xq-page-topbar xq-page-topbar--settings rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-3xl">
             <p class="text-xs font-bold uppercase tracking-[0.3em] text-indigo-600">LLM 配置</p>

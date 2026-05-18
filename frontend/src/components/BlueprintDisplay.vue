@@ -7,7 +7,7 @@
           <div class="flex flex-wrap items-center gap-2 text-xs font-medium">
             <span class="rounded-full border border-white/10 bg-white/12 px-3 py-1 text-white">蓝图总览</span>
             <span class="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-slate-100">只读预览</span>
-            <span class="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-slate-100">{{ chapterOutline.length }} 章</span>
+            <span class="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-slate-100">{{ hasChapterOutline ? `${chapterOutline.length} 章` : `${novelOutline.length} 段总纲` }}</span>
             <span v-if="hasAiMessage" class="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-slate-100">含系统说明</span>
           </div>
 
@@ -31,15 +31,15 @@
 
         <div class="flex flex-wrap items-center gap-3 xl:justify-end">
           <div class="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm leading-6 text-slate-100">
-            <p class="font-semibold text-white">此处只做最终决定</p>
-            <p class="mt-1 text-slate-200">确认后直接进入写作台；如需改方向，请先重做蓝图。</p>
+            <p class="font-semibold text-white">此处决定下一步推进层级</p>
+            <p class="mt-1 text-slate-200">若还只有小说总大纲，会先继续生成章节大纲；只有章节大纲完成后才进入写作台。</p>
           </div>
           <button
             type="button"
             class="inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition-all hover:-translate-y-0.5 hover:bg-white/15"
             @click="confirmRegenerate"
           >
-            重做蓝图
+            {{ regenerateActionLabel }}
           </button>
           <button
             type="button"
@@ -47,7 +47,7 @@
             :disabled="props.isSaving || !blueprint"
             @click="confirmBlueprint"
           >
-            {{ props.isSaving ? '正在进入写作台...' : blueprint ? '确认蓝图并进入开写' : '缺少蓝图' }}
+            {{ props.isSaving ? savingActionLabel : (blueprint ? primaryActionLabel : '缺少蓝图') }}
           </button>
         </div>
       </div>
@@ -84,13 +84,13 @@
 
       <div v-if="!blueprint" class="rounded-[28px] border border-rose-200 bg-rose-50 p-8 text-center text-rose-700 shadow-[0_12px_40px_-28px_rgba(244,63,94,0.18)]">
         <p class="text-lg font-semibold">暂时没有可展示的蓝图</p>
-        <p class="mt-2 text-sm leading-6">先返回上一页重新生成，或者直接点“重做蓝图”再来一版。</p>
+        <p class="mt-2 text-sm leading-6">先返回上一页重新生成，或者直接点“{{ regenerateActionLabel }}”再来一版。</p>
         <button
           type="button"
           class="mt-5 inline-flex items-center justify-center rounded-2xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-rose-900/10 transition-all hover:-translate-y-0.5 hover:bg-rose-500"
           @click="confirmRegenerate"
         >
-          重做蓝图
+          {{ regenerateActionLabel }}
         </button>
       </div>
 
@@ -140,11 +140,22 @@
               </span>
             </div>
 
-            <div class="mt-4 rounded-2xl border border-amber-200/70 bg-amber-50 p-4">
-              <p class="text-xs font-medium uppercase tracking-[0.24em] text-amber-600">核心规则</p>
-              <p class="mt-2 whitespace-pre-line text-sm leading-7 text-amber-900">
+            <div class="mt-4 rounded-2xl border border-sky-200/70 bg-sky-50 p-4">
+              <p class="text-xs font-medium uppercase tracking-[0.24em] text-sky-600">核心规则</p>
+              <p class="mt-2 whitespace-pre-line text-sm leading-7 text-sky-900">
                 {{ worldCoreRules }}
               </p>
+            </div>
+
+            <div v-if="worldSystemCards.length" class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <article
+                v-for="card in worldSystemCards"
+                :key="card.label"
+                class="rounded-2xl border border-emerald-200/70 bg-emerald-50/70 px-4 py-4"
+              >
+                <p class="text-xs font-medium uppercase tracking-[0.24em] text-emerald-700">{{ card.label }}</p>
+                <p class="mt-2 whitespace-pre-line text-sm leading-6 text-emerald-950">{{ card.value }}</p>
+              </article>
             </div>
 
             <div class="mt-4 grid gap-3 md:grid-cols-2">
@@ -187,6 +198,97 @@
           </section>
 
           <section class="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-[0_12px_40px_-28px_rgba(15,23,42,0.24)]">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p class="text-xs font-medium uppercase tracking-[0.24em] text-indigo-600">小说总大纲</p>
+                <h3 class="mt-2 text-lg font-semibold text-slate-950">按阶段展开的全书推进路线</h3>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-500">
+                  {{ novelOutline.length }} 段
+                </span>
+                <button
+                  v-if="hasNovelOutline"
+                  type="button"
+                  class="inline-flex items-center justify-center rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-100"
+                  @click="confirmRegenerate"
+                >
+                  重新生成小说总大纲
+                </button>
+              </div>
+            </div>
+
+            <div class="mt-4 space-y-3">
+              <article
+                v-for="stage in novelOutline"
+                :key="stage.stage"
+                class="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4"
+              >
+                <div class="flex items-start gap-4">
+                  <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-sm font-semibold text-white">
+                    {{ stage.stage }}
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <h4 class="text-base font-semibold text-slate-950">{{ stage.title }}</h4>
+                      <span class="rounded-full bg-white px-2 py-1 text-xs font-medium text-slate-500">
+                        第 {{ stage.stage }} 阶段
+                      </span>
+                      <span class="rounded-full bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700">
+                        {{ stage.expectedChapterRange }}
+                      </span>
+                    </div>
+                    <p class="mt-2 text-sm leading-6 text-slate-700"><span class="font-semibold text-slate-900">阶段主题：</span>{{ stage.coreTheme }}</p>
+                    <p class="mt-2 text-sm leading-6 text-slate-700"><span class="font-semibold text-slate-900">阶段目标：</span>{{ stage.goal }}</p>
+                    <p class="mt-2 text-sm leading-6 text-slate-600"><span class="font-semibold text-slate-900">核心冲突：</span>{{ stage.mainConflict }}</p>
+                    <div class="mt-3 grid gap-3 md:grid-cols-2">
+                      <p class="rounded-xl bg-white px-3 py-3 text-sm leading-6 text-slate-700"><span class="font-semibold text-slate-900">阶段背景：</span>{{ stage.background }}</p>
+                      <p class="rounded-xl bg-white px-3 py-3 text-sm leading-6 text-slate-700"><span class="font-semibold text-slate-900">人物推进：</span>{{ stage.characterProgression }}</p>
+                      <p class="rounded-xl bg-white px-3 py-3 text-sm leading-6 text-slate-700"><span class="font-semibold text-slate-900">世界推进：</span>{{ stage.worldProgression }}</p>
+                      <p class="rounded-xl bg-white px-3 py-3 text-sm leading-6 text-slate-700"><span class="font-semibold text-slate-900">势力变化：</span>{{ stage.factionProgression }}</p>
+                      <p class="rounded-xl bg-white px-3 py-3 text-sm leading-6 text-slate-700 md:col-span-2"><span class="font-semibold text-slate-900">体系推进：</span>{{ stage.powerProgression }}</p>
+                    </div>
+                    <div class="mt-3 grid gap-3 md:grid-cols-2" v-if="stage.survivalAndLifeProgression || stage.culturalAndCivilizationalProgression || stage.resourceAndOperationLine || stage.emotionalCore || stage.majorSetpiece || stage.storyFunction">
+                      <p v-if="stage.survivalAndLifeProgression" class="rounded-xl bg-cyan-50 px-3 py-3 text-sm leading-6 text-cyan-900"><span class="font-semibold">生存/生活推进：</span>{{ stage.survivalAndLifeProgression }}</p>
+                      <p v-if="stage.culturalAndCivilizationalProgression" class="rounded-xl bg-violet-50 px-3 py-3 text-sm leading-6 text-violet-900"><span class="font-semibold">文化/文明推进：</span>{{ stage.culturalAndCivilizationalProgression }}</p>
+                      <p v-if="stage.resourceAndOperationLine" class="rounded-xl bg-emerald-50 px-3 py-3 text-sm leading-6 text-emerald-900"><span class="font-semibold">资源/运营线：</span>{{ stage.resourceAndOperationLine }}</p>
+                      <p v-if="stage.emotionalCore" class="rounded-xl bg-rose-50 px-3 py-3 text-sm leading-6 text-rose-900"><span class="font-semibold">情绪核心：</span>{{ stage.emotionalCore }}</p>
+                      <p v-if="stage.majorSetpiece" class="rounded-xl bg-amber-50 px-3 py-3 text-sm leading-6 text-amber-950"><span class="font-semibold">场面支点：</span>{{ stage.majorSetpiece }}</p>
+                      <p v-if="stage.storyFunction" class="rounded-xl bg-slate-100 px-3 py-3 text-sm leading-6 text-slate-800 md:col-span-2"><span class="font-semibold">阶段职责：</span>{{ stage.storyFunction }}</p>
+                    </div>
+                    <div class="mt-3 rounded-xl bg-slate-50 px-3 py-3">
+                      <p class="text-sm font-semibold text-slate-900">关键事件</p>
+                      <ul v-if="stage.keyEvents.length" class="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-slate-600">
+                        <li v-for="event in stage.keyEvents" :key="`${stage.stage}-${event}`">{{ event }}</li>
+                      </ul>
+                    </div>
+                    <div v-if="stage.turningPoints.length || stage.stageTasks.length" class="mt-3 grid gap-3 md:grid-cols-2">
+                      <div v-if="stage.turningPoints.length" class="rounded-xl bg-indigo-50 px-3 py-3">
+                        <p class="text-sm font-semibold text-indigo-900">转折节点</p>
+                        <ul class="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-indigo-800">
+                          <li v-for="point in stage.turningPoints" :key="`${stage.stage}-${point}`">{{ point }}</li>
+                        </ul>
+                      </div>
+                      <div v-if="stage.stageTasks.length" class="rounded-xl bg-teal-50 px-3 py-3">
+                        <p class="text-sm font-semibold text-teal-900">阶段任务</p>
+                        <ul class="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-teal-800">
+                          <li v-for="task in stage.stageTasks" :key="`${stage.stage}-${task}`">{{ task }}</li>
+                        </ul>
+                      </div>
+                    </div>
+                    <p class="mt-3 rounded-xl bg-amber-50 px-3 py-3 text-sm leading-6 text-amber-900"><span class="font-semibold">阶段高潮：</span>{{ stage.stageClimax }}</p>
+                    <p class="mt-3 rounded-xl bg-emerald-50 px-3 py-3 text-sm leading-6 text-emerald-800"><span class="font-semibold">伏笔与回收：</span>{{ stage.foreshadowingAndPayoff }}</p>
+                    <p v-if="stage.endingHook" class="mt-3 rounded-xl bg-white px-3 py-2 text-sm leading-6 text-indigo-700">
+                      <span class="font-semibold">阶段钩子：</span>{{ stage.endingHook }}
+                    </p>
+                  </div>
+                </div>
+              </article>
+              <p v-if="!novelOutline.length" class="text-sm text-slate-500">暂无小说总大纲。</p>
+            </div>
+          </section>
+
+          <section class="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-[0_12px_40px_-28px_rgba(15,23,42,0.24)]">
             <div class="flex items-center justify-between gap-3">
               <div>
                 <p class="text-xs font-medium uppercase tracking-[0.24em] text-indigo-600">章节总览</p>
@@ -218,7 +320,7 @@
                   </div>
                 </div>
               </article>
-              <p v-if="!chapterOutline.length" class="text-sm text-slate-500">暂无章节大纲。</p>
+              <p v-if="!chapterOutline.length" class="text-sm text-slate-500">当前还没有章节大纲，先确认上面的小说总大纲，再继续细化。</p>
             </div>
           </section>
         </main>
@@ -305,12 +407,12 @@
             </p>
             <div class="mt-4 space-y-3 text-sm leading-6 text-slate-600">
               <div class="rounded-2xl border border-white/80 bg-white/80 px-4 py-3">
-                <p class="font-semibold text-slate-900">确认蓝图并进入开写</p>
-                <p class="mt-1">会把当前蓝图保存到项目中，并直接切到小说详情工作台。</p>
+                <p class="font-semibold text-slate-900">{{ hasCompleteChapterOutline ? '确认蓝图并进入开写' : '基于小说总大纲生成章节大纲' }}</p>
+                <p class="mt-1">{{ hasCompleteChapterOutline ? '会把当前蓝图保留在项目中，并直接切到小说详情工作台。' : '会继续调用软件的正式生成链，把全书总纲细化成可执行章节大纲。' }}</p>
               </div>
               <div class="rounded-2xl border border-white/80 bg-white/80 px-4 py-3">
-                <p class="font-semibold text-slate-900">重做蓝图</p>
-                <p class="mt-1">用于方向不满意时重新生成，避免带着错误骨架进入后续写作。</p>
+                <p class="font-semibold text-slate-900">{{ regenerateActionLabel }}</p>
+                <p class="mt-1">用于方向不满意时重新生成；如果当前已经有小说总大纲，这里会直接走总纲重生成流程。</p>
               </div>
             </div>
           </section>
@@ -362,10 +464,41 @@ interface WorldItem {
   description: string
 }
 
+interface SystemCard {
+  label: string
+  value: string
+}
+
 interface ChapterItem {
   number: number
   title: string
   summary: string
+}
+
+interface NovelOutlineStage {
+  stage: number
+  title: string
+  coreTheme: string
+  goal: string
+  mainConflict: string
+  background: string
+  characterProgression: string
+  worldProgression: string
+  factionProgression: string
+  powerProgression: string
+  survivalAndLifeProgression: string
+  culturalAndCivilizationalProgression: string
+  resourceAndOperationLine: string
+  emotionalCore: string
+  majorSetpiece: string
+  storyFunction: string
+  turningPoints: string[]
+  stageTasks: string[]
+  keyEvents: string[]
+  stageClimax: string
+  foreshadowingAndPayoff: string
+  endingHook: string
+  expectedChapterRange: string
 }
 
 const props = defineProps<Props>()
@@ -396,6 +529,27 @@ const displayText = (value: unknown, fallback = '待补充'): string => {
 }
 
 const maybeText = (value: unknown): string => optionalText(value)
+
+const formatStructuredValue = (value: unknown): string => {
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => formatStructuredValue(item))
+      .filter(Boolean)
+      .join('；')
+  }
+  if (isRecord(value)) {
+    return Object.entries(value)
+      .map(([key, nested]) => {
+        const nestedText = formatStructuredValue(nested)
+        return nestedText ? `${key}：${nestedText}` : ''
+      })
+      .filter(Boolean)
+      .join('\n')
+  }
+  return ''
+}
 
 const importanceWeight = (value: string): number => {
   const normalized = value.trim().toLowerCase()
@@ -458,6 +612,75 @@ const worldFactions = computed<WorldItem[]>(() => {
   }))
 })
 
+const worldSystemCards = computed<SystemCard[]>(() => {
+  const fields = [
+    ['era_background', '时代背景'],
+    ['world_structure', '世界结构'],
+    ['power_system', '力量体系'],
+    ['survival_system', '生存体系'],
+    ['life_system', '生活体系'],
+    ['culture_system', '文化体系'],
+    ['civilization_system', '文明体系'],
+    ['economy_system', '经济体系'],
+    ['social_structure', '社会结构'],
+    ['resource_system', '资源体系'],
+    ['belief_system', '信仰体系'],
+    ['geography_system', '地理体系'],
+    ['faction_order', '势力秩序'],
+  ] as const
+
+  return fields
+    .map(([key, label]) => ({
+      label,
+      value: formatStructuredValue(worldSetting.value?.[key]),
+    }))
+    .filter((item) => item.value)
+})
+
+const novelOutline = computed<NovelOutlineStage[]>(() => {
+  const outline = Array.isArray(props.blueprint?.novel_outline) ? props.blueprint!.novel_outline : []
+
+  return outline
+    .map((item, index) => {
+      const record = isRecord(item) ? item : {}
+      const keyEvents = Array.isArray(record.key_events)
+        ? record.key_events.map((event) => displayText(event, '')).filter(Boolean)
+        : []
+      const turningPoints = Array.isArray(record.turning_points)
+        ? record.turning_points.map((item) => displayText(item, '')).filter(Boolean)
+        : []
+      const stageTasks = Array.isArray(record.stage_tasks)
+        ? record.stage_tasks.map((item) => displayText(item, '')).filter(Boolean)
+        : []
+      return {
+        stage: Number(record.stage) || index + 1,
+        title: displayText(record.title, `阶段 ${index + 1}`),
+        coreTheme: displayText(record.core_theme, '暂无阶段主题'),
+        goal: displayText(record.goal, '暂无阶段目标'),
+        mainConflict: displayText(record.main_conflict, '暂无核心冲突'),
+        background: displayText(record.background, '暂无阶段背景'),
+        characterProgression: displayText(record.character_progression, '暂无人物推进'),
+        worldProgression: displayText(record.world_progression, '暂无世界推进'),
+        factionProgression: displayText(record.faction_progression, '暂无势力变化'),
+        powerProgression: displayText(record.power_progression, '暂无体系推进'),
+        survivalAndLifeProgression: maybeText(record.survival_and_life_progression),
+        culturalAndCivilizationalProgression: maybeText(record.cultural_and_civilizational_progression),
+        resourceAndOperationLine: maybeText(record.resource_and_operation_line),
+        emotionalCore: maybeText(record.emotional_core),
+        majorSetpiece: maybeText(record.major_setpiece),
+        storyFunction: maybeText(record.story_function),
+        turningPoints,
+        stageTasks,
+        keyEvents,
+        stageClimax: displayText(record.stage_climax, '暂无阶段高潮'),
+        foreshadowingAndPayoff: displayText(record.foreshadowing_and_payoff, '暂无伏笔信息'),
+        endingHook: displayText(record.ending_hook, ''),
+        expectedChapterRange: displayText(record.expected_chapter_range, '章节范围待定'),
+      }
+    })
+    .sort((left, right) => left.stage - right.stage)
+})
+
 const chapterOutline = computed<ChapterItem[]>(() => {
   const outline = Array.isArray(props.blueprint?.chapter_outline) ? props.blueprint!.chapter_outline : []
 
@@ -466,6 +689,27 @@ const chapterOutline = computed<ChapterItem[]>(() => {
     title: displayText((chapter as { title?: unknown }).title, `第 ${index + 1} 章`),
     summary: displayText((chapter as { summary?: unknown }).summary, '暂无章节摘要'),
   }))
+})
+
+const hasNovelOutline = computed(() => novelOutline.value.length > 0)
+const hasCompleteChapterOutline = computed(() => {
+  if (chapterOutline.value.length < 12) return false
+  const sortedNumbers = chapterOutline.value.map((chapter) => chapter.number).sort((left, right) => left - right)
+  return sortedNumbers.slice(0, 12).every((chapterNumber, index) => chapterNumber === index + 1)
+})
+const hasChapterOutline = computed(() => chapterOutline.value.length > 0)
+const primaryActionLabel = computed(() => {
+  if (!props.blueprint) return '缺少蓝图'
+  if (!hasCompleteChapterOutline.value && hasNovelOutline.value) return '基于小说总大纲生成章节大纲'
+  return '确认蓝图并进入开写'
+})
+const savingActionLabel = computed(() => {
+  if (!hasCompleteChapterOutline.value && hasNovelOutline.value) return '正在生成章节大纲...'
+  return '正在进入写作台...'
+})
+const regenerateActionLabel = computed(() => {
+  if (hasNovelOutline.value) return '重新生成小说总大纲'
+  return '重新生成蓝图'
 })
 
 const characterCards = computed<CharacterCard[]>(() => {
@@ -576,9 +820,9 @@ const relationshipCards = computed<RelationshipCard[]>(() => {
 
 const overviewStats = computed(() => [
   {
-    label: '章节数',
-    value: String(chapterOutline.value.length),
-    hint: '后续会按这个结构开写',
+    label: hasChapterOutline.value ? '章节数' : '总纲段数',
+    value: String(hasChapterOutline.value ? chapterOutline.value.length : novelOutline.value.length),
+    hint: hasChapterOutline.value ? '后续会按这个结构开写' : '下一步将基于这些阶段拆成章节',
   },
   {
     label: '角色数',
@@ -587,8 +831,8 @@ const overviewStats = computed(() => [
   },
   {
     label: '当前阶段',
-    value: props.isSaving ? '进入写作台' : '蓝图定稿',
-    hint: '这一屏只负责最后确认或重做',
+    value: hasCompleteChapterOutline.value ? (props.isSaving ? '进入写作台' : '蓝图定稿') : (props.isSaving ? '生成章节大纲' : '总纲确认'),
+    hint: hasCompleteChapterOutline.value ? '这一屏只负责最后确认或重做' : '先确认全书推进，再继续细化到章节',
   },
   {
     label: '世界块',
@@ -621,7 +865,12 @@ watch(
 )
 
 const confirmRegenerate = async () => {
-  const confirmed = await globalAlert.showConfirm('重做蓝图会覆盖当前内容，确定继续吗？', '重做蓝图确认')
+  const confirmed = await globalAlert.showConfirm(
+    hasNovelOutline.value
+      ? '重新生成小说总大纲会覆盖当前总纲及其下游章节大纲，确定继续吗？'
+      : '重新生成蓝图会覆盖当前内容，确定继续吗？',
+    hasNovelOutline.value ? '重新生成小说总大纲确认' : '重新生成蓝图确认'
+  )
   if (confirmed) {
     emit('regenerate')
   }

@@ -20,6 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from ..db.base import Base
 
 LONG_TEXT_TYPE = Text().with_variant(LONGTEXT, "mysql")
+PROJECT_ID_TYPE = String(36).with_variant(String(36, collation="utf8mb4_unicode_ci"), "mysql")
 
 
 class WriterPersona(Base):
@@ -29,7 +30,7 @@ class WriterPersona(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[str] = mapped_column(
-        ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
     
     # ===== 基础信息 =====
@@ -169,13 +170,13 @@ class WriterPersona(Base):
             opening_style="开门见山，前三段必须有冲突或悬念",
             transition_style="场景切换干脆，不拖泥带水",
             ending_style="必须留钩子，禁止总结性结尾",
-            dialogue_style="简洁有力，符合角色身份，适当使用网络用语",
-            dialogue_tags="少用'说'，多用动作描写代替",
-            description_style="镜头语言，画面感强，少用形容词堆砌",
+            dialogue_style="简洁有力，符合角色身份，对话先承担试探、压迫、误导、撕裂等功能，再考虑口语化润色",
+            dialogue_tags="对白优先交代立场冲突与权力变化，再用动作补足压迫感，不要用动作描写稀释有效台词",
+            description_style="镜头语言与冲突并重，画面感要为动作、情绪和决策服务，避免静态景物停留过久",
             show_vs_tell_ratio="7:3 展示为主",
             sensory_focus=["视觉", "听觉", "触觉"],
             catchphrases=["说实话", "不是我说", "懂的都懂", "这波啊"],
-            personal_quirks=["喜欢用省略号制造悬念", "关键对话后加一句内心吐槽"],
+            personal_quirks=["喜欢在局势突变前压一句短停顿", "关键冲突后补一记带判断的动作细节"],
             imperfection_patterns=[
                 "偶尔用不完整的句子表达急促感",
                 "对话中适当使用语气词",
@@ -197,6 +198,6 @@ class WriterPersona(Base):
             variation_rules={
                 "sentence_length_variation": "每3-5句变化一次长度",
                 "paragraph_length_variation": "段落长度随情节紧张度变化",
-                "dialogue_density_variation": "动作戏对话密集，心理戏对话稀疏"
+                "dialogue_density_variation": "冲突场景保持较高对白密度，心理段只能服务已发生的事件与决策"
             }
         )

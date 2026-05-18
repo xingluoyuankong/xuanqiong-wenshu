@@ -14,6 +14,7 @@ from ..db.base import Base
 # 自定义列类型：兼容跨数据库环境
 BIGINT_PK_TYPE = BigInteger().with_variant(Integer, "sqlite")
 LONG_TEXT_TYPE = Text().with_variant(LONGTEXT, "mysql")
+PROJECT_ID_TYPE = String(36).with_variant(String(36, collation="utf8mb4_unicode_ci"), "mysql")
 
 
 class Foreshadowing(Base):
@@ -22,7 +23,7 @@ class Foreshadowing(Base):
     __tablename__ = "foreshadowings"
     
     id: Mapped[int] = mapped_column(BIGINT_PK_TYPE, primary_key=True, autoincrement=True)
-    project_id: Mapped[str] = mapped_column(ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True)
     chapter_id: Mapped[int] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False)
     chapter_number: Mapped[int] = mapped_column(Integer, nullable=False)
     
@@ -102,7 +103,7 @@ class ForeshadowingReminder(Base):
     __tablename__ = "foreshadowing_reminders"
     
     id: Mapped[int] = mapped_column(BIGINT_PK_TYPE, primary_key=True, autoincrement=True)
-    project_id: Mapped[str] = mapped_column(ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True)
     foreshadowing_id: Mapped[int] = mapped_column(ForeignKey("foreshadowings.id", ondelete="CASCADE"), nullable=False)
     
     # 提醒信息
@@ -148,7 +149,7 @@ class ForeshadowingAnalysis(Base):
     __tablename__ = "foreshadowing_analysis"
     
     id: Mapped[int] = mapped_column(BIGINT_PK_TYPE, primary_key=True, autoincrement=True)
-    project_id: Mapped[str] = mapped_column(ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, unique=True)
+    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, unique=True)
     
     # 分析结果
     total_foreshadowings: Mapped[int] = mapped_column(Integer, default=0)

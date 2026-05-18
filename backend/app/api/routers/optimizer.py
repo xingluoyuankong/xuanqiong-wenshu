@@ -9,10 +9,12 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.dependencies import get_current_user
 from ...db.session import get_session
+from ...models.novel import ChapterVersion
 from ...schemas.novel import Chapter as ChapterSchema
 from ...schemas.user import UserInDB
 from ...services.llm_service import LLMService
@@ -31,6 +33,7 @@ class OptimizeRequest(BaseModel):
     dimension: str = Field(..., description="优化维度: dialogue/environment/psychology/rhythm")
     additional_notes: Optional[str] = Field(default=None, description="额外优化指令")
     version_index: Optional[int] = Field(default=None, description="要优化的版本索引（0-based），不传则使用已选版本")
+    version_id: Optional[int] = Field(default=None, description="Stable version id; preferred over version_index")
 
 
 class OptimizeResponse(BaseModel):
@@ -132,27 +135,29 @@ async def optimize_chapter(
     # 确定要优化的内容来源
     original_content = None
 
-    # 情况 A: 指定了版本索引
-    if request.version_index is not None:
-        versions = sorted(list(chapter.versions or []), key=lambda v: v.created_at)
+    # ?? A: ??????? ID / ??????
+    if request.version_id is not None or request.version_index is not None:
+        versions = sorted(list(chapter.versions or []), key=lambda v: (v.created_at, v.id))
         if not versions:
-            raise HTTPException(status_code=400, detail="该章节还没有生成任何版本")
-        if request.version_index < 0 or request.version_index >= len(versions):
-            raise HTTPException(status_code=400, detail=f"版本索引 {request.version_index} 无效")
-        if not versions[request.version_index].content:
-            raise HTTPException(status_code=400, detail="指定版本的内容为空")
-        original_content = versions[request.version_index].content
+            raise HTTPException(status_code=400, detail="????????????")
+        selected_version = None
+        if request.version_id is not None:
+            selected_version = next((version for version in versions if version.id == request.version_id), None)
+            if selected_version is None:
+                raise HTTPException(status_code=400, detail="????????????????????")
+        else:
+            if request.version_index is None or request.version_index < 0 or request.version_index >= len(versions):
+                raise HTTPException(status_code=400, detail=f"???? {request.version_index} ??")
+            selected_version = versions[request.version_index]
+        if not selected_version.content:
+            raise HTTPException(status_code=400, detail="?????????")
+        original_content = selected_version.content
 
-    # 情况 B: 使用已选版本
+    # ?? B: ??????
     if not original_content and chapter.selected_version and chapter.selected_version.content:
         original_content = chapter.selected_version.content
 
-    # 情况 C: 使用最新版本
-    if not original_content:
-        versions = sorted(list(chapter.versions or []), key=lambda v: v.created_at)
-        if versions and versions[-1].content:
-            original_content = versions[-1].content
-
+    # ?? C: ??????
     if not original_content:
         raise HTTPException(status_code=400, detail="章节尚未生成内容，无法进行优化")
     
@@ -205,16 +210,17 @@ async def optimize_chapter(
     
     # 调用LLM进行优化
     try:
-        response = await llm_service.get_llm_response(
-            system_prompt=optimizer_prompt,
-            conversation_history=[{
-                "role": "user",
-                "content": json.dumps(optimize_input, ensure_ascii=False)
-            }],
-            temperature=0.7,
-            user_id=current_user.id,
-            timeout=600.0,
-        )
+        with LLMService.daily_limit_scope(f"optimizer:{request.project_id}:{request.chapter_number}:{request.dimension}:{current_user.id}"):
+            response = await llm_service.get_llm_response(
+                system_prompt=optimizer_prompt,
+                conversation_history=[{
+                    "role": "user",
+                    "content": json.dumps(optimize_input, ensure_ascii=False)
+                }],
+                temperature=0.7,
+                user_id=current_user.id,
+                timeout=600.0,
+            )
         
         cleaned = remove_think_tags(response)
         normalized = unwrap_markdown_json(cleaned)
@@ -289,7 +295,7 @@ async def apply_optimization(
     if not selected_version:
         raise HTTPException(status_code=400, detail="Selected chapter version not found")
 
-    existing_versions = sorted(list(chapter.versions or []), key=lambda v: v.created_at)
+    existing_versions = sorted(list(chapter.versions or []), key=lambda v: (v.created_at, v.id))
     next_version_number = len(existing_versions) + 1
     optimized_version = type(selected_version)(
         chapter_id=chapter.id,

@@ -1,26 +1,53 @@
 <template>
   <div class="ce-shell">
-    <div class="ce-panel">
-      <div class="ce-icon">*</div>
-      <h3>这一章还没有正文</h3>
-
-      <div v-if="canGenerate" class="space-y-4">
-        <p>可以直接开始生成这一章。建议先确认上一章已完成，再继续推进。</p>
-        <button
-          type="button"
-          class="md-btn md-btn-filled md-ripple ce-primary"
-          :disabled="generatingChapter === chapterNumber"
-          @click="$emit('generateChapter', chapterNumber)"
-        >
-          {{ generatingChapter === chapterNumber ? '生成中...' : `开始生成第 ${chapterNumber} 章` }}
-        </button>
+    <section class="ce-panel">
+      <div class="ce-orbit" aria-hidden="true">
+        <span></span>
+        <strong>{{ chapterNumber }}</strong>
       </div>
 
-      <div v-else class="space-y-3">
-        <p>当前还不能生成这一章，前面的章节需要先完成，避免上下文断裂。</p>
-        <div class="ce-lock">请按顺序推进章节</div>
+      <div class="ce-copy">
+        <p class="ce-kicker">章节待生成</p>
+        <h3>第 {{ chapterNumber }} 章还没有正文</h3>
+        <p v-if="canGenerate">
+          已经轮到这一章进入正文生产。点击开始后，系统会在后台生成候选版本，
+          并在完成后切换到评审/确认流程。
+        </p>
+        <p v-else>
+          当前章节还被顺序锁保护。请先完成前置章节，避免上下文断裂、人物动机跳跃或伏笔遗漏。
+        </p>
       </div>
-    </div>
+
+      <div class="ce-path">
+        <div :class="['ce-step', canGenerate ? 'ce-step--done' : '']">
+          <span>1</span>
+          <strong>确认前文</strong>
+          <em>保证承接</em>
+        </div>
+        <div :class="['ce-step', canGenerate ? 'ce-step--active' : 'ce-step--locked']">
+          <span>2</span>
+          <strong>生成本章</strong>
+          <em>{{ canGenerate ? '可执行' : '待解锁' }}</em>
+        </div>
+        <div class="ce-step ce-step--future">
+          <span>3</span>
+          <strong>评审确认</strong>
+          <em>选择版本</em>
+        </div>
+      </div>
+
+      <button
+        v-if="canGenerate"
+        type="button"
+        class="ce-primary"
+        :disabled="generatingChapter === chapterNumber"
+        @click="$emit('generateChapter', chapterNumber)"
+      >
+        {{ generatingChapter === chapterNumber ? '生成中...' : `开始生成第 ${chapterNumber} 章` }}
+      </button>
+
+      <div v-else class="ce-lock">请按顺序推进章节</div>
+    </section>
   </div>
 </template>
 
@@ -36,59 +63,167 @@ defineEmits(['generateChapter'])
 
 <style scoped>
 .ce-shell {
+  min-height: 360px;
   display: grid;
-  justify-items: center;
-  padding: 20px 0 8px;
+  place-items: center;
+  padding: 18px;
 }
 
 .ce-panel {
-  width: min(560px, 100%);
-  padding: 28px;
-  text-align: center;
-  border-radius: 28px;
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.06);
+  width: min(820px, 100%);
+  display: grid;
+  gap: 20px;
+  padding: clamp(24px, 4vw, 38px);
+  border-radius: 34px;
+  border: 1px solid rgba(107, 155, 235, 0.2);
+  background:
+    radial-gradient(circle at 10% 12%, rgba(107, 155, 235, 0.22), transparent 32%),
+    radial-gradient(circle at 92% 18%, rgba(168, 85, 247, 0.12), transparent 28%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(241, 247, 255, 0.94));
+  box-shadow: 0 26px 72px rgba(37, 99, 235, 0.12);
 }
 
-.ce-icon {
-  width: 60px;
-  height: 60px;
-  margin: 0 auto 18px;
+.ce-orbit {
+  position: relative;
+  width: 78px;
+  height: 78px;
   display: grid;
   place-items: center;
-  border-radius: 18px;
-  background: rgba(37, 99, 235, 0.08);
-  color: #1d4ed8;
-  font-size: 1.6rem;
-  font-weight: 700;
+  border-radius: 26px;
+  background: linear-gradient(135deg, #eef6ff, #ffffff);
+  box-shadow: inset 0 0 0 1px rgba(107, 155, 235, 0.18), 0 18px 42px rgba(107, 155, 235, 0.16);
 }
 
-.ce-panel h3 {
+.ce-orbit span {
+  position: absolute;
+  inset: 10px;
+  border-radius: 22px;
+  border: 1px dashed rgba(37, 99, 235, 0.35);
+}
+
+.ce-orbit strong {
+  color: #2563eb;
+  font-size: 1.9rem;
+  font-weight: 950;
+}
+
+.ce-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.ce-kicker {
+  margin: 0;
+  color: #4f46e5;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.ce-copy h3 {
+  margin: 0;
   color: #0f172a;
-  font-size: 1.45rem;
-  font-weight: 700;
+  font-size: clamp(1.35rem, 2.2vw, 2rem);
+  font-weight: 900;
 }
 
-.ce-panel p {
-  color: #475569;
-  margin-top: 12px;
+.ce-copy p {
+  max-width: 66ch;
+  margin: 0;
+  color: #52627a;
   line-height: 1.8;
 }
 
+.ce-path {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ce-step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  align-items: center;
+  min-height: 82px;
+  padding: 14px;
+  border-radius: 22px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.ce-step span {
+  grid-row: span 2;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  color: #475569;
+  background: rgba(15, 23, 42, 0.06);
+  font-weight: 900;
+}
+
+.ce-step strong {
+  color: #0f172a;
+  font-size: 0.92rem;
+}
+
+.ce-step em {
+  color: #64748b;
+  font-size: 0.76rem;
+  font-style: normal;
+}
+
+.ce-step--done span,
+.ce-step--active span {
+  color: #fff;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+}
+
+.ce-step--active {
+  border-color: rgba(37, 99, 235, 0.35);
+  box-shadow: 0 16px 36px rgba(37, 99, 235, 0.12);
+}
+
+.ce-step--locked {
+  opacity: 0.72;
+}
+
 .ce-primary {
-  min-width: 220px;
+  width: fit-content;
+  min-height: 44px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  font-weight: 850;
+  cursor: pointer;
+  box-shadow: 0 16px 36px rgba(37, 99, 235, 0.22);
+}
+
+.ce-primary:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .ce-lock {
+  width: fit-content;
   display: inline-flex;
   align-items: center;
-  min-height: 34px;
-  padding: 0 14px;
+  min-height: 38px;
+  padding: 0 16px;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.06);
   color: #475569;
-  font-size: 0.85rem;
-  font-weight: 700;
+  background: rgba(15, 23, 42, 0.06);
+  font-size: 0.86rem;
+  font-weight: 850;
+}
+
+@media (max-width: 720px) {
+  .ce-path {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

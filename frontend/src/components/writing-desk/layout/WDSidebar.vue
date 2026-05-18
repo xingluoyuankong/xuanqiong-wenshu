@@ -83,20 +83,23 @@
             <span v-if="currentChapter?.generation_status">后台状态：{{ statusText(selectedOutline.chapter_number) }}</span>
           </div>
 
-          <div class="wd-current-actions">
-            <button
-              type="button"
-              :class="chapterAction(selectedOutline.chapter_number).mode === 'action' ? 'wd-mini-btn wd-mini-btn--primary' : 'wd-mini-btn'"
-              :disabled="chapterAction(selectedOutline.chapter_number).disabled"
-              :title="chapterAction(selectedOutline.chapter_number).reason"
-              @click="handleChapterAction(selectedOutline.chapter_number)"
+          <div v-if="currentQualitySummary" class="wd-current-quality">
+            <span
+              :class="['wd-quality-pill', `wd-quality-pill--${currentQualitySummary.tone}`]"
+              :title="currentQualitySummary.issues.join('；')"
             >
-              {{ chapterAction(selectedOutline.chapter_number).label }}
-            </button>
+              {{ currentQualitySummary.label }}
+            </span>
+          </div>
+
+          <div class="wd-current-actions">
+            <div class="wd-current-actions__summary">
+              <p class="wd-current-actions__label">主操作已收口到顶部</p>
+              <p class="wd-current-card__hint">{{ currentActionGuidance }}</p>
+            </div>
             <button
-              v-if="!isChapterCompleted(selectedOutline.chapter_number)"
               type="button"
-              class="wd-mini-btn"
+              class="wd-mini-btn wd-mini-btn--accent"
               @click="$emit('editChapter', selectedOutline)"
             >
               编辑当前大纲
@@ -110,10 +113,6 @@
               删除当前章
             </button>
           </div>
-
-          <p v-if="chapterAction(selectedOutline.chapter_number).reason" class="wd-current-card__hint">
-            {{ chapterAction(selectedOutline.chapter_number).reason }}
-          </p>
         </section>
 
         <div v-else class="wd-empty">
@@ -140,6 +139,7 @@ import { computed } from 'vue'
 import { globalAlert } from '@/composables/useAlert'
 import type { ChapterOutline, NovelProject, WorkspaceSummary } from '@/api/novel'
 import { resolveChapterActionDecision } from '@/utils/chapterGeneration'
+import { buildChapterQualitySummary } from '@/utils/chapterQuality'
 
 interface Props {
   project: NovelProject
@@ -156,7 +156,6 @@ const props = defineProps<Props>()
 const emit = defineEmits([
   'closeSidebar',
   'selectChapter',
-  'generateChapter',
   'editChapter',
   'deleteChapter',
   'generateOutline',
@@ -188,6 +187,10 @@ const currentChapter = computed(() => {
   if (!selectedOutline.value) return null
   return props.project.chapters.find((chapter) => chapter.chapter_number === selectedOutline.value?.chapter_number) || null
 })
+const currentQualitySummary = computed(() => buildChapterQualitySummary(
+  currentChapter.value,
+  currentChapter.value?.generation_runtime,
+))
 
 const getChapter = (chapterNumber: number) =>
   props.project.chapters.find((chapter) => chapter.chapter_number === chapterNumber)
@@ -197,21 +200,30 @@ const getChapterStatus = (chapterNumber: number) =>
 
 const isChapterCompleted = (chapterNumber: number) => getChapterStatus(chapterNumber) === 'successful'
 
-const getChapterAction = (chapterNumber: number) => resolveChapterActionDecision(props.project, chapterNumber, {
-  generatingChapter: props.generatingChapter,
-  evaluatingChapter: props.evaluatingChapter,
+const currentActionDecision = computed(() => {
+  if (!selectedOutline.value) return null
+  return resolveChapterActionDecision(props.project, selectedOutline.value.chapter_number, {
+    generatingChapter: props.generatingChapter,
+    evaluatingChapter: props.evaluatingChapter,
+  })
 })
 
-const chapterAction = (chapterNumber: number) => {
-  const decision = getChapterAction(chapterNumber)
-  return {
-    label: decision.label,
-    disabled: decision.mode === 'running' || decision.mode === 'disabled',
-    reason: decision.reason,
-    mode: decision.mode,
-    targetChapter: decision.targetChapterNumber ?? undefined,
+const currentActionGuidance = computed(() => {
+  const decision = currentActionDecision.value
+  if (!decision) {
+    return '生成、确认、终止等主操作统一放到顶部命令栏，避免侧栏再出现一套重复按钮。'
   }
-}
+  if (decision.canOpenResult) {
+    return '当前章已有候选版本，接下来请在顶部命令栏继续查看候选版本、评审并确认。'
+  }
+  if (decision.mode === 'running') {
+    return '当前章仍在后台处理中，先看顶部任务栏进度，不要在侧栏重复触发同类动作。'
+  }
+  if (decision.mode === 'disabled') {
+    return '当前章暂时没有可执行的主动作，请先按顶部提示推进或切换章节。'
+  }
+  return `当前章的主动作已经收口到顶部命令栏：${decision.label}。`
+})
 
 const statusText = (chapterNumber: number) => {
   const status = getChapterStatus(chapterNumber)
@@ -238,29 +250,6 @@ const canDeleteSelectedChapter = computed(() => {
   const chapterNumbers = outlineItems.value.map((chapter) => chapter.chapter_number)
   return chapterNumber === Math.max(...chapterNumbers)
 })
-
-async function confirmGenerateChapter(chapterNumber: number) {
-  const confirmed = await globalAlert.showConfirm(
-    '重新生成会覆盖当前阶段结果，是否继续？',
-    '确认生成',
-  )
-
-  if (confirmed) {
-    emit('generateChapter', chapterNumber)
-  }
-}
-
-function handleChapterAction(chapterNumber: number) {
-  const action = chapterAction(chapterNumber)
-  if (action.disabled) return
-
-  if (action.mode === 'navigate' && action.targetChapter) {
-    emit('selectChapter', action.targetChapter)
-    return
-  }
-
-  void confirmGenerateChapter(chapterNumber)
-}
 
 async function handleDeleteCurrentChapter() {
   if (!selectedOutline.value || !canDeleteSelectedChapter.value) return
@@ -494,8 +483,59 @@ async function handleDeleteCurrentChapter() {
   font-weight: 700;
 }
 
+.wd-current-quality {
+  display: flex;
+}
+
+.wd-quality-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.wd-quality-pill--success {
+  background: rgba(22, 163, 74, 0.12);
+  color: #15803d;
+}
+
+.wd-quality-pill--warning {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+.wd-quality-pill--danger {
+  background: rgba(220, 38, 38, 0.12);
+  color: #b91c1c;
+}
+
 .wd-current-actions {
   grid-template-columns: 1fr;
+}
+
+.wd-current-actions__summary {
+  display: grid;
+  gap: 4px;
+  padding: 12px 12px 10px;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.wd-current-actions__label {
+  margin: 0;
+  font-size: 0.74rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #4338ca;
+}
+
+.wd-current-actions__summary .wd-current-card__hint {
+  margin-top: 0;
 }
 
 .wd-status-pill--success {
@@ -509,8 +549,8 @@ async function handleDeleteCurrentChapter() {
 }
 
 .wd-status-pill--active {
-  background: rgba(245, 158, 11, 0.14);
-  color: #b45309;
+  background: rgba(14, 165, 233, 0.14);
+  color: #1d4ed8;
 }
 
 .wd-status-pill--idle {
@@ -536,14 +576,14 @@ async function handleDeleteCurrentChapter() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 38px;
-  padding: 0 14px;
-  border-radius: 12px;
+  min-height: 42px;
+  padding: 0 15px;
+  border-radius: 14px;
   border: 1px solid rgba(148, 163, 184, 0.24);
   background: #fff;
   color: #334155;
-  font-size: 0.84rem;
-  font-weight: 800;
+  font-size: 0.88rem;
+  font-weight: 850;
   cursor: pointer;
 }
 
@@ -558,6 +598,12 @@ async function handleDeleteCurrentChapter() {
   background: #0f172a;
   color: #fff;
   border-color: #0f172a;
+}
+
+.wd-mini-btn--accent {
+  background: rgba(79, 70, 229, 0.1);
+  color: #4338ca;
+  border-color: rgba(99, 102, 241, 0.2);
 }
 
 .wd-mini-btn--danger {

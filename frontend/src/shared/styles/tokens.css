@@ -1,0 +1,69 @@
+:root {
+  color-scheme: light;
+
+  --xq-bg-ink: #0d1021;
+  --xq-bg-midnight: #14182f;
+  --xq-bg-paper: #f8fbff;
+  --xq-bg-paper-soft: #eef6ff;
+  --xq-bg-glass: rgba(255, 255, 255, 0.76);
+
+  --xq-ink: #0f172a;
+  --xq-ink-muted: #64748b;
+  --xq-ink-faint: #94a3b8;
+  --xq-gold: #0ea5e9;
+  --xq-gold-deep: #2563eb;
+  --xq-cinnabar: #e11d48;
+  --xq-jade: #0f766e;
+  --xq-celestial: #4f46e5;
+  --xq-border: rgba(148, 163, 184, 0.24);
+
+  --xq-radius-xs: 8px;
+  --xq-radius-sm: 14px;
+  --xq-radius-md: 22px;
+  --xq-radius-lg: 32px;
+  --xq-radius-pill: 999px;
+
+  --xq-shadow-paper: 0 18px 45px rgba(15, 23, 42, 0.08);
+  --xq-shadow-floating: 0 26px 70px rgba(13, 16, 33, 0.22);
+  --xq-ring: 0 0 0 4px rgba(14, 165, 233, 0.18);
+
+  --xq-font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun", serif;
+  --xq-font-sans: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+  --xq-font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+
+  --xq-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --xq-fast: 160ms var(--xq-ease);
+  --xq-normal: 280ms var(--xq-ease);
+}
+
+.xq-page-canvas {
+  min-height: 100vh;
+  color: var(--xq-ink);
+  background:
+    radial-gradient(circle at 14% 8%, rgba(37, 99, 235, 0.12), transparent 28rem),
+    radial-gradient(circle at 86% 12%, rgba(14, 165, 233, 0.12), transparent 24rem),
+    linear-gradient(135deg, #f8fbff 0%, #eef6ff 52%, #eaf2ff 100%);
+  font-family: var(--xq-font-sans);
+}
+
+.xq-paper-grain {
+  position: relative;
+}
+
+.xq-paper-grain::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  opacity: 0.26;
+  background-image:
+    linear-gradient(rgba(37, 99, 235, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(14, 165, 233, 0.028) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), transparent 88%);
+}
+
+.xq-focus-ring:focus-visible {
+  outline: none;
+  box-shadow: var(--xq-ring);
+}

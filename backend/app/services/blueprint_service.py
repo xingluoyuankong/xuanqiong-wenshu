@@ -223,75 +223,76 @@ class BlueprintService:
         """
         从大纲自动生成章节蓝图
         """
-        # 获取项目信息
-        project = self.db.query(NovelProject).filter(
-            NovelProject.id == project_id
-        ).first()
-        
-        if not project or not project.blueprint:
-            logger.error(f"项目不存在或无蓝图: {project_id}")
-            return None
-        
-        # 获取章节大纲
-        outline = self.db.query(ChapterOutline).filter(
-            ChapterOutline.project_id == project_id,
-            ChapterOutline.chapter_number == chapter_number
-        ).first()
-        
-        if not outline:
-            logger.error(f"章节大纲不存在: {project_id}/{chapter_number}")
-            return None
-        
-        # 获取前后章节信息
-        prev_outline = self.db.query(ChapterOutline).filter(
-            ChapterOutline.project_id == project_id,
-            ChapterOutline.chapter_number == chapter_number - 1
-        ).first()
-        
-        next_outline = self.db.query(ChapterOutline).filter(
-            ChapterOutline.project_id == project_id,
-            ChapterOutline.chapter_number == chapter_number + 1
-        ).first()
-        
-        # 计算总章节数
-        total_chapters = self.db.query(ChapterOutline).filter(
-            ChapterOutline.project_id == project_id
-        ).count()
-        
-        # 生成蓝图
-        prompt = GENERATE_BLUEPRINT_PROMPT.format(
-            genre=project.blueprint.genre or "",
-            style=project.blueprint.style or "",
-            total_chapters=total_chapters,
-            chapter_number=chapter_number,
-            title=outline.title,
-            summary=outline.summary or "",
-            prev_chapter=f"第{prev_outline.chapter_number}章: {prev_outline.title}" if prev_outline else "无",
-            next_chapter=f"第{next_outline.chapter_number}章: {next_outline.title}" if next_outline else "无"
-        )
-        
-        try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
-                user_id=user_id,
-                max_tokens=1000,
-                temperature=0.5
+        with LLMService.daily_limit_scope(f"blueprint_single:{project_id}:{chapter_number}:{user_id}"):
+            # 获取项目信息
+            project = self.db.query(NovelProject).filter(
+                NovelProject.id == project_id
+            ).first()
+
+            if not project or not project.blueprint:
+                logger.error(f"项目不存在或无蓝图: {project_id}")
+                return None
+
+            # 获取章节大纲
+            outline = self.db.query(ChapterOutline).filter(
+                ChapterOutline.project_id == project_id,
+                ChapterOutline.chapter_number == chapter_number
+            ).first()
+
+            if not outline:
+                logger.error(f"章节大纲不存在: {project_id}/{chapter_number}")
+                return None
+
+            # 获取前后章节信息
+            prev_outline = self.db.query(ChapterOutline).filter(
+                ChapterOutline.project_id == project_id,
+                ChapterOutline.chapter_number == chapter_number - 1
+            ).first()
+
+            next_outline = self.db.query(ChapterOutline).filter(
+                ChapterOutline.project_id == project_id,
+                ChapterOutline.chapter_number == chapter_number + 1
+            ).first()
+
+            # 计算总章节数
+            total_chapters = self.db.query(ChapterOutline).filter(
+                ChapterOutline.project_id == project_id
+            ).count()
+
+            # 生成蓝图
+            prompt = GENERATE_BLUEPRINT_PROMPT.format(
+                genre=project.blueprint.genre or "",
+                style=project.blueprint.style or "",
+                total_chapters=total_chapters,
+                chapter_number=chapter_number,
+                title=outline.title,
+                summary=outline.summary or "",
+                prev_chapter=f"第{prev_outline.chapter_number}章: {prev_outline.title}" if prev_outline else "无",
+                next_chapter=f"第{next_outline.chapter_number}章: {next_outline.title}" if next_outline else "无"
             )
-            
-            if response:
-                data = self._parse_json_response(response)
-                if data:
-                    # 创建或更新蓝图
-                    blueprint = self.get_blueprint(project_id, chapter_number)
-                    if blueprint:
-                        return self.update_blueprint(blueprint, **data)
-                    else:
-                        return self.create_blueprint(project_id, chapter_number, **data)
-        
-        except Exception as e:
-            logger.error(f"生成章节蓝图失败: {e}")
-        
-        return None
+
+            try:
+                response = await self.llm_service.generate(
+                    prompt=prompt,
+                    user_id=user_id,
+                    max_tokens=1000,
+                    temperature=0.5
+                )
+
+                if response:
+                    data = self._parse_json_response(response)
+                    if data:
+                        # 创建或更新蓝图
+                        blueprint = self.get_blueprint(project_id, chapter_number)
+                        if blueprint:
+                            return self.update_blueprint(blueprint, **data)
+                        else:
+                            return self.create_blueprint(project_id, chapter_number, **data)
+
+            except Exception as e:
+                logger.error(f"生成章节蓝图失败: {e}")
+
+            return None
     
     async def generate_all_blueprints(
         self,
@@ -301,69 +302,70 @@ class BlueprintService:
         """
         为项目所有章节生成蓝图
         """
-        # 获取项目信息
-        project = self.db.query(NovelProject).filter(
-            NovelProject.id == project_id
-        ).first()
-        
-        if not project or not project.blueprint:
-            logger.error(f"项目不存在或无蓝图: {project_id}")
-            return []
-        
-        # 获取所有章节大纲
-        outlines = self.db.query(ChapterOutline).filter(
-            ChapterOutline.project_id == project_id
-        ).order_by(ChapterOutline.chapter_number).all()
-        
-        if not outlines:
-            return []
-        
-        # 格式化大纲列表
-        outlines_text = "\n".join([
-            f"第{o.chapter_number}章 - {o.title}: {o.summary or '无摘要'}"
-            for o in outlines
-        ])
-        
-        prompt = GENERATE_BATCH_BLUEPRINT_PROMPT.format(
-            genre=project.blueprint.genre or "",
-            style=project.blueprint.style or "",
-            total_chapters=len(outlines),
-            synopsis=project.blueprint.full_synopsis or "",
-            outlines=outlines_text
-        )
-        
-        try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
-                user_id=user_id,
-                max_tokens=8000,
-                temperature=0.5
+        with LLMService.daily_limit_scope(f"blueprint_batch:{project_id}:{user_id}"):
+            # 获取项目信息
+            project = self.db.query(NovelProject).filter(
+                NovelProject.id == project_id
+            ).first()
+
+            if not project or not project.blueprint:
+                logger.error(f"项目不存在或无蓝图: {project_id}")
+                return []
+
+            # 获取所有章节大纲
+            outlines = self.db.query(ChapterOutline).filter(
+                ChapterOutline.project_id == project_id
+            ).order_by(ChapterOutline.chapter_number).all()
+
+            if not outlines:
+                return []
+
+            # 格式化大纲列表
+            outlines_text = "\n".join([
+                f"第{o.chapter_number}章 - {o.title}: {o.summary or '无摘要'}"
+                for o in outlines
+            ])
+
+            prompt = GENERATE_BATCH_BLUEPRINT_PROMPT.format(
+                genre=project.blueprint.genre or "",
+                style=project.blueprint.style or "",
+                total_chapters=len(outlines),
+                synopsis=project.blueprint.full_synopsis or "",
+                outlines=outlines_text
             )
-            
-            if response:
-                data_list = self._parse_json_response(response)
-                if isinstance(data_list, list):
-                    blueprints = []
-                    for data in data_list:
-                        chapter_number = data.pop("chapter_number", None)
-                        if chapter_number:
-                            blueprint = self.get_blueprint(project_id, chapter_number)
-                            if blueprint:
-                                blueprint = self.update_blueprint(blueprint, **data)
-                            else:
-                                blueprint = self.create_blueprint(
-                                    project_id, chapter_number, **data
-                                )
-                            blueprints.append(blueprint)
-                    
-                    self.db.commit()
-                    return blueprints
-        
-        except Exception as e:
-            logger.error(f"批量生成章节蓝图失败: {e}")
-            self.db.rollback()
-        
-        return []
+
+            try:
+                response = await self.llm_service.generate(
+                    prompt=prompt,
+                    user_id=user_id,
+                    max_tokens=8000,
+                    temperature=0.5
+                )
+
+                if response:
+                    data_list = self._parse_json_response(response)
+                    if isinstance(data_list, list):
+                        blueprints = []
+                        for data in data_list:
+                            chapter_number = data.pop("chapter_number", None)
+                            if chapter_number:
+                                blueprint = self.get_blueprint(project_id, chapter_number)
+                                if blueprint:
+                                    blueprint = self.update_blueprint(blueprint, **data)
+                                else:
+                                    blueprint = self.create_blueprint(
+                                        project_id, chapter_number, **data
+                                    )
+                                blueprints.append(blueprint)
+
+                        self.db.commit()
+                        return blueprints
+
+            except Exception as e:
+                logger.error(f"批量生成章节蓝图失败: {e}")
+                self.db.rollback()
+
+            return []
     
     # ==================== 模板管理 ====================
     

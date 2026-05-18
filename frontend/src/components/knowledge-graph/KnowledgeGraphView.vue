@@ -1,5 +1,5 @@
 ﻿<template>
-  <div class="grid h-full gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
+  <div class="knowledge-graph-page grid h-full gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
     <aside class="space-y-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
       <div>
         <h3 class="text-lg font-semibold text-slate-900">知识图谱</h3>
@@ -201,8 +201,7 @@ const loadThreads = async () => {
 }
 
 const reload = async () => {
-  await loadGraph()
-  await loadThreads()
+  await Promise.all([loadGraph(), loadThreads()])
 }
 
 onMounted(reload)

@@ -117,39 +117,42 @@ class SixDimensionReviewService:
         previous_summary: Optional[str] = None,
         character_profiles: Optional[str] = None,
         world_setting: Optional[str] = None,
+        user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
-        constitution = await self.constitution_service.get_constitution(project_id)
-        persona = await self.writer_persona_service.get_active_persona(project_id)
-        prompt_template = await self.prompt_service.get_prompt('six_dimension_review')
+        with LLMService.daily_limit_scope(f"six_dimension_review:{project_id}:{chapter_number}:{user_id or 0}:{len(chapter_content or '')}"):
+            constitution = await self.constitution_service.get_constitution(project_id)
+            persona = await self.writer_persona_service.get_active_persona(project_id)
+            prompt_template = await self.prompt_service.get_prompt('six_dimension_review')
 
-        prompt = self._build_prompt(
-            chapter_number=chapter_number,
-            chapter_title=chapter_title,
-            chapter_content=chapter_content,
-            constitution_context=self.constitution_service.get_constitution_context(constitution),
-            persona_context=self.writer_persona_service.get_persona_context(persona),
-            chapter_plan=chapter_plan,
-            previous_summary=previous_summary,
-            character_profiles=character_profiles,
-            world_setting=world_setting,
-            prompt_template=prompt_template,
-        )
-
-        try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
-                system_prompt=(
-                    '你是一位严格的长篇连载小说总编审。'
-                    '请从六个维度输出结构化 JSON，少而准地指出真正影响阅读和连载稳定性的问题。'
-                ),
+            prompt = self._build_prompt(
+                chapter_number=chapter_number,
+                chapter_title=chapter_title,
+                chapter_content=chapter_content,
+                constitution_context=self.constitution_service.get_constitution_context(constitution),
+                persona_context=self.writer_persona_service.get_persona_context(persona),
+                chapter_plan=chapter_plan,
+                previous_summary=previous_summary,
+                character_profiles=character_profiles,
+                world_setting=world_setting,
+                prompt_template=prompt_template,
             )
-            parsed = self._parse_response(response)
-            if parsed:
-                return parsed
-        except Exception as exc:
-            logger.warning('Six-dimension review failed for project=%s chapter=%s: %s', project_id, chapter_number, exc)
 
-        return self._create_default_result('六维审查已回退到默认结果')
+            try:
+                response = await self.llm_service.generate(
+                    prompt=prompt,
+                    system_prompt=(
+                        '你是一位严格的长篇连载小说总编审。'
+                        '请从六个维度输出结构化 JSON，少而准地指出真正影响阅读和连载稳定性的问题。'
+                    ),
+                    user_id=user_id,
+                )
+                parsed = self._parse_response(response)
+                if parsed:
+                    return parsed
+            except Exception as exc:
+                logger.warning('六维评审失败：project=%s chapter=%s error=%s', project_id, chapter_number, exc)
+
+            return self._create_default_result('六维审查已回退到默认结果')
 
     async def quick_review(self, project_id: str, chapter_content: str) -> Dict[str, Any]:
         results: Dict[str, Any] = {

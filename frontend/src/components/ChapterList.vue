@@ -89,7 +89,7 @@ const getChapterStatusClass = (chapterNumber: number) => {
     case '已完成':
       return 'bg-green-100 text-green-800'
     case '待选择':
-      return 'bg-yellow-100 text-yellow-800'
+      return 'bg-sky-100 text-sky-800'
     default:
       return 'bg-gray-100 text-gray-800'
   }

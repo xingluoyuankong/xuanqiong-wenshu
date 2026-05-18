@@ -1,16 +1,17 @@
 <template>
-  <div v-if="show" class="eval-overlay" @click.self="emit('close')">
-    <div class="eval-dialog">
-      <header class="eval-header">
+  <Teleport to="body">
+    <div v-if="show" class="xq-dialog-overlay eval-overlay" @click.self="emit('close')">
+      <div class="xq-dialog-shell xq-dialog-shell--xl eval-dialog">
+      <header class="xq-dialog-header eval-header">
         <div>
           <p class="eval-kicker">AI 综合评审</p>
           <h3>候选版本评审详情</h3>
           <p class="eval-subtitle">会明确写清楚推荐的是哪个候选版本、每个版本各自的优缺点，以及可直接回填的优化建议。</p>
         </div>
-        <button type="button" class="md-icon-btn md-ripple" aria-label="关闭评审详情" @click="emit('close')">×</button>
+        <button type="button" class="xq-dialog-close md-ripple" aria-label="关闭评审详情" @click="emit('close')">×</button>
       </header>
 
-      <div class="eval-body">
+      <div class="xq-dialog-body eval-body">
         <section v-if="parsedEvaluation" class="eval-overview">
           <div class="eval-overview__summary">
             <div>
@@ -123,6 +124,7 @@
       </footer>
     </div>
   </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">

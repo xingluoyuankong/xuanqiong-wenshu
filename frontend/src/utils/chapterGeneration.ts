@@ -51,17 +51,17 @@ const STAGE_LABEL_MAP: Record<string, string> = {
   queued: '排队中',
   prepare_context: '准备上下文',
   generate_mission: '生成任务',
-  generate_variants: '生成候选版本',
+  generate_variants: '生成正文',
   review: 'AI 评审',
   diagnose_once: '问题诊断',
-  diagnose_previous_chapter: '检查上一章',
-  diagnose_context_bundle: '检查上下文',
+  diagnose_previous_chapter: '前章依据',
+  diagnose_context_bundle: '关联上下文',
   diagnose_structural: '结构诊断',
   diagnose_character: '角色诊断',
   diagnose_delivery: '表达诊断',
-  optimize_content: '内容优化',
+  optimize_content: '分阶段优化',
   optimize_structural: '结构优化',
-  optimize_character: '角色优化',
+  optimize_character: '人物优化',
   optimize_delivery: '表达优化',
   consistency: '一致性检查',
   persist_versions: '保存候选版本',
@@ -152,6 +152,15 @@ const STAGE_STALL_THRESHOLDS: Record<string, number> = {
 }
 
 export const normalizeRuntimeStage = (rawStage: unknown): string => {
+  const stage = String(rawStage || '').trim().toLowerCase()
+  if (!stage) return 'queued'
+  if (['already_generating', 'running', 'in_progress', 'generate_variants'].includes(stage)) return 'generating'
+  if (stage === 'review' || stage.startsWith('diagnose_') || stage.startsWith('optimize_')) return 'evaluating'
+  if (stage === 'persist_versions') return 'selecting'
+  return STAGE_META_MAP.get(stage)?.key || stage
+}
+
+const normalizeDisplayStage = (rawStage: unknown): string => {
   const stage = String(rawStage || '').trim().toLowerCase()
   if (!stage) return 'queued'
   return STAGE_META_MAP.get(stage)?.key || stage
@@ -277,7 +286,7 @@ const getStageDisplayLabel = (runtimeRecord: Record<string, any>, stage: string)
   if (stage.startsWith('diagnose_') && typeof runtimeRecord.diagnosis_stage_label === 'string') {
     return String(runtimeRecord.diagnosis_stage_label)
   }
-  if (stage.startsWith('optimize_') && typeof runtimeRecord.optimization_stage_label === 'string') {
+  if (stage.startsWith('optimize_') && stage !== 'optimize_content' && typeof runtimeRecord.optimization_stage_label === 'string') {
     return String(runtimeRecord.optimization_stage_label)
   }
   if (stage === 'review' && typeof runtimeRecord.progress_message === 'string') {
@@ -410,7 +419,7 @@ export const buildChapterTaskUiModel = (
   }
 ): ChapterTaskUiModel => {
   const runtimeRecord = runtime || {}
-  const stage = normalizeRuntimeStage(options?.status || runtimeRecord.progress_stage || runtimeRecord.status)
+  const stage = normalizeDisplayStage(runtimeRecord.progress_stage || runtimeRecord.status || options?.status)
   const nowMs = options?.nowMs || Date.now()
   const updatedAtMs = getRuntimeTimestamp(runtimeRecord)
   const sinceUpdateMs = updatedAtMs ? Math.max(0, nowMs - updatedAtMs) : 0
@@ -428,7 +437,21 @@ export const buildChapterTaskUiModel = (
   const estimatedRemainingMs = Math.max(0, Number(runtimeRecord.estimated_remaining_seconds || 0) || 0) * 1000
   const stallThresholdMs = STAGE_STALL_THRESHOLDS[stage] || 180_000
   const isBusy = RUNTIME_BUSY_STAGES.has(stage) || stage === 'selecting'
-  const isLikelyStalled = Boolean(isBusy && sinceUpdateMs >= stallThresholdMs && statusFetchFailureCount >= 2)
+  const backendMarkedStalled = Boolean(
+    runtimeRecord.stale
+    || runtimeRecord.is_stale
+    || runtimeRecord.stalled
+    || runtimeRecord.is_stalled
+    || runtimeRecord.needs_recovery
+  )
+  const hasRepeatedSyncFailure = statusFetchFailureCount >= 2
+  const exceededStageBudget = sinceUpdateMs >= stallThresholdMs
+  const exceededHardBudget = sinceUpdateMs >= stallThresholdMs * 2
+  const isLikelyStalled = Boolean(
+    isBusy
+    && exceededStageBudget
+    && (backendMarkedStalled || hasRepeatedSyncFailure || exceededHardBudget)
+  )
 
   const baseMessage = String(options?.progressMessage || runtimeRecord.progress_message || '').trim()
   const priorityFixes = Array.isArray(runtimeRecord.self_critique_priority_fixes)
@@ -452,11 +475,13 @@ export const buildChapterTaskUiModel = (
     }).join('、')}`
     : ''
 
+  const optimizationLogs = Array.isArray(runtimeRecord.optimization_logs) ? runtimeRecord.optimization_logs : []
   const critiqueSummaryParts = [
     typeof runtimeRecord.self_critique_final_score === 'number' ? `评分 ${runtimeRecord.self_critique_final_score}` : '',
     typeof runtimeRecord.self_critique_improvement === 'number' && runtimeRecord.self_critique_improvement !== 0 ? `提升 ${runtimeRecord.self_critique_improvement}` : '',
     typeof runtimeRecord.self_critique_critical_count === 'number' && runtimeRecord.self_critique_critical_count > 0 ? `严重问题 ${runtimeRecord.self_critique_critical_count}` : '',
     typeof runtimeRecord.self_critique_major_count === 'number' && runtimeRecord.self_critique_major_count > 0 ? `主要问题 ${runtimeRecord.self_critique_major_count}` : '',
+    optimizationLogs.length > 0 ? `分批优化 ${optimizationLogs.length} 段` : '',
     runtimeRecord.review_status ? `评审状态 ${runtimeRecord.review_status}` : '',
   ].filter(Boolean)
   const critiqueSummary = critiqueSummaryParts.join(' · ')
@@ -577,8 +602,8 @@ export const resolveChapterActionDecision = (
   if (canOpenResult) {
     return {
       mode: 'navigate',
-      label: '查看当前结果',
-      reason: '这一章已经有候选结果了，先进去看评估或确认版本。',
+      label: '查看候选版本',
+      reason: '这一章已经产出了候选版本，先进入候选版本区继续看评审、对比并确认版本。',
       targetChapterNumber: chapterNumber,
       canGenerate: false,
       shouldConfirm,
@@ -605,7 +630,7 @@ export const resolveChapterActionDecision = (
   if (status === 'successful') {
     return {
       mode: 'action',
-      label: '重写',
+      label: '重新生成',
       reason: '当前正文已经完成，如需重写可以从这里重新生成。',
       targetChapterNumber: chapterNumber,
       canGenerate: true,
@@ -619,8 +644,8 @@ export const resolveChapterActionDecision = (
   if (isRetry) {
     return {
       mode: 'action',
-      label: '重试',
-      reason: '这一章上次失败了，可以直接重试，或先进去看异常。',
+      label: '重新生成',
+      reason: '这一章上次失败了，可以直接重新生成，或先进去看异常。',
       targetChapterNumber: chapterNumber,
       canGenerate: true,
       shouldConfirm,
@@ -632,7 +657,7 @@ export const resolveChapterActionDecision = (
 
   return {
     mode: 'action',
-    label: '创作',
+    label: '生成本章',
     reason: '',
     targetChapterNumber: chapterNumber,
     canGenerate,

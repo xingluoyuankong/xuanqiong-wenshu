@@ -10,7 +10,7 @@ const GlobalNotification = defineAsyncComponent(() => import('@/components/share
 </script>
 
 <template>
-  <div class="min-h-screen bg-white">
+  <div class="xq-app-root min-h-screen">
     <!-- 全局导航栏 -->
     <GlobalNavBar />
 

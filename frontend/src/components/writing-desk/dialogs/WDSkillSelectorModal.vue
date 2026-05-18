@@ -24,16 +24,16 @@
             leave-from="opacity-100 translate-y-0 sm:scale-100"
             leave-to="opacity-0 translate-y-4 sm:scale-95"
           >
-            <DialogPanel class="skill-dialog-shell">
-              <div class="skill-dialog-header">
+            <DialogPanel class="xq-dialog-shell xq-dialog-shell--xl skill-dialog-shell">
+              <div class="xq-dialog-header skill-dialog-header">
                 <div>
                   <DialogTitle as="h3">写作技能中心</DialogTitle>
                   <p>安装只是把技能加入你的可用工具箱；执行时才会把当前项目、当前章节和你的输入一起送进去分析，不会自动改系统配置，也不会直接覆盖正文。</p>
                 </div>
-                <button type="button" class="text-slate-400 hover:text-slate-700" @click="handleClose">×</button>
+                <button type="button" class="xq-dialog-close" @click="handleClose">×</button>
               </div>
 
-              <div class="skill-dialog-body">
+              <div class="xq-dialog-body skill-dialog-body">
                 <section class="skill-guide-panel">
                   <article>
                     <h4>技能的安装与使用逻辑</h4>
@@ -636,7 +636,7 @@ const handleClose = () => emit('close')
 }
 
 .skill-info-block--warn {
-  background: #fffbeb;
+  background: rgba(239, 246, 255, 0.95);
 }
 
 .skill-tag-list {

@@ -13,6 +13,8 @@ const { pushMock, routeMock, novelStoreMock, alertMocks, localStorageState } = v
     createProject: vi.fn(),
     sendConversation: vi.fn(),
     generateBlueprint: vi.fn(),
+    startBlueprintGeneration: vi.fn(),
+    getBlueprintGenerationStatus: vi.fn(),
     saveBlueprint: vi.fn(),
   },
   alertMocks: {
@@ -60,8 +62,8 @@ vi.mock('@/components/ConversationInput.vue', () => ({
 
 vi.mock('@/components/BlueprintConfirmation.vue', () => ({
   default: {
-    props: ['aiMessage'],
-    template: '<div class="blueprint-confirmation">{{ aiMessage }}</div>',
+    props: ['aiMessage', 'forceStage'],
+    template: '<div class="blueprint-confirmation">{{ aiMessage }}|{{ forceStage }}</div>',
   },
 }))
 
@@ -123,6 +125,8 @@ describe('InspirationMode', () => {
       blueprint: { title: '蓝图' },
       ai_message: '蓝图已生成',
     })
+    novelStoreMock.startBlueprintGeneration.mockResolvedValue({ status: 'queued' })
+    novelStoreMock.getBlueprintGenerationStatus.mockResolvedValue({ status: 'successful', blueprint: { title: '蓝图', chapter_outline: [{ chapter_number: 1, title: '第1章', summary: '摘要' }] }, ai_message: '章节大纲已生成' })
     novelStoreMock.saveBlueprint.mockResolvedValue(undefined)
     alertMocks.showConfirm.mockResolvedValue(true)
   })
@@ -204,12 +208,12 @@ describe('InspirationMode', () => {
     expect(pushMock).toHaveBeenCalledWith('/')
   })
 
-  it('存在可恢复项目时显示继续上次灵感按钮', async () => {
+  it('auto restores previous inspiration project', async () => {
     localStorageState.xuanqiong_wenshu_active_inspiration_project_id = 'resume-proj'
 
     const wrapper = await mountView()
 
-    expect(wrapper.text()).toContain('继续上次灵感')
+    expect(novelStoreMock.loadProject).toHaveBeenCalledWith('resume-proj')
   })
 
   it('存在 query 项目时不显示继续上次灵感按钮', async () => {
@@ -228,4 +232,109 @@ describe('InspirationMode', () => {
 
     expect(wrapper.text()).not.toContain('继续上次灵感')
   })
+
+  it('provides fallback text input when restored assistant has no ui_control', async () => {
+    localStorageState.xuanqiong_wenshu_active_inspiration_project_id = 'resume-proj'
+    novelStoreMock.currentProject = {
+      id: 'resume-proj',
+      blueprint: null,
+      conversation_history: [
+        { role: 'assistant', content: JSON.stringify({ ai_message: 'continue with fallback', is_complete: false, ui_control: null }) },
+      ],
+    }
+    novelStoreMock.loadProject.mockResolvedValue(undefined)
+
+    const wrapper = await mountView()
+    const inputStub = wrapper.findComponent({ name: 'ConversationInput' })
+
+    expect(inputStub.exists()).toBe(true)
+    expect(inputStub.props('loading')).toBe(false)
+    expect(inputStub.props('uiControl')).toMatchObject({ type: 'text_input' })
+  })
+
+  it('navigates to writing desk without saving blueprint again', async () => {
+    novelStoreMock.currentProject = { id: 'proj-1', blueprint: null, conversation_history: [] }
+    const wrapper = await mountView()
+
+    ;(wrapper.vm as any).handleBlueprintGenerated({
+      blueprint: {
+        title: 'Blueprint',
+        chapter_outline: Array.from({ length: 12 }, (_, index) => ({ chapter_number: index + 1, title: `第${index + 1}章`, summary: '摘要' })),
+      },
+      ai_message: 'blueprint generated',
+    })
+    await (wrapper.vm as any).handleConfirmBlueprint()
+
+    expect(novelStoreMock.saveBlueprint).not.toHaveBeenCalled()
+    expect(pushMock).toHaveBeenCalledWith('/novel/proj-1')
+    expect(localStorageState.xuanqiong_wenshu_active_inspiration_project_id).toBeUndefined()
+  })
+
+  it('novel outline only blueprint switches to forced chapter outline confirmation view', async () => {
+    novelStoreMock.currentProject = { id: 'proj-1', blueprint: null, conversation_history: [] }
+    const wrapper = await mountView()
+
+    ;(wrapper.vm as any).handleBlueprintGenerated({
+      blueprint: { title: 'Blueprint', novel_outline: [{ stage: 1, title: '第一阶段' }] },
+      ai_message: 'blueprint generated',
+    })
+    await (wrapper.vm as any).handleConfirmBlueprint()
+    await flushPromises()
+
+    expect(novelStoreMock.startBlueprintGeneration).not.toHaveBeenCalled()
+    expect((wrapper.vm as any).pendingBlueprintForceStage).toBe('chapter_outline')
+    expect(wrapper.html()).toContain('blueprint-confirmation-stub')
+    expect(pushMock).not.toHaveBeenCalled()
+  })
+
+
+  it('restores novel outline stage when blueprint has total outline but no chapter outline', async () => {
+    localStorageState.xuanqiong_wenshu_active_inspiration_project_id = 'novel-outline-proj'
+    novelStoreMock.currentProject = {
+      id: 'novel-outline-proj',
+      blueprint: { title: '异海开拓史', novel_outline: [{ stage: 1, title: '孤岛立足' }] },
+      conversation_history: [
+        { role: 'assistant', content: JSON.stringify({ ai_message: '总纲已生成', is_complete: false, ui_control: null, conversation_state: { stage: 'outline' } }) },
+      ],
+    }
+    novelStoreMock.loadProject.mockResolvedValue(undefined)
+
+    const wrapper = await mountView()
+
+    expect(wrapper.html()).toContain('blueprint-display-stub')
+  })
+
+  it('regenerate blueprint marks next confirmation as forced novel outline regeneration', async () => {
+    novelStoreMock.currentProject = { id: 'proj-1', blueprint: null, conversation_history: [] }
+    const wrapper = await mountView()
+
+    ;(wrapper.vm as any).handleBlueprintGenerated({
+      blueprint: { title: 'Blueprint', novel_outline: [{ stage: 1, title: '第一阶段' }] },
+      ai_message: 'blueprint generated',
+    })
+    ;(wrapper.vm as any).handleRegenerateBlueprint()
+    await flushPromises()
+
+    expect(wrapper.html()).toContain('blueprint-confirmation-stub')
+    expect((wrapper.vm as any).pendingBlueprintForceStage).toBe('novel_outline')
+  })
+
+  it('does not treat empty blueprint as usable on resume', async () => {
+    localStorageState.xuanqiong_wenshu_active_inspiration_project_id = 'empty-blueprint-proj'
+    novelStoreMock.currentProject = {
+      id: 'empty-blueprint-proj',
+      blueprint: { title: '', chapter_outline: [] },
+      conversation_history: [
+        { role: 'assistant', content: JSON.stringify({ ai_message: 'continue conflict', is_complete: false, ui_control: null, conversation_state: { stage: 'conflict' } }) },
+      ],
+    }
+    novelStoreMock.loadProject.mockResolvedValue(undefined)
+
+    const wrapper = await mountView()
+
+    expect(wrapper.html()).not.toContain('blueprint-display-stub')
+    expect(wrapper.html()).toContain('blueprint-confirmation-stub')
+    expect(novelStoreMock.currentConversationState.value).toMatchObject({ stage: 'conflict' })
+  })
+
 })

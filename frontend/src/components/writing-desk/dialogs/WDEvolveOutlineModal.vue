@@ -1,19 +1,18 @@
 <!-- 剧情演进弹窗 - 让用户选择剧情分支 -->
 <template>
-  <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-    <!-- 遮罩 -->
-    <div class="absolute inset-0 bg-black/50" @click="$emit('close')"></div>
-
-    <!-- 弹窗内容 -->
-    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden">
-      <!-- 标题 -->
-      <div class="px-6 py-4 border-b border-slate-200">
-        <h3 class="text-xl font-bold text-slate-900">剧情推演</h3>
-        <p class="text-sm text-slate-500 mt-1">选择你感兴趣的方向，大纲将自动更新</p>
+  <div v-if="show" class="xq-dialog-overlay" @click.self="$emit('close')">
+    <div class="xq-dialog-shell">
+      <div class="xq-dialog-header">
+        <div>
+          <p class="xq-dialog-kicker">Plot Evolution</p>
+          <h3 class="xq-dialog-title">剧情推演</h3>
+          <p class="xq-dialog-subtitle">选择你感兴趣的方向，大纲将自动更新，并保留可回滚的演进意图。</p>
+        </div>
+        <button type="button" class="xq-dialog-close" @click="$emit('close')" aria-label="关闭">×</button>
       </div>
 
       <!-- 内容区 -->
-      <div class="px-6 py-4 overflow-y-auto max-h-[60vh]">
+      <div class="xq-dialog-body">
         <!-- 加载状态 -->
         <div v-if="loading" class="flex flex-col items-center justify-center py-12">
           <div class="animate-spin rounded-full h-12 w-12 border-4 border-indigo-500 border-t-transparent"></div>
@@ -25,7 +24,7 @@
           <div
             v-for="alt in alternatives"
             :key="alt.id"
-            class="p-4 border-2 border-slate-200 rounded-xl cursor-pointer transition-all hover:border-indigo-400 hover:shadow-md"
+            class="evolve-card"
             @click="selectOption(alt)"
           >
             <div class="flex items-start justify-between">
@@ -38,7 +37,7 @@
                     :class="{
                       'bg-purple-100 text-purple-700': alt.evolution_type === 'branch',
                       'bg-blue-100 text-blue-700': alt.evolution_type === 'extend',
-                      'bg-orange-100 text-orange-700': alt.evolution_type === 'twist'
+                      'bg-sky-100 text-sky-700': alt.evolution_type === 'twist'
                     }"
                   >
                     {{ alt.evolution_type === 'branch' ? '分支剧情' : alt.evolution_type === 'extend' ? '延伸剧情' : '反转剧情' }}
@@ -58,17 +57,17 @@
       </div>
 
       <!-- 底部按钮 -->
-      <div class="px-6 py-4 border-t border-slate-200 flex justify-between">
+      <div class="xq-dialog-footer justify-between">
         <button
           @click="$emit('close')"
-          class="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800"
+          class="md-btn md-btn-outlined md-ripple"
         >
           取消
         </button>
         <button
           v-if="!loading && alternatives.length"
           @click="regenerate"
-          class="px-4 py-2 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+          class="md-btn md-btn-filled md-ripple"
         >
           重新生成
         </button>
@@ -142,3 +141,21 @@ async function regenerate() {
   }
 }
 </script>
+
+<style scoped>
+.evolve-card {
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.evolve-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(99, 102, 241, 0.35);
+  box-shadow: 0 18px 42px rgba(99, 102, 241, 0.12);
+}
+</style>

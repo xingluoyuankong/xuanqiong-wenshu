@@ -8,6 +8,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db.base import Base
 
+PROJECT_ID_TYPE = String(36).with_variant(String(36, collation="utf8mb4_unicode_ci"), "mysql")
+
 
 class WritingSkill(Base):
     """已安装的写作技能元数据"""
@@ -36,7 +38,7 @@ class SkillExecution(Base):
         ForeignKey("writing_skills.id", ondelete="CASCADE"), nullable=False, index=True
     )
     project_id: Mapped[Optional[str]] = mapped_column(
-        ForeignKey("novel_projects.id", ondelete="SET NULL"), nullable=True, index=True
+        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="SET NULL"), nullable=True, index=True
     )
     chapter_number: Mapped[Optional[int]] = mapped_column(Integer)
     prompt: Mapped[Optional[str]] = mapped_column(Text)

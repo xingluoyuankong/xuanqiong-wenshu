@@ -127,6 +127,16 @@ _SUPPLEMENTAL_CHARACTER_NAMES: tuple[str, ...] = (
 logger = logging.getLogger(__name__)
 
 
+def _to_plain_data(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        value = value.model_dump()
+    if isinstance(value, dict):
+        return {key: _to_plain_data(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_plain_data(item) for item in value]
+    return value
+
+
 def _normalize_version_content(raw_content: Any, metadata: Any) -> str:
     # 优先使用原始内容
     text = _coerce_text(raw_content)
@@ -1246,6 +1256,42 @@ def _extract_generation_runtime_payload(chapter: Optional[Chapter]) -> Dict[str,
         parsed = _coerce_runtime_datetime(normalized_runtime.get(field))
         if parsed is not None:
             normalized_runtime[field] = parsed
+    chapter_status = _normalize_chapter_status(_get_loaded_scalar_value(chapter, "status") if chapter else None)
+    runtime_stage = _safe_str(
+        normalized_runtime.get("progress_stage") or normalized_runtime.get("status") or chapter_status
+    ).lower()
+    runtime_updated_at = (
+        _coerce_runtime_datetime(normalized_runtime.get("updated_at"))
+        or _coerce_runtime_datetime(_get_loaded_scalar_value(chapter, "updated_at") if chapter else None)
+        or _coerce_runtime_datetime(normalized_runtime.get("started_at"))
+        or _coerce_runtime_datetime(_get_loaded_scalar_value(chapter, "created_at") if chapter else None)
+    )
+    busy_runtime_stages = {
+        "queued",
+        "generating",
+        "prepare_context",
+        "generate_mission",
+        "generate_variants",
+        "review",
+        "ai_review",
+        "evaluating",
+        "self_critique",
+        "enrichment",
+        "persist_versions",
+        "selecting",
+        "running",
+        "in_progress",
+    }
+    if runtime_stage in busy_runtime_stages and runtime_updated_at is not None:
+        stale_seconds = int((datetime.now(timezone.utc) - runtime_updated_at).total_seconds())
+        normalized_runtime["stale"] = False
+        normalized_runtime["stale_seconds"] = max(0, stale_seconds)
+        if stale_seconds >= int(_BUSY_CHAPTER_STALE_TIMEOUT.total_seconds()):
+            normalized_runtime["stale"] = True
+            normalized_runtime["stale_reason"] = "generation_runtime_has_not_updated"
+    elif runtime_stage in busy_runtime_stages:
+        normalized_runtime["stale"] = None
+        normalized_runtime["stale_reason"] = "generation_runtime_missing_update_timestamp"
     return normalized_runtime
 
 
@@ -1373,8 +1419,7 @@ class NovelService:
             title=title,
             initial_prompt=initial_prompt,
         )
-        blueprint = NovelBlueprint(project=project)
-        self.session.add_all([project, blueprint])
+        self.session.add(project)
         await self.session.commit()
         await self.session.refresh(project)
         return project
@@ -1529,10 +1574,11 @@ class NovelService:
         record.one_sentence_summary = blueprint.one_sentence_summary
         record.full_synopsis = blueprint.full_synopsis
         record.world_setting = {
-            **(blueprint.world_setting or {}),
-            "story_arcs": blueprint.story_arcs or [],
-            "volume_plan": blueprint.volume_plan or [],
-            "foreshadowing_system": blueprint.foreshadowing_system or [],
+            **(_to_plain_data(blueprint.world_setting) or {}),
+            "story_arcs": _to_plain_data(blueprint.story_arcs or []),
+            "volume_plan": _to_plain_data(blueprint.volume_plan or []),
+            "novel_outline": _to_plain_data(blueprint.novel_outline or []),
+            "foreshadowing_system": _to_plain_data(blueprint.foreshadowing_system or []),
         }
 
         total_chapters = len(blueprint.chapter_outline or [])
@@ -1625,6 +1671,7 @@ class NovelService:
             relationships=[],
             story_arcs=[],
             volume_plan=[],
+            novel_outline=[],
             foreshadowing_system=[],
             chapter_outline=[],
         )
@@ -1637,7 +1684,7 @@ class NovelService:
         if "world_setting" in patch and patch["world_setting"] is not None:
             # 创建新字典对象以触发 SQLAlchemy 的变更检测
             existing = blueprint.world_setting or {}
-            world_setting_patch = {**patch["world_setting"]}
+            world_setting_patch = _to_plain_data(patch["world_setting"]) or {}
             factions_payload = world_setting_patch.pop("factions", None)
             blueprint.world_setting = {**existing, **world_setting_patch}
 
@@ -1649,6 +1696,11 @@ class NovelService:
         if "volume_plan" in patch and patch["volume_plan"] is not None:
             current_world = dict(blueprint.world_setting or {})
             current_world["volume_plan"] = patch["volume_plan"]
+            blueprint.world_setting = current_world
+
+        if "novel_outline" in patch and patch["novel_outline"] is not None:
+            current_world = dict(blueprint.world_setting or {})
+            current_world["novel_outline"] = patch["novel_outline"]
             blueprint.world_setting = current_world
 
         if "foreshadowing_system" in patch and patch["foreshadowing_system"] is not None:
@@ -2065,6 +2117,36 @@ class NovelService:
         if dirty:
             await self.session.commit()
 
+    def _is_blueprint_schema_usable(self, blueprint: Blueprint | None) -> bool:
+        if blueprint is None:
+            return False
+
+        chapter_outline = list(getattr(blueprint, "chapter_outline", None) or [])
+        title = str(getattr(blueprint, "title", "") or "").strip()
+        one_sentence_summary = str(getattr(blueprint, "one_sentence_summary", "") or "").strip()
+        full_synopsis = str(getattr(blueprint, "full_synopsis", "") or "").strip()
+        world_setting_value = getattr(blueprint, "world_setting", None)
+        if hasattr(world_setting_value, "model_dump"):
+            world_setting = {
+                key: value
+                for key, value in world_setting_value.model_dump(exclude_none=True).items()
+                if value not in (None, "", [], {})
+            }
+        else:
+            world_setting = dict(world_setting_value or {})
+        characters = list(getattr(blueprint, "characters", None) or [])
+        relationships = list(getattr(blueprint, "relationships", None) or [])
+
+        return bool(
+            chapter_outline
+            or title
+            or one_sentence_summary
+            or full_synopsis
+            or world_setting
+            or characters
+            or relationships
+        )
+
     async def _serialize_project(self, project: NovelProject) -> NovelProjectSchema:
         await self._recover_stale_busy_chapters(project)
         conversations = [
@@ -2073,6 +2155,7 @@ class NovelService:
         ]
 
         blueprint_schema = self._build_blueprint_schema(project)
+        serialized_blueprint = blueprint_schema if self._is_blueprint_schema_usable(blueprint_schema) else None
 
         outlines_map = {outline.chapter_number: outline for outline in project.outlines}
         chapters_map = {chapter.chapter_number: chapter for chapter in project.chapters}
@@ -2094,7 +2177,7 @@ class NovelService:
             title=project.title,
             initial_prompt=project.initial_prompt or "",
             conversation_history=conversations,
-            blueprint=blueprint_schema,
+            blueprint=serialized_blueprint,
             chapters=chapters_schema,
             workspace_summary=workspace_summary,
         )
@@ -2154,6 +2237,7 @@ class NovelService:
                 relationships=relationships,
                 story_arcs=list((world_setting or {}).get("story_arcs") or []),
                 volume_plan=list((world_setting or {}).get("volume_plan") or []),
+                novel_outline=list((world_setting or {}).get("novel_outline") or []),
                 foreshadowing_system=list((world_setting or {}).get("foreshadowing_system") or []),
                 chapter_outline=[
                     ChapterOutlineSchema(
@@ -2186,6 +2270,7 @@ class NovelService:
             relationships=[],
             story_arcs=[],
             volume_plan=[],
+            novel_outline=[],
             foreshadowing_system=[],
             chapter_outline=[],
         )
@@ -2215,6 +2300,18 @@ class NovelService:
         elif section == NovelSectionType.WORLD_SETTING:
             data = {
                 "world_setting": blueprint.world_setting or {},
+            }
+        elif section == NovelSectionType.NOVEL_OUTLINE:
+            data = {
+                "novel_outline": blueprint.novel_outline or [],
+                "story_arcs": blueprint.story_arcs or [],
+                "volume_plan": blueprint.volume_plan or [],
+                "foreshadowing_system": blueprint.foreshadowing_system or [],
+                "world_setting": blueprint.world_setting or {},
+                "outline_stage_count": len(blueprint.novel_outline or []),
+                "story_arc_count": len(blueprint.story_arcs or []),
+                "volume_count": len(blueprint.volume_plan or []),
+                "foreshadowing_count": len(blueprint.foreshadowing_system or []),
             }
         elif section == NovelSectionType.CHARACTERS:
             data = {
@@ -2583,6 +2680,16 @@ class NovelService:
                 word_count = int(_get_loaded_scalar_value(chapter, "word_count") or 0)
             except (TypeError, ValueError):
                 word_count = 0
+            if word_count <= 0 and runtime_payload:
+                try:
+                    runtime_actual_word_count = int(runtime_payload.get("actual_word_count") or 0)
+                except (TypeError, ValueError):
+                    runtime_actual_word_count = 0
+                if runtime_actual_word_count > 0 and status_value in {
+                    ChapterGenerationStatus.WAITING_FOR_CONFIRM.value,
+                    ChapterGenerationStatus.SELECTING.value,
+                }:
+                    word_count = runtime_actual_word_count
             selected_version = _get_loaded_relation_value(chapter, "selected_version")
             chapter_versions = sorted(
                 _get_loaded_relation_items(chapter, "versions"),
@@ -2615,6 +2722,7 @@ class NovelService:
                             style=v.version_label,
                             evaluation=eval_map.get(v.id),
                             metadata=v.metadata,
+                            word_count=len(v.content or ""),
                             created_at=v.created_at
                         ) for v in chapter_versions
                     ]
@@ -2622,6 +2730,36 @@ class NovelService:
                 if chapter_evaluations:
                     latest = chapter_evaluations[-1]
                     evaluation_text = latest.feedback or latest.decision
+
+            quality_metric_snapshot = None
+            quality_source_version_id = None
+            quality_candidates = []
+            if selected_version:
+                quality_candidates.append(selected_version)
+            quality_candidates.extend(reversed(chapter_versions))
+            seen_quality_version_ids = set()
+            for version_item in quality_candidates:
+                version_id = getattr(version_item, "id", None)
+                if version_id in seen_quality_version_ids:
+                    continue
+                seen_quality_version_ids.add(version_id)
+                version_metadata = getattr(version_item, "metadata", None) or {}
+                if not isinstance(version_metadata, dict):
+                    continue
+                quality_metric_snapshot = version_metadata.get("quality_metrics")
+                if not quality_metric_snapshot:
+                    guard = version_metadata.get("story_progression_guard") or {}
+                    if isinstance(guard, dict):
+                        quality_metric_snapshot = guard.get("quality_metric_snapshot")
+                if isinstance(quality_metric_snapshot, dict):
+                    quality_source_version_id = version_id
+                    break
+                quality_metric_snapshot = None
+
+            if quality_metric_snapshot:
+                runtime_payload = dict(runtime_payload or {})
+                runtime_payload.setdefault("quality_metrics", quality_metric_snapshot)
+                runtime_payload.setdefault("quality_metrics_source_version_id", quality_source_version_id)
 
         progress_snapshot = build_chapter_progress_snapshot(
             chapter,

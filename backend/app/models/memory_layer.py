@@ -14,6 +14,8 @@ import enum
 
 from ..db.base import Base
 
+PROJECT_ID_TYPE = String(36).with_variant(String(36, collation="utf8mb4_unicode_ci"), "mysql")
+
 
 class CharacterStateType(str, enum.Enum):
     """角色状态类型"""
@@ -38,7 +40,7 @@ class CharacterState(Base):
 
     # SQLite 仅对 INTEGER PRIMARY KEY 提供可靠自增，BigInteger 会导致 NOT NULL 失败
     id = Column(Integer, primary_key=True, autoincrement=True)
-    project_id = Column(String(255), ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True)
     character_id = Column(BigInteger, ForeignKey("blueprint_characters.id", ondelete="CASCADE"), nullable=False, index=True)
     character_name = Column(String(255), nullable=False)  # 冗余存储，方便查询
     
@@ -93,7 +95,7 @@ class TimelineEvent(Base):
 
     # SQLite 仅对 INTEGER PRIMARY KEY 提供可靠自增，BigInteger 会导致 NOT NULL 失败
     id = Column(Integer, primary_key=True, autoincrement=True)
-    project_id = Column(String(255), ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # 时间信息
     chapter_number = Column(Integer, nullable=False, index=True)
@@ -131,7 +133,7 @@ class CausalChain(Base):
 
     # SQLite 仅对 INTEGER PRIMARY KEY 提供可靠自增，BigInteger 会导致 NOT NULL 失败
     id = Column(Integer, primary_key=True, autoincrement=True)
-    project_id = Column(String(255), ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # 因果关系
     cause_type = Column(String(64))  # event/action/decision/external
@@ -168,7 +170,7 @@ class StoryTimeTracker(Base):
 
     # SQLite 仅对 INTEGER PRIMARY KEY 提供可靠自增，BigInteger 在本地会导致 NOT NULL 失败
     id = Column(Integer, primary_key=True, autoincrement=True)
-    project_id = Column(String(255), ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, unique=True)
+    project_id = Column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, unique=True)
     
     # 时间设定
     time_system = Column(String(64), default="modern")  # modern/ancient/fantasy/scifi

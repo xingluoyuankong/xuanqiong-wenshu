@@ -1,12 +1,14 @@
 <!-- 风格学习弹窗 - 支持我的章节与外部参考文本 -->
 <template>
-  <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-    <div class="absolute inset-0 bg-black/50" @click="$emit('close')"></div>
-
-    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] overflow-hidden">
-      <div class="px-6 py-4 border-b border-slate-200">
-        <h3 class="text-xl font-bold text-slate-900">文风学习</h3>
-        <p class="text-sm text-slate-500 mt-1">既可以学习你自己的章节风格，也可以学习外部参考文本的文风</p>
+  <div v-if="show" class="xq-dialog-overlay" @click.self="$emit('close')">
+    <div class="xq-dialog-shell xq-dialog-shell--wide">
+      <div class="xq-dialog-header">
+        <div>
+          <p class="xq-dialog-kicker">Style Learning</p>
+          <h3 class="xq-dialog-title">文风学习</h3>
+          <p class="xq-dialog-subtitle">既可以学习你自己的章节风格，也可以学习外部参考文本的文风，并沉淀为可复用风格档案。</p>
+        </div>
+        <button type="button" class="xq-dialog-close" @click="$emit('close')" aria-label="关闭">×</button>
       </div>
 
       <div class="px-6 pt-4 border-b border-slate-100 flex gap-2">
@@ -28,7 +30,7 @@
         </button>
       </div>
 
-      <div class="px-6 py-4 overflow-y-auto max-h-[62vh] space-y-4">
+      <div class="xq-dialog-body space-y-4">
         <div v-if="loading" class="flex flex-col items-center justify-center py-12">
           <div class="animate-spin rounded-full h-12 w-12 border-4 border-indigo-500 border-t-transparent"></div>
           <p class="mt-4 text-slate-500">AI 正在分析文风...</p>
@@ -85,7 +87,7 @@
 
             <div
               v-else-if="activeProfile"
-              class="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 space-y-1"
+              class="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800 space-y-1"
             >
               <p class="font-medium">当前启用的是外部参考文风</p>
               <p>正在使用「{{ activeProfile.name }}」，如需学习自己的章节文风，请先点击下方“学习我的文风”。</p>

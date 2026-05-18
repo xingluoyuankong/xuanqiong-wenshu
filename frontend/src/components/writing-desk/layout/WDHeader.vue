@@ -1,5 +1,5 @@
 ﻿<template>
-  <header class="wd-header-shell">
+  <header class="wd-header-shell xq-topbar xq-topbar--desk">
     <template v-if="props.headerCollapsed">
       <div class="wd-header-collapsed-bar">
         <div class="wd-header-collapsed-bar__summary">
@@ -62,14 +62,6 @@
 
         <div class="wd-header-actions">
           <button type="button" class="wd-utility-btn wd-utility-btn--accent" @click="$emit('toggleHeaderCollapse')">收起顶部</button>
-          <button type="button" class="wd-utility-btn" @click="$emit('viewProjectDetail')">项目详情</button>
-          <button v-if="isAdmin" type="button" class="wd-utility-btn" @click="$emit('openRuntimeLogs')">运行日志</button>
-          <button v-if="isAdmin" type="button" class="wd-utility-btn" @click="$emit('openAdminPanel')">管理后台</button>
-          <button type="button" class="wd-utility-btn" @click="$emit('openSkills')">写作技能</button>
-          <button type="button" class="wd-utility-btn" @click="$emit('toggleShortcutHelp')">
-            快捷键
-            <span class="wd-shortcut-hint">?</span>
-          </button>
           <button
             type="button"
             class="wd-utility-btn wd-utility-btn--accent"
@@ -78,6 +70,19 @@
           >
             {{ sidebarOpen ? '收起目录' : '展开目录' }}
           </button>
+          <details ref="utilityMenuRef" class="wd-utility-menu" @keydown.esc="closeUtilityMenu">
+            <summary class="wd-utility-btn wd-utility-menu__summary">
+              更多工具
+              <span class="wd-shortcut-hint">⋯</span>
+            </summary>
+            <div class="wd-utility-menu__panel">
+              <button type="button" class="wd-utility-menu__item" @click="emit('viewProjectDetail'); closeUtilityMenu()">项目详情</button>
+              <button type="button" class="wd-utility-menu__item" @click="emit('openSkills'); closeUtilityMenu()">写作技能</button>
+              <button type="button" class="wd-utility-menu__item" @click="emit('toggleShortcutHelp'); closeUtilityMenu()">快捷键</button>
+              <button v-if="isAdmin" type="button" class="wd-utility-menu__item" @click="emit('openRuntimeLogs'); closeUtilityMenu()">运行日志</button>
+              <button v-if="isAdmin" type="button" class="wd-utility-menu__item" @click="emit('openAdminPanel'); closeUtilityMenu()">管理后台</button>
+            </div>
+          </details>
         </div>
       </div>
 
@@ -137,22 +142,27 @@
         </div>
 
         <div class="wd-command-actions">
-          <button type="button" class="wd-action wd-action--nav" :disabled="!canPrevChapter" @click="$emit('prevChapter')">上一章</button>
-          <button type="button" class="wd-action wd-action--nav" :disabled="!canNextChapter" @click="$emit('nextChapter')">下一章</button>
-          <button v-if="canOpenVersionsCurrent" type="button" class="wd-action wd-action--ghost" @click="$emit('openVersionsCurrent')">候选版本区</button>
-          <button
-            v-if="reviewActionVisible"
-            type="button"
-            class="wd-action wd-action--ghost"
-            @click="reviewActionMode === 'all' ? $emit('reviewAllVersionsCurrent') : $emit('evaluateCurrent')"
-          >
-            {{ reviewActionLabel }}
-          </button>
-          <button v-if="canConfirmCurrent" type="button" class="wd-action wd-action--tonal" @click="$emit('confirmCurrent')">确认版本</button>
-          <button v-if="canTerminateCurrent" type="button" class="wd-action wd-action--danger" @click="$emit('terminateCurrent')">终止处理</button>
-          <button v-if="canGenerateCurrent && !canConfirmCurrent" type="button" class="wd-action wd-action--primary" @click="$emit('generateCurrent')">
-            {{ primaryActionLabel }}
-          </button>
+          <div class="wd-command-group wd-command-group--nav">
+            <button type="button" class="wd-action wd-action--nav" :disabled="!canPrevChapter" @click="$emit('prevChapter')">上一章</button>
+            <button type="button" class="wd-action wd-action--nav" :disabled="!canNextChapter" @click="$emit('nextChapter')">下一章</button>
+          </div>
+
+          <div class="wd-command-group wd-command-group--core">
+            <button v-if="canOpenVersionsCurrent" type="button" class="wd-action wd-action--panel" @click="$emit('openVersionsCurrent')">查看候选版本</button>
+            <button
+              v-if="reviewActionVisible"
+              type="button"
+              class="wd-action wd-action--accent"
+              @click="reviewActionMode === 'all' ? $emit('reviewAllVersionsCurrent') : $emit('evaluateCurrent')"
+            >
+              {{ reviewActionLabel }}
+            </button>
+            <button v-if="canConfirmCurrent" type="button" class="wd-action wd-action--tonal wd-action--key" @click="$emit('confirmCurrent')">确认版本</button>
+            <button v-if="canTerminateCurrent" type="button" class="wd-action wd-action--danger" @click="$emit('terminateCurrent')">终止处理</button>
+            <button v-if="canGenerateCurrent" type="button" class="wd-action wd-action--primary wd-action--key" @click="$emit('generateCurrent')">
+              {{ primaryActionLabel }}
+            </button>
+          </div>
 
           <div v-if="!hasDirectAction" class="wd-action-note">
             <span class="wd-action-note__title">{{ actionNoteTitle }}</span>
@@ -165,7 +175,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { GenerationRuntime, NovelProject, WorkspaceSummary } from '@/api/novel'
 import { stripThinkTags } from '@/utils/safeMarkdown'
 import { buildChapterTaskUiModel, normalizeRuntimeStage } from '@/utils/chapterGeneration'
@@ -180,6 +190,7 @@ const props = defineProps<{
   selectedChapterNumber: number | null
   sidebarOpen: boolean
   canGenerateCurrent: boolean
+  generateCurrentLabel?: string
   canEvaluateCurrent: boolean
   canConfirmCurrent: boolean
   canTerminateCurrent: boolean
@@ -198,7 +209,7 @@ const props = defineProps<{
   headerCollapsed?: boolean
 }>()
 
-defineEmits([
+const emit = defineEmits([
   'goBack',
   'viewProjectDetail',
   'toggleSidebar',
@@ -217,12 +228,20 @@ defineEmits([
   'toggleHeaderCollapse',
 ])
 
+const utilityMenuRef = ref<HTMLDetailsElement | null>(null)
+
+const closeUtilityMenu = () => {
+  if (utilityMenuRef.value) {
+    utilityMenuRef.value.open = false
+  }
+}
+
 const genreText = computed(() => props.project?.blueprint?.genre || '未设定题材')
 const totalWordCount = computed(() => props.workspaceSummary?.total_word_count || 0)
 const hasDirectAction = computed(() => props.canGenerateCurrent || props.canEvaluateCurrent || props.canConfirmCurrent || props.canTerminateCurrent)
 const reviewActionMode = computed<'all' | 'single' | null>(() => props.canReviewAllVersionsCurrent ? 'all' : (props.canEvaluateCurrent ? 'single' : null))
 const reviewActionVisible = computed(() => reviewActionMode.value !== null)
-const reviewActionLabel = computed(() => reviewActionMode.value === 'all' ? 'AI评审候选版本' : 'AI复评当前正文')
+const reviewActionLabel = computed(() => reviewActionMode.value === 'all' ? 'AI 综合评审' : 'AI 复评正文')
 
 const focusText = computed(() => {
   if (props.selectedChapterNumber) return `第 ${props.selectedChapterNumber} 章`
@@ -288,7 +307,7 @@ const activeStyleText = computed(() => {
   return `${profile.name || '外部参考文风'} · ${sourceLabel}`
 })
 
-const primaryActionLabel = computed(() => props.selectedChapterNumber ? `生成第 ${props.selectedChapterNumber} 章` : '开始创作')
+const primaryActionLabel = computed(() => props.generateCurrentLabel || (props.selectedChapterNumber ? `生成第 ${props.selectedChapterNumber} 章` : '开始创作'))
 
 const actionNoteTitle = computed(() => {
   if (props.isCurrentChapterBusy) return '后台处理中'
@@ -316,6 +335,7 @@ const collapsedSubtitle = computed(() => {
   padding: 6px 8px 4px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.16);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 250, 255, 0.94));
+  overflow: visible;
 }
 
 .wd-header-main,
@@ -341,6 +361,23 @@ const collapsedSubtitle = computed(() => {
   align-items: center;
 }
 
+.wd-header-main,
+.wd-header-actions,
+.wd-utility-menu {
+  position: relative;
+  overflow: visible;
+}
+
+.wd-header-main {
+  z-index: 40;
+}
+
+.wd-command-bar,
+.wd-task-panel {
+  position: relative;
+  z-index: 1;
+}
+
 .wd-header-lead {
   min-width: 0;
   flex: 1;
@@ -353,6 +390,25 @@ const collapsedSubtitle = computed(() => {
 .wd-task-panel__chips {
   flex-wrap: wrap;
   align-items: center;
+}
+
+.wd-header-actions {
+  justify-content: flex-end;
+}
+
+.wd-command-actions {
+  align-items: flex-start;
+}
+
+.wd-command-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.wd-command-group--core {
+  flex: 1;
 }
 
 .wd-icon-btn,
@@ -388,24 +444,95 @@ const collapsedSubtitle = computed(() => {
 }
 
 .wd-brand-pill { background: rgba(79, 70, 229, 0.12); color: #4338ca; }
-.wd-state-pill--warning { background: rgba(245, 158, 11, 0.14); color: #92400e; }
+.wd-state-pill--warning { background: rgba(14, 165, 233, 0.14); color: #1d4ed8; }
 .wd-state-pill--danger { background: rgba(239, 68, 68, 0.12); color: #b91c1c; }
 .wd-meta-pill { background: rgba(15, 23, 42, 0.05); color: #475569; }
 .wd-meta-pill--accent { background: rgba(37, 99, 235, 0.12); color: #1d4ed8; }
-.wd-meta-pill--warn { background: rgba(245, 158, 11, 0.14); color: #b45309; }
+.wd-meta-pill--warn { background: rgba(14, 165, 233, 0.14); color: #1d4ed8; }
 
 .wd-utility-btn,
 .wd-action {
-  min-height: 28px;
-  padding: 0 10px;
   border-radius: 999px;
-  font-size: 0.74rem;
-  font-weight: 700;
+  font-weight: 800;
 }
 
-.wd-utility-btn { background: #fff; color: #334155; border: 1px solid rgba(148, 163, 184, 0.25); }
+.wd-utility-btn {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 0.76rem;
+  background: #fff;
+  color: #334155;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.wd-action {
+  min-height: 40px;
+  padding: 0 16px;
+  font-size: 0.86rem;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
 .wd-utility-btn--accent { background: rgba(79, 70, 229, 0.1); color: #4338ca; }
 .wd-shortcut-hint { margin-left: 6px; min-height: 18px; padding: 0 7px; background: rgba(15, 23, 42, 0.08); color: #475569; }
+
+.wd-utility-menu {
+  position: relative;
+  z-index: 50;
+}
+
+.wd-utility-menu__summary {
+  display: inline-flex;
+  align-items: center;
+  list-style: none;
+}
+
+.wd-utility-menu__summary::-webkit-details-marker {
+  display: none;
+}
+
+.wd-utility-menu[open] {
+  z-index: 90;
+}
+
+.wd-utility-menu[open] .wd-utility-menu__summary {
+  background: rgba(79, 70, 229, 0.1);
+  color: #4338ca;
+}
+
+.wd-utility-menu__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 180px;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(12px);
+  pointer-events: auto;
+  z-index: 120;
+}
+
+.wd-utility-menu__item {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #334155;
+  text-align: left;
+  font-size: 0.78rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.wd-utility-menu__item:hover {
+  background: #eef2ff;
+  color: #4338ca;
+}
 
 .wd-task-panel,
 .wd-header-collapsed-bar {
@@ -433,11 +560,19 @@ const collapsedSubtitle = computed(() => {
 
 .wd-command-copy__item { display: grid; gap: 3px; min-width: 120px; }
 .wd-command-copy__label { width: fit-content; }
-.wd-action--nav, .wd-action--ghost { background: #fff; color: #334155; border: 1px solid rgba(148, 163, 184, 0.24); }
-.wd-action--tonal { background: rgba(59, 130, 246, 0.12); color: #1d4ed8; }
-.wd-action--danger { background: rgba(239, 68, 68, 0.12); color: #b91c1c; }
+.wd-action--nav,
+.wd-action--panel { background: #fff; color: #334155; border: 1px solid rgba(148, 163, 184, 0.24); }
+.wd-action--accent { background: rgba(79, 70, 229, 0.12); color: #4338ca; border: 1px solid rgba(99, 102, 241, 0.18); }
+.wd-action--tonal { background: rgba(37, 99, 235, 0.14); color: #1d4ed8; border: 1px solid rgba(59, 130, 246, 0.14); }
+.wd-action--danger { background: rgba(239, 68, 68, 0.12); color: #b91c1c; border: 1px solid rgba(239, 68, 68, 0.14); }
 .wd-action--primary { background: #111827; color: #fff; }
-.wd-action-note { display: inline-grid; gap: 2px; color: #475569; font-size: 0.72rem; }
+.wd-action--key {
+  min-height: 44px;
+  padding: 0 18px;
+  font-size: 0.92rem;
+  box-shadow: 0 16px 32px rgba(59, 130, 246, 0.14);
+}
+.wd-action-note { display: inline-grid; gap: 2px; color: #475569; font-size: 0.72rem; padding: 8px 2px; }
 .wd-action-note__title { color: #0f172a; font-weight: 700; }
 
 @media (max-width: 960px) {
@@ -446,6 +581,11 @@ const collapsedSubtitle = computed(() => {
   .wd-task-panel__head,
   .wd-header-collapsed-bar { align-items: stretch; flex-direction: column; }
   .wd-header-collapsed-bar__summary { min-width: 0; }
+  .wd-command-group--core { flex: none; }
+  .wd-header-actions { justify-content: flex-start; }
+  .wd-utility-menu { width: 100%; }
+  .wd-utility-menu__summary { width: 100%; justify-content: center; }
+  .wd-utility-menu__panel { left: 0; right: 0; min-width: 0; }
 }
 </style>
 

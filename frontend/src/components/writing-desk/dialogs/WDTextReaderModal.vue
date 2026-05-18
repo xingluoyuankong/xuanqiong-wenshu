@@ -24,8 +24,8 @@
             leave-from="opacity-100 translate-y-0 sm:scale-100"
             leave-to="opacity-0 translate-y-4 sm:scale-95"
           >
-            <DialogPanel class="m3-reader-dialog md-dialog flex h-[calc(100vh-1rem)] w-[min(1400px,calc(100vw-1rem))] flex-col overflow-hidden text-left">
-              <div class="m3-reader-dialog__head">
+            <DialogPanel class="xq-dialog-shell xq-dialog-shell--xl xq-reader-dialog m3-reader-dialog flex h-[calc(100vh-1rem)] flex-col overflow-hidden text-left">
+              <div class="xq-dialog-header m3-reader-dialog__head">
                 <div class="min-w-0 flex-1">
                   <div class="m3-reader-dialog__chips">
                     <span v-for="chip in chips" :key="chip" class="m3-reader-chip">{{ chip }}</span>
@@ -39,17 +39,17 @@
                 </div>
 
                 <div class="m3-reader-dialog__actions">
-                  <button type="button" class="md-icon-btn md-ripple" @click="$emit('close')" aria-label="关闭阅读层">
+                  <button type="button" class="xq-dialog-close md-ripple" @click="$emit('close')" aria-label="关闭阅读层">
                     ×
                   </button>
                 </div>
               </div>
 
-              <div class="m3-reader-dialog__body">
+              <div class="xq-dialog-body m3-reader-dialog__body">
                 <article class="m3-reader-content">{{ content }}</article>
               </div>
 
-              <div class="m3-reader-dialog__foot">
+              <div class="xq-dialog-footer m3-reader-dialog__foot">
                 <div class="m3-reader-dialog__foot-note">
                   <span v-if="confirmVersionIndex !== null && confirmVersionIndex !== undefined">
                     这是一版可直接确认的候选正文。

@@ -32,17 +32,17 @@
             <h4 class="text-base font-semibold text-slate-900">当前最该处理的问题</h4>
             <p class="mt-1 text-sm text-slate-500">这里列的是最值得回灌到下一章生成与当前精修链路的问题。</p>
           </div>
-          <span class="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">优先级排序</span>
+          <span class="rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">优先级排序</span>
         </div>
         <div v-if="priorityIssues.length" class="mt-4 space-y-3">
           <div
             v-for="(issue, index) in priorityIssues"
             :key="`${sectionType}-issue-${index}`"
-            class="rounded-2xl border border-amber-100 bg-amber-50/70 px-4 py-3"
+            class="rounded-2xl border border-sky-100 bg-sky-50/70 px-4 py-3"
           >
             <div class="flex items-start justify-between gap-3">
               <p class="text-sm font-medium leading-6 text-slate-900">{{ issue.title }}</p>
-              <span class="rounded-full bg-white px-2.5 py-1 text-xs text-amber-700">P{{ index + 1 }}</span>
+              <span class="rounded-full bg-white px-2.5 py-1 text-xs text-sky-700">P{{ index + 1 }}</span>
             </div>
             <p v-if="issue.detail" class="mt-2 text-sm leading-6 text-slate-600">{{ issue.detail }}</p>
             <p v-if="issue.hint" class="mt-2 text-xs leading-5 text-slate-500">{{ issue.hint }}</p>

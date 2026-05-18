@@ -1,4 +1,6 @@
-from functools import lru_cache
+from datetime import datetime
+from functools import cached_property, lru_cache
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -27,7 +29,7 @@ class Settings(BaseSettings):
         description="是否允许用户自助注册",
     )
     logging_level: str = Field(default="INFO", description="文件日志级别")
-    console_logging_level: str = Field(default="WARNING", description="控制台日志级别")
+    console_logging_level: str = Field(default="INFO", description="控制台日志级别")
     sqlalchemy_echo: bool = Field(default=False, description="是否输出 SQLAlchemy 原始 SQL")
     log_dir: Optional[str] = Field(
         default=None,
@@ -197,13 +199,22 @@ class Settings(BaseSettings):
             return candidate
         return (self.project_root / "logs").resolve()
 
+    @cached_property
+    def runtime_log_dir(self) -> Path:
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        return self.resolved_log_dir / f"run-{timestamp}-pid{os.getpid()}"
+
+    @property
+    def latest_run_file(self) -> Path:
+        return self.resolved_log_dir / "latest-run.txt"
+
     @property
     def app_log_file(self) -> Path:
-        return self.resolved_log_dir / "backend.log"
+        return self.runtime_log_dir / "backend.log"
 
     @property
     def error_log_file(self) -> Path:
-        return self.resolved_log_dir / "backend-error.log"
+        return self.runtime_log_dir / "backend-error.log"
 
     @property
     def admin_password_uses_default(self) -> bool:

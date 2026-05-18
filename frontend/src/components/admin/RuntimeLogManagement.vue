@@ -414,7 +414,7 @@ onBeforeUnmount(stopAutoRefresh)
 .brief-log-item__top, .brief-log-item__meta { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
 .brief-log-item__time { color:#64748b; font-size:.75rem; }
 .brief-log-item__badge, .backend-line__badge { display:inline-flex; align-items:center; min-height:22px; padding:0 8px; border-radius:999px; font-size:.72rem; font-weight:800; }
-.state-skip { background:rgba(245, 158, 11, .16); color:#b45309; }
+.state-skip { background:rgba(14, 165, 233, .16); color:#1d4ed8; }
 .state-degraded { background:rgba(239, 68, 68, .16); color:#b91c1c; }
 .brief-log-item strong { color:#0f172a; line-height:1.55; }
 .brief-log-item small { color:#475569; }

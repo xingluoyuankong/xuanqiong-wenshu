@@ -132,6 +132,16 @@ class ConsistencyService:
         parts = [part.strip() for part in re.split(r"\n\s*\n", chapter_text or "") if part.strip()]
         return parts or [chapter_text]
 
+    @classmethod
+    def _extract_paragraph_indexes_from_location(cls, location: str, *, total: int) -> List[int]:
+        numbers = [int(item) for item in re.findall(r"第\s*(\d+)\s*段", str(location or ""))]
+        indexes: List[int] = []
+        for number in numbers:
+            index = number - 1
+            if 0 <= index < total and index not in indexes:
+                indexes.append(index)
+        return indexes
+
     @staticmethod
     def _expand_indexes(indexes: List[int], total: int, radius: int = 1) -> List[int]:
         picked = set()
@@ -141,25 +151,103 @@ class ConsistencyService:
             picked.update(range(start, end + 1))
         return sorted(picked)
 
+    @staticmethod
+    def _violation_indicates_residue(violation: ConsistencyViolation) -> bool:
+        haystack = " ".join(
+            str(value or "")
+            for value in (violation.description, violation.location, violation.suggested_fix)
+        )
+        residue_markers = (
+            "重复", "再次", "重新", "首次", "第一次", "两次", "双版本", "拼接", "回卷", "时间线", "认知重置",
+            "来源不一致", "重复发现", "多次呈现为第一次", "前后不一致",
+        )
+        return any(marker in haystack for marker in residue_markers)
+
+    def _resolve_local_fix_window(self, indexes: List[int], violations: List[ConsistencyViolation], total: int) -> tuple[List[int], str]:
+        if not indexes:
+            return [], "none"
+        span = max(indexes) - min(indexes)
+        force_contiguous = span >= 3 or any(self._violation_indicates_residue(item) for item in violations)
+        if force_contiguous:
+            return list(range(min(indexes), max(indexes) + 1)), "contiguous_span"
+        return self._expand_indexes(indexes, total, radius=1), "expanded_window"
+
+    @classmethod
+    def _build_residue_hints(cls, violations: List[ConsistencyViolation], *, limit: int = 4) -> List[str]:
+        hints: List[str] = []
+        for violation in violations:
+            if not cls._violation_indicates_residue(violation):
+                continue
+            summary = str(violation.description or violation.location or "").strip()
+            if summary and summary not in hints:
+                hints.append(summary)
+            if len(hints) >= limit:
+                break
+        return hints
+
+    @staticmethod
+    def _violation_haystack(violation: ConsistencyViolation) -> str:
+        return " ".join(
+            str(value or "")
+            for value in (violation.description, violation.location, violation.suggested_fix)
+        )
+
+    @classmethod
+    def _build_violation_execution_requirements(cls, violations: List[ConsistencyViolation], *, limit: int = 4) -> List[str]:
+        requirements: List[str] = []
+        haystack = "\n".join(cls._violation_haystack(item) for item in violations)
+        if any(token in haystack for token in ("时间冲突", "年份很旧", "黑潮登陆夜", "日期", "旧卷", "旧档案", "最近一次黑潮")):
+            requirements.append("若冲突来自‘旧卷/旧档案’与‘最近黑潮日期’并存，必须在正文里显式补一个单一解释踏板：旧封新页、后贴补录、人为夹带，或二次篡改其一，不能让两个版本并排成立。")
+        if any(token in haystack for token in ("来源不一致", "物件流转", "借阅单", "残页", "外借", "清单", "卷宗")):
+            requirements.append("若冲突来自物件来源或流转边界不清，必须把主卷、残页、借阅单、外借记录之间的关系说清，只保留一条正式流转链。")
+        if any(token in haystack for token in ("重复", "双版本", "拼接", "回卷", "第一次", "再次", "认知重置")):
+            requirements.append("若冲突来自重复发现或时间线回卷，必须删掉被废弃版本，只保留一次正式发现/确认动作。")
+        if any(token in haystack for token in ("人称/性别指代", "性别指代", "人称冲突", "称谓冲突", "指代前后冲突", "代词前后不一致")):
+            requirements.append("若冲突来自人称、称谓或性别指代不一致，必须统一同一角色在该场景内的称谓与代词，只保留一套稳定指代，不要在“他/她/TA”或不同身份称呼之间来回切换。")
+        if any(token in haystack for token in ("说法冲突", "改口", "前后不一致", "设定冲突")):
+            requirements.append("若同一事实出现两种说法，必须选定一种为正式事实，并把另一种改成误导、试探、记错或伪装，不要两种都当真。")
+        for violation in violations[:2]:
+            if violation.suggested_fix:
+                line = f"优先落实：{str(violation.suggested_fix).strip()}"
+                if line not in requirements:
+                    requirements.append(line)
+            if len(requirements) >= limit:
+                break
+        return requirements[:limit]
+
     def _locate_violation_indexes(self, paragraphs: List[str], violations: List[ConsistencyViolation]) -> List[int]:
         indexes: List[int] = []
         for violation in violations[:6]:
+            matched_indexes: List[int] = []
             location = str(violation.location or "").strip()
             description = str(violation.description or "").strip()
+            suggested_fix = str(violation.suggested_fix or "").strip()
             if location and location != "未知":
-                normalized = location.replace("...", "").strip()
-                for idx, paragraph in enumerate(paragraphs):
-                    if normalized and normalized in paragraph and idx not in indexes:
-                        indexes.append(idx)
-            if indexes:
-                continue
-            keywords = [item for item in re.split(r"[，、；。,.。\s]+", description) if len(item) >= 2][:3]
-            for keyword in keywords:
-                for idx, paragraph in enumerate(paragraphs):
-                    if keyword in paragraph and idx not in indexes:
-                        indexes.append(idx)
-            if indexes:
-                continue
+                matched_indexes.extend(self._extract_paragraph_indexes_from_location(location, total=len(paragraphs)))
+                if not matched_indexes:
+                    normalized = location.replace("...", "").strip()
+                    for idx, paragraph in enumerate(paragraphs):
+                        if normalized and normalized in paragraph and idx not in matched_indexes:
+                            matched_indexes.append(idx)
+            if not matched_indexes:
+                keywords = [item for item in re.split(r"[，、；。,.。\s]+", description) if len(item) >= 2][:3]
+                for keyword in keywords:
+                    for idx, paragraph in enumerate(paragraphs):
+                        if keyword in paragraph and idx not in matched_indexes:
+                            matched_indexes.append(idx)
+                    if matched_indexes:
+                        break
+            if not matched_indexes and suggested_fix:
+                keywords = [item for item in re.split(r"[，、；。,.。\s]+", suggested_fix) if len(item) >= 2][:3]
+                for keyword in keywords:
+                    for idx, paragraph in enumerate(paragraphs):
+                        if keyword in paragraph and idx not in matched_indexes:
+                            matched_indexes.append(idx)
+                    if matched_indexes:
+                        break
+            for idx in matched_indexes:
+                if idx not in indexes:
+                    indexes.append(idx)
         return indexes[:4] if indexes else ([0] if paragraphs else [])
 
     @staticmethod
@@ -182,34 +270,35 @@ class ConsistencyService:
         user_id: int,
         include_foreshadowing: bool = True,
     ) -> ConsistencyCheckResult:
-        started_at = time.time()
-        context = await self._get_check_context(project_id, include_foreshadowing)
-        prompt = CONSISTENCY_CHECK_PROMPT.format(
-            novel_setting=self._truncate_text(context.get("novel_setting"), 2200) or "（未设定）",
-            character_state=self._truncate_text(context.get("character_state"), 2000) or "（未记录）",
-            global_summary=self._truncate_text(context.get("global_summary"), 1800) or "（无前文摘要）",
-            plot_arcs=self._truncate_text(context.get("plot_arcs"), 1800) or "（无剧情线记录）",
-            chapter_text=self._excerpt_chapter_for_check(chapter_text),
-        )
-        try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
-                user_id=user_id,
-                max_tokens=2000,
-                temperature=0.2,
+        with LLMService.daily_limit_scope(f"consistency_check:{project_id}:{user_id}:{len(chapter_text or '')}"):
+            started_at = time.time()
+            context = await self._get_check_context(project_id, include_foreshadowing)
+            prompt = CONSISTENCY_CHECK_PROMPT.format(
+                novel_setting=self._truncate_text(context.get("novel_setting"), 2200) or "（未设定）",
+                character_state=self._truncate_text(context.get("character_state"), 2000) or "（未记录）",
+                global_summary=self._truncate_text(context.get("global_summary"), 1800) or "（无前文摘要）",
+                plot_arcs=self._truncate_text(context.get("plot_arcs"), 1800) or "（无剧情线记录）",
+                chapter_text=self._excerpt_chapter_for_check(chapter_text),
             )
-            result = self._parse_check_response(response)
-            result.check_time_ms = int((time.time() - started_at) * 1000)
-            return result
-        except Exception as exc:
-            logger.error("一致性检查失败: %s", exc)
-            return ConsistencyCheckResult(
-                is_consistent=False,
-                violations=[],
-                summary=f"检查过程出错: {exc}",
-                check_time_ms=int((time.time() - started_at) * 1000),
-                status="error",
-            )
+            try:
+                response = await self.llm_service.generate(
+                    prompt=prompt,
+                    user_id=user_id,
+                    max_tokens=2000,
+                    temperature=0.2,
+                )
+                result = self._parse_check_response(response)
+                result.check_time_ms = int((time.time() - started_at) * 1000)
+                return result
+            except Exception as exc:
+                logger.error("一致性检查失败: %s", exc)
+                return ConsistencyCheckResult(
+                    is_consistent=False,
+                    violations=[],
+                    summary=f"检查过程出错: {exc}",
+                    check_time_ms=int((time.time() - started_at) * 1000),
+                    status="error",
+                )
 
     async def _auto_fix_locally(
         self,
@@ -226,10 +315,18 @@ class ConsistencyService:
         target_indexes = self._locate_violation_indexes(paragraphs, violations)
         if not target_indexes:
             return None
-        window_indexes = self._expand_indexes(target_indexes, len(paragraphs), radius=1)
+        window_indexes, rewrite_mode = self._resolve_local_fix_window(target_indexes, violations, len(paragraphs))
         excerpt = "\n\n".join(paragraphs[index] for index in window_indexes)
         prev_anchor = paragraphs[window_indexes[0] - 1] if window_indexes[0] > 0 else ""
         next_anchor = paragraphs[window_indexes[-1] + 1] if window_indexes[-1] + 1 < len(paragraphs) else ""
+        residue_hints = self._build_residue_hints(violations)
+        residue_guard = ""
+        if residue_hints:
+            residue_guard = "[必须删除的旧版本残留]\n" + "\n".join(f"- {item}" for item in residue_hints[:4]) + "\n\n"
+        execution_requirements = self._build_violation_execution_requirements(violations)
+        execution_guard = ""
+        if execution_requirements:
+            execution_guard = "[本轮必须落地的修复动作]\n" + "\n".join(f"- {item}" for item in execution_requirements) + "\n\n"
         violations_text = "\n".join(
             f"- [{v.severity.value}] {v.category}: {v.description}"
             + (f"\n  位置: {v.location}" if v.location else "")
@@ -240,6 +337,9 @@ class ConsistencyService:
 
 [必须修复的问题]
 {violations_text}
+
+[修复模式]
+{'连续统一区段改写' if rewrite_mode == 'contiguous_span' else '局部窗口改写'}
 
 [前文锚点]
 {prev_anchor or "（无）"}
@@ -255,10 +355,14 @@ class ConsistencyService:
 - 角色状态：{self._truncate_text(context.get("character_state"), 1000)}
 - 前文摘要：{self._truncate_text(context.get("global_summary"), 1000)}
 
-要求：
+{execution_guard}{residue_guard}要求：
 1. 只输出修复后的片段正文。
 2. 不改变既定剧情方向，只修复冲突和承接。
 3. 开头和结尾必须自然衔接前后锚点。
+4. 如果同一线索、发现动作、对话或事件推进在片段中出现多个版本，只保留一个正式版本，删除其余残留。
+5. 如果角色在前文已经知道某事，不要在本片段里再写成第一次得知或第一次确认。
+6. 如果冲突来自时间、来源或设定边界，只能给出一条正式解释链，不要并排保留两个都成立的版本。
+7. 必须把修复落到正文动作、证据或说法上，不要只抽象解释“这里存在问题”。
 """
         try:
             response = await self.llm_service.generate(
@@ -294,44 +398,52 @@ class ConsistencyService:
         violations: List[ConsistencyViolation],
         user_id: int,
     ) -> Optional[str]:
-        if not violations:
-            return chapter_text
+        with LLMService.daily_limit_scope(f"consistency_fix:{project_id}:{user_id}:{len(chapter_text or '')}"):
+            if not violations:
+                return chapter_text
 
-        context = await self._get_check_context(project_id)
-        localized_fixed = await self._auto_fix_locally(
-            chapter_text=chapter_text,
-            violations=violations,
-            context=context,
-            user_id=user_id,
-        )
-        if localized_fixed and localized_fixed != chapter_text:
-            return localized_fixed
-
-        violations_text = "\n".join(
-            f"- [{v.severity.value}] {v.category}: {v.description}"
-            + (f"\n  位置: {v.location}" if v.location else "")
-            + (f"\n  建议: {v.suggested_fix}" if v.suggested_fix else "")
-            for v in violations[:6]
-        )
-        prompt = GENERATE_FIX_PROMPT.format(
-            chapter_text=self._excerpt_chapter_for_check(chapter_text, limit=7000),
-            violations=violations_text,
-            novel_setting=self._truncate_text(context.get("novel_setting"), 1600),
-            character_state=self._truncate_text(context.get("character_state"), 1400),
-            global_summary=self._truncate_text(context.get("global_summary"), 1200),
-        )
-        try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
+            context = await self._get_check_context(project_id)
+            localized_fixed = await self._auto_fix_locally(
+                chapter_text=chapter_text,
+                violations=violations,
+                context=context,
                 user_id=user_id,
-                max_tokens=8000,
-                temperature=0.5,
             )
-            cleaned = remove_think_tags(response) if response else ""
-            return cleaned.strip() if cleaned else None
-        except Exception as exc:
-            logger.error("自动修复失败: %s", exc)
-            return None
+            if localized_fixed and localized_fixed != chapter_text:
+                return localized_fixed
+
+            violations_text = "\n".join(
+                f"- [{v.severity.value}] {v.category}: {v.description}"
+                + (f"\n  位置: {v.location}" if v.location else "")
+                + (f"\n  建议: {v.suggested_fix}" if v.suggested_fix else "")
+                for v in violations[:6]
+            )
+            execution_requirements = self._build_violation_execution_requirements(violations, limit=5)
+            if execution_requirements:
+                violations_text = (
+                    violations_text
+                    + "\n\n[本轮必须落地的修复动作]\n"
+                    + "\n".join(f"- {item}" for item in execution_requirements)
+                )
+            prompt = GENERATE_FIX_PROMPT.format(
+                chapter_text=self._excerpt_chapter_for_check(chapter_text, limit=7000),
+                violations=violations_text,
+                novel_setting=self._truncate_text(context.get("novel_setting"), 1600),
+                character_state=self._truncate_text(context.get("character_state"), 1400),
+                global_summary=self._truncate_text(context.get("global_summary"), 1200),
+            )
+            try:
+                response = await self.llm_service.generate(
+                    prompt=prompt,
+                    user_id=user_id,
+                    max_tokens=8000,
+                    temperature=0.5,
+                )
+                cleaned = remove_think_tags(response) if response else ""
+                return cleaned.strip() if cleaned else None
+            except Exception as exc:
+                logger.error("自动修复失败: %s", exc)
+                return None
 
     async def check_and_fix(
         self,
@@ -340,33 +452,34 @@ class ConsistencyService:
         user_id: int,
         auto_fix_threshold: ViolationSeverity = ViolationSeverity.CRITICAL,
     ) -> Dict[str, Any]:
-        check_result = await self.check_consistency(project_id=project_id, chapter_text=chapter_text, user_id=user_id)
-        result: Dict[str, Any] = {
-            "check_result": check_result,
-            "fixed_content": None,
-            "needs_manual_review": False,
-        }
-        if check_result.is_consistent:
+        with LLMService.daily_limit_scope(f"consistency_check_fix:{project_id}:{user_id}:{len(chapter_text or '')}"):
+            check_result = await self.check_consistency(project_id=project_id, chapter_text=chapter_text, user_id=user_id)
+            result: Dict[str, Any] = {
+                "check_result": check_result,
+                "fixed_content": None,
+                "needs_manual_review": False,
+            }
+            if check_result.is_consistent:
+                return result
+
+            severity_order = [ViolationSeverity.CRITICAL, ViolationSeverity.MAJOR, ViolationSeverity.MINOR]
+            threshold_index = severity_order.index(auto_fix_threshold)
+            violations_to_fix = [
+                item for item in check_result.violations
+                if severity_order.index(item.severity) <= threshold_index
+            ]
+            if violations_to_fix:
+                result["fixed_content"] = await self.auto_fix(
+                    project_id=project_id,
+                    chapter_text=chapter_text,
+                    violations=violations_to_fix,
+                    user_id=user_id,
+                )
+
+            result["needs_manual_review"] = any(
+                item.severity == ViolationSeverity.MAJOR for item in check_result.violations
+            ) and auto_fix_threshold == ViolationSeverity.CRITICAL
             return result
-
-        severity_order = [ViolationSeverity.CRITICAL, ViolationSeverity.MAJOR, ViolationSeverity.MINOR]
-        threshold_index = severity_order.index(auto_fix_threshold)
-        violations_to_fix = [
-            item for item in check_result.violations
-            if severity_order.index(item.severity) <= threshold_index
-        ]
-        if violations_to_fix:
-            result["fixed_content"] = await self.auto_fix(
-                project_id=project_id,
-                chapter_text=chapter_text,
-                violations=violations_to_fix,
-                user_id=user_id,
-            )
-
-        result["needs_manual_review"] = any(
-            item.severity == ViolationSeverity.MAJOR for item in check_result.violations
-        ) and auto_fix_threshold == ViolationSeverity.CRITICAL
-        return result
 
     async def _get_check_context(self, project_id: str, include_foreshadowing: bool = True) -> Dict[str, str]:
         context: Dict[str, str] = {}

@@ -526,10 +526,10 @@ const getStatusColor = (status: string): string => {
     'not_generated': 'bg-slate-100 text-slate-600',
     'generating': 'bg-blue-100 text-blue-700',
     'evaluating': 'bg-purple-100 text-purple-700',
-    'selecting': 'bg-yellow-100 text-yellow-700',
+    'selecting': 'bg-sky-100 text-sky-700',
     'failed': 'bg-red-100 text-red-700',
-    'evaluation_failed': 'bg-orange-100 text-orange-700',
-    'waiting_for_confirm': 'bg-amber-100 text-amber-700',
+    'evaluation_failed': 'bg-sky-100 text-sky-700',
+    'waiting_for_confirm': 'bg-sky-100 text-sky-700',
     'successful': 'bg-green-100 text-green-700'
   }
   return colorMap[status] || 'bg-slate-100 text-slate-600'
@@ -676,7 +676,7 @@ const getScoreLabel = (key: string | number): string => {
 const getScoreColor = (score: number): string => {
   if (score >= 8) return 'text-green-600'
   if (score >= 6) return 'text-blue-600'
-  if (score >= 4) return 'text-amber-600'
+  if (score >= 4) return 'text-sky-600'
   return 'text-red-600'
 }
 
@@ -684,7 +684,7 @@ const getScoreColor = (score: number): string => {
 const getScoreBarColor = (score: number): string => {
   if (score >= 8) return 'bg-green-500'
   if (score >= 6) return 'bg-blue-500'
-  if (score >= 4) return 'bg-amber-500'
+  if (score >= 4) return 'bg-sky-500'
   return 'bg-red-500'
 }
 

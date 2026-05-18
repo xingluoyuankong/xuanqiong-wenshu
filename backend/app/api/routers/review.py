@@ -53,16 +53,20 @@ async def review_six_dimension(
         session, llm_service, prompt_service, constitution_service, persona_service
     )
 
-    result = await review_service.review_chapter(
-        project_id=request.project_id,
-        chapter_number=request.chapter_number,
-        chapter_title=request.chapter_title or "",
-        chapter_content=request.chapter_content,
-        chapter_plan=request.chapter_plan,
-        previous_summary=request.previous_summary,
-        character_profiles=request.character_profiles,
-        world_setting=request.world_setting,
-    )
+    with LLMService.daily_limit_scope(
+        f"review_six_dimension:{request.project_id}:{request.chapter_number}:{int(current_user.id)}"
+    ):
+        result = await review_service.review_chapter(
+            project_id=request.project_id,
+            chapter_number=request.chapter_number,
+            chapter_title=request.chapter_title or "",
+            chapter_content=request.chapter_content,
+            chapter_plan=request.chapter_plan,
+            previous_summary=request.previous_summary,
+            character_profiles=request.character_profiles,
+            world_setting=request.world_setting,
+            user_id=int(current_user.id),
+        )
     return {"project_id": request.project_id, "review": result}
 
 
@@ -76,12 +80,15 @@ async def review_consistency(
     await novel_service.ensure_project_owner(request.project_id, current_user.id)
 
     consistency_service = ConsistencyService(session, LLMService(session))
-    result = await consistency_service.check_consistency(
-        project_id=request.project_id,
-        chapter_text=request.chapter_text,
-        user_id=current_user.id,
-        include_foreshadowing=request.include_foreshadowing,
-    )
+    with LLMService.daily_limit_scope(
+        f"review_consistency:{request.project_id}:{int(current_user.id)}"
+    ):
+        result = await consistency_service.check_consistency(
+            project_id=request.project_id,
+            chapter_text=request.chapter_text,
+            user_id=int(current_user.id),
+            include_foreshadowing=request.include_foreshadowing,
+        )
 
     report = {
         "is_consistent": result.is_consistent,

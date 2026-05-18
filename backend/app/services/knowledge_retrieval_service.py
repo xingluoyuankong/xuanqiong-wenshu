@@ -188,7 +188,7 @@ class KnowledgeRetrievalService:
     ) -> FilteredContext:
         """
         检索并过滤知识
-        
+
         Args:
             project_id: 项目ID
             chapter_number: 章节号
@@ -196,62 +196,63 @@ class KnowledgeRetrievalService:
             pov_character: POV角色（用于可见性过滤）
             user_guidance: 用户指导
             top_k: 检索数量
-            
+
         Returns:
             FilteredContext
         """
-        # 1. 获取章节蓝图信息
-        blueprint = self._get_chapter_blueprint(project_id, chapter_number)
-        
-        # 2. 生成检索关键词
-        queries = await self._generate_search_queries(
-            blueprint=blueprint,
-            user_guidance=user_guidance,
-            user_id=user_id
-        )
-        
-        # 3. 执行向量检索
-        retrieved = await self._retrieve_from_vector_store(
-            project_id=project_id,
-            queries=queries,
-            top_k=top_k,
-            user_id=user_id,
-        )
-        
-        # 4. 获取前文摘要
-        memory = self.db.query(ProjectMemory).filter(
-            ProjectMemory.project_id == project_id
-        ).first()
-        global_summary = memory.global_summary if memory else ""
-        
-        # 5. 过滤和结构化
-        filtered = await self._filter_knowledge(
-            retrieved=retrieved,
-            blueprint=blueprint,
-            global_summary=global_summary,
-            pov_character=pov_character,
-            user_id=user_id
-        )
+        with LLMService.daily_limit_scope(f"knowledge_retrieval:{project_id}:{chapter_number}:{user_id}:{top_k}"):
+            # 1. 获取章节蓝图信息
+            blueprint = self._get_chapter_blueprint(project_id, chapter_number)
 
-        filtered_counts = {
-            "plot_fuel": len(filtered.plot_fuel),
-            "character_info": len(filtered.character_info),
-            "world_fragments": len(filtered.world_fragments),
-            "narrative_techniques": len(filtered.narrative_techniques),
-            "warnings": len(filtered.warnings),
-        }
-        hit_chapters = sorted({r.chapter_number for r in retrieved if r.chapter_number})
-        filtered.stats = {
-            "query_count": len(queries),
-            "retrieved_count": len(retrieved),
-            "top_k": top_k,
-            "hit_chapters": hit_chapters,
-            "filtered_counts": filtered_counts,
-            "total_filtered": sum(filtered_counts.values()),
-            "pov_character": pov_character,
-        }
+            # 2. 生成检索关键词
+            queries = await self._generate_search_queries(
+                blueprint=blueprint,
+                user_guidance=user_guidance,
+                user_id=user_id
+            )
 
-        return filtered
+            # 3. 执行向量检索
+            retrieved = await self._retrieve_from_vector_store(
+                project_id=project_id,
+                queries=queries,
+                top_k=top_k,
+                user_id=user_id,
+            )
+
+            # 4. 获取前文摘要
+            memory = self.db.query(ProjectMemory).filter(
+                ProjectMemory.project_id == project_id
+            ).first()
+            global_summary = memory.global_summary if memory else ""
+
+            # 5. 过滤和结构化
+            filtered = await self._filter_knowledge(
+                retrieved=retrieved,
+                blueprint=blueprint,
+                global_summary=global_summary,
+                pov_character=pov_character,
+                user_id=user_id
+            )
+
+            filtered_counts = {
+                "plot_fuel": len(filtered.plot_fuel),
+                "character_info": len(filtered.character_info),
+                "world_fragments": len(filtered.world_fragments),
+                "narrative_techniques": len(filtered.narrative_techniques),
+                "warnings": len(filtered.warnings),
+            }
+            hit_chapters = sorted({r.chapter_number for r in retrieved if r.chapter_number})
+            filtered.stats = {
+                "query_count": len(queries),
+                "retrieved_count": len(retrieved),
+                "top_k": top_k,
+                "hit_chapters": hit_chapters,
+                "filtered_counts": filtered_counts,
+                "total_filtered": sum(filtered_counts.values()),
+                "pov_character": pov_character,
+            }
+
+            return filtered
     
     async def get_chapter_context(
         self,
@@ -330,50 +331,51 @@ class KnowledgeRetrievalService:
     ) -> Optional[str]:
         """
         生成当前章节的写作摘要
-        
+
         基于前文内容和章节蓝图，生成针对性的写作摘要。
         """
-        # 获取章节蓝图
-        blueprint = self._get_chapter_blueprint(project_id, chapter_number)
-        if not blueprint:
-            return None
-        
-        # 获取前几章内容
-        recent_chapters = await self._get_recent_chapter_content(
-            project_id=project_id,
-            current_chapter=chapter_number,
-            count=3
-        )
-        
-        combined_text = "\n\n---\n\n".join([
-            f"第{ch['number']}章：\n{ch['content'][:2000]}..."
-            for ch in recent_chapters
-        ])
-        
-        prompt = SUMMARIZE_RECENT_CHAPTERS_PROMPT.format(
-            combined_text=combined_text,
-            chapter_number=chapter_number,
-            chapter_title=blueprint.brief_summary or f"第{chapter_number}章",
-            chapter_focus=blueprint.chapter_focus or "",
-            chapter_function=blueprint.chapter_function or "",
-            suspense_density=blueprint.suspense_density or "",
-            foreshadowing_ops=blueprint.foreshadowing_ops or "",
-            twist_level=blueprint.cognitive_twist_level or 1,
-            brief_summary=blueprint.brief_summary or ""
-        )
-        
-        try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
-                user_id=user_id,
-                max_tokens=1000,
-                temperature=0.3
+        with LLMService.daily_limit_scope(f"knowledge_summary:{project_id}:{chapter_number}:{user_id}"):
+            # 获取章节蓝图
+            blueprint = self._get_chapter_blueprint(project_id, chapter_number)
+            if not blueprint:
+                return None
+
+            # 获取前几章内容
+            recent_chapters = await self._get_recent_chapter_content(
+                project_id=project_id,
+                current_chapter=chapter_number,
+                count=3
             )
-            cleaned = remove_think_tags(response) if response else ""
-            return cleaned.strip() if cleaned else None
-        except Exception as e:
-            logger.error(f"生成章节摘要失败: {e}")
-            return None
+
+            combined_text = "\n\n---\n\n".join([
+                f"第{ch['number']}章：\n{ch['content'][:2000]}..."
+                for ch in recent_chapters
+            ])
+
+            prompt = SUMMARIZE_RECENT_CHAPTERS_PROMPT.format(
+                combined_text=combined_text,
+                chapter_number=chapter_number,
+                chapter_title=blueprint.brief_summary or f"第{chapter_number}章",
+                chapter_focus=blueprint.chapter_focus or "",
+                chapter_function=blueprint.chapter_function or "",
+                suspense_density=blueprint.suspense_density or "",
+                foreshadowing_ops=blueprint.foreshadowing_ops or "",
+                twist_level=blueprint.cognitive_twist_level or 1,
+                brief_summary=blueprint.brief_summary or ""
+            )
+
+            try:
+                response = await self.llm_service.generate(
+                    prompt=prompt,
+                    user_id=user_id,
+                    max_tokens=1000,
+                    temperature=0.3
+                )
+                cleaned = remove_think_tags(response) if response else ""
+                return cleaned.strip() if cleaned else None
+            except Exception as e:
+                logger.error(f"生成章节摘要失败: {e}")
+                return None
     
     def _get_chapter_blueprint(
         self,

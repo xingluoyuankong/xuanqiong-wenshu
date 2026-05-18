@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const apiMocks = vi.hoisted(() => ({
   editChapterContent: vi.fn(),
+  getAllNovels: vi.fn(),
   getNovel: vi.fn(),
 }))
 
 vi.mock('@/api/novel', () => ({
   NovelAPI: {
+    getAllNovels: apiMocks.getAllNovels,
     getNovel: apiMocks.getNovel,
   },
   OptimizerAPI: {},
@@ -52,6 +54,24 @@ describe('novel store loadProject', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setActivePinia(createPinia())
+  })
+
+  it('同一项目并发加载时只发送一次请求', async () => {
+    const store = useNovelStore()
+
+    let resolveRequest: ((value: any) => void) | undefined
+    apiMocks.getNovel.mockImplementationOnce(() => new Promise(resolve => { resolveRequest = resolve }))
+
+    const firstPromise = store.loadProject('project-same', true)
+    const secondPromise = store.loadProject('project-same', true)
+
+    expect(apiMocks.getNovel).toHaveBeenCalledTimes(1)
+
+    if (resolveRequest) resolveRequest({ id: 'project-same', title: '同一项目', chapters: [] })
+    await Promise.all([firstPromise, secondPromise])
+
+    expect(store.currentProject?.id).toBe('project-same')
+    expect(store.error).toBeNull()
   })
 
   it('旧项目请求后返回时不会覆盖新项目', async () => {
@@ -102,6 +122,32 @@ describe('novel store loadProject', () => {
 
     expect(staleError).toBeUndefined()
     expect(store.currentProject?.id).toBe('project-new')
+    expect(store.error).toBeNull()
+    expect(store.isLoading).toBe(false)
+  })
+})
+
+describe('novel store loadProjects', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+  })
+
+  it('项目列表并发加载时只发送一次请求', async () => {
+    const store = useNovelStore()
+
+    let resolveRequest: ((value: any) => void) | undefined
+    apiMocks.getAllNovels.mockImplementationOnce(() => new Promise(resolve => { resolveRequest = resolve }))
+
+    const firstPromise = store.loadProjects()
+    const secondPromise = store.loadProjects()
+
+    expect(apiMocks.getAllNovels).toHaveBeenCalledTimes(1)
+
+    if (resolveRequest) resolveRequest([{ id: 'project-1', title: '项目', genre: '', last_edited: '', completed_chapters: 0, total_chapters: 0 }])
+    await Promise.all([firstPromise, secondPromise])
+
+    expect(store.projects).toHaveLength(1)
     expect(store.error).toBeNull()
     expect(store.isLoading).toBe(false)
   })

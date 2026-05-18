@@ -82,7 +82,7 @@ const { remove } = store
   border-left: 3px solid var(--md-error, #ef4444);
 }
 .toast--warning {
-  border-left: 3px solid var(--md-warning, #f59e0b);
+  border-left: 3px solid var(--md-warning, #0ea5e9);
 }
 .toast--info {
   border-left: 3px solid var(--md-primary, #7eb8e8);
@@ -95,7 +95,7 @@ const { remove } = store
 }
 .toast--success .toast-icon  { color: var(--md-success, #22c55e); }
 .toast--error .toast-icon    { color: var(--md-error, #ef4444); }
-.toast--warning .toast-icon  { color: var(--md-warning, #f59e0b); }
+.toast--warning .toast-icon  { color: var(--md-warning, #0ea5e9); }
 .toast--info .toast-icon     { color: var(--md-primary, #7eb8e8); }
 
 .toast-message {

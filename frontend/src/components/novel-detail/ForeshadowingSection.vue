@@ -35,7 +35,7 @@
           <h4 class="text-base font-semibold text-slate-900">自动提醒与风险提示</h4>
           <p class="mt-1 text-sm text-slate-500">如果伏笔拖太久没处理，系统会在这里明确提醒你该在哪个方向推进。</p>
         </div>
-        <span class="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">自动汇总</span>
+        <span class="rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">自动汇总</span>
       </div>
       <div v-if="recommendations.length || reminders.length" class="mt-4 grid gap-4 xl:grid-cols-2">
         <div class="space-y-3">
@@ -47,7 +47,7 @@
         </div>
         <div class="space-y-3">
           <div class="text-sm font-medium text-slate-700">待处理提醒</div>
-          <div v-for="item in reminders" :key="item.id" class="rounded-2xl border border-amber-100 bg-amber-50/80 px-4 py-3">
+          <div v-for="item in reminders" :key="item.id" class="rounded-2xl border border-sky-100 bg-sky-50/80 px-4 py-3">
             <div class="text-sm font-medium text-slate-900">{{ item.message }}</div>
             <div class="mt-1 text-xs text-slate-500">{{ mapReminderType(item.reminder_type) }} · {{ formatDate(item.created_at) }}</div>
           </div>
@@ -159,8 +159,8 @@ const boardColumns = computed(() => [
     key: 'overdue',
     title: '待回收',
     description: '拖太久没处理，最容易让读者忘掉或觉得空。',
-    badgeClass: 'bg-amber-50 text-amber-700',
-    cardClass: 'border-amber-100 bg-amber-50/80',
+    badgeClass: 'bg-sky-50 text-sky-700',
+    cardClass: 'border-sky-100 bg-sky-50/80',
     items: overdueItems.value
   },
   {

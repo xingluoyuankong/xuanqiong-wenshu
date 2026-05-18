@@ -551,8 +551,8 @@ onUnmounted(() => {
 }
 
 .cg-log-item__level--warning {
-  background: rgba(245, 158, 11, 0.16);
-  color: #b45309;
+  background: rgba(14, 165, 233, 0.16);
+  color: #1d4ed8;
 }
 
 .cg-log-item__level--error {
@@ -818,8 +818,8 @@ onUnmounted(() => {
   padding: 12px 14px;
   border-radius: 16px;
   background: rgba(255, 245, 157, 0.46);
-  border: 1px solid rgba(245, 158, 11, 0.25);
-  color: #92400e;
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  color: #1d4ed8;
   font-weight: 600;
 }
 
@@ -853,7 +853,7 @@ onUnmounted(() => {
 
 .cg-critique-panel__degraded {
   margin: 8px 0 0;
-  color: #92400e;
+  color: #1d4ed8;
   font-weight: 600;
 }
 

@@ -98,112 +98,113 @@ class OutlineEvolutionService:
         num_options: int = 3,
     ) -> List[OutlineAlternative]:
         """基于当前大纲，生成 N 个剧情演进选项"""
-        project = await self.db.scalar(
-            select(NovelProject)
-            .options(
-                selectinload(NovelProject.blueprint),
-                selectinload(NovelProject.characters),
+        with LLMService.daily_limit_scope(f"outline_evolution:{project_id}:{chapter_number}:{user_id}:{num_options}"):
+            project = await self.db.scalar(
+                select(NovelProject)
+                .options(
+                    selectinload(NovelProject.blueprint),
+                    selectinload(NovelProject.characters),
+                )
+                .where(NovelProject.id == project_id)
             )
-            .where(NovelProject.id == project_id)
-        )
 
-        if not project:
-            raise ValueError("项目不存在")
+            if not project:
+                raise ValueError("项目不存在")
 
-        blueprint = project.blueprint
-        if not blueprint:
-            raise ValueError("项目无蓝图")
+            blueprint = project.blueprint
+            if not blueprint:
+                raise ValueError("项目无蓝图")
 
-        outline = None
-        if chapter_number > 0:
-            outline = await self.db.scalar(
+            outline = None
+            if chapter_number > 0:
+                outline = await self.db.scalar(
+                    select(ChapterOutline).where(
+                        ChapterOutline.project_id == project_id,
+                        ChapterOutline.chapter_number == chapter_number,
+                    )
+                )
+
+            prev_outline = None
+            if chapter_number > 1:
+                prev_outline = await self.db.scalar(
+                    select(ChapterOutline).where(
+                        ChapterOutline.project_id == project_id,
+                        ChapterOutline.chapter_number == chapter_number - 1,
+                    )
+                )
+
+            next_outline = await self.db.scalar(
                 select(ChapterOutline).where(
                     ChapterOutline.project_id == project_id,
-                    ChapterOutline.chapter_number == chapter_number,
+                    ChapterOutline.chapter_number == chapter_number + 1,
                 )
             )
 
-        prev_outline = None
-        if chapter_number > 1:
-            prev_outline = await self.db.scalar(
-                select(ChapterOutline).where(
-                    ChapterOutline.project_id == project_id,
-                    ChapterOutline.chapter_number == chapter_number - 1,
+            characters_data = project.characters or []
+            characters = (
+                "\n".join(
+                    f"- {getattr(character, 'name', '未知') or '未知'}: {getattr(character, 'identity', '') or ''}"
+                    for character in characters_data[:10]
                 )
+                if characters_data
+                else "（无角色信息）"
             )
 
-        next_outline = await self.db.scalar(
-            select(ChapterOutline).where(
-                ChapterOutline.project_id == project_id,
-                ChapterOutline.chapter_number == chapter_number + 1,
-            )
-        )
+            if chapter_number == 0:
+                chapter_title = "全书画纲"
+                chapter_summary = blueprint.full_synopsis or ""
+            else:
+                chapter_title = outline.title if outline else ""
+                chapter_summary = outline.summary if outline else ""
 
-        characters_data = project.characters or []
-        characters = (
-            "\n".join(
-                f"- {getattr(character, 'name', '未知') or '未知'}: {getattr(character, 'identity', '') or ''}"
-                for character in characters_data[:10]
-            )
-            if characters_data
-            else "（无角色信息）"
-        )
+            prev_chapter = f"第{prev_outline.chapter_number}章: {prev_outline.title}" if prev_outline else "无"
+            next_chapter = f"第{next_outline.chapter_number}章: {next_outline.title}" if next_outline else "无"
 
-        if chapter_number == 0:
-            chapter_title = "全书画纲"
-            chapter_summary = blueprint.full_synopsis or ""
-        else:
-            chapter_title = outline.title if outline else ""
-            chapter_summary = outline.summary if outline else ""
-
-        prev_chapter = f"第{prev_outline.chapter_number}章: {prev_outline.title}" if prev_outline else "无"
-        next_chapter = f"第{next_outline.chapter_number}章: {next_outline.title}" if next_outline else "无"
-
-        prompt = EVOLVE_PROMPT.format(
-            num_options=num_options,
-            genre=blueprint.genre or "",
-            style=blueprint.style or "",
-            title=blueprint.title or "",
-            chapter_number=chapter_number,
-            chapter_title=chapter_title,
-            chapter_summary=chapter_summary,
-            prev_chapter=prev_chapter,
-            next_chapter=next_chapter,
-            characters=characters,
-        )
-
-        try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
-                user_id=user_id,
-                max_tokens=4000,
-                temperature=0.8,
+            prompt = EVOLVE_PROMPT.format(
+                num_options=num_options,
+                genre=blueprint.genre or "",
+                style=blueprint.style or "",
+                title=blueprint.title or "",
+                chapter_number=chapter_number,
+                chapter_title=chapter_title,
+                chapter_summary=chapter_summary,
+                prev_chapter=prev_chapter,
+                next_chapter=next_chapter,
+                characters=characters,
             )
 
-            if response:
-                options_data = self._parse_json_response(response)
-                if options_data and isinstance(options_data, list):
-                    batch_id = str(uuid.uuid4())
+            try:
+                response = await self.llm_service.generate(
+                    prompt=prompt,
+                    user_id=user_id,
+                    max_tokens=4000,
+                    temperature=0.8,
+                )
 
-                    alternatives = []
-                    for idx, opt in enumerate(options_data[:num_options]):
-                        alt = await self._create_alternative(
-                            project_id=project_id,
-                            chapter_number=chapter_number,
-                            batch_id=batch_id,
-                            option_index=idx,
-                            data=opt,
-                        )
-                        alternatives.append(alt)
+                if response:
+                    options_data = self._parse_json_response(response)
+                    if options_data and isinstance(options_data, list):
+                        batch_id = str(uuid.uuid4())
 
-                    await self.db.commit()
-                    return alternatives
+                        alternatives = []
+                        for idx, opt in enumerate(options_data[:num_options]):
+                            alt = await self._create_alternative(
+                                project_id=project_id,
+                                chapter_number=chapter_number,
+                                batch_id=batch_id,
+                                option_index=idx,
+                                data=opt,
+                            )
+                            alternatives.append(alt)
 
-        except Exception as e:
-            logger.error(f"生成剧情演进选项失败: {e}")
-            await self.db.rollback()
+                        await self.db.commit()
+                        return alternatives
 
-        return []
+            except Exception as e:
+                logger.error(f"生成剧情演进选项失败: {e}")
+                await self.db.rollback()
+
+            return []
 
     async def _create_alternative(
         self,

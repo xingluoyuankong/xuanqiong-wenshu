@@ -24,8 +24,8 @@
             leave-from="opacity-100 translate-y-0 sm:scale-100"
             leave-to="opacity-0 translate-y-4 sm:scale-95"
           >
-            <DialogPanel class="wd-version-diff-dialog md-dialog flex h-[calc(100vh-1rem)] w-[min(1400px,calc(100vw-1rem))] flex-col overflow-hidden text-left">
-              <div class="wd-version-diff-dialog__head">
+            <DialogPanel class="xq-dialog-shell xq-dialog-shell--xl xq-diff-dialog wd-version-diff-dialog flex h-[calc(100vh-1rem)] flex-col overflow-hidden text-left">
+              <div class="xq-dialog-header wd-version-diff-dialog__head">
                 <div class="min-w-0 flex-1">
                   <div class="wd-version-diff-dialog__chips">
                     <span class="wd-chip wd-chip--primary">候选版本对比</span>
@@ -40,12 +40,12 @@
                     只读对比两个候选版本的文本差异，不会修改正文，也不会创建新版本。
                   </p>
                 </div>
-                <button type="button" class="md-icon-btn md-ripple" @click="emit('close')" aria-label="关闭">
+                <button type="button" class="xq-dialog-close md-ripple" @click="emit('close')" aria-label="关闭">
                   ×
                 </button>
               </div>
 
-              <div class="wd-version-diff-dialog__body">
+              <div class="xq-dialog-body wd-version-diff-dialog__body">
                 <div class="wd-version-diff-dialog__summary">
                   <span>总行数 {{ diffSummary.total_lines }}</span>
                   <span>新增 {{ diffSummary.added }}</span>
@@ -93,7 +93,7 @@
                 </div>
               </div>
 
-              <div class="wd-version-diff-dialog__foot">
+              <div class="xq-dialog-footer wd-version-diff-dialog__foot">
                 <span>当前仅做只读候选版本对比；需要修改正文请使用“精细编辑”。</span>
                 <button type="button" class="md-btn md-btn-outlined md-ripple" @click="emit('close')">
                   关闭

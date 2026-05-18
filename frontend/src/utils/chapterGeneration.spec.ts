@@ -163,7 +163,7 @@ describe('chapterGeneration utils', () => {
     ).toBe(1)
   })
 
-  it('为等待确认章节返回查看结果动作', () => {
+  it('为等待确认章节返回查看候选版本动作', () => {
     expect(
       resolveChapterActionDecision(
         {
@@ -178,14 +178,14 @@ describe('chapterGeneration utils', () => {
       )
     ).toMatchObject({
       mode: 'navigate',
-      label: '查看当前结果',
+      label: '查看候选版本',
       shouldConfirm: true,
       canOpenResult: true,
       canGenerate: false,
     })
   })
 
-  it('为失败章节返回重试动作', () => {
+  it('为失败章节返回重新生成动作', () => {
     expect(
       resolveChapterActionDecision(
         {
@@ -200,9 +200,28 @@ describe('chapterGeneration utils', () => {
       )
     ).toMatchObject({
       mode: 'action',
-      label: '重试',
+      label: '重新生成',
       isRetry: true,
       canGenerate: true,
     })
   })
+
+  it('marks backend-stale generation runtime as likely stalled without requiring fetch failures', () => {
+    const nowMs = Date.parse('2026-04-28T12:20:00.000Z')
+    const updatedAt = '2026-04-28T12:00:00.000Z'
+
+    expect(
+      buildChapterTaskUiModel({
+        progress_stage: 'generate_variants',
+        updated_at: updatedAt,
+        stale: true,
+      }, {
+        nowMs,
+        statusFetchFailureCount: 0,
+      })
+    ).toMatchObject({
+      isLikelyStalled: true,
+    })
+  })
+
 })

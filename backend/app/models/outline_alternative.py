@@ -17,6 +17,7 @@ from ..db.base import Base
 
 BIGINT_PK_TYPE = BigInteger().with_variant(Integer, "sqlite")
 LONG_TEXT_TYPE = Text().with_variant(LONGTEXT, "mysql")
+PROJECT_ID_TYPE = String(36).with_variant(String(36, collation="utf8mb4_unicode_ci"), "mysql")
 
 
 class EvolutionStatus(str, enum.Enum):
@@ -40,6 +41,7 @@ class OutlineAlternative(Base):
 
     # 所属项目
     project_id: Mapped[str] = mapped_column(
+        PROJECT_ID_TYPE,
         ForeignKey("novel_projects.id", ondelete="CASCADE"),
         nullable=False,
         index=True
@@ -97,6 +99,7 @@ class OutlineEvolutionHistory(Base):
 
     # 所属项目
     project_id: Mapped[str] = mapped_column(
+        PROJECT_ID_TYPE,
         ForeignKey("novel_projects.id", ondelete="CASCADE"),
         nullable=False,
         index=True

@@ -44,7 +44,7 @@ async def read_llm_config(
 ) -> LLMConfigRead:
     config = await service.get_config(current_user.id)
     if not config:
-        logger.info("LLM config not set yet for user_id=%s", current_user.id)
+        logger.info("用户 %s 尚未保存 LLM 配置", current_user.id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -54,7 +54,7 @@ async def read_llm_config(
             },
         )
 
-    logger.info("Fetched LLM config for user_id=%s", current_user.id)
+    logger.info("已读取用户 %s 的 LLM 配置", current_user.id)
     return config
 
 
@@ -64,7 +64,7 @@ async def upsert_llm_config(
     service: LLMConfigService = Depends(get_llm_config_service),
     current_user: UserInDB = Depends(get_current_user),
 ) -> LLMConfigRead:
-    logger.info("Upserting LLM config for user_id=%s", current_user.id)
+    logger.info("正在写入用户 %s 的 LLM 配置", current_user.id)
     return await service.upsert_config(current_user.id, payload)
 
 
@@ -75,7 +75,7 @@ async def delete_llm_config(
 ) -> None:
     deleted = await service.delete_config(current_user.id)
     if not deleted:
-        logger.warning("LLM config delete skipped; no record found for user_id=%s", current_user.id)
+        logger.warning("用户 %s 没有可删除的 LLM 配置，已跳过删除", current_user.id)
         raise HTTPException(
             status_code=404,
             detail={
@@ -85,7 +85,7 @@ async def delete_llm_config(
             },
         )
 
-    logger.info("Deleted LLM config for user_id=%s", current_user.id)
+    logger.info("已删除用户 %s 的 LLM 配置", current_user.id)
 
 
 @router.post("/models", response_model=List[str])
@@ -99,10 +99,10 @@ async def list_models(
             api_key=payload.llm_provider_api_key,
             base_url=payload.llm_provider_url,
         )
-        logger.info("Fetched %s models for user_id=%s", len(models), current_user.id)
+        logger.info("已为用户 %s 获取到 %s 个可用模型", current_user.id, len(models))
         return models
     except ValueError as exc:
-        logger.warning("Model list request invalid for user_id=%s: %s", current_user.id, str(exc))
+        logger.warning("用户 %s 的模型列表请求无效：%s", current_user.id, str(exc))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -113,7 +113,7 @@ async def list_models(
             },
         )
     except Exception as exc:
-        logger.warning("Model list probe failed for user_id=%s: %s", current_user.id, str(exc))
+        logger.warning("用户 %s 的模型列表探测失败：%s", current_user.id, str(exc))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={
@@ -130,7 +130,7 @@ async def trace_llm_config_source(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> dict:
-    logger.info("Tracing LLM config source for user_id=%s", current_user.id)
+    logger.info("正在追踪用户 %s 的 LLM 配置来源", current_user.id)
     from ...services.llm_service import LLMService
 
     service = LLMService(session)
@@ -146,7 +146,7 @@ async def health_check_llm_config(
     service: LLMConfigService = Depends(get_llm_config_service),
     current_user: UserInDB = Depends(get_current_user),
 ) -> LLMHealthCheckResponse:
-    logger.info("Running LLM health check for user_id=%s", current_user.id)
+    logger.info("正在执行用户 %s 的 LLM 健康检查", current_user.id)
     return await service.run_health_check(
         user_id=current_user.id,
         include_disabled=include_disabled,
@@ -158,5 +158,5 @@ async def auto_switch_llm_provider(
     service: LLMConfigService = Depends(get_llm_config_service),
     current_user: UserInDB = Depends(get_current_user),
 ) -> LLMAutoSwitchResponse:
-    logger.info("Running LLM auto switch for user_id=%s", current_user.id)
+    logger.info("正在执行用户 %s 的 LLM 自动切换", current_user.id)
     return await service.auto_switch_provider(user_id=current_user.id)

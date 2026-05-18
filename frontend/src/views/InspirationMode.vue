@@ -1,6 +1,6 @@
 <template>
-  <div class="inspiration-shell min-h-screen text-slate-900">
-    <header class="inspiration-topbar sticky top-0 z-30">
+  <div class="inspiration-shell xq-page-canvas min-h-screen text-slate-900">
+    <header class="inspiration-topbar xq-topbar xq-topbar--inspiration sticky top-0 z-30">
       <div class="mx-auto flex w-full max-w-7xl items-center gap-4 px-4 py-4 sm:px-6 lg:px-8">
         <button class="inspiration-back-btn" type="button" @click="goBack">
           <span class="inspiration-back-icon">&larr;</span>
@@ -194,6 +194,7 @@
               <BlueprintConfirmation
                 v-if="showBlueprintConfirmation"
                 :ai-message="confirmationMessage"
+                :force-stage="pendingBlueprintForceStage"
                 @blueprint-generated="handleBlueprintGenerated"
                 @back="backToConversation"
               />
@@ -213,7 +214,7 @@
 
       <section
         v-else
-        class="grid flex-1 min-h-0 gap-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(300px,360px)] xl:grid-cols-[minmax(0,1.75fr)_minmax(320px,380px)]"
+        class="inspiration-chat-layout grid flex-1 min-h-0 gap-3"
       >
         <div class="inspiration-panel inspiration-chat-panel flex min-h-0 flex-col overflow-hidden">
           <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 px-4 py-4 sm:px-5">
@@ -244,7 +245,7 @@
             </p>
           </div>
 
-          <div ref="chatArea" class="inspiration-chat-area flex-1 min-h-[360px] space-y-3 overflow-y-auto px-4 py-4 sm:px-5 sm:py-4 lg:min-h-[440px]">
+          <div ref="chatArea" class="inspiration-chat-area flex-1 min-h-[260px] space-y-3 overflow-y-auto px-4 py-4 sm:px-5 sm:py-4 lg:min-h-[320px]">
             <transition name="fade">
               <InspirationLoading v-if="isInitialLoading" />
             </transition>
@@ -268,7 +269,7 @@
               <span class="inspiration-pill inspiration-pill--slate">支持单选和文本补充</span>
             </div>
 
-            <div class="max-h-[38vh] overflow-y-auto pr-1">
+            <div class="inspiration-input-scroll">
               <ConversationInput
                 :ui-control="currentUIControl"
                 :loading="novelStore.isLoading"
@@ -278,7 +279,7 @@
           </div>
         </div>
 
-        <aside class="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1">
+        <aside class="inspiration-rail flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
           <section class="inspiration-panel inspiration-rail-card p-5">
             <p class="inspiration-kicker">当前状态</p>
             <h3 class="mt-2 text-xl font-semibold text-slate-950">{{ conversationStateLabel }}</h3>
@@ -328,8 +329,8 @@
             <p class="inspiration-kicker">工作流摘要</p>
             <div class="mt-4 space-y-3 text-sm leading-6 text-slate-600">
               <p>如果对话结束，会先进入蓝图确认，再保存到工作台。</p>
-              <p v-if="currentUIControl?.type === 'single_choice'">
-                这一轮有 {{ currentControlOptionCount }} 个候选选项，建议先点最接近的那个。
+              <p v-if="currentUIControl?.type === 'single_choice' || currentUIControl?.type === 'multi_choice'">
+                这一轮有 {{ currentControlOptionCount }} 个候选选项，{{ currentUIControl?.type === 'multi_choice' ? '可以组合多个方向一起推进。' : '建议先点最接近的那个。' }}
               </p>
               <p v-else-if="currentUIControl?.type === 'text_input'">
                 这一轮是文本补充，直接说明你的想法即可。
@@ -380,6 +381,7 @@ const confirmationMessage = ref('')
 const blueprintMessage = ref('')
 const chatArea = ref<HTMLElement | null>(null)
 const isSavingBlueprint = ref(false)
+const pendingBlueprintForceStage = ref<'novel_outline' | 'chapter_outline' | undefined>(undefined)
 
 const syncActiveInspirationProject = (projectId?: string | null) => {
   if (typeof window === 'undefined') return
@@ -419,6 +421,7 @@ const resetInspirationMode = (options?: { preserveResumeProject?: boolean }) => 
   confirmationMessage.value = ''
   blueprintMessage.value = ''
   isSavingBlueprint.value = false
+  pendingBlueprintForceStage.value = undefined
   novelStore.setCurrentProject(null)
   novelStore.currentConversationState.value = {}
   if (!options?.preserveResumeProject) {
@@ -494,7 +497,7 @@ const inspirationProgressPercent = computed(() => {
   return 0
 })
 const inspirationProgressTitle = computed(() => {
-  if (isSavingBlueprint.value) return '\u6b63\u5728\u4fdd\u5b58\u84dd\u56fe\u5e76\u51c6\u5907\u8fdb\u5165\u5199\u4f5c\u53f0'
+  if (isSavingBlueprint.value) return hasCompleteChapterOutline(completedBlueprint.value) ? '\u6b63\u5728\u4fdd\u5b58\u84dd\u56fe\u5e76\u51c6\u5907\u8fdb\u5165\u5199\u4f5c\u53f0' : '\u6b63\u5728\u57fa\u4e8e\u5c0f\u8bf4\u603b\u5927\u7eb2\u751f\u6210\u7ae0\u8282\u5927\u7eb2'
   if (showBlueprint.value) return '\u84dd\u56fe\u5df2\u751f\u6210\uff0c\u7b49\u5f85\u786e\u8ba4'
   if (showBlueprintConfirmation.value) return '\u6b63\u5728\u6536\u675f\u84dd\u56fe\u65b9\u5411'
   if (isInitialLoading.value) return '\u6b63\u5728\u521d\u59cb\u5316\u7075\u611f\u5bf9\u8bdd'
@@ -502,7 +505,7 @@ const inspirationProgressTitle = computed(() => {
   return '\u7075\u611f\u5bf9\u8bdd\u8fdb\u884c\u4e2d'
 })
 const inspirationProgressDescription = computed(() => {
-  if (isSavingBlueprint.value) return '\u84dd\u56fe\u5199\u5165\u9879\u76ee\u540e\u4f1a\u76f4\u63a5\u8df3\u8f6c\u5230\u5c0f\u8bf4\u5199\u4f5c\u754c\u9762\u3002'
+  if (isSavingBlueprint.value) return hasCompleteChapterOutline(completedBlueprint.value) ? '\u84dd\u56fe\u5199\u5165\u9879\u76ee\u540e\u4f1a\u76f4\u63a5\u8df3\u8f6c\u5230\u5c0f\u8bf4\u5199\u4f5c\u754c\u9762\u3002' : '\u7cfb\u7edf\u6b63\u5728\u8c03\u7528\u6b63\u5f0f\u751f\u6210\u94fe\uff0c\u628a\u5c0f\u8bf4\u603b\u5927\u7eb2\u7ec6\u5316\u6210\u7ae0\u8282\u5927\u7eb2\u3002'
   if (showBlueprint.value) return '\u53ef\u4ee5\u5148\u901a\u8bfb\u84dd\u56fe\uff0c\u518d\u51b3\u5b9a\u786e\u8ba4\u8fdb\u5165\u5199\u4f5c\u6216\u91cd\u65b0\u751f\u6210\u3002'
   if (showBlueprintConfirmation.value) return '\u5f53\u524d\u91cd\u70b9\u662f\u786e\u8ba4\u65b9\u5411\uff0c\u4e0d\u8981\u7ee7\u7eed\u5806\u53e0\u8fc7\u591a\u65b0\u4fe1\u606f\u3002'
   if (isInitialLoading.value) return '\u7cfb\u7edf\u6b63\u5728\u521b\u5efa\u7075\u611f\u9879\u76ee\u5e76\u51c6\u5907\u9996\u8f6e\u5f15\u5bfc\u3002'
@@ -519,6 +522,7 @@ const controlModeLabel = computed(() => {
   if (showBlueprint.value) return '\u84dd\u56fe\u5c55\u793a'
   if (isInitialLoading.value) return '\u542f\u52a8\u4e2d'
   if (currentUIControl.value?.type === 'single_choice') return '\u5355\u9009\u63a8\u8fdb'
+  if (currentUIControl.value?.type === 'multi_choice') return '\u591a\u9009\u7ec4\u5408'
   if (currentUIControl.value?.type === 'text_input') return '\u6587\u672c\u8865\u5145'
   return '\u7b49\u5f85\u4e0b\u4e00\u6b65'
 })
@@ -537,6 +541,9 @@ const currentControlTitle = computed(() => {
   if (currentUIControl.value.type === 'single_choice') {
     return `\u5355\u9009\u6a21\u5f0f \u00b7 ${currentControlOptionCount.value} \u4e2a\u5019\u9009`
   }
+  if (currentUIControl.value.type === 'multi_choice') {
+    return `\u591a\u9009\u6a21\u5f0f \u00b7 ${currentControlOptionCount.value} \u4e2a\u5019\u9009`
+  }
   return '\u6587\u672c\u8865\u5145\u6a21\u5f0f \u00b7 \u76f4\u63a5\u8f93\u5165\u4f60\u7684\u60f3\u6cd5'
 })
 
@@ -544,6 +551,9 @@ const currentControlHint = computed(() => {
   if (!conversationStarted.value) return '\u70b9\u51fb“\u5f00\u59cb\u7075\u611f\u5bf9\u8bdd”\u540e\uff0c\u7cfb\u7edf\u4f1a\u5148\u521b\u5efa\u4e00\u4e2a\u7075\u611f\u9879\u76ee\u5e76\u53d1\u8d77\u9996\u8f6e\u5bf9\u8bdd\u3002'
   if (currentUIControl.value?.type === 'single_choice') {
     return currentUIControl.value.placeholder || '\u53ef\u4ee5\u5148\u70b9\u6700\u63a5\u8fd1\u7684\u9009\u9879\uff0c\u518d\u8865\u4e00\u53e5\u8bf4\u660e\u3002'
+  }
+  if (currentUIControl.value?.type === 'multi_choice') {
+    return currentUIControl.value.placeholder || '\u53ef\u4ee5\u5148\u7ec4\u5408\u51e0\u4e2a\u6700\u63a5\u8fd1\u7684\u65b9\u5411\uff0c\u518d\u8865\u4e00\u53e5\u4f60\u771f\u6b63\u60f3\u4fdd\u7559\u7684\u6838\u5fc3\u3002'
   }
   if (currentUIControl.value?.type === 'text_input') {
     return currentUIControl.value.placeholder || '\u76f4\u63a5\u8865\u5145\u4f60\u7684\u60f3\u6cd5\uff0c\u8d8a\u77ed\u8d8a\u597d\u3002'
@@ -559,21 +569,60 @@ const stateDescription = computed(() => {
   return '\u6bcf\u4e00\u8f6e\u53ea\u89e3\u51b3\u4e00\u4e2a\u5c0f\u95ee\u9898\uff0c\u907f\u514d\u5728\u8fd9\u4e00\u5c4f\u91cc\u5806\u6ee1\u4e0d\u5fc5\u8981\u7684\u9009\u9879\u3002'
 })
 
+
+const createFallbackTextControl = (placeholder = '继续补充你的想法，或直接说明你想调整的方向。'): UIControl => ({
+  type: 'text_input',
+  placeholder,
+})
+
+const isVisibleConversationItem = (item: any) => {
+  return (item.role === 'user' || item.role === 'assistant') && item.metadata?.type !== 'blueprint_generation_job'
+}
+
 const parseAssistantPayload = (content: string) => {
   try {
     const parsed = JSON.parse(content)
     return {
       aiMessage: typeof parsed.ai_message === 'string' ? parsed.ai_message : content,
       isComplete: Boolean(parsed.is_complete),
-      uiControl: parsed.ui_control as UIControl | null | undefined
+      uiControl: parsed.ui_control as UIControl | null | undefined,
+      conversationState: parsed.conversation_state && typeof parsed.conversation_state === 'object'
+        ? parsed.conversation_state
+        : {},
     }
   } catch {
     return {
       aiMessage: content,
       isComplete: false,
-      uiControl: null
+      uiControl: null,
+      conversationState: {},
     }
   }
+}
+
+
+const hasNovelOutline = (blueprint: Blueprint | null | undefined) => {
+  return Boolean(blueprint && Array.isArray(blueprint.novel_outline) && blueprint.novel_outline.length > 0)
+}
+
+const hasCompleteChapterOutline = (blueprint: Blueprint | null | undefined) => {
+  if (!blueprint || !Array.isArray(blueprint.chapter_outline) || blueprint.chapter_outline.length < 12) {
+    return false
+  }
+
+  const chapterNumbers = blueprint.chapter_outline
+    .map((chapter, index) => Number((chapter as { chapter_number?: unknown }).chapter_number) || index + 1)
+    .sort((left, right) => left - right)
+
+  return chapterNumbers.length >= 12 && chapterNumbers.slice(0, 12).every((chapterNumber, index) => chapterNumber === index + 1)
+}
+
+const hasUsableBlueprint = (blueprint: Blueprint | null | undefined) => {
+  if (!blueprint) return false
+  const hasChapters = hasCompleteChapterOutline(blueprint)
+  const hasTitle = typeof blueprint.title === 'string' && blueprint.title.trim().length > 0
+  const summary = (blueprint.one_sentence_summary || blueprint.full_synopsis || (blueprint as any).summary || '').trim()
+  return hasChapters && (hasTitle || summary.length > 0)
 }
 
 const scrollToBottom = async () => {
@@ -588,10 +637,15 @@ const restoreConversation = async (projectId: string) => {
     syncActiveInspirationProject(projectId)
     await novelStore.loadProject(projectId)
     const project = novelStore.currentProject
-    if (!project || !project.conversation_history) return
+    if (!project) {
+      conversationStarted.value = true
+      currentUIControl.value = createFallbackTextControl('旧灵感项目暂未加载到历史记录，可以继续输入补充或重新发起。')
+      return
+    }
 
+    const visibleHistory = (project.conversation_history || []).filter(isVisibleConversationItem)
     conversationStarted.value = true
-    chatMessages.value = project.conversation_history
+    chatMessages.value = visibleHistory
       .map((item): ChatMessage | null => {
         if (item.role === 'user') {
           try {
@@ -607,29 +661,49 @@ const restoreConversation = async (projectId: string) => {
       })
       .filter((msg): msg is ChatMessage => msg !== null && msg.content !== null)
 
-    const lastAssistantMessage = project.conversation_history.filter((item) => item.role === 'assistant').pop()?.content
+    const visibleAssistantHistory = visibleHistory.filter((item) => item.role === 'assistant')
+    const lastAssistantMessage = visibleAssistantHistory.at(-1)?.content
     if (lastAssistantMessage) {
       const payload = parseAssistantPayload(lastAssistantMessage)
-      const hasPersistedBlueprint = Boolean(project.blueprint)
+      const hasPersistedBlueprint = hasUsableBlueprint(project.blueprint)
+      const hasPersistedNovelOutline = hasNovelOutline(project.blueprint)
 
       if (hasPersistedBlueprint) {
+        novelStore.currentConversationState.value = payload.conversationState || {}
         completedBlueprint.value = project.blueprint || null
-        blueprintMessage.value = payload.aiMessage
+        blueprintMessage.value = payload.aiMessage || '章节大纲已恢复，你可以继续确认后进入写作。'
         showBlueprintConfirmation.value = false
         showBlueprint.value = true
         currentUIControl.value = null
-        syncActiveInspirationProject(null)
+      } else if (project.blueprint && hasPersistedNovelOutline) {
+        novelStore.currentConversationState.value = payload.conversationState || {}
+        completedBlueprint.value = project.blueprint || null
+        blueprintMessage.value = '已恢复到小说总大纲阶段。请先检查总纲，再使用软件功能继续生成章节大纲。'
+        showBlueprintConfirmation.value = false
+        showBlueprint.value = true
+        currentUIControl.value = null
+      } else if (project.blueprint && !hasPersistedBlueprint) {
+        novelStore.currentConversationState.value = payload.conversationState || {}
+        completedBlueprint.value = null
+        confirmationMessage.value = '已恢复到蓝图确认阶段。请先生成小说总大纲，再继续正式生成章节大纲。'
+        showBlueprintConfirmation.value = true
+        showBlueprint.value = false
+        currentUIControl.value = null
       } else if (payload.isComplete) {
+        novelStore.currentConversationState.value = payload.conversationState || {}
         confirmationMessage.value = payload.aiMessage
         showBlueprintConfirmation.value = true
         showBlueprint.value = false
         currentUIControl.value = null
       } else {
-        currentUIControl.value = payload.uiControl || null
+        novelStore.currentConversationState.value = payload.conversationState || {}
+        currentUIControl.value = payload.uiControl || createFallbackTextControl('继续续写这个灵感：补充主角、冲突、世界规则或你想改掉的方向。')
       }
+    } else {
+      currentUIControl.value = createFallbackTextControl('这个旧灵感还没有可恢复的 AI 引导，直接输入一句新想法继续推进。')
     }
 
-    currentTurn.value = project.conversation_history.filter((item) => item.role === 'assistant').length
+    currentTurn.value = visibleAssistantHistory.length
     await scrollToBottom()
   } catch (error) {
     console.error('恢复对话失败:', error)
@@ -695,14 +769,12 @@ const handleUserInput = async (userInput: any) => {
 
     await scrollToBottom()
 
-    if (response.is_complete && response.ready_for_blueprint) {
+    if (response.is_complete) {
       confirmationMessage.value = response.ai_message
       showBlueprintConfirmation.value = true
       showBlueprint.value = false
-    } else if (response.is_complete) {
-      await handleGenerateBlueprint()
     } else {
-      currentUIControl.value = response.ui_control
+      currentUIControl.value = response.ui_control || createFallbackTextControl('AI 没有返回结构化按钮，你可以继续用文本补充设定或要求它换方向。')
     }
   } catch (error) {
     console.error('对话失败:', error)
@@ -726,24 +798,47 @@ const handleUserInput = async (userInput: any) => {
   }
 }
 
-const handleGenerateBlueprint = async () => {
-  try {
-    const response = await novelStore.generateBlueprint()
-    handleBlueprintGenerated(response)
-  } catch (error) {
-    console.error('生成蓝图失败:', error)
-    globalAlert.showError(`生成蓝图失败: ${error instanceof Error ? error.message : '未知错误'}`, '生成失败')
-  }
-}
-
 const handleBlueprintGenerated = (response: any) => {
   completedBlueprint.value = response.blueprint
   blueprintMessage.value = response.ai_message
+  pendingBlueprintForceStage.value = undefined
   showBlueprintConfirmation.value = false
   showBlueprint.value = true
 }
 
+const waitForBlueprintGenerationResult = async () => {
+  const readJobError = (error: unknown, fallback?: string) => {
+    if (typeof error === 'string') return error
+    if (error && typeof error === 'object') {
+      const record = error as { message?: unknown; detail?: unknown }
+      if (typeof record.message === 'string' && record.message.trim()) return record.message
+      if (typeof record.detail === 'string' && record.detail.trim()) return record.detail
+    }
+    return fallback || '生成失败'
+  }
+
+  for (let attempt = 0; attempt < 450; attempt += 1) {
+    const status = await novelStore.getBlueprintGenerationStatus()
+    if (status.status === 'successful' && status.blueprint) {
+      return {
+        blueprint: status.blueprint,
+        ai_message: status.ai_message || '生成完成，请继续下一步。',
+      }
+    }
+    if (status.status === 'failed') {
+      throw new Error(readJobError(status.error, status.progress_message || '生成失败'))
+    }
+    if (status.status === 'cancelled') {
+      throw new Error(status.progress_message || '生成已取消')
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 2000))
+  }
+  throw new Error('等待生成结果超时，请稍后重试。')
+}
+
 const handleRegenerateBlueprint = () => {
+  pendingBlueprintForceStage.value = 'novel_outline'
+  confirmationMessage.value = '你正在重生小说总大纲。确认后会覆盖当前总纲与其下游章节大纲，并重新生成一版更完整的新结构。'
   showBlueprint.value = false
   showBlueprintConfirmation.value = true
 }
@@ -752,20 +847,36 @@ const handleConfirmBlueprint = async () => {
   if (isSavingBlueprint.value) return
 
   if (!completedBlueprint.value) {
-    globalAlert.showError('蓝图数据缺失，请重新生成后再试。', '保存失败')
+    globalAlert.showError('缺少蓝图数据，请先完成生成。', '进入失败')
     return
   }
 
+  const targetProjectId = novelStore.currentProject?.id || resolveResumeProjectId()
+  if (!targetProjectId) {
+    globalAlert.showError('当前灵感项目不存在，请从工作区重新打开。', '进入失败')
+    return
+  }
+
+  const readyForWriting = hasCompleteChapterOutline(completedBlueprint.value)
+
   isSavingBlueprint.value = true
   try {
-    await novelStore.saveBlueprint(completedBlueprint.value)
-    syncActiveInspirationProject(null)
-    if (novelStore.currentProject) {
-      router.push(`/novel/${novelStore.currentProject.id}`)
+    if (!readyForWriting) {
+      pendingBlueprintForceStage.value = 'chapter_outline'
+      confirmationMessage.value = '正在基于当前小说总大纲继续生成章节大纲。页面会直接切换到后台任务视图，显示实时进度与日志。'
+      showBlueprint.value = false
+      showBlueprintConfirmation.value = true
+      return
     }
+
+    syncActiveInspirationProject(null)
+    await router.push(`/novel/${targetProjectId}`)
   } catch (error) {
-    console.error('保存蓝图失败:', error)
-    globalAlert.showError(`保存蓝图失败: ${error instanceof Error ? error.message : '未知错误'}`, '保存失败')
+    console.error(readyForWriting ? 'Enter writing desk failed:' : '生成章节大纲失败:', error)
+    globalAlert.showError(
+      `${readyForWriting ? '进入写作台失败' : '生成章节大纲失败'}：${error instanceof Error ? error.message : '未知错误'}`,
+      readyForWriting ? '进入失败' : '生成失败',
+    )
   } finally {
     isSavingBlueprint.value = false
   }
@@ -783,16 +894,12 @@ onMounted(() => {
 
 <style scoped>
 .inspiration-shell {
-  min-height: 100vh;
-  background:
-    radial-gradient(900px 420px at 10% 0%, rgba(37, 99, 235, 0.16), transparent 56%),
-    radial-gradient(700px 380px at 90% 12%, rgba(16, 185, 129, 0.14), transparent 52%),
-    linear-gradient(180deg, #f8fafc 0%, #eef2ff 42%, #ecfeff 100%);
+  color: var(--xq-ink);
 }
 
 .inspiration-topbar {
-  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(255, 255, 255, 0.78);
+  border-bottom: 1px solid var(--xq-border);
+  background: rgba(255, 250, 240, 0.78);
   backdrop-filter: blur(18px);
 }
 
@@ -802,19 +909,20 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(255, 255, 255, 0.9);
-  color: #0f172a;
-  font-weight: 600;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+  gap: 0.5rem;
+  border: 1px solid var(--xq-border);
+  background: rgba(255, 250, 240, 0.88);
+  color: var(--xq-ink);
+  font-family: var(--xq-font-sans);
+  font-weight: 700;
+  transition: transform var(--xq-fast), box-shadow var(--xq-fast), border-color var(--xq-fast), background var(--xq-fast);
 }
 
 .inspiration-back-btn {
-  min-height: 48px;
-  padding: 0 16px;
-  border-radius: 16px;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+  min-height: 3rem;
+  padding: 0 1rem;
+  border-radius: var(--xq-radius-sm);
+  box-shadow: 0 12px 28px rgba(80, 54, 24, 0.08);
 }
 
 .inspiration-back-btn:hover,
@@ -832,248 +940,276 @@ onMounted(() => {
 .inspiration-kicker {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  border-radius: 999px;
-  background: rgba(15, 118, 110, 0.08);
-  color: #0f766e;
+  gap: 0.5rem;
+  border-radius: var(--xq-radius-pill);
+  background: rgba(214, 169, 79, 0.14);
+  color: var(--xq-gold-deep);
   padding: 0.42rem 0.82rem;
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
 .inspiration-ghost-btn,
 .inspiration-mini-btn {
-  min-height: 40px;
-  padding: 0 14px;
-  border-radius: 12px;
+  min-height: 2.5rem;
+  padding: 0 0.9rem;
+  border-radius: var(--xq-radius-sm);
   font-size: 0.92rem;
 }
 
+.inspiration-ghost-btn:disabled,
+.inspiration-mini-btn:disabled,
+.inspiration-primary-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  box-shadow: none;
+}
+
 .inspiration-ghost-btn--resume {
-  min-height: 48px;
-  border-color: rgba(37, 99, 235, 0.22);
-  background: rgba(239, 246, 255, 0.92);
-  color: #1d4ed8;
+  min-height: 3rem;
+  border-color: rgba(214, 169, 79, 0.28);
+  background: rgba(255, 250, 240, 0.94);
+  color: var(--xq-gold-deep);
 }
 
 .inspiration-primary-btn {
   display: inline-flex;
-  min-height: 52px;
+  min-height: 3.25rem;
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 16px;
-  background: linear-gradient(135deg, #2563eb 0%, #14b8a6 100%);
-  color: #fff;
+  border-radius: var(--xq-radius-sm);
+  background: linear-gradient(135deg, var(--xq-gold-deep), var(--xq-gold));
+  color: #fffaf0;
   font-size: 1rem;
-  font-weight: 700;
-  box-shadow: 0 16px 34px rgba(37, 99, 235, 0.22);
-  transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
-}
-
-.inspiration-primary-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-  box-shadow: none;
+  font-weight: 800;
+  box-shadow: 0 16px 34px rgba(154, 106, 34, 0.22);
+  transition: transform var(--xq-fast), box-shadow var(--xq-fast), opacity var(--xq-fast);
 }
 
 .inspiration-panel {
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 18px 52px -34px rgba(15, 23, 42, 0.26);
-  backdrop-filter: blur(14px);
+  border: 1px solid var(--xq-border);
+  border-radius: var(--xq-radius-lg);
+  background: rgba(255, 250, 240, 0.84);
+  box-shadow: var(--xq-shadow-paper);
+  backdrop-filter: blur(16px);
 }
 
 .inspiration-chat-panel {
   min-height: 0;
 }
 
-.inspiration-stage-strip {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.9));
+
+.inspiration-chat-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.inspiration-input-scroll {
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
+}
+
+.inspiration-rail {
+  max-height: calc(100vh - 11.5rem);
+}
+
+@media (min-width: 1180px) {
+  .inspiration-chat-layout {
+    grid-template-columns: minmax(0, 5.2fr) minmax(220px, 0.8fr);
+  }
+}
+
+@media (min-width: 1440px) {
+  .inspiration-chat-layout {
+    grid-template-columns: minmax(0, 5.8fr) minmax(240px, 0.78fr);
+  }
+}
+
+@media (max-width: 1179px) {
+  .inspiration-rail {
+    display: none;
+  }
+}
+
+.inspiration-stage-strip,
+.inspiration-rail-card {
+  background:
+    linear-gradient(145deg, rgba(255, 250, 240, 0.92), rgba(247, 239, 224, 0.82));
 }
 
 .inspiration-progress-card {
   display: grid;
-  gap: 6px;
-  padding: 12px 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(37, 99, 235, 0.14);
-  background: rgba(239, 246, 255, 0.88);
+  gap: 0.45rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--xq-radius-sm);
+  border: 1px solid rgba(214, 169, 79, 0.22);
+  background: rgba(255, 250, 240, 0.72);
 }
 
 .inspiration-progress-card__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 0.75rem;
   font-size: 0.86rem;
-  font-weight: 700;
-  color: #0f172a;
+  font-weight: 800;
+  color: var(--xq-ink);
 }
 
 .inspiration-progress-card__desc {
   margin: 0;
-  font-size: 0.8rem;
-  line-height: 1.45;
-  color: #475569;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--xq-ink-muted);
 }
 
 .inspiration-progress-track {
   width: 100%;
-  height: 7px;
+  height: 0.45rem;
   overflow: hidden;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.22);
+  border-radius: var(--xq-radius-pill);
+  background: rgba(93, 70, 43, 0.12);
 }
 
 .inspiration-progress-bar {
   height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #2563eb, #14b8a6);
-  transition: width 0.25s ease;
+  border-radius: var(--xq-radius-pill);
+  background: linear-gradient(90deg, var(--xq-gold-deep), var(--xq-gold), var(--xq-jade));
+  transition: width var(--xq-normal);
 }
 
 .inspiration-stage-strip__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 0.65rem;
 }
 
 .inspiration-stage-list {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  gap: 0.65rem;
+}
+
+.inspiration-stage-item,
+.inspiration-step,
+.inspiration-metric {
+  border-radius: var(--xq-radius-sm);
+  border: 1px solid var(--xq-border);
+  background: rgba(255, 250, 240, 0.58);
 }
 
 .inspiration-stage-item {
   display: flex;
-  gap: 12px;
-  padding: 13px;
-  border-radius: 16px;
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  background: rgba(248, 250, 252, 0.9);
+  gap: 0.75rem;
+  padding: 0.8rem;
 }
 
 .inspiration-stage-item--active {
-  border-color: rgba(37, 99, 235, 0.28);
-  background: rgba(239, 246, 255, 0.9);
+  border-color: rgba(214, 169, 79, 0.42);
+  background: rgba(214, 169, 79, 0.12);
+  box-shadow: 0 12px 28px rgba(154, 106, 34, 0.1);
 }
 
 .inspiration-stage-item--done {
-  border-color: rgba(16, 185, 129, 0.18);
+  border-color: rgba(61, 143, 125, 0.24);
 }
 
-.inspiration-stage-item__dot {
-  display: inline-flex;
-  width: 30px;
-  height: 30px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: #e2e8f0;
-  color: #334155;
-  font-size: 0.8rem;
-  font-weight: 700;
-}
-
-.inspiration-stage-item--active .inspiration-stage-item__dot {
-  background: linear-gradient(135deg, #2563eb 0%, #14b8a6 100%);
-  color: #fff;
-}
-
-.inspiration-stage-item--done .inspiration-stage-item__dot {
-  background: rgba(16, 185, 129, 0.14);
-  color: #047857;
-}
-
-.inspiration-stage-item__title {
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.inspiration-stage-item__desc {
-  margin-top: 3px;
-  font-size: 0.84rem;
-  line-height: 1.5;
-  color: #64748b;
-}
-
-.inspiration-landing-panel {
-  background:
-    radial-gradient(circle at top right, rgba(59, 130, 246, 0.08), transparent 28%),
-    radial-gradient(circle at bottom left, rgba(20, 184, 166, 0.08), transparent 24%),
-    rgba(255, 255, 255, 0.88);
-}
-
-.inspiration-step {
-  display: flex;
-  gap: 12px;
-  border-radius: 18px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(248, 250, 252, 0.92);
-  padding: 14px;
-}
-
+.inspiration-stage-item__dot,
 .inspiration-step__index {
   display: inline-flex;
   flex: none;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 999px;
-  background: linear-gradient(135deg, #2563eb 0%, #14b8a6 100%);
-  color: #fff;
-  font-size: 0.9rem;
-  font-weight: 700;
+  border-radius: var(--xq-radius-pill);
+  font-weight: 800;
 }
 
+.inspiration-stage-item__dot {
+  width: 1.9rem;
+  height: 1.9rem;
+  background: rgba(93, 70, 43, 0.1);
+  color: var(--xq-ink-muted);
+  font-size: 0.8rem;
+}
+
+.inspiration-stage-item--active .inspiration-stage-item__dot {
+  background: linear-gradient(135deg, var(--xq-gold-deep), var(--xq-gold));
+  color: #fffaf0;
+}
+
+.inspiration-stage-item--done .inspiration-stage-item__dot {
+  background: rgba(61, 143, 125, 0.14);
+  color: var(--xq-jade);
+}
+
+.inspiration-stage-item__title,
 .inspiration-step__title {
-  color: #0f172a;
-  font-size: 0.94rem;
-  font-weight: 700;
+  color: var(--xq-ink);
+  font-size: 0.95rem;
+  font-weight: 800;
 }
 
+.inspiration-stage-item__desc,
 .inspiration-step__desc {
-  margin-top: 3px;
-  color: #64748b;
+  margin-top: 0.25rem;
+  color: var(--xq-ink-muted);
   font-size: 0.84rem;
-  line-height: 1.5;
+  line-height: 1.55;
+}
+
+.inspiration-landing-panel {
+  background:
+    radial-gradient(circle at top right, rgba(214, 169, 79, 0.14), transparent 28%),
+    radial-gradient(circle at bottom left, rgba(61, 143, 125, 0.12), transparent 24%),
+    rgba(255, 250, 240, 0.82);
+}
+
+.inspiration-step {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.9rem;
+}
+
+.inspiration-step__index {
+  width: 2.15rem;
+  height: 2.15rem;
+  background: linear-gradient(135deg, var(--xq-gold-deep), var(--xq-gold));
+  color: #fffaf0;
+  font-size: 0.9rem;
 }
 
 .inspiration-pill {
   display: inline-flex;
   align-items: center;
-  min-height: 30px;
-  border-radius: 999px;
-  padding: 0 12px;
+  min-height: 1.9rem;
+  border-radius: var(--xq-radius-pill);
+  padding: 0 0.75rem;
   font-size: 0.78rem;
-  font-weight: 700;
+  font-weight: 800;
 }
 
 .inspiration-pill--blue {
-  background: rgba(37, 99, 235, 0.1);
-  color: #1d4ed8;
+  background: rgba(107, 124, 255, 0.11);
+  color: var(--xq-celestial);
 }
 
 .inspiration-pill--teal {
-  background: rgba(20, 184, 166, 0.1);
-  color: #0f766e;
+  background: rgba(61, 143, 125, 0.12);
+  color: var(--xq-jade);
 }
 
 .inspiration-pill--slate {
-  background: rgba(15, 23, 42, 0.06);
-  color: #334155;
+  background: rgba(93, 70, 43, 0.08);
+  color: var(--xq-ink-muted);
 }
 
 .inspiration-chat-area {
   scrollbar-gutter: stable;
-  background: linear-gradient(180deg, rgba(248, 250, 252, 0.92), rgba(255, 255, 255, 0.96));
+  background:
+    linear-gradient(180deg, rgba(247, 239, 224, 0.78), rgba(255, 250, 240, 0.9));
 }
 
 .inspiration-input-shell {
@@ -1081,36 +1217,28 @@ onMounted(() => {
   bottom: 0;
 }
 
-.inspiration-rail-card {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.82)),
-    rgba(255, 255, 255, 0.9);
-}
-
 .inspiration-metric {
-  border-radius: 20px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(248, 250, 252, 0.9);
-  padding: 14px;
+  padding: 0.9rem;
 }
 
 .inspiration-metric__label {
   display: block;
-  color: #64748b;
+  color: var(--xq-ink-muted);
   font-size: 0.76rem;
-  margin-bottom: 6px;
+  margin-bottom: 0.35rem;
 }
 
 .inspiration-metric__value {
   display: block;
-  color: #0f172a;
-  font-size: 1.1rem;
+  color: var(--xq-ink);
+  font-family: var(--xq-font-serif);
+  font-size: 1.15rem;
   line-height: 1.1;
 }
 
 @media (max-width: 1024px) {
   .inspiration-panel {
-    border-radius: 26px;
+    border-radius: var(--xq-radius-md);
   }
 
   .inspiration-stage-list {
@@ -1120,11 +1248,7 @@ onMounted(() => {
 
 @media (max-width: 640px) {
   .inspiration-topbar .inspiration-back-btn {
-    min-height: 44px;
-  }
-
-  .inspiration-step {
-    padding: 14px;
+    min-height: 2.75rem;
   }
 
   .inspiration-stage-list {

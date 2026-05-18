@@ -1,22 +1,14 @@
 <!-- Token 预算管理弹窗 -->
 <template>
-  <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-    <!-- 遮罩 -->
-    <div class="absolute inset-0 bg-black/50" @click="$emit('close')"></div>
-
-    <!-- 弹窗内容 -->
-    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-hidden">
-      <!-- 标题 -->
-      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+  <div v-if="show" class="xq-dialog-overlay" @click.self="$emit('close')">
+    <div class="xq-dialog-shell xq-dialog-shell--wide">
+      <div class="xq-dialog-header">
         <div>
-          <h3 class="text-xl font-bold text-slate-900">Token 预算管理</h3>
-          <p class="text-sm text-slate-500 mt-1">控制 AI 生成成本，跟踪模块使用情况</p>
+          <p class="xq-dialog-kicker">Token Budget</p>
+          <h3 class="xq-dialog-title">Token 预算管理</h3>
+          <p class="xq-dialog-subtitle">控制 AI 生成成本，跟踪模块使用情况，并提前发现预算风险。</p>
         </div>
-        <button @click="$emit('close')" class="text-slate-400 hover:text-slate-600">
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-          </svg>
-        </button>
+        <button @click="$emit('close')" class="xq-dialog-close" aria-label="关闭">×</button>
       </div>
 
       <!-- 标签页 -->
@@ -37,7 +29,7 @@
       </div>
 
       <!-- 内容区 -->
-      <div class="px-6 py-4 overflow-y-auto max-h-[60vh]">
+      <div class="xq-dialog-body">
         <!-- 加载状态 -->
         <div v-if="loading" class="flex flex-col items-center justify-center py-12">
           <div class="animate-spin rounded-full h-12 w-12 border-4 border-indigo-500 border-t-transparent"></div>
@@ -82,7 +74,7 @@
             <div class="relative h-4 bg-slate-200 rounded-full overflow-hidden">
               <div
                 class="absolute left-0 top-0 h-full transition-all duration-500"
-                :class="usagePercent >= 90 ? 'bg-red-500' : usagePercent >= 70 ? 'bg-yellow-500' : 'bg-indigo-500'"
+                :class="usagePercent >= 90 ? 'bg-red-500' : usagePercent >= 70 ? 'bg-sky-500' : 'bg-indigo-500'"
                 :style="{ width: `${Math.min(usagePercent, 100)}%` }"
               ></div>
             </div>
@@ -124,13 +116,13 @@
                 v-for="alert in alerts"
                 :key="alert.id"
                 class="flex items-center gap-3 p-3 rounded-lg"
-                :class="alert.alert_type === 'exceeded' ? 'bg-red-50 border border-red-200' : 'bg-yellow-50 border border-yellow-200'"
+                :class="alert.alert_type === 'exceeded' ? 'bg-red-50 border border-red-200' : 'bg-sky-50 border border-sky-200'"
               >
-                <svg class="w-5 h-5" :class="alert.alert_type === 'exceeded' ? 'text-red-600' : 'text-yellow-600'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg class="w-5 h-5" :class="alert.alert_type === 'exceeded' ? 'text-red-600' : 'text-sky-600'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
                 </svg>
                 <div class="flex-1">
-                  <p class="text-sm font-medium" :class="alert.alert_type === 'exceeded' ? 'text-red-800' : 'text-yellow-800'">
+                  <p class="text-sm font-medium" :class="alert.alert_type === 'exceeded' ? 'text-red-800' : 'text-sky-800'">
                     {{ alert.message }}
                   </p>
                   <p class="text-xs text-slate-500">{{ alert.created_at }}</p>

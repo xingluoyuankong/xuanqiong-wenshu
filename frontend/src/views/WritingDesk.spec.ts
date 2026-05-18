@@ -1,5 +1,6 @@
-import { flushPromises, shallowMount } from '@vue/test-utils'
+﻿import { flushPromises, shallowMount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia } from 'pinia'
 
 const {
   pushMock,
@@ -44,6 +45,7 @@ const {
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: pushMock }),
+  useRoute: () => ({ query: {} }),
 }))
 
 vi.mock('@/stores/novel', () => ({
@@ -79,6 +81,7 @@ vi.mock('@/components/writing-desk', () => ({
       'taskTrackable',
       'canOpenVersionsCurrent',
       'canReviewAllVersionsCurrent',
+      'generateCurrentLabel',
     ],
     emits: ['evaluate-current', 'open-versions-current', 'review-all-versions-current'],
     template: `
@@ -91,6 +94,7 @@ vi.mock('@/components/writing-desk', () => ({
         :data-task-trackable="String(taskTrackable)"
         :data-can-open-versions-current="String(canOpenVersionsCurrent)"
         :data-can-review-all-versions-current="String(canReviewAllVersionsCurrent)"
+        :data-generate-current-label="String(generateCurrentLabel ?? '')"
       >
         <button class="header-evaluate" @click="$emit('evaluate-current')">evaluate</button>
         <button class="header-open-versions" @click="$emit('open-versions-current')">open-versions</button>
@@ -100,7 +104,17 @@ vi.mock('@/components/writing-desk', () => ({
   },
   WDSidebar: {
     name: 'WDSidebar',
-    template: '<div class="sidebar-stub">sidebar</div>',
+    emits: ['edit-chapter'],
+    template: `
+      <div class="sidebar-stub">
+        <button
+          class="sidebar-edit-outline"
+          @click="$emit('edit-chapter', { chapter_number: 1, title: '第一章', summary: '摘要' })"
+        >
+          edit-outline
+        </button>
+      </div>
+    `,
   },
   WDWorkspace: {
     name: 'WDWorkspace',
@@ -138,7 +152,18 @@ vi.mock('@/components/writing-desk/dialogs/WDEvaluationDetailModal.vue', () => (
   default: { name: 'WDEvaluationDetailModal', template: '<div />' },
 }))
 vi.mock('@/components/writing-desk/dialogs/WDEditChapterModal.vue', () => ({
-  default: { name: 'WDEditChapterModal', template: '<div />' },
+  default: {
+    name: 'WDEditChapterModal',
+    props: ['show', 'chapter', 'isRewriting'],
+    template: `
+      <div
+        class="edit-chapter-modal-stub"
+        :data-show="String(show)"
+        :data-chapter-number="String(chapter?.chapter_number ?? '')"
+        :data-chapter-title="String(chapter?.title ?? '')"
+      />
+    `,
+  },
 }))
 vi.mock('@/components/writing-desk/dialogs/WDGenerateChapterModal.vue', () => ({
   default: { name: 'WDGenerateChapterModal', template: '<div />' },
@@ -202,6 +227,7 @@ const mountView = async () => {
   const wrapper = shallowMount(WritingDesk, {
     props: { id: 'project-1' },
     global: {
+      plugins: [createPinia()],
       stubs: {
         Teleport: true,
       },
@@ -289,7 +315,7 @@ describe('WritingDesk', () => {
     await (wrapper.vm as any).selectVersion(1)
     await flushPromises()
 
-    expect(novelStoreMock.selectChapterVersion).toHaveBeenCalledWith(1, 1)
+    expect(novelStoreMock.selectChapterVersion).toHaveBeenCalledWith(1, 1, 2)
     expect(wrapper.findComponent({ name: 'WDWorkspace' }).props('selectedVersionIndex')).toBe(0)
     expect(alertMocks.showError).toHaveBeenCalled()
   })
@@ -313,6 +339,23 @@ describe('WritingDesk', () => {
     const projectProp = wrapper.findComponent({ name: 'WDWorkspace' }).props('project') as ReturnType<typeof buildProject>
     expect(projectProp.chapters[0].summary).toBe('更新摘要')
     expect(projectProp.chapters[0].content).toBe('更新正文')
+  })
+
+  it('侧栏触发编辑大纲时应打开编辑弹窗并带入当前章节', async () => {
+    const wrapper = await mountView()
+
+    wrapper.findComponent({ name: 'WDSidebar' }).vm.$emit('edit-chapter', {
+      chapter_number: 1,
+      title: '第一章',
+      summary: '摘要',
+    })
+    await flushPromises()
+
+    expect((wrapper.vm as any).showEditChapterModal).toBe(true)
+    expect((wrapper.vm as any).editingChapter).toMatchObject({
+      chapter_number: 1,
+      title: '第一章',
+    })
   })
 
   it('将状态拉取失败计数透传给头部任务栏', async () => {
@@ -530,7 +573,7 @@ describe('WritingDesk', () => {
       await confirmPromise
       await flushPromises()
 
-      expect(novelStoreMock.selectChapterVersion).toHaveBeenCalledWith(1, 1)
+      expect(novelStoreMock.selectChapterVersion).toHaveBeenCalledWith(1, 1, 2)
       expect(alertMocks.showSuccess).toHaveBeenCalledWith('版本已确认', '操作成功')
       expect(alertMocks.showError).not.toHaveBeenCalledWith(
         '确认已提交，但后台长时间未回写新状态。请立即刷新，或直接终止处理后重试。',
@@ -570,7 +613,7 @@ describe('WritingDesk', () => {
       await confirmPromise
       await flushPromises()
 
-      expect(novelStoreMock.selectChapterVersion).toHaveBeenCalledWith(1, 1)
+      expect(novelStoreMock.selectChapterVersion).toHaveBeenCalledWith(1, 1, 2)
       expect(alertMocks.showError).toHaveBeenCalledWith(
         '确认已提交，但后台长时间未回写新状态。请立即刷新，或直接终止处理后重试。\n建议：如果再次刷新仍无回写，请终止处理并重新生成。',
         '状态同步提醒'
@@ -725,6 +768,17 @@ describe('WritingDesk', () => {
     expect(header.props('isCurrentChapterTrackable')).toBe(true)
   })
 
+  it('等待确认阶段头部仍应保留“重新生成”主操作文案', async () => {
+    novelStoreMock.currentProject = buildProject('waiting_for_confirm')
+
+    const wrapper = await mountView()
+    const header = wrapper.findComponent({ name: 'WDHeader' })
+
+    expect(header.props('generateCurrentLabel')).toBe('重新生成')
+    expect((wrapper.vm as any).canGenerateSelectedChapter).toBe(true)
+    expect((wrapper.vm as any).canConfirmSelectedChapter).toBe(true)
+  })
+
   it('等待确认阶段删除与预览内容相同的候选版本时不应被误拦截', async () => {
     novelStoreMock.currentProject = {
       ...buildProject('waiting_for_confirm'),
@@ -745,7 +799,7 @@ describe('WritingDesk', () => {
     await (wrapper.vm as any).deleteVersion(0)
     await flushPromises()
 
-    expect(novelStoreMock.deleteChapterVersion).toHaveBeenCalledWith(1, 0)
+    expect(novelStoreMock.deleteChapterVersion).toHaveBeenCalledWith(1, 0, 1)
     expect(alertMocks.showError).not.toHaveBeenCalledWith('不能删除当前生效的版本', '删除失败')
   })
 
@@ -785,3 +839,5 @@ describe('WritingDesk', () => {
     expect(wrapper.findComponent({ name: 'WDWorkspace' }).props('selectedVersionIndex')).toBe(0)
   })
 })
+
+

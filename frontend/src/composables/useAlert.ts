@@ -1,5 +1,4 @@
-// AIMETA P=提示组合函数_全局提示消息管理|R=showAlert_hideAlert|NR=不含UI组件|E=compose:useAlert|X=internal|A=useAlert函数|D=vue|S=dom|RD=./README.ai
-import { ref } from 'vue'
+﻿import { ref } from 'vue'
 
 type AlertType = 'success' | 'error' | 'info' | 'confirmation'
 
@@ -19,63 +18,51 @@ const alerts = ref<Alert[]>([])
 let alertId = 0
 
 const closeAlert = (id: number, result: boolean) => {
-  const index = alerts.value.findIndex((a) => a.id === id)
+  const index = alerts.value.findIndex((alert) => alert.id === id)
   if (index !== -1) {
-    // First, call the onConfirm callback to resolve the promise.
     alerts.value[index].onConfirm(result)
-    // Then, remove the alert from the array to hide it.
     alerts.value.splice(index, 1)
   }
+}
+
+const defaultTitle = (type: AlertType) => {
+  if (type === 'success') return '成功'
+  if (type === 'error') return '错误'
+  if (type === 'confirmation') return '请确认'
+  return '提示'
 }
 
 const showAlert = (
   message: string,
   type: AlertType = 'info',
-  title: string = '',
-  options: Partial<Omit<Alert, 'id' | 'visible' | 'message' | 'type' | 'title'>> = {}
+  title = '',
+  options: Partial<Omit<Alert, 'id' | 'visible' | 'message' | 'type' | 'title'>> = {},
 ) => {
   return new Promise<boolean>((resolve) => {
     const id = alertId++
-
     const newAlert: Alert = {
       id,
       visible: true,
       type,
-      title: title || (type === 'success' ? '成功' : type === 'error' ? '错误' : '提示'),
+      title: title || defaultTitle(type),
       message,
       showCancel: options.showCancel || false,
       confirmText: options.confirmText || '确定',
       cancelText: options.cancelText || '取消',
-      // The onConfirm callback is simply the resolve function of the promise.
-      // This breaks the recursive loop.
       onConfirm: resolve,
     }
     alerts.value.push(newAlert)
 
-    // For simple notifications (not confirmation dialogs), auto-close after 3 seconds.
     if ((type === 'success' || type === 'info') && !newAlert.showCancel) {
-      setTimeout(() => {
-        closeAlert(id, false) // Auto-close and resolve promise with false
-      }, 3000)
+      setTimeout(() => closeAlert(id, false), 3000)
     }
   })
 }
 
-const showSuccess = (message: string, title: string = '成功') => {
-  return showAlert(message, 'success', title);
-};
-
-const showError = (message: string, title: string = '错误') => {
-  return showAlert(message, 'error', title);
-};
-
-const showInfo = (message: string, title: string = '提示') => {
-  return showAlert(message, 'info', title);
-};
-
-const showConfirm = (message: string, title: string = '请确认') => {
-  return showAlert(message, 'confirmation', title, { showCancel: true });
-};
+const showSuccess = (message: string, title = '成功') => showAlert(message, 'success', title)
+const showError = (message: string, title = '错误') => showAlert(message, 'error', title)
+const showInfo = (message: string, title = '提示') => showAlert(message, 'info', title)
+const showConfirm = (message: string, title = '请确认') => showAlert(message, 'confirmation', title, { showCancel: true })
 
 export const globalAlert = {
   alerts,

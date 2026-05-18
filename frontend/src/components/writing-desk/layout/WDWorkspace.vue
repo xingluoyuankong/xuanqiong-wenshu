@@ -23,45 +23,33 @@
             <span v-if="chapterWordGoalText">{{ chapterWordGoalText }}</span>
             <span v-if="chapterWordExecutionText" :class="['wd-workspace-head__meta-pill', chapterWordExecutionClass]">{{ chapterWordExecutionText }}</span>
             <span v-if="chapterWordStatusHint" :class="['wd-workspace-head__meta-pill', chapterWordExecutionClass]">{{ chapterWordStatusHint }}</span>
+            <span v-if="chapterQualitySummary" :class="['wd-workspace-head__meta-pill', chapterQualityClass]" :title="chapterQualitySummary.issues.join('；')">
+              {{ chapterQualitySummary.label }}
+            </span>
             <span v-if="generationRuntime?.enrichment_triggered" class="wd-workspace-head__meta-pill wd-workspace-head__meta-pill--warning">已触发补字数</span>
             <span v-if="lastStatusSyncText">更新 {{ lastStatusSyncText }}</span>
           </div>
 
           <div class="wd-workspace-head__actions">
-            <button type="button" class="md-btn md-btn-text md-ripple m3-action-btn" @click="$emit('fetchChapterStatus')">
-              刷新
+            <span class="wd-workspace-tool-label">内容工具</span>
+            <button type="button" class="md-btn md-btn-text md-ripple m3-action-btn m3-action-btn--quiet" @click="$emit('fetchChapterStatus')">
+              刷新状态
             </button>
             <button
               v-if="canOpenReader"
               type="button"
-              class="md-btn md-btn-text md-ripple m3-action-btn"
+              class="md-btn md-btn-text md-ripple m3-action-btn m3-action-btn--quiet"
               @click="openPrimaryReader"
             >
-              展开全文
-            </button>
-            <button
-              v-if="availableVersions.length > 0"
-              type="button"
-              class="md-btn md-btn-text md-ripple m3-action-btn"
-              @click="handleShowVersionSelector(true)"
-            >
-              查看候选版本
-            </button>
-            <button
-              v-if="availableVersions.length > 1 && !chapterIsBusy"
-              type="button"
-              class="md-btn md-btn-text md-ripple m3-action-btn"
-              @click="handleShowVersionSelector(true); $emit('evaluateAllVersions')"
-            >
-              对比评审全部版本
+              全文阅读
             </button>
             <button
               v-if="selectedChapterNumber !== null && isChapterCompleted(selectedChapterNumber)"
               type="button"
-              class="md-btn md-btn-tonal md-ripple m3-action-btn"
+              class="md-btn md-btn-tonal md-ripple m3-action-btn m3-action-btn--strong"
               @click="openEditModal"
             >
-              手动编辑
+              正文编辑
             </button>
             <button
               v-if="selectedChapterNumber !== null && isChapterCompleted(selectedChapterNumber)"
@@ -71,37 +59,35 @@
             >
               精细编辑
             </button>
-            <button
-              v-if="canTerminateCurrent"
-              type="button"
-              class="md-btn md-btn-outlined md-ripple disabled:opacity-50 m3-action-btn"
-              :disabled="isTerminatingCurrent"
-              @click="requestTerminateChapter"
-            >
-              {{ isTerminatingCurrent ? '终止中...' : '终止处理' }}
-            </button>
-            <button
-              type="button"
-              class="md-btn md-btn-filled md-ripple disabled:opacity-50 m3-action-btn"
-              :disabled="chapterIsBusy"
-              :title="chapterIsBusy ? '当前章节正在处理中，暂时不能重新生成。' : '重新生成当前章节'"
-              @click="confirmRegenerateChapter"
-            >
-              {{ chapterIsBusy ? '处理中...' : '重新生成' }}
-            </button>
           </div>
         </div>
       </header>
+
+      <section v-if="project" class="wd-health-panel" aria-label="项目健康检查">
+        <div class="wd-health-panel__lead">
+          <p class="wd-strip-kicker">项目健康检查</p>
+          <h3>{{ projectHealthTitle }}</h3>
+          <p>{{ projectHealthHint }}</p>
+        </div>
+        <div class="wd-health-grid">
+          <div
+            v-for="item in projectHealthItems"
+            :key="item.label"
+            :class="['wd-health-item', `wd-health-item--${item.tone}`]"
+          >
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+            <em>{{ item.hint }}</em>
+          </div>
+        </div>
+      </section>
 
       <section v-if="chapterOverviewItems.length" class="wd-chapter-strip">
         <div class="wd-strip-head">
           <div>
             <p class="wd-strip-kicker">章节总览</p>
             <h3>横向切换章节</h3>
-          </div>
-          <div class="wd-strip-actions">
-            <button type="button" class="wd-strip-btn" :disabled="!hasPrevChapter" @click="goPrevChapter">上一章</button>
-            <button type="button" class="wd-strip-btn" :disabled="!hasNextChapter" @click="goNextChapter">下一章</button>
+            <p class="wd-strip-note">直接点章节卡切换；上一章 / 下一章 已收口到顶部，避免这里再放一套重复导航。</p>
           </div>
         </div>
 
@@ -214,26 +200,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { globalAlert } from '@/composables/useAlert'
 import type { Chapter, ChapterGenerationResponse, ChapterVersion, NovelProject } from '@/api/novel'
 import { normalizeChapterContent } from '@/utils/chapterContent'
 import {
-  canCancelGeneration,
   isBusyChapterStatus,
   isRecoverableVersionStatus,
   resolveChapterActionDecision,
   resolveChapterRuntime,
 } from '@/utils/chapterGeneration'
-import {
-  WorkspaceInitial,
-  ChapterGenerating,
-  VersionSelector,
-  ChapterContent,
-  ChapterFailed,
-  ChapterEmpty
-} from '../workspace'
+import { buildChapterQualitySummary } from '@/utils/chapterQuality'
+
+const WorkspaceInitial = defineAsyncComponent(() => import('../workspace/states/WorkspaceInitial.vue'))
+const ChapterGenerating = defineAsyncComponent(() => import('../workspace/states/ChapterGenerating.vue'))
+const VersionSelector = defineAsyncComponent(() => import('../workspace/review/VersionSelector.vue'))
+const ChapterContent = defineAsyncComponent(() => import('../workspace/content/ChapterContent.vue'))
+const ChapterFailed = defineAsyncComponent(() => import('../workspace/states/ChapterFailed.vue'))
+const ChapterEmpty = defineAsyncComponent(() => import('../workspace/states/ChapterEmpty.vue'))
 
 interface Props {
   project: NovelProject | null
@@ -302,12 +287,56 @@ const workspaceBodyRef = ref<HTMLElement | null>(null)
 const showWorkspaceScrollTop = ref(false)
 const forceVersionSelector = ref(false)
 const versionSelectorDismissed = ref(false)
+const workspaceScrollRafId = ref<number | null>(null)
 
 
 const selectedChapter = computed(() => {
   if (!props.project || props.selectedChapterNumber === null) return null
   return props.project.chapters.find((chapter) => chapter.chapter_number === props.selectedChapterNumber) || null
 })
+
+const projectHealth = computed(() => {
+  const outlines = props.project?.blueprint?.chapter_outline || []
+  const chapters = props.project?.chapters || []
+  const withSelectedContent = chapters.filter((chapter) => chapter.generation_status === 'successful' && normalizeChapterContent(chapter.content || '').length > 0).length
+  const blocked = chapters.filter((chapter) => chapter.generation_status !== 'successful' || !normalizeChapterContent(chapter.content || '')).length
+  const failed = chapters.filter((chapter) => ['failed', 'evaluation_failed'].includes(chapter.generation_status || '')).length
+  const running = chapters.filter((chapter) => ['generating', 'evaluating', 'selecting', 'waiting_for_confirm'].includes(chapter.generation_status || '')).length
+  const missingDraft = Math.max(0, outlines.length - withSelectedContent)
+  const versions = chapters.reduce((sum, chapter) => sum + (chapter.versions?.length || 0), 0)
+  return {
+    outlines: outlines.length,
+    chapters: chapters.length,
+    versions,
+    withSelectedContent,
+    blocked,
+    failed,
+    running,
+    missingDraft
+  }
+})
+
+const projectHealthTitle = computed(() => {
+  if (projectHealth.value.blocked > 0) return '存在导出阻断，先修复章节状态'
+  if (projectHealth.value.missingDraft > 0) return '大纲已准备，正文仍需推进'
+  return '章节链路完整，可以继续精修或导出'
+})
+
+const projectHealthHint = computed(() => {
+  if (projectHealth.value.running > 0) return `有 ${projectHealth.value.running} 个章节仍在处理或待确认，请优先完成确认/终止。`
+  if (projectHealth.value.failed > 0) return `有 ${projectHealth.value.failed} 个异常章节，需要重新生成或手动修复。`
+  if (projectHealth.value.blocked > 0) return `当前 ${projectHealth.value.blocked} 个章节缺少成功状态或选中正文，导出会被后端拦截。`
+  return '大纲、章节、候选版本与选中正文关系正常。'
+})
+
+const projectHealthItems = computed(() => [
+  { label: '大纲', value: projectHealth.value.outlines, hint: '故事路线', tone: projectHealth.value.outlines ? 'info' : 'warn' },
+  { label: '章节', value: projectHealth.value.chapters, hint: '已建正文位', tone: projectHealth.value.chapters ? 'info' : 'warn' },
+  { label: '候选版本', value: projectHealth.value.versions, hint: '可评审稿件', tone: projectHealth.value.versions ? 'success' : 'warn' },
+  { label: '可导出章节', value: projectHealth.value.withSelectedContent, hint: '成功且有正文', tone: projectHealth.value.blocked ? 'warn' : 'success' },
+  { label: '导出阻断', value: projectHealth.value.blocked, hint: '需处理', tone: projectHealth.value.blocked ? 'danger' : 'success' },
+  { label: '处理中', value: projectHealth.value.running, hint: '后台/待确认', tone: projectHealth.value.running ? 'warn' : 'success' }
+])
 
 const selectedChapterOutline = computed(() => {
   if (!props.project?.blueprint?.chapter_outline || props.selectedChapterNumber === null) return null
@@ -352,6 +381,7 @@ const activeVersionContent = computed(() => normalizeChapterContent(activeVersio
 const selectedChapterContent = computed(() => normalizeChapterContent(selectedChapter.value?.content || ''))
 const hasSelectedChapterContent = computed(() => selectedChapterContent.value.length > 0)
 const chapterRuntime = computed(() => resolveChapterRuntime(selectedChapter.value, props.generationRuntime))
+const chapterQualitySummary = computed(() => buildChapterQualitySummary(selectedChapter.value, chapterRuntime.value))
 const chapterWordGoalText = computed(() => {
   const min = chapterRuntime.value?.min_word_count
   const target = chapterRuntime.value?.target_word_count
@@ -397,12 +427,16 @@ const chapterWordExecutionClass = computed(() => {
   }
   return ''
 })
+const chapterQualityClass = computed(() => {
+  if (chapterQualitySummary.value?.tone === 'success') return 'wd-workspace-head__meta-pill--success'
+  if (chapterQualitySummary.value?.tone === 'danger') return 'wd-workspace-head__meta-pill--danger'
+  return 'wd-workspace-head__meta-pill--warning'
+})
 const hasPreviewableVersions = computed(() => {
   if (!props.availableVersions?.length) return false
   return props.availableVersions.some((version) => normalizeChapterContent(version.content).length > 0)
 })
 const chapterIsBusy = computed(() => isBusyChapterStatus(selectedChapter.value?.generation_status))
-const canTerminateCurrent = computed(() => canCancelGeneration(selectedChapter.value, chapterRuntime.value))
 const isTerminatingCurrent = computed(
   () => props.selectedChapterNumber !== null && props.terminatingChapter === props.selectedChapterNumber
 )
@@ -417,22 +451,6 @@ const shouldShowVersionSelector = computed(() => {
   if (forceVersionSelector.value || props.showVersionSelector) return true
   return allowsRecoverableStatus || shouldFallbackFromMissingContent
 })
-
-const currentChapterIndex = computed(() => orderedChapterNumbers.value.findIndex(item => item === props.selectedChapterNumber))
-const hasPrevChapter = computed(() => currentChapterIndex.value > 0)
-const hasNextChapter = computed(() =>
-  currentChapterIndex.value >= 0 && currentChapterIndex.value < orderedChapterNumbers.value.length - 1
-)
-
-const goPrevChapter = () => {
-  if (!hasPrevChapter.value) return
-  emit('selectChapter', orderedChapterNumbers.value[currentChapterIndex.value - 1])
-}
-
-const goNextChapter = () => {
-  if (!hasNextChapter.value) return
-  emit('selectChapter', orderedChapterNumbers.value[currentChapterIndex.value + 1])
-}
 
 const lastStatusSyncText = computed(() => {
   if (!props.lastStatusSyncAt) return ''
@@ -642,21 +660,6 @@ const saveEditedContent = async () => {
   }
 }
 
-const confirmRegenerateChapter = async () => {
-  const confirmed = await globalAlert.showConfirm(
-    '重新生成会覆盖当前章节的现有内容，是否继续？',
-    '确认重新生成'
-  )
-  if (confirmed && props.selectedChapterNumber !== null) {
-    emit('regenerateChapter', props.selectedChapterNumber)
-  }
-}
-
-const requestTerminateChapter = () => {
-  if (props.selectedChapterNumber === null) return
-  emit('terminateChapter', props.selectedChapterNumber)
-}
-
 const updateWorkspaceScrollTopVisibility = () => {
   const element = workspaceBodyRef.value
   if (!element) {
@@ -668,8 +671,16 @@ const updateWorkspaceScrollTopVisibility = () => {
   showWorkspaceScrollTop.value = isScrollable && element.scrollTop > 240
 }
 
+const scheduleWorkspaceScrollTopVisibilityUpdate = () => {
+  if (workspaceScrollRafId.value !== null) return
+  workspaceScrollRafId.value = window.requestAnimationFrame(() => {
+    workspaceScrollRafId.value = null
+    updateWorkspaceScrollTopVisibility()
+  })
+}
+
 const handleWorkspaceScroll = () => {
-  updateWorkspaceScrollTopVisibility()
+  scheduleWorkspaceScrollTopVisibilityUpdate()
 }
 
 const scrollWorkspaceToTop = () => {
@@ -713,7 +724,7 @@ watch(
   workspaceBodyRef,
   (element, previous) => {
     previous?.removeEventListener('scroll', handleWorkspaceScroll)
-    element?.addEventListener('scroll', handleWorkspaceScroll)
+    element?.addEventListener('scroll', handleWorkspaceScroll, { passive: true })
     updateWorkspaceScrollTopVisibility()
   },
   { flush: 'post' }
@@ -721,6 +732,10 @@ watch(
 
 onUnmounted(() => {
   workspaceBodyRef.value?.removeEventListener('scroll', handleWorkspaceScroll)
+  if (workspaceScrollRafId.value !== null) {
+    window.cancelAnimationFrame(workspaceScrollRafId.value)
+    workspaceScrollRafId.value = null
+  }
 })
 
 const currentComponentProps = computed(() => {
@@ -771,7 +786,10 @@ const currentComponentProps = computed(() => {
   if (isChapterFailed(props.selectedChapterNumber)) {
     return {
       chapterNumber: props.selectedChapterNumber,
-      generatingChapter: props.generatingChapter
+      generatingChapter: props.generatingChapter,
+      chapter: selectedChapter.value,
+      generationRuntime: chapterRuntime.value,
+      lastErrorSummary: selectedChapter.value?.last_error_summary
     }
   }
 
@@ -876,8 +894,8 @@ defineExpose({
 }
 
 .wd-workspace-head__meta-pill--warning {
-  background: rgba(245, 158, 11, 0.16) !important;
-  color: #92400e !important;
+  background: rgba(14, 165, 233, 0.16) !important;
+  color: #1d4ed8 !important;
 }
 
 .wd-workspace-head__meta-pill--danger {
@@ -917,6 +935,40 @@ defineExpose({
   gap: 6px;
 }
 
+.wd-workspace-head__actions {
+  align-items: center;
+}
+
+.wd-workspace-tool-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(79, 70, 229, 0.1);
+  color: #4338ca;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.m3-action-btn {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 14px;
+  font-size: 0.86rem;
+  font-weight: 850;
+}
+
+.m3-action-btn--quiet {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.m3-action-btn--strong {
+  box-shadow: 0 12px 24px rgba(79, 70, 229, 0.12);
+}
+
 .wd-workspace-body {
   position: relative;
   flex: 1;
@@ -925,12 +977,112 @@ defineExpose({
   padding: 8px;
 }
 
+.wd-health-panel {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.9fr) minmax(0, 2fr);
+  gap: 10px;
+  padding: 8px;
+  border-bottom: 1px solid rgba(161, 186, 220, 0.16);
+  background:
+    radial-gradient(circle at 8% 20%, rgba(107, 155, 235, 0.16), transparent 28%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(240, 247, 255, 0.9));
+}
+
+.wd-health-panel__lead {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.wd-health-panel__lead h3 {
+  margin: 2px 0 4px;
+  color: #0f172a;
+  font-size: 0.98rem;
+  font-weight: 850;
+}
+
+.wd-health-panel__lead p {
+  margin: 0;
+  color: #52627a;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.wd-health-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(72px, 1fr));
+  gap: 8px;
+}
+
+.wd-health-item {
+  display: grid;
+  gap: 2px;
+  min-height: 74px;
+  padding: 10px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 10px 24px rgba(107, 155, 235, 0.08);
+}
+
+.wd-health-item span {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.wd-health-item strong {
+  color: #0f172a;
+  font-size: 1.24rem;
+  line-height: 1;
+  font-weight: 900;
+}
+
+.wd-health-item em {
+  color: #64748b;
+  font-size: 0.68rem;
+  font-style: normal;
+}
+
+.wd-health-item--success {
+  border-color: rgba(34, 197, 94, 0.22);
+  background: linear-gradient(180deg, rgba(240, 253, 244, 0.92), rgba(255, 255, 255, 0.84));
+}
+
+.wd-health-item--warn {
+  border-color: rgba(14, 165, 233, 0.28);
+  background: linear-gradient(180deg, rgba(255, 251, 235, 0.94), rgba(255, 255, 255, 0.84));
+}
+
+.wd-health-item--danger {
+  border-color: rgba(239, 68, 68, 0.24);
+  background: linear-gradient(180deg, rgba(254, 242, 242, 0.94), rgba(255, 255, 255, 0.84));
+}
+
 .wd-chapter-strip {
   display: grid;
   gap: 6px;
   padding: 6px 8px 0;
   border-bottom: 1px solid rgba(161, 186, 220, 0.16);
   background: rgba(247, 250, 255, 0.88);
+}
+
+@media (max-width: 1024px) {
+  .wd-health-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .wd-health-grid {
+    grid-template-columns: repeat(3, minmax(90px, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .wd-health-grid {
+    grid-template-columns: repeat(2, minmax(90px, 1fr));
+  }
 }
 
 .wd-strip-head {
@@ -957,27 +1109,11 @@ defineExpose({
   color: #0f172a;
 }
 
-.wd-strip-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.wd-strip-btn {
-  min-height: 28px;
-  padding: 0 9px;
-  border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  background: #fff;
-  color: #334155;
-  font-weight: 700;
-  font-size: 0.76rem;
-  cursor: pointer;
-}
-
-.wd-strip-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+.wd-strip-note {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 0.78rem;
+  line-height: 1.55;
 }
 
 .wd-strip-scroll {
@@ -1032,7 +1168,7 @@ defineExpose({
 }
 
 .wd-strip-chip--warning {
-  border-left: 4px solid rgba(245, 158, 11, 0.72);
+  border-left: 4px solid rgba(14, 165, 233, 0.72);
 }
 
 .wd-strip-chip--danger {
@@ -1045,14 +1181,13 @@ defineExpose({
   bottom: 12px;
   min-height: 42px;
   padding: 0 14px;
-  border: none;
+  border: 1px solid rgba(148, 163, 184, 0.24);
   border-radius: 999px;
-  background: rgba(53, 94, 147, 0.82);
+  background: rgba(53, 94, 147, 0.94);
   color: #fff;
   font-size: 0.82rem;
   font-weight: 700;
-  box-shadow: 0 12px 26px rgba(53, 94, 147, 0.24);
-  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 20px rgba(53, 94, 147, 0.18);
   cursor: pointer;
   z-index: 4;
 }
@@ -1071,4 +1206,3 @@ defineExpose({
   }
 }
 </style>
-

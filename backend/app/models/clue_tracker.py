@@ -12,6 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from ..db.base import Base
 
 LONG_TEXT_TYPE = Text().with_variant(LONGTEXT, "mysql")
+PROJECT_ID_TYPE = String(36).with_variant(String(36, collation="utf8mb4_unicode_ci"), "mysql")
 
 
 class ClueType(str, Enum):
@@ -47,7 +48,7 @@ class StoryClue(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[str] = mapped_column(
-        ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     # ===== 线索基础信息 =====
@@ -124,7 +125,7 @@ class ClueThread(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[str] = mapped_column(
-        ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     # ===== 线索网络信息 =====

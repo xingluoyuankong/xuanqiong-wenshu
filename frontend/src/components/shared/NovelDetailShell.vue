@@ -1,8 +1,8 @@
-﻿<!-- AIMETA P=灏忚璇︽儏澹砡璇︽儏椤靛竷灞€瀹瑰櫒|R=璇︽儏椤靛竷灞€_瀵艰埅|NR=涓嶅惈鍏蜂綋鍐呭|E=component:NovelDetailShell|X=internal|A=甯冨眬缁勪欢|D=vue|S=dom|RD=./README.ai -->
+﻿<!-- AIMETA P=小说详情壳_详情页布局容器|R=详情页布局_导航|NR=不含具体内容|E=component:NovelDetailShell|X=internal|A=布局组件|D=vue|S=dom|RD=./README.ai -->
 <template>
   <div class="h-screen flex flex-col overflow-hidden md-surface">
     <!-- Material 3 Top App Bar -->
-    <header class="md-top-app-bar sticky top-0 z-40">
+    <header class="md-top-app-bar xq-topbar xq-topbar--detail sticky top-0 z-40">
       <div class="max-w-[1800px] mx-auto w-full flex items-center px-4 h-16">
         <!-- Leading: Menu Button (Mobile) -->
         <button
@@ -185,31 +185,31 @@
         <div class="absolute inset-0" @click="cancelNewChapter"></div>
         <div class="md-dialog relative w-full max-w-lg mx-4" @click.stop>
           <div class="md-dialog-header">
-            <h3 class="md-dialog-title">鏂板绔犺妭澶х翰</h3>
+            <h3 class="md-dialog-title">新增章节大纲</h3>
           </div>
           <div class="md-dialog-content space-y-6">
             <div class="md-text-field">
               <label for="new-chapter-title" class="md-text-field-label">
-                绔犺妭鏍囬
+                章节标题
               </label>
               <input
                 id="new-chapter-title"
                 v-model="newChapterTitle"
                 type="text"
                 class="md-text-field-input"
-                placeholder="渚嬪锛氭剰澶栫殑鐩搁亣"
+                placeholder="例如：意外的相遇"
               >
             </div>
             <div class="md-text-field">
               <label for="new-chapter-summary" class="md-text-field-label">
-                绔犺妭鎽樿
+                章节摘要
               </label>
               <textarea
                 id="new-chapter-summary"
                 v-model="newChapterSummary"
                 rows="4"
                 class="md-textarea w-full"
-                placeholder="绠€瑕佹弿杩版湰绔犲彂鐢熺殑涓昏浜嬩欢"
+                placeholder="简要描述本章节发生的主要事件"
               ></textarea>
             </div>
           </div>
@@ -219,21 +219,21 @@
               class="md-btn md-btn-text md-ripple"
               @click="cancelNewChapter"
             >
-              鍙栨秷
+              取消
             </button>
             <button
               type="button"
               class="md-btn md-btn-filled md-ripple"
               @click="saveNewChapter"
             >
-              淇濆瓨
+              保存
             </button>
           </div>
         </div>
       </div>
     </transition>
 
-    <!-- 鍓ф儏婕旇繘寮圭獥 -->
+    <!-- 剧情演进弹窗 -->
     <WDEvolveOutlineModal
       :show="showEvolveModal"
       :project-id="novel?.id || projectId"
@@ -242,7 +242,7 @@
       @select="handleSelectEvolveOption"
     />
 
-    <!-- 璁板繂绠＄悊寮圭獥 -->
+    <!-- 记忆管理弹窗 -->
     <WDMemoryManageModal
       :show="showMemoryModal"
       :project-id="novel?.id || projectId"
@@ -250,7 +250,7 @@
       @updated="handleMemoryUpdated"
     />
 
-    <!-- Token棰勭畻绠＄悊寮圭獥 -->
+    <!-- Token 预算管理弹窗 -->
     <WDTokenBudgetModal
       :show="showTokenBudgetModal"
       :project-id="novel?.id || projectId"
@@ -268,8 +268,10 @@ import { NovelAPI, OptimizerAPI, AnalyticsAPI } from '@/api/novel'
 import { AdminAPI } from '@/api/admin'
 import type { NovelProject, NovelSectionResponse, NovelSectionType, AllSectionType } from '@/api/novel'
 import { formatDateTime } from '@/utils/date'
+import { resolveProjectWritingEntry } from '@/utils/projectRouting'
 import OverviewSection from '@/components/novel-detail/OverviewSection.vue'
 import WorldSettingSection from '@/components/novel-detail/WorldSettingSection.vue'
+import NovelOutlineSection from '@/components/novel-detail/NovelOutlineSection.vue'
 import CharactersSection from '@/components/novel-detail/CharactersSection.vue'
 import RelationshipsSection from '@/components/novel-detail/RelationshipsSection.vue'
 import ChapterOutlineSection from '@/components/novel-detail/ChapterOutlineSection.vue'
@@ -305,6 +307,7 @@ const isSidebarOpen = ref(typeof window !== 'undefined' ? window.innerWidth >= 1
 const sections: Array<{ key: SectionKey; label: string; description: string }> = [
   { key: 'overview', label: '项目概览', description: '定位与整体梗概' },
   { key: 'world_setting', label: '世界设定', description: '规则、地点与阵营' },
+  { key: 'novel_outline', label: '小说总大纲', description: '长篇骨架与推进结构' },
   { key: 'characters', label: '主要角色', description: '人物性格与目标' },
   { key: 'relationships', label: '人物关系', description: '角色之间的联系' },
   { key: 'chapter_outline', label: '章节大纲', description: props.isAdmin ? '故事章节规划' : '故事结构规划' },
@@ -323,6 +326,7 @@ const sections: Array<{ key: SectionKey; label: string; description: string }> =
 const sectionComponents: Record<SectionKey, any> = {
   overview: OverviewSection,
   world_setting: WorldSettingSection,
+  novel_outline: NovelOutlineSection,
   characters: CharactersSection,
   relationships: RelationshipsSection,
   chapter_outline: ChapterOutlineSection,
@@ -350,6 +354,11 @@ const getSectionIcon = (key: SectionKey) => {
     world_setting: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }, [
       h('circle', { cx: 12, cy: 12, r: 10 }),
       h('path', { d: 'M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z' })
+    ]),
+    novel_outline: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }, [
+      h('path', { d: 'M4 19.5A2.5 2.5 0 016.5 17H20' }),
+      h('path', { d: 'M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z' }),
+      h('path', { d: 'M9 7h8M9 11h8M9 15h5' })
     ]),
     characters: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }, [
       h('path', { d: 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2' }),
@@ -426,6 +435,7 @@ const sectionData = reactive<Partial<Record<SectionKey, any>>>({})
 const sectionLoading = reactive<Record<SectionKey, boolean>>({
   overview: false,
   world_setting: false,
+  novel_outline: false,
   characters: false,
   relationships: false,
   chapter_outline: false,
@@ -444,6 +454,7 @@ const sectionLoading = reactive<Record<SectionKey, boolean>>({
 const sectionError = reactive<Record<SectionKey, string | null>>({
   overview: null,
   world_setting: null,
+  novel_outline: null,
   characters: null,
   relationships: null,
   chapter_outline: null,
@@ -461,11 +472,12 @@ const sectionError = reactive<Record<SectionKey, string | null>>({
 })
 
 const overviewMeta = reactive<{ title: string; updated_at: string | null }>({
-  title: '鍔犺浇涓?..',
+  title: '加载中…',
   updated_at: null
 })
 
-const activeSection = ref<SectionKey>('overview')
+const routeSection = typeof route.query.section === 'string' ? route.query.section : ''
+const activeSection = ref<SectionKey>(sections.some(section => section.key === routeSection) ? routeSection as SectionKey : 'overview')
 const activeSectionMeta = computed(() => sections.find(section => section.key === activeSection.value) || sections[0])
 
 // Modal state (user mode only)
@@ -479,10 +491,10 @@ const isAddChapterModalOpen = ref(false)
 const newChapterTitle = ref('')
 const newChapterSummary = ref('')
 
-// 鍓ф儏鎺ㄦ紨鐩稿叧鐘舵€?
+// 剧情推演相关状态
 const showEvolveModal = ref(false)
 
-// 璁板繂绠＄悊涓?Token 棰勭畻寮圭獥鐘舵€?
+// 记忆管理与 Token 预算弹窗状态
 const showMemoryModal = ref(false)
 const showTokenBudgetModal = ref(false)
 const evolveLoading = ref(false)
@@ -511,10 +523,10 @@ const contentCardClass = computed(() => {
     : 'overflow-visible'
 })
 
-// 鎳掑姞杞藉畬鏁撮」鐩紙浠呭湪闇€瑕佺紪杈戞椂锛?
+// 懒加载完整项目（仅在需要编辑时）
 const ensureProjectLoaded = async () => {
   if (props.isAdmin || !projectId) return
-  if (novel.value) return // 宸插姞杞?
+  if (novel.value) return // 已加载
   await novelStore.loadProject(projectId)
 }
 
@@ -530,7 +542,7 @@ const handleResize = () => {
 const loadSection = async (section: SectionKey, force = false) => {
   if (!projectId) return
 
-  // 鍒嗘瀽鍨婼ection浣跨敤鐙珛鐨凙PI锛屼笉闇€瑕佸湪杩欓噷鍔犺浇
+  // 分析类 section 使用独立 API，不需要在这里加载
   const analysisSections: SectionKey[] = [
     'emotion_curve',
     'story_trajectory',
@@ -560,8 +572,8 @@ const loadSection = async (section: SectionKey, force = false) => {
       overviewMeta.updated_at = response.data?.updated_at || null
     }
   } catch (error) {
-    console.error('鍔犺浇妯″潡澶辫触:', error)
-    sectionError[section] = error instanceof Error ? error.message : '鍔犺浇澶辫触'
+    console.error('加载模块失败:', error)
+    sectionError[section] = error instanceof Error ? error.message : '加载失败'
   } finally {
     sectionLoading[section] = false
   }
@@ -591,15 +603,15 @@ const fetchAnalysisSection = async (section: Extract<SectionKey, 'story_trajecto
       sectionData[section] = await AnalyticsAPI.getComprehensiveAnalysis(targetProjectId)
     }
   } catch (error) {
-    console.error('鍔犺浇澧炲己鍒嗘瀽澶辫触:', error)
-    sectionError[section] = error instanceof Error ? error.message : '鍔犺浇澶辫触'
+    console.error('加载增强分析失败:', error)
+    sectionError[section] = error instanceof Error ? error.message : '加载失败'
   } finally {
     sectionLoading[section] = false
   }
 }
 
 const switchSection = (section: SectionKey) => {
-  // 椋庢牸瀛︿範鐩磋揪鏂囬涓績锛涜蹇嗙鐞嗐€乀oken棰勭畻浠嶇洿鎺ユ墦寮€寮圭獥
+  // 风格学习直接跳转文风中心；记忆管理、Token 预算仍直接打开弹窗
   if (section === 'style_learning') {
     router.push('/style-center')
     return
@@ -614,6 +626,7 @@ const switchSection = (section: SectionKey) => {
   }
 
   activeSection.value = section
+  router.replace({ query: { ...route.query, section } }).catch(() => {})
   if (typeof window !== 'undefined' && window.innerWidth < 1024) {
     isSidebarOpen.value = false
   }
@@ -632,8 +645,7 @@ const goToWritingDesk = async () => {
   await ensureProjectLoaded()
   const project = novel.value
   if (!project) return
-  const path = project.title === '未命名灵感项目' ? `/inspiration?project_id=${project.id}` : `/novel/${project.id}`
-  router.push(path)
+  router.push(resolveProjectWritingEntry(project))
 }
 
 const currentComponent = computed(() => sectionComponents[activeSection.value])
@@ -648,6 +660,8 @@ const componentProps = computed(() => {
     case 'overview':
       return { data: data || null, editable }
     case 'world_setting':
+      return { data: data || null, editable }
+    case 'novel_outline':
       return { data: data || null, editable }
     case 'characters':
       return { data: data || null, editable }
@@ -731,7 +745,7 @@ const handleSave = async (data: { field: string; content: any }) => {
     }
     isModalOpen.value = false
   } catch (error) {
-    console.error('淇濆瓨鍙樻洿澶辫触:', error)
+    console.error('保存变更失败:', error)
   }
 }
 
@@ -749,7 +763,7 @@ const cancelNewChapter = () => {
   isAddChapterModalOpen.value = false
 }
 
-// 鍓ф儏鎺ㄦ紨鐩稿叧鍑芥暟
+// 剧情推演相关函数
 const openEvolveModal = async (payload: { projectId: string; chapterNumber: number }) => {
   if (props.isAdmin) return
   evolveChapterNumber.value = payload.chapterNumber
@@ -761,7 +775,7 @@ const openEvolveModal = async (payload: { projectId: string; chapterNumber: numb
     const res = await OptimizerAPI.evolveOutline(payload.projectId, payload.chapterNumber, 3)
     evolveAlternatives.value = res.alternatives
   } catch (e) {
-    console.error('鐢熸垚鍓ф儏婕旇繘閫夐」澶辫触:', e)
+    console.error('生成剧情演进选项失败:', e)
   } finally {
     evolveLoading.value = false
   }
@@ -774,16 +788,16 @@ const handleSelectEvolveOption = async (option: any) => {
   try {
     await OptimizerAPI.selectAlternative(project.id, option.id, evolveChapterNumber.value)
     showEvolveModal.value = false
-    // 鍒锋柊澶х翰鏁版嵁
+    // 刷新大纲数据
     await novelStore.loadProject(project.id)
-    // 鍒囨崲鍒扮珷鑺傚ぇ绾叉爣绛?
+    // 切换到章节大纲标签
     activeSection.value = 'chapter_outline'
   } catch (e) {
-    console.error('閫夋嫨鍓ф儏閫夐」澶辫触:', e)
+    console.error('选择剧情选项失败:', e)
   }
 }
 
-// 椋庢牸瀛︿範鐩稿叧澶勭悊鍑芥暟
+// 风格学习相关处理函数
 async function handleStyleExtracted(summary: any) {
   console.log('风格已提取:', summary)
   await loadSection('overview', true)
@@ -792,7 +806,7 @@ async function handleStyleExtracted(summary: any) {
   }
 }
 
-// 璁板繂绠＄悊鐩稿叧澶勭悊鍑芥暟
+// 记忆管理相关处理函数
 async function handleMemoryUpdated() {
   console.log('记忆已更新')
   await loadSection('overview', true)
@@ -825,7 +839,7 @@ const saveNewChapter = async () => {
     await loadSection('chapter_outline', true)
     isAddChapterModalOpen.value = false
   } catch (error) {
-    console.error('鏂板绔犺妭澶辫触:', error)
+    console.error('新增章节失败:', error)
   }
 }
 
@@ -838,9 +852,8 @@ onMounted(async () => {
     document.body.style.overflow = 'hidden'
   }
 
-  // 鍙姞杞藉繀瑕佺殑 section 鏁版嵁锛屼笉棰勫姞杞藉畬鏁撮」鐩?
+  // 首屏只拉取概览，其他分区按用户切换时再加载，避免详情页首屏串行/并行多请求造成卡顿。
   await loadSection('overview', true)
-  loadSection('world_setting')
 })
 
 onBeforeUnmount(() => {

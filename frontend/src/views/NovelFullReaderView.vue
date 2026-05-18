@@ -1,7 +1,7 @@
 <template>
   <main class="reader-page">
     <section class="reader-shell">
-      <header class="reader-topbar">
+      <header class="reader-topbar xq-page-topbar xq-page-topbar--reader">
         <div class="reader-topbar__lead">
           <div class="reader-topbar__chips">
             <span class="reader-chip reader-chip--primary">全文阅读</span>
@@ -42,6 +42,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { navigateBackOrFallback } from '@/utils/safeNavigation'
 
 interface ReaderPayload {
   title?: string
@@ -69,8 +70,12 @@ const subtitle = computed(() => payload.value.subtitle || '')
 const content = computed(() => payload.value.content || '')
 const chips = computed(() => Array.isArray(payload.value.chips) ? payload.value.chips : [])
 
-function goBack() {
-  router.back()
+async function goBack() {
+  const fallback = typeof route.params.id === 'string'
+    ? { name: 'writing-desk', params: { id: route.params.id } }
+    : { name: 'workspace-entry' }
+
+  await navigateBackOrFallback(router, route.fullPath, fallback)
 }
 </script>
 

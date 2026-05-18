@@ -11,7 +11,7 @@ AIReviewService: AI 评审服务
 import json
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ..services.llm_service import LLMService
 from ..services.prompt_service import PromptService
@@ -62,49 +62,271 @@ class AIReviewService:
         Returns:
             ReviewResult: 评审结果，如果失败返回 None
         """
-        if not versions:
-            logger.warning("没有版本可供评审")
-            return None
+        with LLMService.daily_limit_scope(f"ai_review:{user_id}:{len(versions)}"):
+            if not versions:
+                logger.warning("没有版本可供评审")
+                return None
 
-        if len(versions) == 1:
-            return await self._review_single_version(
-                version=versions[0],
-                chapter_mission=chapter_mission,
-                user_id=user_id,
+            if len(versions) == 1:
+                return await self._review_single_version(
+                    version=versions[0],
+                    chapter_mission=chapter_mission,
+                    user_id=user_id,
+                )
+
+            # 获取评审提示词
+            review_prompt = await self.prompt_service.get_prompt("editor_review")
+            if not review_prompt:
+                logger.warning("未配置 editor_review 提示词，跳过 AI 评审")
+                return None
+
+            # 构建评审输入
+            review_input = self._build_review_input(versions, chapter_mission)
+
+            try:
+                response = await self.llm_service.get_llm_response(
+                    system_prompt=review_prompt,
+                    conversation_history=[{"role": "user", "content": review_input}],
+                    temperature=0.3,
+                    user_id=user_id,
+                    timeout=180.0,
+                )
+                cleaned = remove_think_tags(response)
+                normalized = unwrap_markdown_json(cleaned)
+
+                result = self._parse_review_response(normalized)
+                result.raw_response = cleaned
+
+                logger.info(
+                    "AI 评审完成: 最佳版本=%s, 综合评分=%.1f",
+                    result.best_version_index,
+                    sum(result.scores.values()) / len(result.scores) if result.scores else 0,
+                )
+                return result
+            except Exception as exc:
+                logger.exception("AI 评审失败: %s", exc)
+                return None
+
+    @staticmethod
+    def _split_paragraphs(content: str) -> List[str]:
+        return [segment.strip() for segment in str(content or "").splitlines() if segment.strip()]
+
+    @staticmethod
+    def _count_dialogue_markers(content: str) -> int:
+        return sum(str(content or "").count(marker) for marker in ("“", "”", "「", "」", "『", "』", '"'))
+
+    @staticmethod
+    def _count_progression_markers(content: str) -> int:
+        text = str(content or "")
+        markers = (
+            "却",
+            "但",
+            "突然",
+            "忽然",
+            "发现",
+            "意识到",
+            "逼问",
+            "拒绝",
+            "反问",
+            "威胁",
+            "决定",
+            "转而",
+            "反转",
+            "暴露",
+            "失控",
+            "代价",
+            "线索",
+            "危险",
+            "门外",
+            "脚步",
+            "下一刻",
+            "然而",
+        )
+        return sum(text.count(marker) for marker in markers)
+
+    @staticmethod
+    def _short_excerpt(content: str, *, limit: int = 180) -> str:
+        text = " ".join(str(content or "").split())
+        if len(text) <= limit:
+            return text
+        return f"{text[:limit].rstrip()}..."
+
+    @classmethod
+    def _build_structure_map(cls, paragraphs: List[str]) -> List[Dict[str, Any]]:
+        if not paragraphs:
+            return []
+
+        indexes = {
+            0,
+            len(paragraphs) // 4,
+            len(paragraphs) // 2,
+            (len(paragraphs) * 3) // 4,
+            len(paragraphs) - 1,
+        }
+        structure: List[Dict[str, Any]] = []
+        for index in sorted(indexes):
+            paragraph = paragraphs[index]
+            structure.append(
+                {
+                    "paragraph": index + 1,
+                    "chars": len(paragraph),
+                    "dialogue_markers": cls._count_dialogue_markers(paragraph),
+                    "progression_markers": cls._count_progression_markers(paragraph),
+                    "excerpt": cls._short_excerpt(paragraph),
+                }
             )
+        return structure
 
-        # 获取评审提示词
-        review_prompt = await self.prompt_service.get_prompt("editor_review")
-        if not review_prompt:
-            logger.warning("未配置 editor_review 提示词，跳过 AI 评审")
-            return None
-
-        # 构建评审输入
-        review_input = self._build_review_input(versions, chapter_mission)
-
-        try:
-            response = await self.llm_service.get_llm_response(
-                system_prompt=review_prompt,
-                conversation_history=[{"role": "user", "content": review_input}],
-                temperature=0.3,
-                user_id=user_id,
-                timeout=180.0,
+    @classmethod
+    def _estimate_static_description_risk(cls, paragraphs: List[str]) -> Dict[str, int]:
+        static_count = 0
+        max_static_run = 0
+        current_run = 0
+        for paragraph in paragraphs:
+            is_static = (
+                len(paragraph) >= 80
+                and cls._count_dialogue_markers(paragraph) == 0
+                and cls._count_progression_markers(paragraph) == 0
             )
-            cleaned = remove_think_tags(response)
-            normalized = unwrap_markdown_json(cleaned)
-            
-            result = self._parse_review_response(normalized)
-            result.raw_response = cleaned
-            
-            logger.info(
-                "AI 评审完成: 最佳版本=%s, 综合评分=%.1f",
-                result.best_version_index,
-                sum(result.scores.values()) / len(result.scores) if result.scores else 0,
+            if is_static:
+                static_count += 1
+                current_run += 1
+                max_static_run = max(max_static_run, current_run)
+            else:
+                current_run = 0
+        return {"static_paragraph_count": static_count, "max_static_run": max_static_run}
+
+    @staticmethod
+    def _format_structure_map(excerpt_payload: Dict[str, Any]) -> str:
+        risk = excerpt_payload.get("static_description_risk") or {}
+        lines = [
+            (
+                f"- 全文约 {excerpt_payload.get('total_chars', 0)} 字，"
+                f"{excerpt_payload.get('paragraph_count', 0)} 段，"
+                f"对话标记 {excerpt_payload.get('dialogue_marker_count', 0)} 处，"
+                f"推进标记 {excerpt_payload.get('progression_marker_count', 0)} 处；"
+                f"静态段落 {risk.get('static_paragraph_count', 0)} 段，"
+                f"最长连续静态段 {risk.get('max_static_run', 0)} 段。"
             )
-            return result
-        except Exception as exc:
-            logger.exception("AI 评审失败: %s", exc)
-            return None
+        ]
+        for item in excerpt_payload.get("structure_map") or []:
+            lines.append(
+                "- P{paragraph} | {chars}字 | 对话{dialogue_markers} | 推进{progression_markers}: {excerpt}".format(
+                    **item
+                )
+            )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_mission_checklist(chapter_mission: Optional[dict]) -> str:
+        if not isinstance(chapter_mission, dict) or not chapter_mission:
+            return ""
+
+        lines: List[str] = []
+        purpose = chapter_mission.get("chapter_purpose") or chapter_mission.get("purpose")
+        if purpose:
+            lines.append(f"- 本章目的：{purpose}")
+
+        continuity = chapter_mission.get("continuity_anchor")
+        if isinstance(continuity, dict):
+            inherit = continuity.get("inherit_from_previous") or []
+            deliver = continuity.get("deliver_to_next") or []
+            if inherit:
+                lines.append(f"- 必须承接：{'; '.join(str(item) for item in inherit[:4])}")
+            if deliver:
+                lines.append(f"- 必须递给下一章：{'; '.join(str(item) for item in deliver[:4])}")
+
+        dialogue_strategy = chapter_mission.get("dialogue_strategy")
+        if isinstance(dialogue_strategy, dict):
+            purposes = dialogue_strategy.get("purpose") or dialogue_strategy.get("goals") or []
+            if purposes:
+                lines.append(f"- 对话必须承担：{'; '.join(str(item) for item in purposes[:4])}")
+
+        scene_list = chapter_mission.get("scene_list") or []
+        if isinstance(scene_list, list):
+            for index, scene in enumerate(scene_list[:8], start=1):
+                if not isinstance(scene, dict):
+                    continue
+                beats = []
+                for key, label in (
+                    ("goal", "目标"),
+                    ("conflict", "阻碍"),
+                    ("turn", "转折"),
+                    ("emotion_shift", "情绪变化"),
+                    ("dialogue_value", "对话功能"),
+                    ("end_hook", "钩子"),
+                ):
+                    value = scene.get(key)
+                    if value:
+                        beats.append(f"{label}={value}")
+                if beats:
+                    lines.append(f"- 场景{index}: " + "；".join(str(item) for item in beats))
+
+        return "\n".join(lines)
+
+    @classmethod
+    def _extract_paragraph_window(cls, paragraphs: List[str], anchor_index: int, radius: int = 1) -> str:
+        if not paragraphs:
+            return ""
+        safe_index = max(0, min(anchor_index, len(paragraphs) - 1))
+        start = max(0, safe_index - radius)
+        end = min(len(paragraphs), safe_index + radius + 1)
+        return "\n\n".join(paragraphs[start:end]).strip()
+
+    @classmethod
+    def _find_keyword_window(cls, paragraphs: List[str], keywords: List[str], *, default_index: int = 0) -> str:
+        if not paragraphs:
+            return ""
+        for idx, paragraph in enumerate(paragraphs):
+            if any(keyword and keyword in paragraph for keyword in keywords):
+                return cls._extract_paragraph_window(paragraphs, idx)
+        return cls._extract_paragraph_window(paragraphs, default_index)
+
+    @classmethod
+    def _find_max_scored_window(cls, paragraphs: List[str], scorer) -> str:
+        if not paragraphs:
+            return ""
+        best_index = 0
+        best_score = None
+        for idx, paragraph in enumerate(paragraphs):
+            score = scorer(paragraph)
+            if best_score is None or score > best_score:
+                best_index = idx
+                best_score = score
+        return cls._extract_paragraph_window(paragraphs, best_index)
+
+    @classmethod
+    def _build_excerpt_payload(cls, content: str) -> Dict[str, Any]:
+        text = str(content or "")
+        total_chars = len(text)
+        paragraphs = cls._split_paragraphs(text)
+        dialogue_marker_count = cls._count_dialogue_markers(text)
+        progression_marker_count = cls._count_progression_markers(text)
+        middle_start = max((total_chars // 2) - 700, 0)
+        return {
+            "total_chars": total_chars,
+            "paragraph_count": len(paragraphs),
+            "dialogue_marker_count": dialogue_marker_count,
+            "progression_marker_count": progression_marker_count,
+            "structure_map": cls._build_structure_map(paragraphs),
+            "static_description_risk": cls._estimate_static_description_risk(paragraphs),
+            "head": text[:1400],
+            "middle": text[middle_start: middle_start + 1400],
+            "tail": text[-1400:],
+            "first_conflict": cls._find_keyword_window(
+                paragraphs,
+                ["质问", "逼", "压", "拒绝", "反问", "冷笑", "却", "忽然", "突然", "翻脸", "门外", "脚步"],
+            ),
+            "dialogue_window": cls._find_max_scored_window(
+                paragraphs,
+                lambda paragraph: cls._count_dialogue_markers(paragraph) * 10 + sum(paragraph.count(keyword) for keyword in ("问", "答", "说", "笑", "冷", "盯", "逼")),
+            ),
+            "turn_window": cls._find_keyword_window(
+                paragraphs,
+                ["却", "忽然", "突然", "没想到", "谁知", "竟", "反而", "下一瞬", "然而"],
+                default_index=max(0, len(paragraphs) // 2),
+            ),
+        }
 
     def _build_review_input(
         self, versions: List[str], chapter_mission: Optional[dict]
@@ -115,30 +337,52 @@ class AIReviewService:
         if chapter_mission:
             lines.append("[章节导演脚本]")
             lines.append(json.dumps(chapter_mission, ensure_ascii=False, indent=2))
+            mission_checklist = self._format_mission_checklist(chapter_mission)
+            if mission_checklist:
+                lines.append("[导演脚本兑现清单]")
+                lines.append(mission_checklist)
             lines.append("")
 
         lines.append("[待评审版本]")
         for i, content in enumerate(versions):
             lines.append(f"--- 版本 {i} ---")
-            total_chars = len(content)
+            excerpt_payload = self._build_excerpt_payload(content)
+            total_chars = excerpt_payload["total_chars"]
+            lines.append(
+                f"[版本概况] 原文共 {total_chars} 字，约 {excerpt_payload['paragraph_count']} 段，对话标记 {excerpt_payload['dialogue_marker_count']} 处。"
+            )
+            lines.append("[整章结构地图]")
+            lines.append(self._format_structure_map(excerpt_payload))
+            lines.append("请优先结合[整章结构地图]判断：是否存在连续静态描写、正文是否只是扩写氛围、对话是否真正改变局势、章节结尾是否把后果递给下一章。")
+            lines.append("")
             if total_chars <= 3200:
                 lines.append(content)
             else:
-                head = content[:1800]
-                tail = content[-1400:]
                 lines.append("[开头片段]")
-                lines.append(head)
+                lines.append(excerpt_payload["head"])
+                lines.append("")
+                lines.append("[中段片段]")
+                lines.append(excerpt_payload["middle"])
                 lines.append("")
                 lines.append("[结尾片段]")
-                lines.append(tail)
+                lines.append(excerpt_payload["tail"])
+                lines.append("")
+                lines.append("[首个冲突片段]")
+                lines.append(excerpt_payload["first_conflict"] or "（未提取到明显冲突片段）")
+                lines.append("")
+                lines.append("[最长对话片段]")
+                lines.append(excerpt_payload["dialogue_window"] or "（未提取到高密度对话片段）")
+                lines.append("")
+                lines.append("[关键转折片段]")
+                lines.append(excerpt_payload["turn_window"] or "（未提取到明显转折片段）")
                 lines.append("")
                 lines.append(
-                    f"... (该版本较长，已截取开头 1800 字 + 结尾 1400 字，原文共 {total_chars} 字)"
+                    f"... (该版本较长，已截取开头/中段/结尾以及冲突/对话/转折关键区间，原文共 {total_chars} 字)"
                 )
             lines.append("")
 
         lines.append("[评审要求]")
-        lines.append("请按照评审流程，对上述版本进行对比分析，输出 JSON 格式的评审结果。")
+        lines.append("请按照评审流程，对上述版本进行对比分析，重点判断整章是否真正推进剧情、对话是否改变局势，并输出 JSON 格式的评审结果。")
 
         return "\n".join(lines)
 
@@ -152,27 +396,46 @@ class AIReviewService:
         if chapter_mission:
             lines.append("[章节导演脚本]")
             lines.append(json.dumps(chapter_mission, ensure_ascii=False, indent=2))
+            mission_checklist = self._format_mission_checklist(chapter_mission)
+            if mission_checklist:
+                lines.append("[导演脚本兑现清单]")
+                lines.append(mission_checklist)
             lines.append("")
 
         lines.append("[待评审正文]")
-        total_chars = len(version)
+        excerpt_payload = self._build_excerpt_payload(version)
+        total_chars = excerpt_payload["total_chars"]
+        lines.append("请优先结合[整章结构地图]判断：是否存在连续静态描写、正文是否只是扩写氛围、对话是否真正改变局势、章节结尾是否把后果递给下一章。")
+        lines.append(
+            f"[版本概况] 原文共 {total_chars} 字，约 {excerpt_payload['paragraph_count']} 段，对话标记 {excerpt_payload['dialogue_marker_count']} 处。"
+        )
+        lines.append("[整章结构地图]")
+        lines.append(self._format_structure_map(excerpt_payload))
+        lines.append("请优先结合[整章结构地图]判断：是否存在连续静态描写、正文是否只是扩写氛围、对话是否真正改变局势、章节结尾是否把后果递给下一章。")
+        lines.append("")
         if total_chars <= 4200:
             lines.append(version)
         else:
             head = version[:2200]
-            middle_start = max((total_chars // 2) - 700, 0)
-            middle = version[middle_start: middle_start + 1400]
-            tail = version[-1400:]
             lines.append("[开头片段]")
             lines.append(head)
             lines.append("")
             lines.append("[中段片段]")
-            lines.append(middle)
+            lines.append(excerpt_payload["middle"])
             lines.append("")
             lines.append("[结尾片段]")
-            lines.append(tail)
+            lines.append(excerpt_payload["tail"])
             lines.append("")
-            lines.append(f"...（正文较长，已截取开头/中段/结尾片段，原文共 {total_chars} 字）")
+            lines.append("[首个冲突片段]")
+            lines.append(excerpt_payload["first_conflict"] or "（未提取到明显冲突片段）")
+            lines.append("")
+            lines.append("[最长对话片段]")
+            lines.append(excerpt_payload["dialogue_window"] or "（未提取到高密度对话片段）")
+            lines.append("")
+            lines.append("[关键转折片段]")
+            lines.append(excerpt_payload["turn_window"] or "（未提取到明显转折片段）")
+            lines.append("")
+            lines.append(f"...（正文较长，已截取开头/中段/结尾及冲突/对话/转折关键区间，原文共 {total_chars} 字）")
 
         lines.append("")
         lines.append("[评审要求]")

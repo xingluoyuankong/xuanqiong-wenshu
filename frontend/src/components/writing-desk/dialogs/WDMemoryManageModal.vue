@@ -1,26 +1,18 @@
 <!-- 记忆管理弹窗 - 管理项目的记忆层 -->
 <template>
-  <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-    <!-- 遮罩 -->
-    <div class="absolute inset-0 bg-black/50" @click="$emit('close')"></div>
-
-    <!-- 弹窗内容 -->
-    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden">
-      <!-- 标题 -->
-      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+  <div v-if="show" class="xq-dialog-overlay" @click.self="$emit('close')">
+    <div class="xq-dialog-shell">
+      <div class="xq-dialog-header">
         <div>
-          <h3 class="text-xl font-bold text-slate-900">记忆管理</h3>
-          <p class="text-sm text-slate-500 mt-1">管理项目的动态记忆层，支持增量更新、快照和回滚</p>
+          <p class="xq-dialog-kicker">Memory Layer</p>
+          <h3 class="xq-dialog-title">记忆管理</h3>
+          <p class="xq-dialog-subtitle">管理项目动态记忆层，支持增量更新、快照、压缩和回滚。</p>
         </div>
-        <button @click="$emit('close')" class="text-slate-400 hover:text-slate-600">
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-          </svg>
-        </button>
+        <button @click="$emit('close')" class="xq-dialog-close" aria-label="关闭">×</button>
       </div>
 
       <!-- 内容区 -->
-      <div class="px-6 py-4 overflow-y-auto max-h-[60vh]">
+      <div class="xq-dialog-body">
         <!-- 加载状态 -->
         <div v-if="loading" class="flex flex-col items-center justify-center py-12">
           <div class="animate-spin rounded-full h-12 w-12 border-4 border-indigo-500 border-t-transparent"></div>
@@ -43,7 +35,7 @@
         <!-- 记忆信息 -->
         <div v-else>
           <!-- 当前状态卡片 -->
-          <div class="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-4 mb-4">
+          <div class="memory-status-card">
             <div class="flex items-center gap-3">
               <div class="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center">
                 <svg class="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -98,7 +90,7 @@
                   v-if="snapshot.id !== currentSnapshotId"
                   @click="rollbackToSnapshot(snapshot.id)"
                   :disabled="actionLoading"
-                  class="px-3 py-1.5 text-sm font-medium text-orange-600 bg-orange-50 rounded-lg hover:bg-orange-100 disabled:opacity-50"
+                  class="px-3 py-1.5 text-sm font-medium text-sky-600 bg-sky-50 rounded-lg hover:bg-sky-100 disabled:opacity-50"
                 >
                   回滚
                 </button>
@@ -120,7 +112,7 @@
       </div>
 
       <!-- 底部按钮 -->
-      <div class="px-6 py-4 border-t border-slate-200 flex justify-between items-center">
+      <div class="xq-dialog-footer justify-between">
         <button
           @click="compressMemory"
           :disabled="actionLoading || snapshots.length === 0"
@@ -252,3 +244,16 @@ watch(() => props.show, (newVal) => {
   }
 })
 </script>
+
+<style scoped>
+.memory-status-card {
+  padding: 16px;
+  margin-bottom: 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(99, 102, 241, 0.18);
+  background:
+    radial-gradient(circle at 8% 20%, rgba(99, 102, 241, 0.14), transparent 34%),
+    linear-gradient(135deg, rgba(238, 242, 255, 0.96), rgba(255, 255, 255, 0.9));
+  box-shadow: 0 16px 38px rgba(99, 102, 241, 0.1);
+}
+</style>

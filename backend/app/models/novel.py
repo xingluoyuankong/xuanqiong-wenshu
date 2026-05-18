@@ -13,6 +13,7 @@ from ..db.base import Base
 # 自定义列类型：兼容跨数据库环境
 BIGINT_PK_TYPE = BigInteger().with_variant(Integer, "sqlite")
 LONG_TEXT_TYPE = Text().with_variant(LONGTEXT, "mysql")
+PROJECT_ID_TYPE = String(36).with_variant(String(36, collation="utf8mb4_unicode_ci"), "mysql")
 
 
 class _MetadataAccessor:
@@ -32,7 +33,7 @@ class NovelProject(Base):
 
     __tablename__ = "novel_projects"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     initial_prompt: Mapped[Optional[str]] = mapped_column(Text)
@@ -90,7 +91,7 @@ class NovelConversation(Base):
     __tablename__ = "novel_conversations"
 
     id: Mapped[int] = mapped_column(BIGINT_PK_TYPE, primary_key=True, autoincrement=True)
-    project_id: Mapped[str] = mapped_column(ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False)
     seq: Mapped[int] = mapped_column(Integer, nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False)
     content: Mapped[str] = mapped_column(LONG_TEXT_TYPE, nullable=False)
@@ -107,7 +108,7 @@ class NovelBlueprint(Base):
     __tablename__ = "novel_blueprints"
 
     project_id: Mapped[str] = mapped_column(
-        ForeignKey("novel_projects.id", ondelete="CASCADE"), primary_key=True
+        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), primary_key=True
     )
     title: Mapped[Optional[str]] = mapped_column(String(255))
     target_audience: Mapped[Optional[str]] = mapped_column(String(255))
@@ -129,7 +130,7 @@ class BlueprintCharacter(Base):
     __tablename__ = "blueprint_characters"
 
     id: Mapped[int] = mapped_column(BIGINT_PK_TYPE, primary_key=True, autoincrement=True)
-    project_id: Mapped[str] = mapped_column(ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     identity: Mapped[Optional[str]] = mapped_column(String(255))
     personality: Mapped[Optional[str]] = mapped_column(Text)
@@ -148,7 +149,7 @@ class BlueprintRelationship(Base):
     __tablename__ = "blueprint_relationships"
 
     id: Mapped[int] = mapped_column(BIGINT_PK_TYPE, primary_key=True, autoincrement=True)
-    project_id: Mapped[str] = mapped_column(ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False)
     character_from: Mapped[str] = mapped_column(String(255), nullable=False)
     character_to: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
@@ -166,7 +167,7 @@ class ChapterOutline(Base):
     )
 
     id: Mapped[int] = mapped_column(BIGINT_PK_TYPE, primary_key=True, autoincrement=True)
-    project_id: Mapped[str] = mapped_column(ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False)
     chapter_number: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     summary: Mapped[Optional[str]] = mapped_column(Text)
@@ -185,7 +186,7 @@ class Chapter(Base):
     )
 
     id: Mapped[int] = mapped_column(BIGINT_PK_TYPE, primary_key=True, autoincrement=True)
-    project_id: Mapped[str] = mapped_column(ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False)
     chapter_number: Mapped[int] = mapped_column(Integer, nullable=False)
     real_summary: Mapped[Optional[str]] = mapped_column(LONG_TEXT_TYPE)
     status: Mapped[str] = mapped_column(String(32), default="not_generated")
@@ -263,3 +264,23 @@ class ChapterEvaluation(Base):
 
     chapter: Mapped[Chapter] = relationship(back_populates="evaluations")
     version: Mapped[Optional[ChapterVersion]] = relationship(back_populates="evaluations")
+
+
+class BlueprintGenerationJob(Base):
+    """蓝图生成任务持久化状态。"""
+
+    __tablename__ = "blueprint_generation_jobs"
+
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    progress_stage: Mapped[Optional[str]] = mapped_column(String(32))
+    progress_message: Mapped[Optional[str]] = mapped_column(Text)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    blueprint_payload: Mapped[Optional[dict]] = mapped_column(JSON)
+    ai_message: Mapped[Optional[str]] = mapped_column(LONG_TEXT_TYPE)
+    error_payload: Mapped[Optional[dict]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

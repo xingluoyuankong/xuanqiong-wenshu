@@ -21,6 +21,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db.base import Base
 
+PROJECT_ID_TYPE = String(36).with_variant(String(36, collation="utf8mb4_unicode_ci"), "mysql")
+
 
 class NovelConstitution(Base):
     """小说宪法 - 项目级别的创作规则集"""
@@ -28,7 +30,7 @@ class NovelConstitution(Base):
     __tablename__ = "novel_constitutions"
 
     project_id: Mapped[str] = mapped_column(
-        ForeignKey("novel_projects.id", ondelete="CASCADE"), primary_key=True
+        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), primary_key=True
     )
     
     # ===== 故事基础 =====

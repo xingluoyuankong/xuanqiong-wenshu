@@ -1,6 +1,6 @@
 ﻿<template>
   <div class="llm-settings-root">
-    <section class="llm-toolbar">
+    <section class="llm-toolbar xq-page-topbar xq-page-topbar--llm">
       <div>
         <h2>LLM 配置</h2>
         <p>统一管理接口地址、API Key、模型列表，并支持健康检查和自动切换。</p>

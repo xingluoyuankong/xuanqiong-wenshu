@@ -28,6 +28,7 @@ class ExportService:
 
         if not chapters:
             raise HTTPException(status_code=404, detail="没有章节可导出")
+        self._validate_exportable_chapters(chapters)
 
         outlines = await self._get_outlines_map(project_id)
 
@@ -64,6 +65,7 @@ class ExportService:
 
         if not chapters:
             raise HTTPException(status_code=404, detail="没有章节可导出")
+        self._validate_exportable_chapters(chapters)
 
         outlines = await self._get_outlines_map(project_id)
 
@@ -124,14 +126,40 @@ class ExportService:
         outlines = result.scalars().all()
         return {outline.chapter_number: outline for outline in outlines}
 
+    def _validate_exportable_chapters(self, chapters: list[Chapter]) -> None:
+        """导出前硬校验：禁止把空章节/未选中版本伪装成正常导出。
+
+        历史实现会在 selected_version 缺失时回退到最新版本，导致数据库状态断链被
+        TXT/DOCX 导出掩盖。小说交付场景中这会让作者误以为全书已完成，因此导出必须
+        只接受“章节状态成功 + 已选中版本 + 正文非空”的章节。
+        """
+        invalid: list[str] = []
+        for chapter in chapters:
+            chapter_no = getattr(chapter, "chapter_number", "?")
+            selected_version = getattr(chapter, "selected_version", None)
+            content = (getattr(selected_version, "content", "") or "").strip() if selected_version else ""
+            if getattr(chapter, "status", None) != "successful":
+                invalid.append(f"第{chapter_no}章状态为 {getattr(chapter, 'status', 'unknown')}")
+                continue
+            if selected_version is None:
+                invalid.append(f"第{chapter_no}章未选中正文版本")
+                continue
+            if not content:
+                invalid.append(f"第{chapter_no}章选中版本正文为空")
+
+        if invalid:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "novel_export_not_ready",
+                    "message": "小说仍存在未完成或不可导出的章节，请修复后再导出。",
+                    "issues": invalid,
+                },
+            )
+
     def _get_chapter_content(self, chapter: Chapter) -> str:
         selected_version = chapter.selected_version
         if selected_version and selected_version.content:
             return selected_version.content
-
-        if chapter.versions:
-            latest_version = chapter.versions[-1]
-            if latest_version.content:
-                return latest_version.content
 
         return ""

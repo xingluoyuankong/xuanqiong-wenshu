@@ -37,7 +37,7 @@
                       生成第 {{ chapterNumber ?? '-' }} 章
                     </DialogTitle>
                     <p class="md-body-small md-on-surface-variant mt-1">
-                      可指定章节方向、质量偏好与字数约束（最低 1200 字）。
+                      可指定章节方向、质量偏好与字数约束（默认约 5000 字，可自行调整，最低 1200 字）。
                     </p>
                   </div>
                 </div>
@@ -143,7 +143,7 @@
                 </p>
               </div>
 
-              <div class="shrink-0 border-t px-6 py-4 sm:flex sm:flex-row-reverse sm:px-8" style="border-top-color: var(--md-outline-variant); background-color: var(--md-surface-container-low);">
+              <div class="xq-dialog-footer">
                 <button
                   type="button"
                   class="md-btn md-btn-filled md-ripple sm:ml-3 sm:w-auto w-full justify-center"
@@ -200,8 +200,8 @@ interface ChapterGenerationConfig {
   targetWordCount: number
 }
 
-const DEFAULT_MIN_WORD_COUNT = 2400
-const DEFAULT_TARGET_WORD_COUNT = 3200
+const DEFAULT_MIN_WORD_COUNT = 4500
+const DEFAULT_TARGET_WORD_COUNT = 5000
 
 const getChapterGenerationStorageKey = (projectId?: string, chapterNumber?: number | null) => {
   if (!projectId || !chapterNumber) return null
@@ -324,39 +324,39 @@ const writingDirectionPresets = [
 ]
 
 const qualityPresets = [
+  '情节推进更果断',
+  '对白更有张力',
+  '行动逻辑更清晰',
+  '细节服务情节推进',
+  '减少解释性旁白',
   '冲突更强',
   '钩子更狠',
-  '情绪更细腻',
   '反转更自然',
-  '对白更有张力',
   '节奏更紧凑',
-  '画面感更强',
-  '细节更真实',
   '人物动机更清晰',
   '角色弧光更明显',
   '悬念密度更高',
   '叙事更连贯',
-  '张弛更有层次',
-  '信息密度更高',
-  '文风更有辨识度',
-  '情节推进更果断',
   '伏笔与回收更闭环',
-  '心理描写更深入',
   '场景调度更清楚',
-  '行动逻辑更清晰',
+  '人物说话更贴合身份',
   '章节开头吸引力更高',
   '章节结尾留白更强',
   '视角控制更稳定',
   '避免口水化叙述',
   '避免机械重复表达',
+  '信息密度更高',
+  '张弛更有层次',
   '句式更有变化',
   '比喻更克制更准确',
-  '细节服务情节推进',
-  '减少解释性旁白',
-  '人物说话更贴合身份',
   '场景切换更自然',
   '高潮段落更有爆发力',
   '低潮段落更有余韵',
+  '文风更有辨识度',
+  '情绪更细腻',
+  '画面感更强',
+  '细节更真实',
+  '心理描写更深入',
   '叙述更具电影感',
   '关键词回环更明显',
 ]
@@ -444,12 +444,13 @@ const applyInitialValues = () => {
 }
 
 watch(
-  () => props.show,
-  (visible) => {
+  () => [props.show, props.projectId, props.chapterNumber],
+  ([visible]) => {
     if (visible) {
       applyInitialValues()
     }
-  }
+  },
+  { immediate: true }
 )
 
 const appendPreset = (target: typeof writingNotes, preset: string) => {
@@ -464,7 +465,11 @@ const appendPreset = (target: typeof writingNotes, preset: string) => {
 }
 
 const appendWritingPreset = (preset: string) => appendPreset(writingNotes, preset)
-const appendQualityPreset = (preset: string) => appendPreset(qualityRequirements, preset)
+const QUALITY_BASELINE = '优先保证章级推进、对话攻防、逻辑递进，描写只服务冲突'
+const appendQualityPreset = (preset: string) => {
+  appendPreset(qualityRequirements, QUALITY_BASELINE)
+  appendPreset(qualityRequirements, preset)
+}
 
 const finishSaveMessage = (scopeLabel: string, config: ChapterGenerationConfig) => {
   hasSavedConfig.value = true

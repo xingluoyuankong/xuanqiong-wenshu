@@ -1,5 +1,5 @@
 ﻿<template>
-  <div class="m3-shell min-h-screen flex flex-col overflow-x-hidden">
+  <div class="m3-shell writing-desk-shell xq-page-canvas min-h-screen flex flex-col overflow-x-hidden">
     <WDHeader
       :project="project"
       :progress="progress"
@@ -10,6 +10,7 @@
       :selected-chapter-number="selectedChapterNumber"
       :sidebar-open="sidebarOpen"
       :can-generate-current="canGenerateSelectedChapter"
+      :generate-current-label="generateCurrentLabel"
       :can-evaluate-current="canEvaluateSelectedChapter"
       :can-confirm-current="canConfirmSelectedChapter"
       :can-terminate-current="canTerminateSelectedChapter"
@@ -44,8 +45,8 @@
       @toggle-header-collapse="headerCollapsed = !headerCollapsed"
     />
 
-    <main class="m3-main min-h-0 flex-1 w-full px-1 pb-2 pt-1 sm:px-2 lg:px-3">
-      <div v-if="novelStore.isLoading" class="skeleton-workspace h-full flex gap-3 px-2 pb-3 pt-2 sm:px-3 lg:px-4">
+    <main class="m3-main writing-desk-main min-h-0 flex-1 w-full px-1 pb-2 pt-1 sm:px-2 lg:px-3">
+      <div v-if="novelStore.isLoading" class="skeleton-workspace writing-desk-loading h-full flex gap-3 px-2 pb-3 pt-2 sm:px-3 lg:px-4">
         <!-- Sidebar skeleton -->
         <div class="skeleton-sidebar w-64 flex-shrink-0 rounded-2xl animate-pulse"></div>
         <!-- Main area skeleton -->
@@ -57,23 +58,23 @@
         </div>
       </div>
 
-      <div v-else-if="novelStore.error" class="text-center py-20">
+      <div v-else-if="novelStore.error" class="writing-desk-error text-center py-20">
         <div class="md-card md-card-outlined mx-auto max-w-md p-8" style="border-radius: var(--md-radius-xl);">
           <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-full mx-auto" style="background-color: var(--md-error-container);">
             <svg class="w-6 h-6" style="color: var(--md-error);" fill="currentColor" viewBox="0 0 20 20">
               <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
             </svg>
           </div>
-          <h3 class="md-title-large mb-2" style="color: var(--md-on-surface);">鍔犺浇澶辫触</h3>
+          <h3 class="md-title-large mb-2" style="color: var(--md-on-surface);">加载失败</h3>
           <p class="md-body-medium mb-4" style="color: var(--md-error);">{{ novelStore.error }}</p>
-          <button @click="loadProject" class="md-btn md-btn-tonal md-ripple">閲嶆柊鍔犺浇</button>
+          <button @click="loadProject" class="md-btn md-btn-tonal md-ripple">重新加载</button>
         </div>
       </div>
 
       <div
         v-else-if="project"
         :class="[
-          'm3-workspace min-h-0 flex flex-col lg:flex-row',
+          'm3-workspace writing-desk-grid min-h-0 flex flex-col lg:flex-row',
           sidebarOpen ? 'gap-2 lg:gap-3' : 'gap-1 lg:gap-0'
         ]"
       >
@@ -149,7 +150,7 @@
               <h3 class="md-title-large font-semibold">工作台快捷键</h3>
               <p class="md-body-small md-on-surface-variant mt-1">支持自定义显示方案；当前快捷键会避免在输入框和编辑器里误触发。</p>
             </div>
-            <button class="md-icon-btn md-ripple" @click="showShortcutHelp = false">脳</button>
+            <button class="md-icon-btn md-ripple" @click="showShortcutHelp = false">×</button>
           </div>
           <div class="m3-shortcut-grid">
             <div v-for="item in shortcutItems" :key="item.label" class="m3-shortcut-item">
@@ -160,31 +161,31 @@
           <div class="m3-shortcut-config">
             <div class="m3-shortcut-config__row">
               <label>主动作</label>
-              <input v-model="shortcutConfig.primaryAction" class="md-text-field-input" type="text" placeholder="渚嬪 Ctrl/Cmd + Enter">
+              <input v-model="shortcutConfig.primaryAction" class="md-text-field-input" type="text" placeholder="例如 Ctrl/Cmd + Enter">
             </div>
             <div class="m3-shortcut-config__row">
               <label>生成章节</label>
-              <input v-model="shortcutConfig.generateChapter" class="md-text-field-input" type="text" placeholder="渚嬪 Ctrl/Cmd + Shift + G">
+              <input v-model="shortcutConfig.generateChapter" class="md-text-field-input" type="text" placeholder="例如 Ctrl/Cmd + Shift + G">
             </div>
             <div class="m3-shortcut-config__row">
               <label>展开全文</label>
-              <input v-model="shortcutConfig.openReader" class="md-text-field-input" type="text" placeholder="渚嬪 Ctrl/Cmd + Shift + F">
+              <input v-model="shortcutConfig.openReader" class="md-text-field-input" type="text" placeholder="例如 Ctrl/Cmd + Shift + F">
             </div>
             <div class="m3-shortcut-config__row">
               <label>刷新状态</label>
-              <input v-model="shortcutConfig.refreshStatus" class="md-text-field-input" type="text" placeholder="渚嬪 Ctrl/Cmd + .">
+              <input v-model="shortcutConfig.refreshStatus" class="md-text-field-input" type="text" placeholder="例如 Ctrl/Cmd + .">
             </div>
             <div class="m3-shortcut-config__row">
               <label>上一章</label>
-              <input v-model="shortcutConfig.prevChapter" class="md-text-field-input" type="text" placeholder="渚嬪 Alt + P">
+              <input v-model="shortcutConfig.prevChapter" class="md-text-field-input" type="text" placeholder="例如 Alt + P">
             </div>
             <div class="m3-shortcut-config__row">
               <label>下一章</label>
-              <input v-model="shortcutConfig.nextChapter" class="md-text-field-input" type="text" placeholder="渚嬪 Alt + N">
+              <input v-model="shortcutConfig.nextChapter" class="md-text-field-input" type="text" placeholder="例如 Alt + N">
             </div>
             <div class="m3-shortcut-config__row">
               <label>打开面板</label>
-              <input v-model="shortcutConfig.openShortcuts" class="md-text-field-input" type="text" placeholder="渚嬪 ?">
+              <input v-model="shortcutConfig.openShortcuts" class="md-text-field-input" type="text" placeholder="例如 ?">
             </div>
             <div class="m3-shortcut-config__actions">
               <button class="md-btn md-btn-outlined md-ripple" @click="saveShortcutConfig({ ...DEFAULT_SHORTCUT_CONFIG })">恢复默认</button>
@@ -196,6 +197,7 @@
     </Teleport>
 
     <WDVersionDetailModal
+      v-if="showVersionDetailModal"
       :show="showVersionDetailModal"
       :detail-version-index="detailVersionIndex"
       :version="availableVersions[detailVersionIndex] || null"
@@ -204,6 +206,7 @@
       @select-version="selectVersionFromDetail"
     />
     <WDEvaluationDetailModal
+      v-if="showEvaluationDetailModal"
       :show="showEvaluationDetailModal"
       :evaluation="evaluationToShow"
       @regenerate="handleRegenerateFromEvaluation"
@@ -211,19 +214,23 @@
       @close="showEvaluationDetailModal = false"
     />
     <WDEditChapterModal
+      v-if="showEditChapterModal"
       :show="showEditChapterModal"
       :chapter="editingChapter"
       :is-rewriting="isRewritingOutline"
+      :is-saving="isSavingOutline"
       @close="showEditChapterModal = false"
       @save="saveChapterChanges"
       @rewrite="rewriteChapterSummary"
     />
     <WDGenerateOutlineModal
+      v-if="showGenerateOutlineModal"
       :show="showGenerateOutlineModal"
       @close="showGenerateOutlineModal = false"
       @generate="handleGenerateOutline"
     />
     <WDGenerateChapterModal
+      v-if="showGenerateChapterModal"
       :show="showGenerateChapterModal"
       :project-id="project?.id"
       :chapter-number="pendingGenerateChapterNumber"
@@ -235,6 +242,7 @@
       @generate="handleGenerateChapter"
     />
     <WDVersionDiffModal
+      v-if="showVersionDiffModal"
       :show="showVersionDiffModal"
       :project-id="project?.id || ''"
       :chapter-number="selectedChapterNumber || 1"
@@ -245,6 +253,7 @@
       @close="closeVersionDiffModal"
     />
     <WDPatchDiffModal
+      v-if="showPatchDiffModal"
       :show="showPatchDiffModal"
       :project-id="project?.id || ''"
       :chapter-number="patchDiffChapterNumber || selectedChapterNumber || 1"
@@ -254,6 +263,7 @@
       @applied="handlePatchApplied"
     />
     <WDSkillSelectorModal
+      v-if="showSkillSelectorModal"
       :show="showSkillSelectorModal"
       :project-id="project?.id || ''"
       :chapter-number="selectedChapterNumber"
@@ -279,7 +289,7 @@
               class="md-icon-btn md-ripple"
               @click="closeCandidateOptimizeDialog()"
             >
-              脳
+              ×
             </button>
           </div>
           <div class="wd-candidate-optimize-dialog__body">
@@ -308,7 +318,7 @@
               class="md-btn md-btn-outlined md-ripple"
               @click="closeCandidateOptimizeDialog()"
             >
-              鍙栨秷
+              取消
             </button>
             <button
               type="button"
@@ -316,7 +326,7 @@
               :disabled="isOptimizingCandidateVersion"
               @click="generateCandidateOptimization"
             >
-              {{ isOptimizingCandidateVersion ? '鐢熸垚涓?..' : '鐢熸垚浼樺寲棰勮' }}
+              {{ isOptimizingCandidateVersion ? '生成中...' : '生成优化预览' }}
             </button>
           </div>
         </div>
@@ -342,7 +352,7 @@
               class="md-icon-btn md-ripple"
               @click="resetCandidateOptimizationState"
             >
-              脳
+              ×
             </button>
           </div>
           <div class="wd-candidate-optimize-result__body">{{ candidateOptimizedContent }}</div>
@@ -352,7 +362,7 @@
               class="md-btn md-btn-outlined md-ripple"
               @click="resetCandidateOptimizationState"
             >
-              鍙栨秷
+              取消
             </button>
             <button
               type="button"
@@ -360,7 +370,7 @@
               :disabled="isApplyingCandidateOptimization"
               @click="applyCandidateOptimization"
             >
-              {{ isApplyingCandidateOptimization ? '搴旂敤涓?..' : '搴旂敤浼樺寲缁撴灉' }}
+              {{ isApplyingCandidateOptimization ? '应用中...' : '应用优化结果' }}
             </button>
           </div>
         </div>
@@ -370,8 +380,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { getActivePinia } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
 import { useNovelStore } from '@/stores/novel'
@@ -441,6 +451,7 @@ interface VersionOption {
 
 const props = defineProps<Props>()
 const router = useRouter()
+const route = useRoute()
 const authStore = getActivePinia() ? useAuthStore() : null
 const novelStore = useNovelStore()
 
@@ -463,6 +474,7 @@ const pendingGenerateChapterNumber = ref<number | null>(null)
 const showShortcutHelp = ref(false)
 const isGeneratingOutline = ref(false)
 const isRewritingOutline = ref(false)
+const isSavingOutline = ref(false)
 const evaluatingVersionIndex = ref<number | null>(null)
 const deletingVersionIndex = ref<number | null>(null)
 const workspaceRef = ref<{
@@ -493,6 +505,8 @@ interface UiDiagnostics {
   status?: number
   retryable?: boolean
   responseSnippet?: string
+  rejectionSummary?: Record<string, any>
+  missingChapters?: number[]
 }
 
 const latestUiDiagnostics = ref<UiDiagnostics | null>(null)
@@ -526,8 +540,8 @@ interface ShortcutConfig {
   openShortcuts: string
 }
 
-const DEFAULT_MIN_WORD_COUNT = 2400
-const DEFAULT_TARGET_WORD_COUNT = 3200
+const DEFAULT_MIN_WORD_COUNT = 4500
+const DEFAULT_TARGET_WORD_COUNT = 5000
 const OPTIMIZE_DIMENSIONS = [
   { key: 'dialogue', label: '对话', description: '让人物声音更有区分度，并强化潜台词。' },
   { key: 'environment', label: '环境', description: '增强场景氛围，让空间参与叙事。' },
@@ -569,9 +583,9 @@ const saveShortcutConfig = (config: ShortcutConfig) => {
   shortcutConfig.value = normalized
   try {
     localStorage.setItem(shortcutConfigStorageKey, JSON.stringify(normalized))
-    globalAlert.showSuccess('蹇嵎閿樉绀洪厤缃凡淇濆瓨', '淇濆瓨鎴愬姛')
+    globalAlert.showSuccess('快捷键显示配置已保存', '保存成功')
   } catch {
-    globalAlert.showError('淇濆瓨蹇嵎閿厤缃け璐ワ紝璇锋鏌ユ祻瑙堝櫒瀛樺偍鏉冮檺', '淇濆瓨澶辫触')
+    globalAlert.showError('保存快捷键配置失败，请检查浏览器存储权限', '保存失败')
   }
 }
 
@@ -682,6 +696,23 @@ const hasTrackableTaskPanel = computed(() =>
   Boolean(taskPanelChapterNumber.value) && isTrackableTask(taskPanelChapter.value, taskPanelRuntime.value)
 )
 
+const generateCurrentLabel = computed(() => {
+  const target = selectedChapterNumber.value ?? workspaceSummary.value?.next_chapter_to_generate
+  const status = String(selectedChapter.value?.generation_status || '')
+
+  if (selectedChapterNumber.value !== null && ['waiting_for_confirm', 'evaluation_failed', 'failed', 'successful'].includes(status)) {
+    return '重新生成'
+  }
+
+  if (selectedChapterAction.value?.canGenerate && selectedChapterAction.value.label) {
+    return selectedChapterAction.value.label === '生成本章' && target
+      ? `生成第 ${target} 章`
+      : selectedChapterAction.value.label
+  }
+  if (target) return `生成第 ${target} 章`
+  return '开始创作'
+})
+
 const canEvaluateSelectedChapter = computed(() => selectedChapter.value?.generation_status === 'successful')
 const canConfirmSelectedChapter = computed(() => {
   const status = selectedChapter.value?.generation_status
@@ -716,10 +747,14 @@ const canSelectNextChapter = computed(() => {
 })
 
 const isCurrentVersion = (versionIndex: number) => {
-  if (!selectedChapter.value?.content || !availableVersions.value[versionIndex]?.content) return false
+  const version = availableVersions.value[versionIndex]
+  if (selectedChapter.value?.selected_version_id && version?.id) {
+    return selectedChapter.value.selected_version_id === version.id
+  }
+  if (!selectedChapter.value?.content || !version?.content) return false
   return (
     normalizeChapterContent(selectedChapter.value.content) ===
-    normalizeChapterContent(availableVersions.value[versionIndex].content)
+    normalizeChapterContent(version.content)
   )
 }
 
@@ -774,6 +809,7 @@ const resetWorkspaceState = () => {
   pendingGenerateChapterNumber.value = null
   isGeneratingOutline.value = false
   isRewritingOutline.value = false
+  isSavingOutline.value = false
   evaluatingVersionIndex.value = null
   deletingVersionIndex.value = null
   optimizerSuggestionNotes.value = ''
@@ -801,6 +837,8 @@ const normalizeUiDiagnostics = (error: unknown, fallbackMessage: string, title?:
       status: detail.status,
       retryable: detail.retryable,
       responseSnippet: detail.responseSnippet,
+      rejectionSummary: detail.rejectionSummary,
+      missingChapters: detail.missingChapters,
     }
   }
 
@@ -822,9 +860,19 @@ const formatUiDiagnosticsMessage = (
   options: { includeRootCause?: boolean; includeRequestId?: boolean; includeHint?: boolean } = {}
 ) => {
   const lines = [diagnostics.message]
-  if (options.includeRootCause && diagnostics.rootCause) lines.push(`鏍瑰洜锛?{diagnostics.rootCause}`)
-  if (options.includeRequestId && diagnostics.requestId) lines.push(`璇锋眰ID锛?{diagnostics.requestId}`)
-  if (options.includeHint && diagnostics.hint) lines.push(`寤鸿锛?{diagnostics.hint}`)
+  if (options.includeRootCause && diagnostics.rootCause) lines.push(`根因：${diagnostics.rootCause}`)
+  if (options.includeRequestId && diagnostics.requestId) lines.push(`请求ID：${diagnostics.requestId}`)
+  if (options.includeHint && diagnostics.hint) lines.push(`建议：${diagnostics.hint}`)
+  if (diagnostics.missingChapters?.length) lines.push(`未通过章节：${diagnostics.missingChapters.join('、')}`)
+  if (diagnostics.rejectionSummary) {
+    const summary = diagnostics.rejectionSummary
+    const missing = Array.isArray(summary.missing_chapters) ? summary.missing_chapters.length : undefined
+    const retries = summary.retry_count ?? summary.retries
+    lines.push(`硬筛摘要：${[
+      missing !== undefined ? `${missing} 章未达标` : '',
+      retries !== undefined ? `重试 ${retries} 次` : '',
+    ].filter(Boolean).join('，') || '已返回详细拒绝原因'}`)
+  }
   return lines.join('\n')
 }
 
@@ -901,12 +949,12 @@ const loadProject = async () => {
     clearLatestDiagnostics()
     pickInitialChapter()
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '鍔犺浇椤圭洰澶辫触锛岃绋嶅悗閲嶈瘯', '鍔犺浇澶辫触')
+    const diagnostics = normalizeUiDiagnostics(error, '加载项目失败，请稍后重试', '加载失败')
     setLatestDiagnostics(diagnostics)
-    console.error('鍔犺浇椤圭洰澶辫触:', diagnostics)
+    console.error('加载项目失败:', diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '鍔犺浇澶辫触'
+      diagnostics.title || '加载失败'
     )
   }
 }
@@ -1113,7 +1161,7 @@ const generateChapter = async (
           : '',
       ].filter(Boolean).join('\n')
     }
-    globalAlert.showError(message, '鐢熸垚鍙楅檺')
+    globalAlert.showError(message, '生成受限')
     return
   }
 
@@ -1132,9 +1180,9 @@ const generateChapter = async (
     resetVersionSelectionState()
     markProjectSynced()
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '鐢熸垚绔犺妭澶辫触锛岃绋嶅悗閲嶈瘯', '鐢熸垚澶辫触')
+    const diagnostics = normalizeUiDiagnostics(error, '生成章节失败，请稍后重试', '生成失败')
     setLatestDiagnostics(diagnostics)
-    console.error('鐢熸垚绔犺妭澶辫触:', diagnostics)
+    console.error('生成章节失败:', diagnostics)
     try {
       await syncSingleChapterStatus(chapterNumber)
       } catch (syncError) {
@@ -1144,7 +1192,7 @@ const generateChapter = async (
     generatingChapter.value = null
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '鐢熸垚澶辫触'
+      diagnostics.title || '生成失败'
     )
   }
 }
@@ -1319,8 +1367,8 @@ const terminateChapter = async (chapterNumber?: number) => {
   if (target === null || target === undefined) return
 
   const confirmed = await globalAlert.showConfirm(
-    `杩欎細灏嗙 ${target} 绔犲綋鍓嶅悗鍙颁换鍔℃爣璁颁负澶辫触骞跺仠姝㈠墠绔户缁瓑寰咃紱鑻ユ湇鍔＄浠诲姟宸叉帴杩戝畬鎴愶紝浠嶅彲鑳藉湪鐭椂闂村唴鍥炲啓缁撴灉銆傛槸鍚︾户缁紵`,
-    '纭缁堟鍚庡彴澶勭悊'
+    `这会将第 ${target} 章当前后台任务标记为失败，并停止前端继续等待；如果服务端任务已经接近完成，仍可能在短时间内回写结果。是否继续？`,
+    '确认终止后台处理'
   )
   if (!confirmed) return
 
@@ -1332,12 +1380,12 @@ const terminateChapter = async (chapterNumber?: number) => {
     globalAlert.showSuccess(`第 ${target} 章已标记为失败，前端会停止继续等待该任务。`, '已终止')
     await fetchChapterStatus()
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '缁堟鍚庡彴澶勭悊澶辫触锛岃绋嶅悗閲嶈瘯', '缁堟澶辫触')
+    const diagnostics = normalizeUiDiagnostics(error, '终止后台处理失败，请稍后重试', '终止失败')
     setLatestDiagnostics(diagnostics)
-    console.error('缁堟绔犺妭鍚庡彴浠诲姟澶辫触:', diagnostics)
+    console.error('终止章节后台任务失败:', diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '缁堟澶辫触'
+      diagnostics.title || '终止失败'
     )
   } finally {
     terminatingChapter.value = null
@@ -1407,13 +1455,14 @@ const withVersionSelectionPreview = async (versionIndex: number, task: () => Pro
 }
 
 const selectVersion = async (versionIndex: number) => {
-  if (selectedChapterNumber.value === null || !availableVersions.value[versionIndex]?.content) return
+  const version = availableVersions.value[versionIndex]
+  if (selectedChapterNumber.value === null || !version?.content) return
   const chapterNumber = selectedChapterNumber.value
   const originalVersionIndex = getOriginalVersionIndex(versionIndex)
   if (originalVersionIndex === undefined) return
   try {
     await withVersionSelectionPreview(versionIndex, async () => {
-      await novelStore.selectChapterVersion(chapterNumber, originalVersionIndex)
+      await novelStore.selectChapterVersion(chapterNumber, originalVersionIndex, version.id)
       clearLatestDiagnostics()
       resetVersionSelectionState(versionIndex)
       markProjectSynced()
@@ -1434,12 +1483,12 @@ const selectVersion = async (versionIndex: number) => {
         )
     }
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '閫夋嫨绔犺妭鐗堟湰澶辫触锛岃绋嶅悗閲嶈瘯', '閫夋嫨澶辫触')
+    const diagnostics = normalizeUiDiagnostics(error, '选择章节版本失败，请稍后重试', '选择失败')
     setLatestDiagnostics(diagnostics)
-    console.error('閫夋嫨绔犺妭鐗堟湰澶辫触:', diagnostics)
+    console.error('选择章节版本失败:', diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '閫夋嫨澶辫触'
+      diagnostics.title || '选择失败'
     )
   }
 }
@@ -1472,21 +1521,26 @@ const deleteVersion = async (versionIndex: number) => {
   const originalVersionIndex = getOriginalVersionIndex(versionIndex)
   if (originalVersionIndex === undefined) return
 
-  // 闃叉鍒犻櫎褰撳墠姝ｅ湪鏌ョ湅鐨勭増鏈?
+  // 防止删除当前正在查看的版本
   const versionToCheck = availableVersions.value[versionIndex]
   if (!versionToCheck?.content) return
 
-  // 浠呭湪绔犺妭宸茬粡纭鎴愬姛鏃讹紝鎵嶆妸褰撳墠姝ｆ枃瑙嗕负涓嶅彲鍒犻櫎鐨勭敓鏁堢増鏈€?
-  // waiting_for_confirm 闃舵铏界劧浼氬洖濉竴涓瑙堟鏂囷紝浣嗛偅鍙槸鍊欓€夊洖鏄撅紝涓嶈兘鎹閿佹鍒犻櫎銆?
+  // 仅在章节已经确认成功时，才把当前正文视为不可删除的生效版本。
+  // waiting_for_confirm 阶段回填的是候选预览，不能据此锁死删除。
   const chapterStatus = selectedChapter.value?.generation_status
   const currentContent = selectedChapter.value?.content?.trim() || ''
   const versionContent = versionToCheck.content.trim()
-  if (chapterStatus === 'successful' && currentContent && currentContent === versionContent) {
+  const selectedVersionId = selectedChapter.value?.selected_version_id
+  if (
+    chapterStatus === 'successful' &&
+    ((selectedVersionId && versionToCheck.id && selectedVersionId === versionToCheck.id) ||
+      (!selectedVersionId && currentContent && currentContent === versionContent))
+  ) {
     globalAlert.showError('不能删除当前生效的版本', '删除失败')
     return
   }
 
-  // 鑷冲皯淇濈暀涓€涓増鏈?
+  // 至少保留一个版本
   if (availableVersions.value.length <= 1) {
     globalAlert.showError('至少需要保留一个版本', '删除失败')
     return
@@ -1502,7 +1556,7 @@ const deleteVersion = async (versionIndex: number) => {
 
   deletingVersionIndex.value = versionIndex
   try {
-    await novelStore.deleteChapterVersion(selectedChapterNumber.value, originalVersionIndex)
+    await novelStore.deleteChapterVersion(selectedChapterNumber.value, originalVersionIndex, versionToCheck.id)
     clearLatestDiagnostics()
     selectedVersionIndex.value = nextSelectedVersionIndex
     if (compareVersionIndex.value === versionIndex) {
@@ -1512,12 +1566,12 @@ const deleteVersion = async (versionIndex: number) => {
     }
     globalAlert.showSuccess('版本已删除', '操作成功')
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '鍒犻櫎鐗堟湰澶辫触锛岃绋嶅悗閲嶈瘯', '鍒犻櫎澶辫触')
+    const diagnostics = normalizeUiDiagnostics(error, '删除版本失败，请稍后重试', '删除失败')
     setLatestDiagnostics(diagnostics)
-    console.error('鍒犻櫎鐗堟湰澶辫触:', diagnostics)
+    console.error('删除版本失败:', diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '鍒犻櫎澶辫触'
+      diagnostics.title || '删除失败'
     )
   } finally {
     deletingVersionIndex.value = null
@@ -1525,25 +1579,46 @@ const deleteVersion = async (versionIndex: number) => {
 }
 
 const openEditChapterModal = (chapter: ChapterOutline) => {
-  editingChapter.value = chapter
+  const latestOutline = project.value?.blueprint?.chapter_outline?.find(
+    (item) => item.chapter_number === chapter.chapter_number
+  )
+  const outlineToEdit = latestOutline || chapter
+
+  if (!outlineToEdit) {
+    globalAlert.showError('当前章节大纲不存在或尚未加载完成。', '无法编辑')
+    return
+  }
+
+  editingChapter.value = { ...outlineToEdit }
+  if (window.innerWidth < 1024) {
+    closeSidebar()
+  }
   showEditChapterModal.value = true
 }
 
 const saveChapterChanges = async (updatedChapter: ChapterOutline) => {
   try {
+    isSavingOutline.value = true
     await novelStore.updateChapterOutline(updatedChapter)
     clearLatestDiagnostics()
+
+    const latestOutline = project.value?.blueprint?.chapter_outline?.find(
+      (item) => item.chapter_number === updatedChapter.chapter_number
+    )
+    editingChapter.value = latestOutline ? { ...latestOutline } : { ...updatedChapter }
+
     globalAlert.showSuccess('章节大纲已更新', '保存成功')
+    showEditChapterModal.value = false
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '鏇存柊绔犺妭澶х翰澶辫触锛岃绋嶅悗閲嶈瘯', '淇濆瓨澶辫触')
+    const diagnostics = normalizeUiDiagnostics(error, '更新章节大纲失败，请稍后重试', '保存失败')
     setLatestDiagnostics(diagnostics)
-    console.error('鏇存柊绔犺妭澶х翰澶辫触:', diagnostics)
+    console.error('更新章节大纲失败:', diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '淇濆瓨澶辫触'
+      diagnostics.title || '保存失败'
     )
   } finally {
-    showEditChapterModal.value = false
+    isSavingOutline.value = false
   }
 }
 
@@ -1556,14 +1631,14 @@ const rewriteChapterSummary = async (payload: { chapter: ChapterOutline; directi
       (item) => item.chapter_number === payload.chapter.chapter_number
     )
     if (rewritten) editingChapter.value = { ...rewritten }
-    globalAlert.showSuccess('绔犺妭鎽樿宸查€氳繃 AI 閲嶅啓', '閲嶅啓鎴愬姛')
+    globalAlert.showSuccess('章节摘要已通过 AI 重写', '重写成功')
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, 'AI 閲嶅啓绔犺妭鎽樿澶辫触锛岃绋嶅悗閲嶈瘯', '閲嶅啓澶辫触')
+    const diagnostics = normalizeUiDiagnostics(error, 'AI 重写章节摘要失败，请稍后重试', '重写失败')
     setLatestDiagnostics(diagnostics)
-    console.error('AI 閲嶅啓绔犺妭鎽樿澶辫触:', diagnostics)
+    console.error('AI 重写章节摘要失败:', diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '閲嶅啓澶辫触'
+      diagnostics.title || '重写失败'
     )
   } finally {
     isRewritingOutline.value = false
@@ -1574,23 +1649,27 @@ const evaluateChapter = async (versionIndex?: number) => {
   if (selectedChapterNumber.value === null) return
   const chapterNumber = selectedChapterNumber.value
   let originalVersionIndex: number | undefined
+  let targetVersionId: number | undefined
   try {
     if (typeof versionIndex === 'number') {
       originalVersionIndex = getOriginalVersionIndex(versionIndex)
       if (originalVersionIndex === undefined) return
+      targetVersionId = availableVersions.value[versionIndex]?.id
       evaluatingVersionIndex.value = versionIndex
       selectedVersionIndex.value = versionIndex
     }
 
     await withChapterStatusRollback(chapterNumber, async () => {
-      await novelStore.evaluateChapter(chapterNumber, originalVersionIndex)
+      await novelStore.evaluateChapter(chapterNumber, originalVersionIndex, targetVersionId)
       markProjectSynced()
     })
 
-    // 璇勪及瀹屾垚鍚庯紝濡傛灉鏄拡瀵圭壒瀹氱増鏈殑锛岃嚜鍔ㄦ墦寮€璇ョ増鏈殑璇勪及璇︽儏
+    // 评估完成后，如果是针对特定版本的评估，自动打开该版本的评估详情
     if (typeof originalVersionIndex === 'number') {
        const updatedChapter = project.value?.chapters.find((item) => item.chapter_number === chapterNumber)
-       const version = updatedChapter?.versions?.[originalVersionIndex]
+       const version = targetVersionId
+         ? updatedChapter?.versions?.find((item) => item.id === targetVersionId)
+         : updatedChapter?.versions?.[originalVersionIndex]
        if (version?.evaluation) {
          handleShowEvaluationDetail(version.evaluation)
        }
@@ -1598,12 +1677,12 @@ const evaluateChapter = async (versionIndex?: number) => {
        globalAlert.showSuccess('章节评估结果已生成', '评估成功')
     }
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '璇勪及绔犺妭澶辫触锛岃绋嶅悗閲嶈瘯', '璇勪及澶辫触')
+    const diagnostics = normalizeUiDiagnostics(error, '评估章节失败，请稍后重试', '评估失败')
     setLatestDiagnostics(diagnostics)
-    console.error('璇勪及绔犺妭澶辫触:', diagnostics)
+    console.error('评估章节失败:', diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '璇勪及澶辫触'
+      diagnostics.title || '评估失败'
     )
   } finally {
     evaluatingVersionIndex.value = null
@@ -1619,12 +1698,12 @@ const evaluateAllVersions = async () => {
       markProjectSynced()
     })
 
-    // 澶氱増鏈瘎瀹″畬鎴愬悗锛岃嚜鍔ㄦ墦寮€璇勪及璇︽儏
+    // 多版本评审完成后，自动打开评估详情
     const updatedChapter = project.value?.chapters.find((item) => item.chapter_number === chapterNumber)
     if (updatedChapter?.evaluation) {
       handleShowEvaluationDetail(updatedChapter.evaluation)
     } else {
-      globalAlert.showSuccess('澶氱増鏈姣旇瘎瀹＄粨鏋滃凡鐢熸垚', '璇勫鎴愬姛')
+      globalAlert.showSuccess('多版本对比评审结果已生成', '评审成功')
     }
   } catch (error) {
     const diagnostics = normalizeUiDiagnostics(error, '多版本评审失败，请稍后重试', '评审失败')
@@ -1632,7 +1711,7 @@ const evaluateAllVersions = async () => {
     console.error('多版本评审失败:', diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '璇勫澶辫触'
+      diagnostics.title || '评审失败'
     )
   }
 }
@@ -1689,6 +1768,7 @@ const generateCandidateOptimization = async () => {
   }
 
   const originalVersionIndex = getOriginalVersionIndex(candidateOptimizeVersionIndex.value)
+  const candidateVersion = availableVersions.value[candidateOptimizeVersionIndex.value]
   if (originalVersionIndex === undefined) {
     globalAlert.showError('未找到对应候选版本', '无法优化')
     return
@@ -1701,6 +1781,7 @@ const generateCandidateOptimization = async () => {
       project.value.id,
       selectedChapterNumber.value,
       originalVersionIndex,
+      candidateVersion?.id,
       candidateSelectedDimension.value,
       candidateAdditionalNotes.value
     )
@@ -1711,12 +1792,12 @@ const generateCandidateOptimization = async () => {
     showCandidateOptimizeResultModal.value = true
     globalAlert.showSuccess('优化结果已生成，请确认是否应用', '优化完成')
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '浼樺寲澶辫触锛岃绋嶅悗閲嶈瘯', '浼樺寲澶辫触')
+    const diagnostics = normalizeUiDiagnostics(error, '优化失败，请稍后重试', '优化失败')
     setLatestDiagnostics(diagnostics)
-    console.error('浼樺寲鐗堟湰澶辫触:', diagnostics)
+    console.error('优化版本失败:', diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '浼樺寲澶辫触'
+      diagnostics.title || '优化失败'
     )
   } finally {
     isOptimizingCandidateVersion.value = false
@@ -1752,14 +1833,14 @@ const applyCandidateOptimization = async () => {
       }
     }
     resetCandidateOptimizationState()
-    globalAlert.showSuccess('鍊欓€夌増鏈紭鍖栫粨鏋滃凡搴旂敤', '鎿嶄綔鎴愬姛')
+    globalAlert.showSuccess('候选版本优化结果已应用', '操作成功')
   } catch (error) {
     const diagnostics = normalizeUiDiagnostics(error, '应用候选版本优化失败，请稍后重试', '应用失败')
     setLatestDiagnostics(diagnostics)
     console.error('应用候选版本优化失败:', diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '搴旂敤澶辫触'
+      diagnostics.title || '应用失败'
     )
   } finally {
     isApplyingCandidateOptimization.value = false
@@ -1791,12 +1872,12 @@ const deleteChapter = async (chapterNumbers: number | number[]) => {
       pickInitialChapter()
     }
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '鍒犻櫎绔犺妭澶辫触锛岃绋嶅悗閲嶈瘯', '鍒犻櫎澶辫触')
+    const diagnostics = normalizeUiDiagnostics(error, '删除章节失败，请稍后重试', '删除失败')
     setLatestDiagnostics(diagnostics)
-    console.error('鍒犻櫎绔犺妭澶辫触:', diagnostics)
+    console.error('删除章节失败:', diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '鍒犻櫎澶辫触'
+      diagnostics.title || '删除失败'
     )
   }
 }
@@ -1821,7 +1902,7 @@ const syncUpdatedChapter = (updatedChapter: Chapter) => {
 
 const editChapterContent = async (data: { chapterNumber: number; content: string }) => {
   if (!project.value) {
-    throw new Error('褰撳墠鏈姞杞介」鐩紝鏃犳硶淇濆瓨绔犺妭鍐呭')
+    throw new Error('当前未加载项目，无法保存章节内容')
   }
   try {
     await novelStore.editChapterContent(project.value.id, data.chapterNumber, data.content)
@@ -1829,12 +1910,12 @@ const editChapterContent = async (data: { chapterNumber: number; content: string
     markProjectSynced()
     globalAlert.showSuccess('章节内容已更新', '保存成功')
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '缂栬緫绔犺妭鍐呭澶辫触锛岃绋嶅悗閲嶈瘯', '淇濆瓨澶辫触')
+    const diagnostics = normalizeUiDiagnostics(error, '编辑章节内容失败，请稍后重试', '保存失败')
     setLatestDiagnostics(diagnostics)
-    console.error('缂栬緫绔犺妭鍐呭澶辫触:', diagnostics)
+    console.error('编辑章节内容失败:', diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '淇濆瓨澶辫触'
+      diagnostics.title || '保存失败'
     )
     throw error
   }
@@ -1844,8 +1925,11 @@ const handleGenerateOutline = async (payload: GenerateOutlinePayload) => {
   if (!project.value) return
   isGeneratingOutline.value = true
   try {
-    const existingTotalChapters = project.value.blueprint?.chapter_outline?.length || 0
-    const startChapter = existingTotalChapters + 1
+    const existingOutline = project.value.blueprint?.chapter_outline ?? []
+    const existingChapterNumbers = existingOutline
+      .map((item) => Number(item.chapter_number))
+      .filter((value) => Number.isFinite(value) && value > 0)
+    const startChapter = (existingChapterNumbers.length ? Math.max(...existingChapterNumbers) : 0) + 1
     await novelStore.generateChapterOutline(startChapter, payload.numChapters, {
       targetTotalChapters: payload.targetTotalChapters,
       targetTotalWords: payload.targetTotalWords,
@@ -1855,12 +1939,12 @@ const handleGenerateOutline = async (payload: GenerateOutlinePayload) => {
     markProjectSynced()
     globalAlert.showSuccess('新的章节大纲已生成（新增 ' + payload.numChapters + ' 章）', '操作成功')
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '鐢熸垚澶х翰澶辫触锛岃绋嶅悗閲嶈瘯', '鐢熸垚澶辫触')
+    const diagnostics = normalizeUiDiagnostics(error, '生成大纲失败，请稍后重试', '生成失败')
     setLatestDiagnostics(diagnostics)
-    console.error('鐢熸垚澶х翰澶辫触:', diagnostics)
+    console.error('生成大纲失败:', diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '鐢熸垚澶辫触'
+      diagnostics.title || '生成失败'
     )
   } finally {
     isGeneratingOutline.value = false
@@ -1966,6 +2050,57 @@ const handleKeydown = (event: KeyboardEvent) => {
   }
 }
 
+
+const runDialogProbeIfRequested = async () => {
+  if (!import.meta.env.DEV) return
+  const probe = typeof route.query.dialog_probe === 'string' ? route.query.dialog_probe : ''
+  if (!probe) return
+  await nextTick()
+  await new Promise(resolve => window.setTimeout(resolve, 1000))
+  const firstVersion = selectedChapter.value?.versions?.[0]
+  const secondVersion = selectedChapter.value?.versions?.[1] || firstVersion
+  const openers: Record<string, () => void> = {
+    'version-detail': () => showVersionDetail(0),
+    'evaluation-detail': () => {
+      evaluationToShow.value = JSON.stringify({
+        recommended_version: 1,
+        content_to_evaluate: { total_versions: Math.max(1, selectedChapter.value?.versions?.length || 1) },
+        evaluation: {
+          version1: {
+            pros: ['Clear conflict hook', 'Readable scene rhythm'],
+            cons: ['Need stronger sensory detail'],
+            overall_review: 'This candidate is readable and suitable for modal validation.'
+          }
+        },
+        optimization_suggestions: ['Tighten the ending hook', 'Add one character-specific gesture']
+      }, null, 2)
+      showEvaluationDetailModal.value = true
+    },
+    'version-diff': () => {
+      versionDiffBaseVersionId.value = firstVersion?.id || null
+      versionDiffCompareVersionId.value = secondVersion?.id || firstVersion?.id || null
+      versionDiffBaseLabel.value = 'Candidate A'
+      versionDiffCompareLabel.value = 'Candidate B'
+      showVersionDiffModal.value = true
+    },
+    'patch-diff': () => {
+      patchDiffChapterNumber.value = selectedChapterNumber.value || 1
+      patchDiffInitialOriginal.value = selectedChapter.value?.content || availableVersions.value[0]?.content || 'Original paragraph for patch diff validation.'
+      patchDiffInitialPatched.value = `${patchDiffInitialOriginal.value}\n\nAdded validation paragraph.`
+      showPatchDiffModal.value = true
+    },
+    'skill-selector': () => { showSkillSelectorModal.value = true },
+    'reader': () => { workspaceRef.value?.openPrimaryReader() },
+    'generate-chapter': () => { pendingGenerateChapterNumber.value = selectedChapterNumber.value || 1; generateChapterSeed.value = {}; showGenerateChapterModal.value = true },
+    'edit-chapter': () => {
+      const outline = project.value?.blueprint?.chapter_outline?.find(item => item.chapter_number === selectedChapterNumber.value) || project.value?.blueprint?.chapter_outline?.[0]
+      if (outline) openEditChapterModal(outline)
+    },
+    'generate-outline': () => { showGenerateOutlineModal.value = true }
+  }
+  openers[probe]?.()
+}
+
 const handleWindowResize = () => {
   if (window.innerWidth < 1024 && sidebarOpen.value && hasBlockingOverlayOpen.value) {
     sidebarOpen.value = false
@@ -2020,7 +2155,7 @@ onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('resize', handleWindowResize)
   handleWindowResize()
-  loadProject()
+  void loadProject().then(runDialogProbeIfRequested)
 })
 
 onUnmounted(() => {
@@ -2032,9 +2167,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
-   鏂囧叿鎵嬭处椋庢牸 - 宸ヤ綔鍙版牱寮?
-   鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
+/* 玄穹文书写作台：纸页、墨色、金线与玻璃层次统一。 */
 :global(body.m3-novel) {
   --md-font-family: 'ZCOOL XiaoWei', 'Noto Serif SC', 'STKaiti', 'KaiTi', serif;
   --md-primary: #7EB8E8;
@@ -2046,7 +2179,59 @@ onUnmounted(() => {
   --md-error-container: #FEF0F0;
 }
 
-/* 涓诲鍣?- 绾稿紶璐ㄦ劅鑳屾櫙 */
+/* 主容器 - 纸张质感背景 */
+
+.writing-desk-shell {
+  position: relative;
+  color: var(--xq-ink);
+  background: linear-gradient(180deg, rgba(255, 251, 245, 0.92), rgba(248, 243, 234, 0.78));
+}
+
+.writing-desk-shell > * {
+  position: relative;
+  z-index: 1;
+}
+
+.writing-desk-main {
+  padding-top: clamp(0.65rem, 1vw, 1rem);
+}
+
+.writing-desk-grid {
+  max-width: 1780px;
+  margin: 0 auto;
+  border: 1px solid rgba(93, 70, 43, 0.12);
+  border-radius: 28px;
+  padding: clamp(0.45rem, 0.9vw, 0.85rem);
+  background: rgba(255, 250, 240, 0.86);
+  box-shadow: 0 14px 34px rgba(37, 28, 18, 0.08);
+}
+
+.writing-desk-loading {
+  max-width: 1780px;
+  margin: 0 auto;
+  border: 1px solid rgba(93, 70, 43, 0.1);
+  border-radius: 28px;
+  background: rgba(255, 250, 240, 0.52);
+  box-shadow: var(--xq-shadow-paper);
+}
+
+.writing-desk-error .md-card {
+  border-color: rgba(153, 27, 27, 0.18) !important;
+  background: rgba(255, 250, 240, 0.92);
+  box-shadow: var(--xq-shadow-floating);
+}
+
+.writing-desk-shell :deep(.md-btn-filled),
+.writing-desk-shell :deep(.md-btn-tonal) {
+  border-radius: 999px;
+  font-weight: 800;
+}
+
+.writing-desk-shell :deep(.md-card),
+.writing-desk-shell :deep(.md-dialog) {
+  border: 1px solid rgba(93, 70, 43, 0.12);
+  box-shadow: var(--xq-shadow-paper);
+}
 .m3-shell {
   background:
     radial-gradient(ellipse 600px 300px at 5% 0%, rgba(126, 184, 232, 0.08), transparent 50%),
@@ -2070,7 +2255,7 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-/* 蹇嵎閿璇濇 */
+/* 快捷键对话框 */
 .m3-shortcut-dialog {
   width: min(1100px, calc(100vw - 32px));
   border-radius: 32px;
@@ -2260,6 +2445,8 @@ onUnmounted(() => {
   }
 }
 </style>
+
+
 
 
 

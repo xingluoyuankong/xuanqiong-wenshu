@@ -57,57 +57,58 @@ class ConstitutionService:
         chapter_content: str
     ) -> dict:
         """检查章节是否符合小说宪法"""
-        constitution = await self.get_constitution(project_id)
-        
-        if constitution is None:
-            return {
-                "overall_compliance": True,
-                "overall_score": 100,
-                "violations": [],
-                "summary": "未设置小说宪法，跳过合规检查"
-            }
-        
-        # 获取检查提示词
-        prompt_template = await self.prompt_service.get_prompt("constitution_check")
-        if not prompt_template:
-            return {
-                "overall_compliance": True,
-                "overall_score": 100,
-                "violations": [],
-                "summary": "未找到合规检查提示词"
-            }
-        
-        # 构建提示词
-        prompt = prompt_template.replace("{{constitution}}", constitution.to_prompt_context())
-        prompt = prompt.replace("{{chapter_number}}", str(chapter_number))
-        prompt = prompt.replace("{{chapter_title}}", chapter_title)
-        prompt = prompt.replace("{{chapter_content}}", chapter_content)
-        
-        # 调用 LLM 进行检查
-        response = await self.llm_service.generate(
-            prompt=prompt,
-            system_prompt="你是一位严格的小说编辑，负责检查章节内容是否符合小说宪法。请以 JSON 格式输出检查结果。"
-        )
-        
-        # 解析结果
-        try:
-            content = sanitize_json_like_text(
-                unwrap_markdown_json(remove_think_tags(response or ""))
+        with LLMService.daily_limit_scope(f"constitution_check:{project_id}:{chapter_number}:{len(chapter_content or '')}"):
+            constitution = await self.get_constitution(project_id)
+
+            if constitution is None:
+                return {
+                    "overall_compliance": True,
+                    "overall_score": 100,
+                    "violations": [],
+                    "summary": "未设置小说宪法，跳过合规检查"
+                }
+
+            # 获取检查提示词
+            prompt_template = await self.prompt_service.get_prompt("constitution_check")
+            if not prompt_template:
+                return {
+                    "overall_compliance": True,
+                    "overall_score": 100,
+                    "violations": [],
+                    "summary": "未找到合规检查提示词"
+                }
+
+            # 构建提示词
+            prompt = prompt_template.replace("{{constitution}}", constitution.to_prompt_context())
+            prompt = prompt.replace("{{chapter_number}}", str(chapter_number))
+            prompt = prompt.replace("{{chapter_title}}", chapter_title)
+            prompt = prompt.replace("{{chapter_content}}", chapter_content)
+
+            # 调用 LLM 进行检查
+            response = await self.llm_service.generate(
+                prompt=prompt,
+                system_prompt="你是一位严格的小说编辑，负责检查章节内容是否符合小说宪法。请以 JSON 格式输出检查结果。"
             )
-            json_start = content.find("{")
-            json_end = content.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                result = json.loads(content[json_start:json_end])
-                return result
-        except json.JSONDecodeError:
-            pass
-        
-        return {
-            "overall_compliance": True,
-            "overall_score": 80,
-            "violations": [],
-            "summary": "合规检查完成，但结果解析失败"
-        }
+
+            # 解析结果
+            try:
+                content = sanitize_json_like_text(
+                    unwrap_markdown_json(remove_think_tags(response or ""))
+                )
+                json_start = content.find("{")
+                json_end = content.rfind("}") + 1
+                if json_start >= 0 and json_end > json_start:
+                    result = json.loads(content[json_start:json_end])
+                    return result
+            except json.JSONDecodeError:
+                pass
+
+            return {
+                "overall_compliance": True,
+                "overall_score": 80,
+                "violations": [],
+                "summary": "合规检查完成，但结果解析失败"
+            }
 
     def get_constitution_context(self, constitution: Optional[NovelConstitution]) -> str:
         """获取宪法上下文（用于注入到写作提示词）"""

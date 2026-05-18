@@ -203,126 +203,127 @@ class FinalizeService:
     ) -> Dict[str, Any]:
         """
         对指定章节执行定稿处理
-        
+
         Args:
             project_id: 项目ID
             chapter_number: 章节号
             chapter_text: 章节正文
             user_id: 用户ID
             skip_vector_update: 是否跳过向量库更新
-            
+
         Returns:
             包含更新结果的字典
         """
         logger.info(f"开始定稿处理: project={project_id}, chapter={chapter_number}")
-        
+
         result = {
             "success": True,
             "chapter_number": chapter_number,
             "updates": {}
         }
-        
-        try:
-            # 1. 先读取当前记忆快照，避免把事务拖过后续 LLM / 向量 I/O
-            existing_memory = await self._first(
-                select(ProjectMemory).where(ProjectMemory.project_id == project_id)
-            )
-            old_summary = existing_memory.global_summary if existing_memory and existing_memory.global_summary else ""
-            old_plot_arcs = existing_memory.plot_arcs if existing_memory and existing_memory.plot_arcs else {}
-            old_state = await self._get_character_state_text(project_id)
-            await self._rollback()
 
-            # 2. 计算阶段：全部在内存中完成
-            new_summary = await self._update_global_summary(
-                chapter_text=chapter_text,
-                old_summary=old_summary,
-                user_id=user_id
-            )
-            if new_summary:
-                result["updates"]["global_summary"] = "updated"
+        with LLMService.daily_limit_scope(f"finalize_chapter:{project_id}:{chapter_number}:{user_id}"):
+            try:
+                # 1. 先读取当前记忆快照，避免把事务拖过后续 LLM / 向量 I/O
+                existing_memory = await self._first(
+                    select(ProjectMemory).where(ProjectMemory.project_id == project_id)
+                )
+                old_summary = existing_memory.global_summary if existing_memory and existing_memory.global_summary else ""
+                old_plot_arcs = existing_memory.plot_arcs if existing_memory and existing_memory.plot_arcs else {}
+                old_state = await self._get_character_state_text(project_id)
+                await self._rollback()
 
-            new_state = await self._update_character_state(
-                chapter_text=chapter_text,
-                old_state=old_state,
-                user_id=user_id
-            )
-            if new_state:
-                result["updates"]["character_state"] = "updated"
+                # 2. 计算阶段：全部在内存中完成
+                new_summary = await self._update_global_summary(
+                    chapter_text=chapter_text,
+                    old_summary=old_summary,
+                    user_id=user_id
+                )
+                if new_summary:
+                    result["updates"]["global_summary"] = "updated"
 
-            new_plot_arcs = await self._update_plot_arcs(
-                chapter_text=chapter_text,
-                chapter_number=chapter_number,
-                old_plot_arcs=old_plot_arcs,
-                user_id=user_id
-            )
-            if new_plot_arcs:
-                result["updates"]["plot_arcs"] = "updated"
+                new_state = await self._update_character_state(
+                    chapter_text=chapter_text,
+                    old_state=old_state,
+                    user_id=user_id
+                )
+                if new_state:
+                    result["updates"]["character_state"] = "updated"
 
-            if not skip_vector_update and self.vector_store_service:
-                await self._update_vector_store(
+                new_plot_arcs = await self._update_plot_arcs(
+                    chapter_text=chapter_text,
+                    chapter_number=chapter_number,
+                    old_plot_arcs=old_plot_arcs,
+                    user_id=user_id
+                )
+                if new_plot_arcs:
+                    result["updates"]["plot_arcs"] = "updated"
+
+                if not skip_vector_update and self.vector_store_service:
+                    await self._update_vector_store(
+                        project_id=project_id,
+                        chapter_number=chapter_number,
+                        chapter_text=chapter_text,
+                        user_id=user_id,
+                    )
+                    result["updates"]["vector_store"] = "updated"
+
+                chapter_summary = await self._generate_chapter_summary(
+                    chapter_text=chapter_text,
+                    chapter_number=chapter_number,
+                    user_id=user_id
+                )
+
+                # 3. 持久化阶段：短事务统一落库
+                project_memory = await self._get_or_create_project_memory(project_id)
+                if new_summary:
+                    project_memory.global_summary = new_summary
+                if new_plot_arcs:
+                    project_memory.plot_arcs = new_plot_arcs
+                if new_state:
+                    await self._save_character_state(project_id, chapter_number, new_state)
+
+                chapter_overview_extra = {
+                    "chapter_summary": chapter_summary,
+                    "word_count": len(chapter_text),
+                    "global_summary": new_summary or project_memory.global_summary or old_summary,
+                    "plot_arc_digest": new_plot_arcs or project_memory.plot_arcs or old_plot_arcs,
+                    "overview_hash": None,
+                    "change_level": "finalized",
+                }
+                await self._create_chapter_snapshot(
                     project_id=project_id,
                     chapter_number=chapter_number,
-                    chapter_text=chapter_text,
-                    user_id=user_id,
+                    global_summary=new_summary or project_memory.global_summary or old_summary,
+                    character_states=new_state,
+                    plot_arcs=new_plot_arcs or project_memory.plot_arcs or old_plot_arcs,
+                    chapter_summary=chapter_summary,
+                    word_count=len(chapter_text),
+                    extra={"chapter_overview": chapter_overview_extra},
                 )
-                result["updates"]["vector_store"] = "updated"
+                result["updates"]["snapshot"] = "created"
 
-            chapter_summary = await self._generate_chapter_summary(
-                chapter_text=chapter_text,
-                chapter_number=chapter_number,
-                user_id=user_id
-            )
+                project_extra = dict(project_memory.extra or {})
+                overview_index = dict(project_extra.get("chapter_overview_index") or {})
+                previous_overview = overview_index.get(str(chapter_number)) if isinstance(overview_index.get(str(chapter_number)), dict) else {}
+                if previous_overview and previous_overview.get("chapter_summary") == chapter_overview_extra.get("chapter_summary"):
+                    chapter_overview_extra["change_level"] = "none"
+                overview_index[str(chapter_number)] = chapter_overview_extra
+                project_extra["chapter_overview_index"] = overview_index
+                project_memory.extra = project_extra
+                project_memory.last_updated_chapter = chapter_number
+                project_memory.version += 1
+                await self._update_blueprint_status(project_id, chapter_number)
 
-            # 3. 持久化阶段：短事务统一落库
-            project_memory = await self._get_or_create_project_memory(project_id)
-            if new_summary:
-                project_memory.global_summary = new_summary
-            if new_plot_arcs:
-                project_memory.plot_arcs = new_plot_arcs
-            if new_state:
-                await self._save_character_state(project_id, chapter_number, new_state)
+                await self._commit()
+                logger.info(f"定稿处理完成: project={project_id}, chapter={chapter_number}")
 
-            chapter_overview_extra = {
-                "chapter_summary": chapter_summary,
-                "word_count": len(chapter_text),
-                "global_summary": new_summary or project_memory.global_summary or old_summary,
-                "plot_arc_digest": new_plot_arcs or project_memory.plot_arcs or old_plot_arcs,
-                "overview_hash": None,
-                "change_level": "finalized",
-            }
-            await self._create_chapter_snapshot(
-                project_id=project_id,
-                chapter_number=chapter_number,
-                global_summary=new_summary or project_memory.global_summary or old_summary,
-                character_states=new_state,
-                plot_arcs=new_plot_arcs or project_memory.plot_arcs or old_plot_arcs,
-                chapter_summary=chapter_summary,
-                word_count=len(chapter_text),
-                extra={"chapter_overview": chapter_overview_extra},
-            )
-            result["updates"]["snapshot"] = "created"
+            except Exception as e:
+                logger.error(f"定稿处理失败: {e}")
+                await self._rollback()
+                result["success"] = False
+                result["error"] = str(e)
 
-            project_extra = dict(project_memory.extra or {})
-            overview_index = dict(project_extra.get("chapter_overview_index") or {})
-            previous_overview = overview_index.get(str(chapter_number)) if isinstance(overview_index.get(str(chapter_number)), dict) else {}
-            if previous_overview and previous_overview.get("chapter_summary") == chapter_overview_extra.get("chapter_summary"):
-                chapter_overview_extra["change_level"] = "none"
-            overview_index[str(chapter_number)] = chapter_overview_extra
-            project_extra["chapter_overview_index"] = overview_index
-            project_memory.extra = project_extra
-            project_memory.last_updated_chapter = chapter_number
-            project_memory.version += 1
-            await self._update_blueprint_status(project_id, chapter_number)
-
-            await self._commit()
-            logger.info(f"定稿处理完成: project={project_id}, chapter={chapter_number}")
-            
-        except Exception as e:
-            logger.error(f"定稿处理失败: {e}")
-            await self._rollback()
-            result["success"] = False
-            result["error"] = str(e)
-        
         return result
     
     async def _get_or_create_project_memory(self, project_id: str) -> ProjectMemory:

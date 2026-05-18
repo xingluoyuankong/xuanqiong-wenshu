@@ -102,101 +102,102 @@ class UltimateWritingFlow:
                 "review_triggered": False
             }
         }
-        
-        try:
-            # ===== 阶段 1: 准备上下文 =====
-            result["metadata"]["flow_stages"].append("context_preparation")
-            
-            # 1.1 获取记忆层上下文
-            memory_context = await self.memory_layer.get_memory_context(
-                project_id, chapter_number, character_names
-            )
-            result["metadata"]["memory_context"] = memory_context[:500] + "..."
-            
-            # 1.2 获取情绪曲线指导
-            emotion_data = self.emotion_curve.calculate_emotion_target(
-                chapter_number, total_chapters, arc_type
-            )
-            emotion_context = self.emotion_curve.get_emotion_curve_context(
-                chapter_number, total_chapters, arc_type
-            )
-            result["metadata"]["emotion_curve"] = emotion_data
-            
-            # 1.3 检查是否需要触发周期回顾
-            if self.chapter_review.should_trigger_review(chapter_number):
-                result["metadata"]["review_triggered"] = True
-                # 这里可以触发回顾，但为了不阻塞生成，可以异步处理
-                logger.info(f"章节 {chapter_number} 触发周期回顾")
-            
-            # ===== 阶段 2: 生成多个版本 =====
-            result["metadata"]["flow_stages"].append("version_generation")
-            
-            style_hints = [
-                "情绪更细腻，节奏更慢，多写内心戏和感官描写",
-                "冲突更强，节奏更快，多写动作和对话",
-                "悬念更重，多埋伏笔，结尾钩子更强",
-            ]
-            
-            for version_index in range(version_count):
-                version_result = await self._generate_single_version(
-                    project_id=project_id,
-                    chapter_number=chapter_number,
-                    outline=outline,
-                    blueprint_context=blueprint_context,
-                    memory_context=memory_context,
-                    emotion_context=emotion_context,
-                    character_profiles=character_profiles,
-                    previous_summary=previous_summary,
-                    target_word_count=target_word_count,
-                    style_hint=style_hints[version_index % len(style_hints)] if version_count > 1 else "",
-                    enable_preview=enable_preview,
-                    enable_critique=enable_critique,
-                    user_id=user_id
+
+        with LLMService.daily_limit_scope(f"ultimate_flow:{project_id}:{chapter_number}:{user_id}"):
+            try:
+                # ===== 阶段 1: 准备上下文 =====
+                result["metadata"]["flow_stages"].append("context_preparation")
+
+                # 1.1 获取记忆层上下文
+                memory_context = await self.memory_layer.get_memory_context(
+                    project_id, chapter_number, character_names
                 )
-                
-                version_result["version_index"] = version_index
-                result["versions"].append(version_result)
-            
-            # ===== 阶段 3: 读者模拟评估 =====
-            if enable_reader_simulation and result["versions"]:
-                result["metadata"]["flow_stages"].append("reader_simulation")
-                
-                for version in result["versions"]:
-                    if version.get("content"):
-                        reader_feedback = await self.reader_simulator.simulate_reading_experience(
-                            chapter_content=version["content"],
-                            chapter_number=chapter_number,
-                            reader_types=[ReaderType.THRILL_SEEKER, ReaderType.CRITIC, ReaderType.CASUAL],
-                            previous_summary=previous_summary,
-                            user_id=user_id
-                        )
-                        version["reader_feedback"] = reader_feedback
-            
-            # ===== 阶段 4: 选择最佳版本 =====
-            result["metadata"]["flow_stages"].append("version_selection")
-            result["best_version_index"] = self._select_best_version(result["versions"])
-            
-            # ===== 阶段 5: 更新记忆层 =====
-            result["metadata"]["flow_stages"].append("memory_update")
-            
-            best_version = result["versions"][result["best_version_index"]]
-            if best_version.get("content"):
-                memory_update = await self.memory_layer.update_memory_after_chapter(
-                    project_id=project_id,
-                    chapter_number=chapter_number,
-                    chapter_content=best_version["content"],
-                    character_names=character_names,
-                    user_id=user_id
+                result["metadata"]["memory_context"] = memory_context[:500] + "..."
+
+                # 1.2 获取情绪曲线指导
+                emotion_data = self.emotion_curve.calculate_emotion_target(
+                    chapter_number, total_chapters, arc_type
                 )
-                result["metadata"]["memory_update"] = memory_update
-            
-            result["status"] = "success"
-            
-        except Exception as e:
-            logger.error(f"终极写作流程失败: {e}")
-            result["status"] = "failed"
-            result["error"] = str(e)
-        
+                emotion_context = self.emotion_curve.get_emotion_curve_context(
+                    chapter_number, total_chapters, arc_type
+                )
+                result["metadata"]["emotion_curve"] = emotion_data
+
+                # 1.3 检查是否需要触发周期回顾
+                if self.chapter_review.should_trigger_review(chapter_number):
+                    result["metadata"]["review_triggered"] = True
+                    # 这里可以触发回顾，但为了不阻塞生成，可以异步处理
+                    logger.info(f"章节 {chapter_number} 触发周期回顾")
+
+                # ===== 阶段 2: 生成多个版本 =====
+                result["metadata"]["flow_stages"].append("version_generation")
+
+                style_hints = [
+                    "情绪更细腻，节奏更慢，多写内心戏和感官描写",
+                    "冲突更强，节奏更快，多写动作和对话",
+                    "悬念更重，多埋伏笔，结尾钩子更强",
+                ]
+
+                for version_index in range(version_count):
+                    version_result = await self._generate_single_version(
+                        project_id=project_id,
+                        chapter_number=chapter_number,
+                        outline=outline,
+                        blueprint_context=blueprint_context,
+                        memory_context=memory_context,
+                        emotion_context=emotion_context,
+                        character_profiles=character_profiles,
+                        previous_summary=previous_summary,
+                        target_word_count=target_word_count,
+                        style_hint=style_hints[version_index % len(style_hints)] if version_count > 1 else "",
+                        enable_preview=enable_preview,
+                        enable_critique=enable_critique,
+                        user_id=user_id
+                    )
+
+                    version_result["version_index"] = version_index
+                    result["versions"].append(version_result)
+
+                # ===== 阶段 3: 读者模拟评估 =====
+                if enable_reader_simulation and result["versions"]:
+                    result["metadata"]["flow_stages"].append("reader_simulation")
+
+                    for version in result["versions"]:
+                        if version.get("content"):
+                            reader_feedback = await self.reader_simulator.simulate_reading_experience(
+                                chapter_content=version["content"],
+                                chapter_number=chapter_number,
+                                reader_types=[ReaderType.THRILL_SEEKER, ReaderType.CRITIC, ReaderType.CASUAL],
+                                previous_summary=previous_summary,
+                                user_id=user_id
+                            )
+                            version["reader_feedback"] = reader_feedback
+
+                # ===== 阶段 4: 选择最佳版本 =====
+                result["metadata"]["flow_stages"].append("version_selection")
+                result["best_version_index"] = self._select_best_version(result["versions"])
+
+                # ===== 阶段 5: 更新记忆层 =====
+                result["metadata"]["flow_stages"].append("memory_update")
+
+                best_version = result["versions"][result["best_version_index"]]
+                if best_version.get("content"):
+                    memory_update = await self.memory_layer.update_memory_after_chapter(
+                        project_id=project_id,
+                        chapter_number=chapter_number,
+                        chapter_content=best_version["content"],
+                        character_names=character_names,
+                        user_id=user_id
+                    )
+                    result["metadata"]["memory_update"] = memory_update
+
+                result["status"] = "success"
+
+            except Exception as e:
+                logger.error(f"终极写作流程失败: {e}")
+                result["status"] = "failed"
+                result["error"] = str(e)
+
         return result
 
     async def _generate_single_version(

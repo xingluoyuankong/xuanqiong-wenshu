@@ -509,85 +509,86 @@ class WritingSkillsService:
         chapter_number: Optional[int] = None,
         user_id: Optional[int] = None,
     ) -> dict[str, Any]:
-        skill = await self.get_skill_detail(skill_id)
-        if not skill or not skill.enabled:
-            raise ValueError("技能不存在或未启用")
+        with LLMService.daily_limit_scope(f"writing_skill:{skill_id}:{project_id or 'none'}:{chapter_number if chapter_number is not None else 'none'}:{user_id or 0}:{len(prompt or '')}"):
+            skill = await self.get_skill_detail(skill_id)
+            if not skill or not skill.enabled:
+                raise ValueError("技能不存在或未启用")
 
-        prompt = (prompt or "").strip()
-        if not prompt:
-            raise ValueError("请先输入技能执行内容")
+            prompt = (prompt or "").strip()
+            if not prompt:
+                raise ValueError("请先输入技能执行内容")
 
-        project_context = ""
-        chapter_context = ""
-        if project_id:
-            project = await self.novel_repo.get_by_id(project_id)
-            if not project:
-                raise ValueError("项目不存在")
-            project_context = (
-                f"项目标题：{project.title}\n"
-                f"一句话简介：{project.blueprint.one_sentence_summary if project.blueprint else ''}\n"
-                f"世界设定：{project.blueprint.world_setting if project.blueprint else {}}\n"
+            project_context = ""
+            chapter_context = ""
+            if project_id:
+                project = await self.novel_repo.get_by_id(project_id)
+                if not project:
+                    raise ValueError("项目不存在")
+                project_context = (
+                    f"项目标题：{project.title}\n"
+                    f"一句话简介：{project.blueprint.one_sentence_summary if project.blueprint else ''}\n"
+                    f"世界设定：{project.blueprint.world_setting if project.blueprint else {}}\n"
+                )
+                if chapter_number is not None:
+                    chapter = next((item for item in project.chapters if item.chapter_number == chapter_number), None)
+                    if chapter:
+                        selected_version = chapter.selected_version.content if chapter.selected_version else None
+                        latest_version = chapter.versions[-1].content if chapter.versions else None
+                        chapter_text = selected_version or latest_version or ""
+                        chapter_context = (
+                            f"章节号：第 {chapter_number} 章\n"
+                            f"章节摘要：{chapter.real_summary or ''}\n"
+                            f"章节正文：{chapter_text[:6000]}\n"
+                        )
+
+            skill_definition = SKILL_DEFINITION_MAP.get(skill_id)
+            skill_instruction = (
+                skill_definition.get("instruction_template")
+                if skill_definition and skill_definition.get("instruction_template")
+                else "请给出具体、可执行的写作改进建议。"
             )
-            if chapter_number is not None:
-                chapter = next((item for item in project.chapters if item.chapter_number == chapter_number), None)
-                if chapter:
-                    selected_version = chapter.selected_version.content if chapter.selected_version else None
-                    latest_version = chapter.versions[-1].content if chapter.versions else None
-                    chapter_text = selected_version or latest_version or ""
-                    chapter_context = (
-                        f"章节号：第 {chapter_number} 章\n"
-                        f"章节摘要：{chapter.real_summary or ''}\n"
-                        f"章节正文：{chapter_text[:6000]}\n"
-                    )
 
-        skill_definition = SKILL_DEFINITION_MAP.get(skill_id)
-        skill_instruction = (
-            skill_definition.get("instruction_template")
-            if skill_definition and skill_definition.get("instruction_template")
-            else "请给出具体、可执行的写作改进建议。"
-        )
+            composed_prompt = (
+                f"你是 玄穹文枢 的写作技能助手。\n"
+                f"技能：{skill.name}\n"
+                f"技能目标：{skill_instruction}\n\n"
+                f"用户要求：{prompt}\n\n"
+                f"{project_context}"
+                f"{chapter_context}"
+                "请直接输出：1）问题判断；2）3条具体修改建议；3）如有必要给出一小段示例改写。"
+            )
 
-        composed_prompt = (
-            f"你是 玄穹文枢 的写作技能助手。\n"
-            f"技能：{skill.name}\n"
-            f"技能目标：{skill_instruction}\n\n"
-            f"用户要求：{prompt}\n\n"
-            f"{project_context}"
-            f"{chapter_context}"
-            "请直接输出：1）问题判断；2）3条具体修改建议；3）如有必要给出一小段示例改写。"
-        )
+            suggestion = await self.llm_service.generate(
+                composed_prompt,
+                system_prompt="你是一名严谨的小说编辑与写作教练。输出必须具体、可执行、贴合上下文。",
+                temperature=0.5,
+                user_id=user_id,
+                response_format=None,
+                max_tokens=1200,
+            )
 
-        suggestion = await self.llm_service.generate(
-            composed_prompt,
-            system_prompt="你是一名严谨的小说编辑与写作教练。输出必须具体、可执行、贴合上下文。",
-            temperature=0.5,
-            user_id=user_id,
-            response_format=None,
-            max_tokens=1200,
-        )
+            result = {
+                "summary": f"已执行技能：{skill.name}",
+                "suggestion": suggestion,
+                "mode": "llm",
+            }
 
-        result = {
-            "summary": f"已执行技能：{skill.name}",
-            "suggestion": suggestion,
-            "mode": "llm",
-        }
+            execution = SkillExecution(
+                skill_id=skill.id,
+                project_id=project_id,
+                chapter_number=chapter_number,
+                prompt=prompt,
+                result=result["suggestion"],
+            )
+            self.db.add(execution)
+            await self.db.commit()
+            await self.db.refresh(execution)
 
-        execution = SkillExecution(
-            skill_id=skill.id,
-            project_id=project_id,
-            chapter_number=chapter_number,
-            prompt=prompt,
-            result=result["suggestion"],
-        )
-        self.db.add(execution)
-        await self.db.commit()
-        await self.db.refresh(execution)
-
-        return {
-            "skill_id": skill.id,
-            "skill_name": skill.name,
-            "project_id": project_id,
-            "chapter_number": chapter_number,
-            "result": result,
-            "executed_at": execution.executed_at.isoformat(),
-        }
+            return {
+                "skill_id": skill.id,
+                "skill_name": skill.name,
+                "project_id": project_id,
+                "chapter_number": chapter_number,
+                "result": result,
+                "executed_at": execution.executed_at.isoformat(),
+            }

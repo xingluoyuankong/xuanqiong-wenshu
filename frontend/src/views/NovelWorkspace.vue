@@ -12,7 +12,7 @@
       </div>
     </transition>
 
-    <header class="sticky top-0 z-30 border-b border-white/70 bg-white/80 backdrop-blur-xl">
+    <header class="xq-topbar xq-topbar--workspace sticky top-0 z-30 border-b border-white/70 bg-white/80 backdrop-blur-xl">
       <div class="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
         <div class="min-w-0">
           <p class="text-xs font-semibold uppercase tracking-[0.3em] text-sky-700">小说工作台</p>
@@ -325,6 +325,7 @@ import { useNovelStore } from '@/stores/novel'
 import { useAuthStore } from '@/stores/auth'
 import type { NovelProjectSummary } from '@/api/novel'
 import { NovelAPI } from '@/api/novel'
+import { resolveProjectWritingEntryFromSummary } from '@/utils/projectRouting'
 
 const router = useRouter()
 const novelStore = useNovelStore()
@@ -433,11 +434,7 @@ function viewProjectDetail(projectId: string) {
 }
 
 function enterProject(project: NovelProjectSummary) {
-  if (project.title === '未命名灵感' || project.total_chapters === 0) {
-    router.push(`/inspiration?project_id=${project.id}`)
-    return
-  }
-  router.push(`/novel/${project.id}`)
+  router.push(resolveProjectWritingEntryFromSummary(project))
 }
 
 async function loadProjects() {

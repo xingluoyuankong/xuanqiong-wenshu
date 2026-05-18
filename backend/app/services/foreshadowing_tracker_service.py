@@ -160,48 +160,49 @@ class ForeshadowingTrackerService:
         user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """获取伏笔提醒和发展建议"""
-        
-        # 获取分类后的伏笔
-        categorized = await self.get_foreshadowings_for_chapter(project_id, chapter_number)
-        
-        # 构建活跃伏笔上下文
-        active_context = self._build_foreshadowing_context(categorized)
-        
-        # 获取提示词
-        prompt_template = await self.prompt_service.get_prompt("foreshadowing_reminder")
-        if not prompt_template:
-            return self._create_basic_reminders(categorized, chapter_number)
-        
-        # 构建提示词
-        prompt = prompt_template
-        prompt = prompt.replace("{{chapter_number}}", str(chapter_number))
-        prompt = prompt.replace("{{chapter_title}}", "")
-        prompt = prompt.replace("{{chapter_outline}}", chapter_outline or "（无大纲）")
-        prompt = prompt.replace("{{active_foreshadowings}}", active_context)
-        
-        # 调用 LLM 获取建议
-        response = await self.llm_service.generate(
-            prompt=prompt,
-            system_prompt="你是一位专业的小说编辑，负责追踪伏笔状态并提供发展建议。请以 JSON 格式输出。",
-            user_id=user_id,
-            timeout=25.0,
-            response_format=None,
-        )
-        
-        # 解析结果
-        try:
-            content = sanitize_json_like_text(
-                unwrap_markdown_json(remove_think_tags(response or ""))
+        with LLMService.daily_limit_scope(f"foreshadowing_reminder:{project_id}:{chapter_number}:{user_id or 0}"):
+
+            # 获取分类后的伏笔
+            categorized = await self.get_foreshadowings_for_chapter(project_id, chapter_number)
+
+            # 构建活跃伏笔上下文
+            active_context = self._build_foreshadowing_context(categorized)
+
+            # 获取提示词
+            prompt_template = await self.prompt_service.get_prompt("foreshadowing_reminder")
+            if not prompt_template:
+                return self._create_basic_reminders(categorized, chapter_number)
+
+            # 构建提示词
+            prompt = prompt_template
+            prompt = prompt.replace("{{chapter_number}}", str(chapter_number))
+            prompt = prompt.replace("{{chapter_title}}", "")
+            prompt = prompt.replace("{{chapter_outline}}", chapter_outline or "（无大纲）")
+            prompt = prompt.replace("{{active_foreshadowings}}", active_context)
+
+            # 调用 LLM 获取建议
+            response = await self.llm_service.generate(
+                prompt=prompt,
+                system_prompt="你是一位专业的小说编辑，负责追踪伏笔状态并提供发展建议。请以 JSON 格式输出。",
+                user_id=user_id,
+                timeout=45.0,
+                response_format=None,
             )
-            json_start = content.find("{")
-            json_end = content.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                result = json.loads(content[json_start:json_end])
-                return result
-        except json.JSONDecodeError:
-            pass
-        
-        return self._create_basic_reminders(categorized, chapter_number)
+
+            # 解析结果
+            try:
+                content = sanitize_json_like_text(
+                    unwrap_markdown_json(remove_think_tags(response or ""))
+                )
+                json_start = content.find("{")
+                json_end = content.rfind("}") + 1
+                if json_start >= 0 and json_end > json_start:
+                    result = json.loads(content[json_start:json_end])
+                    return result
+            except json.JSONDecodeError:
+                pass
+
+            return self._create_basic_reminders(categorized, chapter_number)
 
     def _build_foreshadowing_context(self, categorized: Dict[str, List[Foreshadowing]]) -> str:
         """构建伏笔上下文"""

@@ -44,6 +44,17 @@
         </div>
       </div>
 
+      <div v-if="systemCards.length" class="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div
+          v-for="card in systemCards"
+          :key="card.label"
+          class="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4"
+        >
+          <p class="text-xs font-semibold text-emerald-700 uppercase tracking-wide mb-2">{{ card.label }}</p>
+          <p class="text-sm leading-6 text-emerald-950 whitespace-pre-line">{{ card.value }}</p>
+        </div>
+      </div>
+
       <div class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div class="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4">
           <div class="flex items-center justify-between mb-3">
@@ -159,6 +170,11 @@ interface ListItem {
   description: string
 }
 
+interface SystemCard {
+  label: string
+  value: string
+}
+
 const props = defineProps<{
   data: Record<string, any> | null
   editable?: boolean
@@ -169,6 +185,27 @@ const emit = defineEmits<{
 }>()
 
 const worldSetting = computed(() => props.data?.world_setting || {})
+
+const formatStructuredValue = (value: any): string => {
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) {
+    return value
+      .map(item => formatStructuredValue(item))
+      .filter(Boolean)
+      .join('；')
+  }
+  if (value && typeof value === 'object') {
+    return Object.entries(value)
+      .map(([key, nested]) => {
+        const nestedText = formatStructuredValue(nested)
+        return nestedText ? `${key}：${nestedText}` : ''
+      })
+      .filter(Boolean)
+      .join('\n')
+  }
+  return ''
+}
 
 const normalizeList = (source: any): ListItem[] => {
   if (!source) return []
@@ -192,6 +229,27 @@ const normalizeList = (source: any): ListItem[] => {
 
 const locations = computed(() => normalizeList(worldSetting.value?.key_locations))
 const factions = computed(() => normalizeList(worldSetting.value?.factions))
+const systemCards = computed<SystemCard[]>(() => {
+  const fields: Array<[string, string]> = [
+    ['era_background', '时代背景'],
+    ['world_structure', '世界结构'],
+    ['power_system', '力量体系'],
+    ['survival_system', '生存体系'],
+    ['life_system', '生活体系'],
+    ['culture_system', '文化体系'],
+    ['civilization_system', '文明体系'],
+    ['economy_system', '经济体系'],
+    ['social_structure', '社会结构'],
+    ['resource_system', '资源体系'],
+    ['belief_system', '信仰体系'],
+    ['geography_system', '地理体系'],
+    ['faction_order', '势力秩序'],
+  ]
+
+  return fields
+    .map(([key, label]) => ({ label, value: formatStructuredValue(worldSetting.value?.[key]) }))
+    .filter(item => item.value)
+})
 const rulesCount = computed(() => {
   const raw = String(worldSetting.value?.core_rules || '').trim()
   if (!raw) return 0

@@ -24,9 +24,9 @@
             leave-from="opacity-100 translate-y-0 sm:scale-100"
             leave-to="opacity-0 translate-y-4 sm:scale-95"
           >
-            <DialogPanel class="m3-patchdiff-dialog md-dialog flex h-[calc(100vh-1rem)] w-[min(1400px,calc(100vw-1rem))] flex-col overflow-hidden text-left">
+            <DialogPanel class="xq-dialog-shell xq-dialog-shell--xl xq-diff-dialog m3-patchdiff-dialog flex h-[calc(100vh-1rem)] flex-col overflow-hidden text-left">
               <!-- Header -->
-              <div class="m3-patchdiff-dialog__head">
+              <div class="xq-dialog-header m3-patchdiff-dialog__head">
                 <div class="min-w-0 flex-1">
                   <div class="m3-patchdiff-dialog__chips">
                     <span class="m3-reader-chip">精细编辑</span>
@@ -41,14 +41,14 @@
                 </div>
 
                 <div class="m3-patchdiff-dialog__actions">
-                  <button type="button" class="md-icon-btn md-ripple" @click="handleClose" aria-label="关闭">
+                  <button type="button" class="xq-dialog-close md-ripple" @click="handleClose" aria-label="关闭">
                     ×
                   </button>
                 </div>
               </div>
 
               <!-- Body -->
-              <div class="m3-patchdiff-dialog__body">
+              <div class="xq-dialog-body m3-patchdiff-dialog__body">
                 <!-- 输入编辑区 -->
                 <div class="patchdiff-edit-area mb-4">
                   <div class="grid grid-cols-2 gap-4">
@@ -115,7 +115,7 @@
                     <div class="flex items-center gap-2 text-xs">
                       <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-500"></span> 新增 {{ diffSummary.added }}</span>
                       <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500"></span> 删除 {{ diffSummary.deleted }}</span>
-                      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-yellow-500"></span> 修改 {{ diffSummary.modified }}</span>
+                      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-sky-500"></span> 修改 {{ diffSummary.modified }}</span>
                     </div>
                   </div>
                   <div class="patchdiff-diff-container overflow-y-auto border rounded-lg">
@@ -134,7 +134,7 @@
                           :class="{
                             'bg-green-50 dark:bg-green-900/20': line.change_type === 'added',
                             'bg-red-50 dark:bg-red-900/20': line.change_type === 'deleted',
-                            'bg-yellow-50 dark:bg-yellow-900/20': line.change_type === 'modified',
+                            'bg-sky-50 dark:bg-sky-900/20': line.change_type === 'modified',
                           }"
                         >
                           <td class="px-2 py-1 text-center text-slate-400">{{ line.line_number }}</td>
@@ -162,7 +162,7 @@
               </div>
 
               <!-- Footer -->
-              <div class="m3-patchdiff-dialog__foot">
+              <div class="xq-dialog-footer m3-patchdiff-dialog__foot">
                 <div class="m3-patchdiff-dialog__foot-note">
                   <span v-if="isApplying">正在应用 Patch...</span>
                   <span v-else-if="diffLines.length > 0">

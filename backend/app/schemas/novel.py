@@ -16,7 +16,7 @@ class ChoiceOption(BaseModel):
 class UIControl(BaseModel):
     """描述前端应渲染的组件类型与配置。"""
 
-    type: str = Field(..., description="控件类型，如 single_choice/text_input")
+    type: str = Field(..., description="控件类型，如 single_choice/multi_choice/text_input")
     options: Optional[List[ChoiceOption]] = Field(default=None, description="可选项列表")
     placeholder: Optional[str] = Field(default=None, description="输入提示文案")
 
@@ -70,11 +70,13 @@ class ChapterVersionSchema(BaseModel):
     style: Optional[str] = "标准"
     evaluation: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    word_count: int = 0
     created_at: Optional[datetime] = None
 
 class Chapter(ChapterOutline):
     real_summary: Optional[str] = None
     content: Optional[str] = None
+    selected_version_id: Optional[int] = None
     versions: Optional[List[ChapterVersionSchema]] = None
     evaluation: Optional[str] = None
     generation_status: ChapterGenerationStatus = ChapterGenerationStatus.NOT_GENERATED
@@ -115,6 +117,91 @@ class Relationship(BaseModel):
     extra: Dict[str, Any] = Field(default_factory=dict)
 
 
+class WorldSetting(BaseModel):
+    core_rules: str = ""
+    era: str = ""
+    time_period: str = ""
+    atmosphere: str = ""
+    tone: str = ""
+    era_background: Any = None
+    world_structure: Any = None
+    power_system: Any = None
+    survival_system: Any = None
+    life_system: Any = None
+    culture_system: Any = None
+    civilization_system: Any = None
+    economy_system: Any = None
+    social_structure: Any = None
+    technology_system: Any = None
+    resource_system: Any = None
+    belief_system: Any = None
+    geography_system: Any = None
+    faction_order: Any = None
+    system_blueprint: Dict[str, Any] = Field(default_factory=dict)
+    key_locations: List[Dict[str, Any]] = Field(default_factory=list)
+    factions: List[Dict[str, Any]] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class StoryArc(BaseModel):
+    title: str = ""
+    theme: str = ""
+    goal: str = ""
+    conflict: str = ""
+    summary: str = ""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class VolumePlanItem(BaseModel):
+    volume: Optional[int | str] = None
+    title: str = ""
+    focus: str = ""
+    goal: str = ""
+    summary: str = ""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class NovelOutlineStage(BaseModel):
+    stage: Optional[int] = None
+    title: str = ""
+    core_theme: str = ""
+    goal: str = ""
+    main_conflict: str = ""
+    background: str = ""
+    character_progression: str = ""
+    world_progression: str = ""
+    faction_progression: str = ""
+    power_progression: str = ""
+    survival_and_life_progression: str = ""
+    cultural_and_civilizational_progression: str = ""
+    resource_and_operation_line: str = ""
+    emotional_core: str = ""
+    major_setpiece: str = ""
+    story_function: str = ""
+    key_events: List[str] = Field(default_factory=list)
+    turning_points: List[str] = Field(default_factory=list)
+    stage_tasks: List[str] = Field(default_factory=list)
+    stage_climax: str = ""
+    foreshadowing_and_payoff: str = ""
+    ending_hook: str = ""
+    expected_chapter_range: str = ""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ForeshadowingItem(BaseModel):
+    plant: Any = None
+    payoff: Any = None
+    owner: str = ""
+    trigger: str = ""
+    summary: str = ""
+
+    model_config = ConfigDict(extra="allow")
+
+
 class Blueprint(BaseModel):
     title: str
     target_audience: str = ""
@@ -123,12 +210,13 @@ class Blueprint(BaseModel):
     tone: str = ""
     one_sentence_summary: str = ""
     full_synopsis: str = ""
-    world_setting: Dict[str, Any] = Field(default_factory=dict)
+    world_setting: WorldSetting = Field(default_factory=WorldSetting)
     characters: List[Dict[str, Any]] = Field(default_factory=list)
     relationships: List[Relationship] = Field(default_factory=list)
-    story_arcs: List[Dict[str, Any]] = Field(default_factory=list)
-    volume_plan: List[Dict[str, Any]] = Field(default_factory=list)
-    foreshadowing_system: List[Dict[str, Any]] = Field(default_factory=list)
+    story_arcs: List[StoryArc] = Field(default_factory=list)
+    volume_plan: List[VolumePlanItem] = Field(default_factory=list)
+    novel_outline: List[NovelOutlineStage] = Field(default_factory=list)
+    foreshadowing_system: List[ForeshadowingItem] = Field(default_factory=list)
     chapter_outline: List[ChapterOutline] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
@@ -162,6 +250,26 @@ class BlueprintGenerationResponse(BaseModel):
     ai_message: str
 
 
+class BlueprintGenerationError(BaseModel):
+    code: str
+    message: str
+    detail: Optional[str] = None
+    retryable: bool = True
+
+
+class BlueprintGenerationJobResponse(BaseModel):
+    run_id: str
+    project_id: str
+    status: str
+    progress_stage: str = "queued"
+    progress_message: str = ""
+    started_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    blueprint: Optional[Blueprint] = None
+    ai_message: Optional[str] = None
+    error: Optional[BlueprintGenerationError] = None
+
+
 class ChapterGenerationResponse(BaseModel):
     ai_message: str
     chapter_versions: List[Dict[str, Any]]
@@ -170,6 +278,7 @@ class ChapterGenerationResponse(BaseModel):
 class NovelSectionType(str, Enum):
     OVERVIEW = "overview"
     WORLD_SETTING = "world_setting"
+    NOVEL_OUTLINE = "novel_outline"
     CHARACTERS = "characters"
     RELATIONSHIPS = "relationships"
     CHAPTER_OUTLINE = "chapter_outline"
@@ -252,12 +361,14 @@ class FinalizeChapterResponse(BaseModel):
 
 class SelectVersionRequest(BaseModel):
     chapter_number: int
-    version_index: int
+    version_index: Optional[int] = Field(default=None, description="兼容旧前端的版本索引（0-based）")
+    version_id: Optional[int] = Field(default=None, description="稳定版本 ID，优先于 version_index")
 
 
 class EvaluateChapterRequest(BaseModel):
     chapter_number: int
     version_index: Optional[int] = Field(default=None, description="要评审的版本索引（0-based），不传则使用已选版本或最新版本")
+    version_id: Optional[int] = Field(default=None, description="要评审的版本 ID，优先于 version_index")
     evaluate_all: bool = Field(default=False, description="是否评审所有版本进行对比（多版本评审模式）")
 
 
@@ -294,12 +405,13 @@ class GenerateOutlineRequest(BaseModel):
 class BlueprintPatch(BaseModel):
     one_sentence_summary: Optional[str] = None
     full_synopsis: Optional[str] = None
-    world_setting: Optional[Dict[str, Any]] = None
+    world_setting: Optional[WorldSetting] = None
     characters: Optional[List[Dict[str, Any]]] = None
     relationships: Optional[List[Relationship]] = None
-    story_arcs: Optional[List[Dict[str, Any]]] = None
-    volume_plan: Optional[List[Dict[str, Any]]] = None
-    foreshadowing_system: Optional[List[Dict[str, Any]]] = None
+    story_arcs: Optional[List[StoryArc]] = None
+    volume_plan: Optional[List[VolumePlanItem]] = None
+    novel_outline: Optional[List[NovelOutlineStage]] = None
+    foreshadowing_system: Optional[List[ForeshadowingItem]] = None
     chapter_outline: Optional[List[ChapterOutline]] = None
 
 

@@ -33,125 +33,126 @@ class ImportService:
         导入小说文件，执行分章、分析并创建项目。
         返回新创建的项目ID。
         """
-        content = await self._read_file_content(file)
-        if not content:
-            raise HTTPException(status_code=400, detail="文件内容为空")
+        with LLMService.daily_limit_scope(f"import_novel:{user_id}:{getattr(file, 'filename', 'unknown')}"):
+            content = await self._read_file_content(file)
+            if not content:
+                raise HTTPException(status_code=400, detail="文件内容为空")
 
-        # 1. 智能分段（分章）
-        chapters = self._split_into_chapters(content)
-        if not chapters:
-            # 如果无法分章，将整个文件作为一个章节
-            chapters = [("第一章 全文", content)]
+            # 1. 智能分段（分章）
+            chapters = self._split_into_chapters(content)
+            if not chapters:
+                # 如果无法分章，将整个文件作为一个章节
+                chapters = [("第一章 全文", content)]
 
-        # 2. 准备分析用的文本样本
-        # 策略改进：混合采样 (均匀剧情采样 + 角色高光采样)
-        
-        # A. 均匀剧情采样 (约 30k 字)
-        MAX_PLOT_CHARS = 30000
-        MAX_CHAPTER_CHARS = 1000
-        
-        plot_sample_text = ""
-        chapter_titles = [title for title, _ in chapters]
-        total_chapters = len(chapters)
-        
-        # 预提取人名 (基于全文)
-        potential_characters = self._extract_potential_characters(content, top_n=150) # 扩大到150，广撒网
-        
-        # 确定要采样的章节索引 (均匀分布)
-        indices = []
-        if total_chapters <= 10:
-            indices = list(range(total_chapters))
-        else:
-            indices.extend([0, 1, 2]) # 前3章
-            last_indices = [total_chapters - 2, total_chapters - 1] # 后2章
-            
-            start_mid = 3
-            end_mid = total_chapters - 2
-            mid_count = end_mid - start_mid
-            
-            if mid_count > 0:
-                target_mid_samples = 25 # 中间取25章
-                step = max(1, mid_count // target_mid_samples)
-                for i in range(start_mid, end_mid, step):
-                    indices.append(i)
-            
-            indices.extend(last_indices)
-            indices = sorted(list(set(indices)))
+            # 2. 准备分析用的文本样本
+            # 策略改进：混合采样 (均匀剧情采样 + 角色高光采样)
 
-        for i in indices:
-            if 0 <= i < len(chapters):
-                title, body = chapters[i]
-                clean_body = body[:MAX_CHAPTER_CHARS].strip()
-                plot_sample_text += f"第{i+1}章 {title}\n{clean_body}\n\n"
-        
-        if len(plot_sample_text) > MAX_PLOT_CHARS:
-            plot_sample_text = plot_sample_text[:MAX_PLOT_CHARS] + "...\n(截断)"
-            
-        # B. 角色高光采样 (约 20k-30k 字)
-        # 为每个潜在角色提取一段精彩片段
-        # 优化：Top 150 采样，窗口适当缩小，只求证明存在
-        char_highlights_text = self._extract_character_highlights(content, potential_characters, context_window=200)
-        
-        # 3. 分阶段分析
-        # 阶段一：先筛选出确定的角色名单 (Stable Census)
-        verified_characters = await self._filter_characters_only(user_id, potential_characters, char_highlights_text)
-        logger.info(f"角色筛选完成，潜在 {len(potential_characters)} -> 确认 {len(verified_characters)}")
-        
-        # 阶段二：详细分析 (Deep Profiling)
-        blueprint_data = await self._analyze_content(
-            user_id, 
-            plot_sample_text, 
-            chapter_titles, 
-            potential_characters, # 依然传入作为备选参考
-            char_highlights_text,
-            verified_characters   # 传入确定的名单
-        )
-        
-        # 4. 创建项目
-        title = blueprint_data.title or file.filename.rsplit('.', 1)[0]
-        initial_prompt = f"导入自文件: {file.filename}"
-        project = await self.novel_service.create_project(user_id, title, initial_prompt)
-        
-        # 5. 保存蓝图
-        # 确保 blueprint_data 中的 chapter_outline 包含所有章节（如果AI没返回全部）
-        if blueprint_data.chapter_outline:
-            # 建立映射以合并AI生成的摘要和实际章节列表
-            ai_outlines = {o.chapter_number: o for o in blueprint_data.chapter_outline}
-            final_outlines = []
-            for i, (chap_title, _) in enumerate(chapters, 1):
-                if i in ai_outlines:
-                    outline = ai_outlines[i]
-                    outline.title = chap_title # 优先使用解析出的真实标题
-                else:
-                    # AI未生成的章节，使用默认占位
-                    from ..schemas.novel import ChapterOutline as ChapterOutlineSchema
-                    outline = ChapterOutlineSchema(
-                        chapter_number=i,
-                        title=chap_title,
-                        summary=""
-                    )
-                final_outlines.append(outline)
-            blueprint_data.chapter_outline = final_outlines
-        
-        await self.novel_service.replace_blueprint(project.id, blueprint_data)
-        
-        # 6. 保存章节内容
-        for i, (chap_title, chap_content) in enumerate(chapters, 1):
-            chapter = await self.novel_service.get_or_create_chapter(project.id, i)
-            # 创建初始版本
-            await self.novel_service.replace_chapter_versions(
-                chapter, 
-                [chap_content], 
-                metadata=[{"source": "file_import"}]
+            # A. 均匀剧情采样 (约 30k 字)
+            MAX_PLOT_CHARS = 30000
+            MAX_CHAPTER_CHARS = 1000
+
+            plot_sample_text = ""
+            chapter_titles = [title for title, _ in chapters]
+            total_chapters = len(chapters)
+
+            # 预提取人名 (基于全文)
+            potential_characters = self._extract_potential_characters(content, top_n=150) # 扩大到150，广撒网
+
+            # 确定要采样的章节索引 (均匀分布)
+            indices = []
+            if total_chapters <= 10:
+                indices = list(range(total_chapters))
+            else:
+                indices.extend([0, 1, 2]) # 前3章
+                last_indices = [total_chapters - 2, total_chapters - 1] # 后2章
+
+                start_mid = 3
+                end_mid = total_chapters - 2
+                mid_count = end_mid - start_mid
+
+                if mid_count > 0:
+                    target_mid_samples = 25 # 中间取25章
+                    step = max(1, mid_count // target_mid_samples)
+                    for i in range(start_mid, end_mid, step):
+                        indices.append(i)
+
+                indices.extend(last_indices)
+                indices = sorted(list(set(indices)))
+
+            for i in indices:
+                if 0 <= i < len(chapters):
+                    title, body = chapters[i]
+                    clean_body = body[:MAX_CHAPTER_CHARS].strip()
+                    plot_sample_text += f"第{i+1}章 {title}\n{clean_body}\n\n"
+
+            if len(plot_sample_text) > MAX_PLOT_CHARS:
+                plot_sample_text = plot_sample_text[:MAX_PLOT_CHARS] + "...\n(截断)"
+
+            # B. 角色高光采样 (约 20k-30k 字)
+            # 为每个潜在角色提取一段精彩片段
+            # 优化：Top 150 采样，窗口适当缩小，只求证明存在
+            char_highlights_text = self._extract_character_highlights(content, potential_characters, context_window=200)
+
+            # 3. 分阶段分析
+            # 阶段一：先筛选出确定的角色名单 (Stable Census)
+            verified_characters = await self._filter_characters_only(user_id, potential_characters, char_highlights_text)
+            logger.info(f"角色筛选完成，潜在 {len(potential_characters)} -> 确认 {len(verified_characters)}")
+
+            # 阶段二：详细分析 (Deep Profiling)
+            blueprint_data = await self._analyze_content(
+                user_id,
+                plot_sample_text,
+                chapter_titles,
+                potential_characters, # 依然传入作为备选参考
+                char_highlights_text,
+                verified_characters   # 传入确定的名单
             )
-            # 自动选择第一个版本（即导入的内容）
-            await self.novel_service.select_chapter_version(chapter, 0)
 
-        # 更新项目状态
-        project.status = "blueprint_ready"
-        await self.session.commit()
-        
-        return project.id
+            # 4. 创建项目
+            title = blueprint_data.title or file.filename.rsplit('.', 1)[0]
+            initial_prompt = f"导入自文件: {file.filename}"
+            project = await self.novel_service.create_project(user_id, title, initial_prompt)
+
+            # 5. 保存蓝图
+            # 确保 blueprint_data 中的 chapter_outline 包含所有章节（如果AI没返回全部）
+            if blueprint_data.chapter_outline:
+                # 建立映射以合并AI生成的摘要和实际章节列表
+                ai_outlines = {o.chapter_number: o for o in blueprint_data.chapter_outline}
+                final_outlines = []
+                for i, (chap_title, _) in enumerate(chapters, 1):
+                    if i in ai_outlines:
+                        outline = ai_outlines[i]
+                        outline.title = chap_title # 优先使用解析出的真实标题
+                    else:
+                        # AI未生成的章节，使用默认占位
+                        from ..schemas.novel import ChapterOutline as ChapterOutlineSchema
+                        outline = ChapterOutlineSchema(
+                            chapter_number=i,
+                            title=chap_title,
+                            summary=""
+                        )
+                    final_outlines.append(outline)
+                blueprint_data.chapter_outline = final_outlines
+
+            await self.novel_service.replace_blueprint(project.id, blueprint_data)
+
+            # 6. 保存章节内容
+            for i, (chap_title, chap_content) in enumerate(chapters, 1):
+                chapter = await self.novel_service.get_or_create_chapter(project.id, i)
+                # 创建初始版本
+                await self.novel_service.replace_chapter_versions(
+                    chapter,
+                    [chap_content],
+                    metadata=[{"source": "file_import"}]
+                )
+                # 自动选择第一个版本（即导入的内容）
+                await self.novel_service.select_chapter_version(chapter, 0)
+
+            # 更新项目状态
+            project.status = "blueprint_ready"
+            await self.session.commit()
+
+            return project.id
 
     async def _read_file_content(self, file: UploadFile) -> str:
         content_bytes = await file.read()

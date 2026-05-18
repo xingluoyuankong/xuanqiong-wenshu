@@ -152,7 +152,7 @@ const themeColors = computed(() => {
     }
   } else if (genre.includes('东方') || genre.includes('武侠')) {
     return {
-      primary: 'var(--md-google-yellow)',
+      primary: 'var(--md-google-blue)',
       container: 'var(--md-warning-container)',
       onContainer: 'var(--md-on-warning-container)'
     }

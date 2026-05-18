@@ -298,89 +298,90 @@ class PreviewGenerationService:
     ) -> Dict[str, Any]:
         """
         完整的两阶段生成流程
-        
+
         Args:
             auto_approve: 是否自动批准预览（True 则不需要人工确认）
             max_preview_retries: 预览不通过时的最大重试次数
-        
+
         Returns:
             包含预览、评估、正文的完整结果
         """
-        result = {
-            "preview": None,
-            "evaluation": None,
-            "full_chapter": "",
-            "retries": 0,
-            "status": "pending"
-        }
-        
-        # 阶段 1：生成预览
-        for retry in range(max_preview_retries + 1):
-            result["retries"] = retry
-            
-            # 生成预览
-            preview = await self.generate_preview(
-                project_id=project_id,
-                chapter_number=chapter_number,
-                outline=outline,
-                blueprint_context=blueprint_context,
-                emotion_context=emotion_context,
-                memory_context=memory_context,
-                style_hint=style_hint,
-                user_id=user_id
-            )
-            
-            if preview.get("status") != "success":
-                continue
-            
-            result["preview"] = preview
-            
-            # 评估预览
-            evaluation = await self.evaluate_preview(
-                preview=preview,
-                outline=outline,
-                emotion_context=emotion_context,
-                user_id=user_id
-            )
-            
-            result["evaluation"] = evaluation
-            
-            # 检查是否通过
-            if auto_approve or evaluation.get("approved", False):
-                break
-            
-            # 如果有严重问题且还有重试机会，重新生成
-            critical_issues = [
-                issue for issue in evaluation.get("issues", [])
-                if issue.get("severity") == "critical"
-            ]
-            
-            if not critical_issues or retry >= max_preview_retries:
-                break
-            
-            # 将修改建议加入风格提示
-            suggestions = evaluation.get("revision_suggestions", [])
-            if suggestions:
-                style_hint = style_hint + "\n注意：" + "；".join(suggestions)
-        
-        # 阶段 2：扩写正文
-        if result["preview"]:
-            full_chapter = await self.expand_preview_to_full_chapter(
-                preview=result["preview"],
-                outline=outline,
-                blueprint_context=blueprint_context,
-                memory_context=memory_context,
-                target_word_count=target_word_count,
-                style_hint=style_hint,
-                user_id=user_id
-            )
-            
-            result["full_chapter"] = full_chapter
-            result["status"] = "success" if full_chapter else "failed"
-        else:
-            result["status"] = "preview_failed"
-        
-        return result
+        with LLMService.daily_limit_scope(f"preview_flow:{project_id}:{chapter_number}:{user_id}"):
+            result = {
+                "preview": None,
+                "evaluation": None,
+                "full_chapter": "",
+                "retries": 0,
+                "status": "pending"
+            }
+
+            # 阶段 1：生成预览
+            for retry in range(max_preview_retries + 1):
+                result["retries"] = retry
+
+                # 生成预览
+                preview = await self.generate_preview(
+                    project_id=project_id,
+                    chapter_number=chapter_number,
+                    outline=outline,
+                    blueprint_context=blueprint_context,
+                    emotion_context=emotion_context,
+                    memory_context=memory_context,
+                    style_hint=style_hint,
+                    user_id=user_id
+                )
+
+                if preview.get("status") != "success":
+                    continue
+
+                result["preview"] = preview
+
+                # 评估预览
+                evaluation = await self.evaluate_preview(
+                    preview=preview,
+                    outline=outline,
+                    emotion_context=emotion_context,
+                    user_id=user_id
+                )
+
+                result["evaluation"] = evaluation
+
+                # 检查是否通过
+                if auto_approve or evaluation.get("approved", False):
+                    break
+
+                # 如果有严重问题且还有重试机会，重新生成
+                critical_issues = [
+                    issue for issue in evaluation.get("issues", [])
+                    if issue.get("severity") == "critical"
+                ]
+
+                if not critical_issues or retry >= max_preview_retries:
+                    break
+
+                # 将修改建议加入风格提示
+                suggestions = evaluation.get("revision_suggestions", [])
+                if suggestions:
+                    style_hint = style_hint + "\n注意：" + "；".join(suggestions)
+
+            # 阶段 2：扩写正文
+            if result["preview"]:
+                full_chapter = await self.expand_preview_to_full_chapter(
+                    preview=result["preview"],
+                    outline=outline,
+                    blueprint_context=blueprint_context,
+                    memory_context=memory_context,
+                    target_word_count=target_word_count,
+                    style_hint=style_hint,
+                    user_id=user_id
+                )
+
+                result["full_chapter"] = full_chapter
+                result["status"] = "success" if full_chapter else "failed"
+            else:
+                result["status"] = "preview_failed"
+
+            return result
 
     async def generate_multiple_previews(
         self,
@@ -395,53 +396,54 @@ class PreviewGenerationService:
     ) -> List[Dict[str, Any]]:
         """
         生成多个不同风格的预览供选择
-        
+
         Args:
             count: 生成预览的数量
-        
+
         Returns:
             预览列表
         """
-        style_hints = [
-            "情绪更细腻，节奏更慢，多写内心戏和感官描写",
-            "冲突更强，节奏更快，多写动作和对话",
-            "悬念更重，多埋伏笔，结尾钩子更强",
-            "幽默轻松，多写有趣的对话和互动",
-            "紧张刺激，多写危机和转折",
-        ]
-        
-        previews = []
-        for i in range(min(count, len(style_hints))):
-            preview = await self.generate_preview(
-                project_id=project_id,
-                chapter_number=chapter_number,
-                outline=outline,
-                blueprint_context=blueprint_context,
-                emotion_context=emotion_context,
-                memory_context=memory_context,
-                style_hint=style_hints[i],
-                user_id=user_id
-            )
-            
-            if preview.get("status") == "success":
-                preview["style_hint"] = style_hints[i]
-                preview["index"] = i
-                
-                # 评估预览
-                evaluation = await self.evaluate_preview(
-                    preview=preview,
+        with LLMService.daily_limit_scope(f"preview_multi:{project_id}:{chapter_number}:{user_id}"):
+            style_hints = [
+                "情绪更细腻，节奏更慢，多写内心戏和感官描写",
+                "冲突更强，节奏更快，多写动作和对话",
+                "悬念更重，多埋伏笔，结尾钩子更强",
+                "幽默轻松，多写有趣的对话和互动",
+                "紧张刺激，多写危机和转折",
+            ]
+
+            previews = []
+            for i in range(min(count, len(style_hints))):
+                preview = await self.generate_preview(
+                    project_id=project_id,
+                    chapter_number=chapter_number,
                     outline=outline,
+                    blueprint_context=blueprint_context,
                     emotion_context=emotion_context,
+                    memory_context=memory_context,
+                    style_hint=style_hints[i],
                     user_id=user_id
                 )
-                preview["evaluation"] = evaluation
-                
-                previews.append(preview)
-        
-        # 按评分排序
-        previews.sort(
-            key=lambda x: x.get("evaluation", {}).get("overall_score", 0),
-            reverse=True
-        )
-        
-        return previews
+
+                if preview.get("status") == "success":
+                    preview["style_hint"] = style_hints[i]
+                    preview["index"] = i
+
+                    # 评估预览
+                    evaluation = await self.evaluate_preview(
+                        preview=preview,
+                        outline=outline,
+                        emotion_context=emotion_context,
+                        user_id=user_id
+                    )
+                    preview["evaluation"] = evaluation
+
+                    previews.append(preview)
+
+            # 按评分排序
+            previews.sort(
+                key=lambda x: x.get("evaluation", {}).get("overall_score", 0),
+                reverse=True
+            )
+
+            return previews

@@ -9,6 +9,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db.base import Base
 
+PROJECT_ID_TYPE = String(36).with_variant(String(36, collation="utf8mb4_unicode_ci"), "mysql")
+
 
 class TokenBudget(Base):
     """Token 预算配置 - 项目级的预算上限和模块分配"""
@@ -17,7 +19,7 @@ class TokenBudget(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[str] = mapped_column(
-        ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True, unique=True
+        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True, unique=True
     )
 
     # ===== 预算配置 =====
@@ -51,7 +53,7 @@ class TokenUsage(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[str] = mapped_column(
-        ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
     chapter_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True, index=True
@@ -78,7 +80,7 @@ class TokenBudgetAlert(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[str] = mapped_column(
-        ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     # ===== 预警信息 =====

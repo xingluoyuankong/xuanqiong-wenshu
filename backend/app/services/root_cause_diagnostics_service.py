@@ -14,9 +14,14 @@ _LOG_PREFIX_RE = re.compile(
     r"\[(?P<level>[A-Z]+)\] (?P<logger>\S+) (?P<source>[^|]+)\| (?P<message>.*)$"
 )
 _REQUEST_FAILED_RE = re.compile(
-    r"Request failed:\s*request_id=(?P<request_id>\S+)\s+method=(?P<method>\S+)\s+"
-    r"path=(?P<path>\S+)\s+status=(?P<status>\d+)\s+code=(?P<code>\S+)\s+"
-    r"message=(?P<message>.*?)\s+root_cause=(?P<root_cause>.*)$"
+    r"(?:Request failed:|请求失败[｜|:])\s*"
+    r"(?:request_id|请求ID)=(?P<request_id>\S+)\s+"
+    r"(?:method|方法)=(?P<method>\S+)\s+"
+    r"(?:path|路径)=(?P<path>\S+)\s+"
+    r"(?:status|状态)=(?P<status>\d+)\s+"
+    r"(?:code|错误码)=(?P<code>\S+)\s+"
+    r"(?:message|信息)=(?P<message>.*?)\s+"
+    r"(?:root_cause|根因)=(?P<root_cause>.*)$"
 )
 _EXCEPTION_TOKEN_RE = re.compile(
     r"(?P<etype>[A-Za-z_][\w\.]*(?:Error|Exception|Warning|MissingGreenlet))"
@@ -44,7 +49,7 @@ class RootCauseDiagnosticsService:
         max_runs: int = 8,
         max_incidents: int = 20,
     ) -> None:
-        self._logs_root = logs_root or (settings.project_root.parent / "logs")
+        self._logs_root = logs_root or settings.resolved_log_dir
         self._latest_run_file = latest_run_file or (self._logs_root / "latest-run.txt")
         self._max_runs = max_runs
         self._max_incidents = max_incidents
@@ -210,7 +215,7 @@ class RootCauseDiagnosticsService:
             else:
                 idx += 1
 
-            if "Request failed:" in message:
+            if "Request failed:" in message or "请求失败" in message:
                 incidents.append(
                     self._incident_from_structured_failure(
                         message,

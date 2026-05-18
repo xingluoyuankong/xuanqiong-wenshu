@@ -11,27 +11,11 @@
 
         <div>
           <h4>{{ selectedChapter.title || `第${selectedChapter.chapter_number}章正文` }}</h4>
-          <p>正文先在这里快速看，点“展开全文”会打开网页内阅读层，避免在页面里挤出一大块没法用的空白。</p>
+          <p>正文先在这里快速看；全文阅读已经收口到上方工具区，候选版本切换也统一放到顶部主操作区。</p>
         </div>
       </div>
 
       <div class="wc-topbar__actions">
-        <button
-          v-if="selectedChapter.versions && selectedChapter.versions.length > 0"
-          type="button"
-          class="md-btn md-btn-text md-ripple"
-          @click="$emit('showVersionSelector', true)"
-        >
-          看其他版本
-        </button>
-        <button
-          type="button"
-          class="md-btn md-btn-tonal md-ripple"
-          :disabled="!selectedChapter.content"
-          @click="openReader"
-        >
-          展开全文
-        </button>
         <button
           type="button"
           class="md-btn md-btn-outlined md-ripple"
@@ -46,13 +30,36 @@
       </div>
     </section>
 
+    <section class="wc-health-strip" aria-label="正文健康检查">
+      <div class="wc-health-card wc-health-card--primary">
+        <span>正文状态</span>
+        <strong>{{ contentHealthStatus }}</strong>
+        <em>{{ contentHealthHint }}</em>
+      </div>
+      <div class="wc-health-card">
+        <span>段落</span>
+        <strong>{{ paragraphCount }}</strong>
+        <em>阅读节奏</em>
+      </div>
+      <div class="wc-health-card">
+        <span>预览比例</span>
+        <strong>{{ previewRatioLabel }}</strong>
+        <em>当前页展示</em>
+      </div>
+      <div class="wc-health-card" :class="showOptimizeResult ? 'wc-health-card--warn' : 'wc-health-card--success'">
+        <span>精修队列</span>
+        <strong>{{ showOptimizeResult ? '待应用' : '空闲' }}</strong>
+        <em>{{ showOptimizeResult ? '已有优化稿' : '可继续创作' }}</em>
+      </div>
+    </section>
+
     <section class="wc-reader">
       <div class="wc-reader__head">
         <div>
           <p class="wc-reader__kicker">正文预览区</p>
           <h5 class="md-title-medium font-semibold">当前生效版本</h5>
           <p class="md-body-small md-on-surface-variant">
-            预览保留一屏内的核心内容，真正全文请点展开全文。这样更适合浏览，也不会把按钮和正文挤到两层滚动里。
+            预览保留一屏内的核心内容；真正全文请用上方工具区的“全文阅读”，这样更适合浏览，也不会把按钮和正文挤到两层滚动里。
           </p>
         </div>
         <div class="wc-reader__meta">
@@ -154,7 +161,6 @@ interface ReaderPayload {
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  (e: 'showVersionSelector', payload: boolean): void
   (e: 'chapterUpdated', payload: Chapter): void
   (e: 'openReader', payload: ReaderPayload): void
 }>()
@@ -170,6 +176,26 @@ const optimizeResultNotes = ref('')
 
 const normalizedChapterContent = computed(() => normalizeChapterContent(props.selectedChapter.content || ''))
 const chapterPreviewContent = computed(() => buildChapterPreview(props.selectedChapter.content || '', 980))
+const paragraphCount = computed(() => normalizedChapterContent.value.split(/\n{2,}/).filter((item) => item.trim()).length)
+const previewRatioLabel = computed(() => {
+  const total = normalizedChapterContent.value.length
+  if (!total) return '0%'
+  return `${Math.min(100, Math.round((chapterPreviewContent.value.length / total) * 100))}%`
+})
+const contentHealthStatus = computed(() => {
+  const len = normalizedChapterContent.value.length
+  if (!len) return '无正文'
+  if (len < 600) return '偏短'
+  if (len > 12000) return '偏长'
+  return '可交付'
+})
+const contentHealthHint = computed(() => {
+  const len = normalizedChapterContent.value.length
+  if (!len) return '需要重新生成或粘贴正文'
+  if (len < 600) return '建议补足场景和转折'
+  if (len > 12000) return '建议拆分或压缩节奏'
+  return '适合继续评审、精修或导出'
+})
 
 const optimizeDimensions = [
   { key: 'dialogue', label: '对话', description: '让人物声音更有区分度，并强化潜台词。' },
@@ -297,6 +323,7 @@ const applyOptimization = async () => {
   background:
     linear-gradient(135deg, rgba(219, 234, 254, 0.78), rgba(255, 255, 255, 0.94)),
     rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 44px rgba(37, 99, 235, 0.08);
 }
 
 .wc-topbar__lead,
@@ -350,10 +377,66 @@ const applyOptimization = async () => {
   color: #166534;
 }
 
+.wc-health-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.wc-health-card {
+  display: grid;
+  gap: 3px;
+  min-height: 78px;
+  padding: 12px 14px;
+  border-radius: 22px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+}
+
+.wc-health-card span {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.wc-health-card strong {
+  color: #0f172a;
+  font-size: 1.16rem;
+  line-height: 1.1;
+  font-weight: 950;
+}
+
+.wc-health-card em {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-style: normal;
+}
+
+.wc-health-card--primary {
+  border-color: rgba(37, 99, 235, 0.24);
+  background:
+    radial-gradient(circle at 12% 16%, rgba(37, 99, 235, 0.16), transparent 36%),
+    linear-gradient(180deg, rgba(239, 246, 255, 0.98), rgba(255, 255, 255, 0.9));
+}
+
+.wc-health-card--success {
+  border-color: rgba(34, 197, 94, 0.22);
+  background: linear-gradient(180deg, rgba(240, 253, 244, 0.98), rgba(255, 255, 255, 0.9));
+}
+
+.wc-health-card--warn {
+  border-color: rgba(14, 165, 233, 0.28);
+  background: linear-gradient(180deg, rgba(255, 251, 235, 0.98), rgba(255, 255, 255, 0.9));
+}
+
 .wc-reader {
   display: grid;
   min-height: 0;
-  background: rgba(255, 255, 255, 0.94);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 252, 255, 0.96));
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.05);
 }
 
 .wc-reader__head {
@@ -396,7 +479,10 @@ const applyOptimization = async () => {
 .wc-reader__body {
   max-width: 76ch;
   margin: 0 auto;
-  font-size: 1rem;
+  font-size: 1.02rem;
+  letter-spacing: 0.01em;
+  background:
+    linear-gradient(90deg, rgba(37, 99, 235, 0.08), transparent 1px) 0 0 / 1px 100% no-repeat;
 }
 
 .wc-dialog,
@@ -453,6 +539,16 @@ const applyOptimization = async () => {
   }
 
   .wc-dimension-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wc-health-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .wc-health-strip {
     grid-template-columns: 1fr;
   }
 }

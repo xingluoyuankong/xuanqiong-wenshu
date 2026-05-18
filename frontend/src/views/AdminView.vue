@@ -10,7 +10,7 @@
     </aside>
 
     <div class="admin-main">
-      <header class="admin-header">
+      <header class="admin-header xq-page-topbar xq-page-topbar--admin">
         <div class="header-content">
           <div class="header-main">
             <button type="button" class="mobile-trigger" aria-label="切换侧栏" @click="collapsed = !collapsed">☰</button>

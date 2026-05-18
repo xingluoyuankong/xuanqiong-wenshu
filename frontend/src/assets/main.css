@@ -1289,3 +1289,1038 @@ body {
     font-family: var(--md-font-family);
   }
 }
+
+/* ============================================
+   Xuanqiong Writing Desk Dialog System
+   ============================================ */
+.xq-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background:
+    radial-gradient(circle at 14% 12%, rgba(107, 155, 235, 0.18), transparent 32%),
+    rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(12px);
+}
+
+.xq-dialog-shell {
+  position: relative;
+  width: min(920px, calc(100vw - 2rem));
+  max-height: min(88vh, 920px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 32px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background:
+    radial-gradient(circle at 12% 0%, rgba(107, 155, 235, 0.16), transparent 30%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.96));
+  box-shadow: 0 30px 90px rgba(15, 23, 42, 0.28);
+}
+
+.xq-dialog-shell--wide {
+  width: min(1180px, calc(100vw - 2rem));
+}
+
+.xq-dialog-shell--xl {
+  width: min(1400px, calc(100vw - 1rem));
+  max-height: calc(100vh - 1rem);
+}
+
+.xq-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  background:
+    radial-gradient(circle at 6% 16%, rgba(99, 102, 241, 0.14), transparent 30%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(241, 247, 255, 0.9));
+}
+
+.xq-dialog-kicker {
+  margin: 0 0 4px;
+  color: #4f46e5;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.xq-dialog-title {
+  margin: 0;
+  color: #0f172a;
+  font-size: clamp(1.18rem, 2vw, 1.62rem);
+  font-weight: 950;
+  letter-spacing: -0.02em;
+}
+
+.xq-dialog-subtitle {
+  margin: 6px 0 0;
+  max-width: 68ch;
+  color: #64748b;
+  font-size: 0.88rem;
+  line-height: 1.65;
+}
+
+.xq-dialog-close {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #475569;
+  font-size: 1.2rem;
+  font-weight: 900;
+  transition: transform 0.18s ease, background 0.18s ease;
+}
+
+.xq-dialog-close:hover {
+  transform: translateY(-1px);
+  background: #fff;
+}
+
+.xq-dialog-body {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 22px 24px;
+}
+
+.xq-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 18px 24px 22px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.xq-field-panel {
+  padding: 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.05);
+}
+
+.xq-soft-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.m3-generate-dialog,
+.m3-outline-dialog,
+.m3-detail-dialog,
+.m3-patchdiff-dialog,
+.m3-reader-dialog,
+.wd-version-diff-dialog,
+.eval-dialog,
+.skill-dialog-shell {
+  border: 1px solid rgba(148, 163, 184, 0.2) !important;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(107, 155, 235, 0.14), transparent 30%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.96)) !important;
+  box-shadow: 0 30px 90px rgba(15, 23, 42, 0.22) !important;
+}
+
+.m3-generate-dialog,
+.m3-outline-dialog,
+.m3-detail-dialog {
+  border-radius: 32px !important;
+  overflow: hidden;
+}
+
+.m3-generate-dialog textarea,
+.m3-outline-dialog input,
+.m3-detail-dialog textarea,
+.m3-edit-dialog textarea,
+.m3-edit-dialog input {
+  border-color: rgba(148, 163, 184, 0.24) !important;
+  background: rgba(255, 255, 255, 0.82) !important;
+}
+
+.m3-generate-dialog .md-btn,
+.m3-outline-dialog .md-btn,
+.m3-detail-dialog .md-btn,
+.m3-patchdiff-dialog .md-btn,
+.wd-version-diff-dialog .md-btn,
+.m3-reader-dialog .md-btn {
+  border-radius: 999px;
+  font-weight: 800;
+}
+
+/* Xuanqiong premium dialog refinements: version, evaluation, diff, skill and reader surfaces */
+.xq-diff-dialog,
+.xq-reader-dialog,
+.skill-dialog-shell,
+.eval-dialog,
+.m3-detail-dialog {
+  isolation: isolate;
+}
+
+.xq-diff-dialog::before,
+.xq-reader-dialog::before,
+.skill-dialog-shell::before,
+.eval-dialog::before,
+.m3-detail-dialog::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(99, 102, 241, 0.16), transparent 28%),
+    radial-gradient(circle at 88% 10%, rgba(14, 165, 233, 0.12), transparent 30%);
+  z-index: -1;
+}
+
+.xq-diff-dialog .wd-version-diff-dialog__summary,
+.xq-diff-dialog .m3-patchdiff-dialog__chips,
+.xq-reader-dialog .m3-reader-dialog__chips,
+.skill-dialog-shell .skill-guide-panel,
+.eval-dialog .eval-overview__stats,
+.m3-detail-dialog .m3-review-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.xq-diff-dialog .wd-version-diff-dialog__summary span,
+.xq-diff-dialog .wd-chip,
+.xq-diff-dialog .m3-reader-chip,
+.xq-reader-dialog .m3-reader-chip,
+.skill-dialog-shell .skill-card,
+.eval-dialog .eval-stat,
+.m3-detail-dialog .m3-mini-badge {
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
+}
+
+.xq-diff-dialog .wd-version-diff-dialog__body,
+.xq-diff-dialog .m3-patchdiff-dialog__body,
+.skill-dialog-shell .skill-dialog-body,
+.eval-dialog .eval-body,
+.m3-detail-dialog .xq-dialog-body {
+  background:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.78), rgba(255, 255, 255, 0.92)),
+    radial-gradient(circle at 0% 0%, rgba(79, 70, 229, 0.06), transparent 34%);
+}
+
+.xq-reader-dialog .m3-reader-dialog__body {
+  background:
+    linear-gradient(90deg, rgba(15, 23, 42, 0.04), transparent 12%, transparent 88%, rgba(15, 23, 42, 0.04)),
+    linear-gradient(180deg, #fffaf1, #fff 38%, #f8fafc);
+}
+
+.xq-reader-dialog .m3-reader-content {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: clamp(22px, 4vw, 54px);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 28px 70px rgba(15, 23, 42, 0.10);
+  color: #1f2937;
+  font-size: clamp(1rem, 1.5vw, 1.14rem);
+  line-height: 2.05;
+  letter-spacing: 0.01em;
+  white-space: pre-wrap;
+}
+
+.xq-diff-dialog table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.xq-diff-dialog thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(248, 250, 252, 0.96);
+  backdrop-filter: blur(12px);
+}
+
+.skill-dialog-shell .skill-main-grid,
+.eval-dialog .eval-grid,
+.m3-detail-dialog .m3-review-grid {
+  align-items: stretch;
+}
+
+.skill-dialog-shell .skill-guide-panel article,
+.eval-dialog .eval-card,
+.m3-detail-dialog .m3-review-card,
+.xq-diff-dialog .patchdiff-edit-area {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 18px 46px rgba(15, 23, 42, 0.07);
+}
+
+@media (max-width: 768px) {
+  .xq-dialog-shell--xl,
+  .xq-dialog-shell--wide {
+    width: calc(100vw - 0.75rem);
+    max-height: calc(100vh - 0.75rem);
+  }
+
+  .xq-dialog-header,
+  .xq-dialog-footer {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .xq-dialog-body {
+    padding: 16px;
+  }
+}
+
+/* Xuanqiong premium page systems: admin, settings, graph, clue and style center */
+.admin-layout,
+.style-center-page,
+.knowledge-graph-page,
+.clue-tracker-page {
+  background:
+    radial-gradient(circle at 10% 0%, rgba(79, 70, 229, 0.12), transparent 34%),
+    radial-gradient(circle at 90% 8%, rgba(14, 165, 233, 0.10), transparent 28%),
+    linear-gradient(135deg, #f8fafc 0%, #eef4ff 46%, #eff6ff 100%) !important;
+}
+
+.admin-sider__panel,
+.admin-header,
+.style-center-hero,
+.style-card,
+.style-summary-card,
+.knowledge-graph-page :is(section, article),
+.clue-tracker-page :is(section, article) {
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06) !important;
+}
+
+.admin-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.admin-content .content-scroll,
+.style-center-page,
+.knowledge-graph-page,
+.clue-tracker-page {
+  scrollbar-color: rgba(99, 102, 241, 0.45) rgba(226, 232, 240, 0.6);
+}
+
+.header-kicker,
+.style-center-hero__eyebrow,
+.knowledge-graph-page :is(.eyebrow, .kicker),
+.clue-tracker-page :is(.eyebrow, .kicker) {
+  color: #4f46e5 !important;
+  letter-spacing: 0.24em !important;
+}
+
+.header-title,
+.style-center-hero h1,
+.knowledge-graph-page h1,
+.clue-tracker-page h1 {
+  background: linear-gradient(135deg, #0f172a, #3730a3 52%, #0f766e);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent !important;
+}
+
+.admin-layout .n-menu-item-content,
+.admin-layout .n-menu-item-content-header {
+  border-radius: 18px !important;
+}
+
+.admin-layout .n-menu-item-content--selected,
+.admin-layout .n-menu-item-content:hover {
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.12), rgba(14, 165, 233, 0.10)) !important;
+}
+
+/* Settings / LLM workbench shell */
+body:has(.llm-settings-page),
+body:has(.system-settings-page) {
+  background: #f8fafc;
+}
+
+.llm-settings-page,
+.system-settings-page,
+.settings-management,
+.llm-settings,
+.system-settings-panel {
+  --xq-page-card: rgba(255, 255, 255, 0.82);
+}
+
+.llm-settings-page :is(header, section, article),
+.system-settings-page :is(header, section, article),
+.settings-management :is(section, article),
+.llm-settings :is(section, article),
+.system-settings-panel :is(section, article) {
+  border-color: rgba(148, 163, 184, 0.2) !important;
+  background: rgba(255, 255, 255, 0.94) !important;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06) !important;
+}
+
+.style-center-page .style-center-summary-grid,
+.knowledge-graph-page :is(.summary-grid, .stats-grid),
+.clue-tracker-page :is(.summary-grid, .stats-grid) {
+  gap: clamp(14px, 2vw, 22px) !important;
+}
+
+.style-center-page :is(button, .workflow-badge),
+.knowledge-graph-page button,
+.clue-tracker-page button,
+.admin-layout button,
+.llm-settings-page button,
+.system-settings-page button {
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+
+.style-center-page :is(button, .workflow-badge):hover,
+.knowledge-graph-page button:hover,
+.clue-tracker-page button:hover,
+.admin-layout button:hover,
+.llm-settings-page button:hover,
+.system-settings-page button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.10);
+}
+
+/* --------------------------------------------------------------------------
+   Xuanqiong unified topbar system - 2026-04-29
+   Goal: make all major page headers share one visual language without touching
+   route behavior or feature wiring.
+---------------------------------------------------------------------------- */
+:root {
+  --xq-topbar-ink: #0f172a;
+  --xq-topbar-muted: #64748b;
+  --xq-topbar-line: rgba(148, 163, 184, 0.24);
+  --xq-topbar-glass: rgba(255, 255, 255, 0.82);
+  --xq-topbar-glass-strong: rgba(255, 255, 255, 0.92);
+  --xq-topbar-blue: #2563eb;
+  --xq-topbar-indigo: #4f46e5;
+  --xq-topbar-cyan: #0891b2;
+  --xq-topbar-amber: #0ea5e9;
+  --xq-topbar-radius: 26px;
+  --xq-topbar-shadow: 0 24px 70px rgba(15, 23, 42, 0.10);
+  --xq-topbar-inner-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.xq-topbar,
+.xq-page-topbar {
+  position: relative;
+  overflow: hidden;
+  color: var(--xq-topbar-ink) !important;
+  border-color: var(--xq-topbar-line) !important;
+  background: linear-gradient(135deg, rgba(255,255,255,0.98), rgba(248,250,252,0.96) 52%, rgba(239,246,255,0.94)) !important;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08), var(--xq-topbar-inner-shadow) !important;
+}
+
+.xq-topbar::before,
+.xq-page-topbar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.08), transparent 34%, rgba(14, 165, 233, 0.06) 72%, rgba(14, 165, 233, 0.04));
+  opacity: 0.55;
+  mask-image: linear-gradient(180deg, #000 0%, rgba(0,0,0,0.54) 62%, transparent 100%);
+}
+
+.xq-topbar > *,
+.xq-page-topbar > * {
+  position: relative;
+  z-index: 1;
+}
+
+.xq-page-topbar {
+  border-radius: var(--xq-topbar-radius) !important;
+}
+
+.xq-topbar--global {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.28) !important;
+}
+
+.xq-topbar--global .global-nav-main {
+  min-height: 58px !important;
+  padding: 8px 18px !important;
+}
+
+.xq-topbar--global .brand,
+.xq-topbar--desk .wd-brand-pill,
+.xq-page-topbar :is(.entry-kicker, .inspiration-kicker),
+.xq-page-topbar :is(.reader-chip--primary) {
+  letter-spacing: 0.18em !important;
+  text-transform: uppercase;
+  color: #1d4ed8 !important;
+}
+
+.xq-topbar--global .brand {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 14px !important;
+  border-radius: 999px !important;
+  border: 1px solid rgba(37, 99, 235, 0.18) !important;
+  background: linear-gradient(135deg, rgba(37,99,235,0.10), rgba(255,255,255,0.82)) !important;
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.12) !important;
+}
+
+.xq-topbar--global .brand::before {
+  content: '✦';
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  color: white;
+  background: linear-gradient(135deg, #2563eb, #14b8a6);
+}
+
+.xq-topbar--global :is(.nav-link, .nav-btn, .continue-btn, .locale-btn),
+.xq-topbar :is(button, .wd-utility-btn, .wd-action, .inspiration-back-btn, .inspiration-ghost-btn),
+.xq-page-topbar :is(button, .reader-btn),
+.xq-page-topbar :is(.n-button, [role='button']) {
+  border-radius: 999px !important;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease !important;
+}
+
+.xq-topbar--global :is(.nav-link, .nav-btn, .locale-btn),
+.xq-topbar :is(.wd-utility-btn, .inspiration-back-btn, .inspiration-ghost-btn),
+.xq-page-topbar :is(.reader-btn--ghost) {
+  border: 1px solid rgba(148, 163, 184, 0.24) !important;
+  background: rgba(255,255,255,0.70) !important;
+  color: #334155 !important;
+}
+
+.xq-topbar--global :is(.nav-link--active, .continue-btn),
+.xq-topbar :is(.wd-utility-btn--accent, .wd-action--primary),
+.xq-page-topbar :is(.reader-btn:not(.reader-btn--ghost)) {
+  border-color: rgba(37, 99, 235, 0.30) !important;
+  color: #fff !important;
+  background: linear-gradient(135deg, #2563eb, #0f766e) !important;
+  box-shadow: 0 14px 32px rgba(37, 99, 235, 0.20) !important;
+}
+
+.xq-topbar--global :is(.nav-link, .nav-btn, .continue-btn, .locale-btn):hover,
+.xq-topbar :is(button, .wd-utility-btn, .wd-action, .inspiration-back-btn, .inspiration-ghost-btn):hover,
+.xq-page-topbar :is(button, .reader-btn):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.12) !important;
+}
+
+.xq-page-topbar :is(h1, h2),
+.xq-topbar :is(h1, h2),
+.xq-topbar--desk .wd-header-main h1 {
+  color: #0f172a !important;
+  letter-spacing: -0.04em !important;
+}
+
+.xq-page-topbar :is(p, small),
+.xq-topbar :is(p, small),
+.xq-topbar--desk :is(.wd-meta-pill, .wd-command-copy__label) {
+  color: var(--xq-topbar-muted) !important;
+}
+
+.xq-topbar--desk,
+.xq-topbar--detail,
+.xq-topbar--workspace,
+.xq-topbar--inspiration {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.24) !important;
+}
+
+.xq-topbar--desk .wd-header-main,
+.xq-topbar--desk .wd-command-bar,
+.xq-topbar--desk .wd-task-panel,
+.xq-topbar--global .global-task-band {
+  background: rgba(255,255,255,0.62) !important;
+  border-color: rgba(148, 163, 184, 0.22) !important;
+}
+
+.xq-topbar--detail .md-top-app-bar__container,
+.xq-topbar--workspace > div,
+.xq-topbar--inspiration > div {
+  min-height: 64px;
+}
+
+.xq-page-topbar--entry,
+.xq-page-topbar--style,
+.xq-page-topbar--settings,
+.xq-page-topbar--llm,
+.xq-page-topbar--reader,
+.xq-page-topbar--admin {
+  border: 1px solid rgba(148, 163, 184, 0.24) !important;
+}
+
+.xq-page-topbar--entry {
+  padding: clamp(28px, 5vw, 56px) !important;
+}
+
+.xq-page-topbar--settings,
+.xq-page-topbar--llm,
+.xq-page-topbar--style,
+.xq-page-topbar--admin,
+.xq-page-topbar--reader {
+  padding: clamp(18px, 2.8vw, 28px) !important;
+}
+
+.xq-page-topbar--reader {
+  align-items: center;
+}
+
+@media (max-width: 900px) {
+  .xq-topbar--global .global-nav-main {
+    align-items: stretch !important;
+    flex-direction: column !important;
+    min-height: auto !important;
+    gap: 10px !important;
+  }
+  .xq-topbar--global .nav-links {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .xq-page-topbar--entry,
+  .xq-page-topbar--settings,
+  .xq-page-topbar--llm,
+  .xq-page-topbar--style,
+  .xq-page-topbar--admin,
+  .xq-page-topbar--reader {
+    border-radius: 22px !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Xuanqiong inner-page section unification - 2026-04-29 late pass
+   These rules pull admin/settings/graph/clue/style internals toward the same
+   premium rhythm as the unified topbars.
+---------------------------------------------------------------------------- */
+:root {
+  --xq-section-radius: 24px;
+  --xq-section-border: rgba(148, 163, 184, 0.24);
+  --xq-section-bg: rgba(255, 255, 255, 0.78);
+  --xq-section-bg-soft: rgba(248, 250, 252, 0.78);
+  --xq-section-shadow: 0 18px 48px rgba(15, 23, 42, 0.075);
+}
+
+:is(.admin-card, .novel-management-card, .runtime-card, .prompt-admin-card, .settings-panel, .llm-settings-panel),
+.knowledge-graph-page :is(aside, section, article),
+.clue-tracker-page :is(aside, section, article),
+.style-center-page :is(section, article, .style-card, .style-summary-card) {
+  border: 1px solid var(--xq-section-border) !important;
+  border-radius: var(--xq-section-radius) !important;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(59, 130, 246, 0.08), transparent 34%),
+    linear-gradient(135deg, var(--xq-section-bg), rgba(255,255,255,0.92)) !important;
+  box-shadow: var(--xq-section-shadow), inset 0 1px 0 rgba(255,255,255,0.70) !important;
+  backdrop-filter: blur(18px);
+}
+
+:is(.card-header, .runtime-card__header, .editor-header, .runtime-main__head),
+.knowledge-graph-page :is(aside > div:first-child, section > div:first-child),
+.clue-tracker-page :is(aside > div:first-child, section > div:first-child) {
+  position: relative;
+  isolation: isolate;
+}
+
+:is(.card-header, .runtime-card__header, .editor-header, .runtime-main__head)::before,
+.knowledge-graph-page :is(aside > div:first-child, section > div:first-child)::before,
+.clue-tracker-page :is(aside > div:first-child, section > div:first-child)::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: -2px;
+  width: 42px;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #2563eb, #14b8a6, #0ea5e9);
+  opacity: 0.9;
+}
+
+:is(.card-title, .runtime-card__title, .editor-header__title, .section-title),
+.knowledge-graph-page :is(h3, h4),
+.clue-tracker-page :is(h3, h4) {
+  color: #0f172a !important;
+  letter-spacing: -0.025em !important;
+  font-weight: 750 !important;
+}
+
+:is(.card-subtitle, .runtime-card__subtitle, .editor-header__description, .brief-panel__tip),
+.knowledge-graph-page :is(p),
+.clue-tracker-page :is(p) {
+  color: #64748b !important;
+}
+
+.knowledge-graph-page :is(button, input, select),
+.clue-tracker-page :is(button, input, select),
+:is(.admin-card, .novel-management-card, .runtime-card, .prompt-admin-card) :is(button, input, textarea, .n-button),
+:is(.settings-panel, .llm-settings-panel, .llm-toolbar) :is(button, input, textarea, select, .n-button) {
+  border-radius: 16px !important;
+}
+
+.knowledge-graph-page :is(button:hover),
+.clue-tracker-page :is(button:hover),
+:is(.admin-card, .novel-management-card, .runtime-card, .prompt-admin-card) :is(button:hover, .n-button:hover),
+:is(.settings-panel, .llm-settings-panel, .llm-toolbar) :is(button:hover, .n-button:hover) {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.10) !important;
+}
+
+.knowledge-graph-page :is(.bg-slate-50, .bg-sky-50),
+.clue-tracker-page :is(.bg-slate-50, .bg-sky-50),
+.runtime-card :is(.brief-panel, .runtime-main, .project-rail__item, .brief-summary),
+.prompt-admin-card :is(.prompt-editor, .empty-editor, .editor-content) {
+  background: rgba(248, 250, 252, 0.72) !important;
+  border-color: rgba(148, 163, 184, 0.20) !important;
+}
+
+.knowledge-graph-page,
+.clue-tracker-page {
+  min-height: 68vh;
+}
+
+@media (max-width: 760px) {
+  :is(.admin-card, .novel-management-card, .runtime-card, .prompt-admin-card, .settings-panel, .llm-settings-panel),
+  .knowledge-graph-page :is(aside, section, article),
+  .clue-tracker-page :is(aside, section, article),
+  .style-center-page :is(section, article, .style-card, .style-summary-card) {
+    border-radius: 20px !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Xuanqiong unified cool canvas - emergency visual correction
+   Removes the split pale-blue / pale-yellow wash and locks the app to a
+   single frost-white + mist-blue + cyan premium palette.
+---------------------------------------------------------------------------- */
+:root {
+  --xq-canvas-base: #f7fbff;
+  --xq-canvas-mid: #eef6ff;
+  --xq-canvas-deep: #eaf2ff;
+  --xq-canvas-cyan: rgba(14, 165, 233, 0.11);
+  --xq-canvas-indigo: rgba(79, 70, 229, 0.10);
+  --xq-canvas-teal: rgba(20, 184, 166, 0.08);
+  --xq-accent-warm: #0ea5e9; /* warm amber deliberately retired for global surfaces */
+}
+
+html,
+body,
+#app,
+.xq-page-canvas,
+.entry-page,
+.reader-page,
+.admin-layout,
+.style-center-page,
+.knowledge-graph-page,
+.clue-tracker-page,
+.system-settings-page,
+.llm-settings-page,
+.novel-workspace-page,
+.inspiration-shell,
+.wd-page,
+.writing-desk-page {
+  background:
+    radial-gradient(circle at 8% 0%, var(--xq-canvas-indigo), transparent 32%),
+    radial-gradient(circle at 92% 6%, var(--xq-canvas-cyan), transparent 30%),
+    radial-gradient(circle at 52% 92%, var(--xq-canvas-teal), transparent 38%),
+    linear-gradient(135deg, var(--xq-canvas-base) 0%, var(--xq-canvas-mid) 52%, var(--xq-canvas-deep) 100%) !important;
+}
+
+.xq-topbar,
+.xq-page-topbar,
+.admin-sider__panel,
+.admin-header,
+.style-center-hero,
+.entry-hero,
+.reader-topbar,
+.llm-toolbar,
+.md-top-app-bar,
+.wd-header-shell,
+.inspiration-topbar,
+.novel-management-card,
+.runtime-card,
+.prompt-admin-card,
+.admin-card,
+.settings-panel,
+.llm-settings-panel,
+.style-card,
+.style-summary-card,
+.knowledge-graph-page :is(aside, section, article),
+.clue-tracker-page :is(aside, section, article) {
+  background: linear-gradient(135deg, rgba(255,255,255,0.96), rgba(248,251,255,0.94) 54%, rgba(239,246,255,0.92)) !important;
+}
+
+.xq-topbar::before,
+.xq-page-topbar::before {
+  background:
+    linear-gradient(90deg, rgba(37, 99, 235, 0.13), transparent 30%, rgba(14, 165, 233, 0.12) 68%, rgba(20, 184, 166, 0.08)),
+    repeating-linear-gradient(135deg, rgba(15, 23, 42, 0.026) 0 1px, transparent 1px 12px) !important;
+}
+
+:is(.xq-page-topbar, .xq-topbar, .entry-hero, .style-center-hero, .reader-topbar, .llm-toolbar) :is(.bg-amber-50, .bg-yellow-50, .bg-orange-50),
+:is(.admin-layout, .style-center-page, .knowledge-graph-page, .clue-tracker-page, .inspiration-shell, .entry-page) :is(.bg-amber-50, .bg-yellow-50, .bg-orange-50) {
+  background-color: rgba(239, 246, 255, 0.78) !important;
+  border-color: rgba(125, 211, 252, 0.30) !important;
+  color: #075985 !important;
+}
+
+/* Keep warning semantics visible, but stop warning colors from becoming page-wide yellow blocks. */
+:is(.xq-page-topbar, .xq-topbar, .admin-layout, .style-center-page, .knowledge-graph-page, .clue-tracker-page) :is(.text-sky-700, .text-yellow-700, .text-orange-700) {
+  color: #0369a1 !important;
+}
+
+/* Last-mile old gradient neutralization: no large surface should end in cream/yellow. */
+[style*="255, 247, 237"],
+[style*="245, 158, 11"],
+[style*="#eff6ff"],
+[style*="#0ea5e9"] {
+  background:
+    radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.08), transparent 34%),
+    linear-gradient(135deg, rgba(255,255,255,0.90), rgba(239,246,255,0.88)) !important;
+}
+
+/* --------------------------------------------------------------------------
+   Warm residue remapping - keep warnings semantic, but never dirty the UI.
+   Amber/yellow/orange are confined to tiny text/badges and remapped to refined
+   blue-violet/sky warning surfaces on product pages.
+---------------------------------------------------------------------------- */
+:root {
+  --xq-warn-surface: rgba(239, 246, 255, 0.82);
+  --xq-warn-surface-strong: rgba(224, 242, 254, 0.86);
+  --xq-warn-border: rgba(14, 165, 233, 0.26);
+  --xq-warn-ink: #075985;
+  --xq-warn-dot: #0ea5e9;
+}
+
+:is(
+  .entry-page,
+  .inspiration-shell,
+  .admin-layout,
+  .style-center-page,
+  .knowledge-graph-page,
+  .clue-tracker-page,
+  .system-settings-page,
+  .llm-settings-page,
+  .reader-page,
+  .wd-page,
+  .writing-desk-page,
+  .md-layout,
+  .md-page,
+  .xq-page-canvas
+) :is(
+  .bg-amber-50, .bg-amber-100, .bg-yellow-50, .bg-yellow-100, .bg-orange-50, .bg-orange-100,
+  [class*='bg-amber-'], [class*='bg-yellow-'], [class*='bg-orange-']
+) {
+  background: linear-gradient(135deg, var(--xq-warn-surface), var(--xq-warn-surface-strong)) !important;
+  border-color: var(--xq-warn-border) !important;
+}
+
+:is(
+  .entry-page,
+  .inspiration-shell,
+  .admin-layout,
+  .style-center-page,
+  .knowledge-graph-page,
+  .clue-tracker-page,
+  .system-settings-page,
+  .llm-settings-page,
+  .reader-page,
+  .wd-page,
+  .writing-desk-page,
+  .md-layout,
+  .md-page,
+  .xq-page-canvas
+) :is(
+  .text-amber-500, .text-sky-600, .text-sky-700, .text-amber-800,
+  .text-yellow-500, .text-sky-600, .text-yellow-700, .text-sky-800,
+  .text-orange-500, .text-orange-600, .text-orange-700, .text-orange-800,
+  [class*='text-amber-'], [class*='text-yellow-'], [class*='text-orange-']
+) {
+  color: var(--xq-warn-ink) !important;
+}
+
+:is(
+  .entry-page,
+  .inspiration-shell,
+  .admin-layout,
+  .style-center-page,
+  .knowledge-graph-page,
+  .clue-tracker-page,
+  .system-settings-page,
+  .llm-settings-page,
+  .reader-page,
+  .wd-page,
+  .writing-desk-page,
+  .md-layout,
+  .md-page,
+  .xq-page-canvas
+) :is(
+  .border-amber-100, .border-amber-200, .border-yellow-100, .border-yellow-200, .border-orange-100, .border-orange-200,
+  [class*='border-amber-'], [class*='border-yellow-'], [class*='border-orange-']
+) {
+  border-color: var(--xq-warn-border) !important;
+}
+
+:is(.status-warning, .wd-state-pill--warning, .task-chip--warn, .wd-meta-pill--warn) {
+  background: linear-gradient(135deg, rgba(224,242,254,0.92), rgba(239,246,255,0.86)) !important;
+  border-color: rgba(14,165,233,0.30) !important;
+  color: #075985 !important;
+}
+
+/* Keep destructive/error states red; only warning/warm decoration is cooled. */
+:is(.text-red-500, .text-red-600, .text-red-700, .text-rose-500, .text-rose-600, .text-rose-700) {
+  --xq-preserve-error-color: initial;
+}
+
+/* --------------------------------------------------------------------------
+   Xuanqiong Visual Constitution - one product, one language
+   This is the final UI contract above legacy md/Tailwind/Naive/local systems.
+---------------------------------------------------------------------------- */
+:root {
+  --xq-ui-bg: #f8fbff;
+  --xq-ui-bg-2: #eef6ff;
+  --xq-ui-surface: rgba(255, 255, 255, 0.82);
+  --xq-ui-surface-strong: rgba(255, 255, 255, 0.94);
+  --xq-ui-surface-soft: rgba(239, 246, 255, 0.76);
+  --xq-ui-border: rgba(148, 163, 184, 0.24);
+  --xq-ui-ink: #0f172a;
+  --xq-ui-muted: #64748b;
+  --xq-ui-faint: #94a3b8;
+  --xq-ui-primary: #2563eb;
+  --xq-ui-primary-2: #0891b2;
+  --xq-ui-primary-soft: rgba(37, 99, 235, 0.10);
+  --xq-ui-radius: 22px;
+  --xq-ui-radius-lg: 30px;
+  --xq-ui-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+  --xq-ui-shadow-hover: 0 24px 64px rgba(15, 23, 42, 0.12);
+}
+
+.xq-app-root {
+  min-height: 100vh;
+  color: var(--xq-ui-ink);
+  background:
+    radial-gradient(circle at 10% 0%, rgba(37, 99, 235, 0.11), transparent 30rem),
+    radial-gradient(circle at 92% 4%, rgba(14, 165, 233, 0.10), transparent 28rem),
+    linear-gradient(135deg, var(--xq-ui-bg), var(--xq-ui-bg-2)) !important;
+  font-family: var(--xq-font-sans, "Noto Sans SC", "Microsoft YaHei", "PingFang SC", sans-serif);
+}
+
+/* Typography contract */
+.xq-app-root :is(h1, h2, h3, h4, .card-title, .runtime-card__title, .reader-topbar h1, .entry-hero h1) {
+  color: var(--xq-ui-ink) !important;
+  font-family: var(--xq-font-sans, "Noto Sans SC", "Microsoft YaHei", sans-serif) !important;
+  letter-spacing: -0.035em;
+}
+
+.xq-app-root :is(p, small, .card-subtitle, .runtime-card__subtitle, .entry-hero__desc) {
+  color: var(--xq-ui-muted);
+}
+
+/* Universal product surfaces */
+.xq-app-root :is(
+  .md-card,
+  .n-card,
+  .xq-panel,
+  .entry-card,
+  .project-row,
+  .inspiration-panel,
+  .style-card,
+  .style-summary-card,
+  .reader-body,
+  .reader-empty,
+  .wd-card,
+  .wd-panel,
+  .admin-card,
+  .novel-management-card,
+  .runtime-card,
+  .prompt-admin-card,
+  .settings-panel,
+  .llm-settings-panel
+) {
+  border: 1px solid var(--xq-ui-border) !important;
+  border-radius: var(--xq-ui-radius-lg) !important;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.055), transparent 30%),
+    linear-gradient(135deg, var(--xq-ui-surface-strong), var(--xq-ui-surface-soft)) !important;
+  box-shadow: var(--xq-ui-shadow) !important;
+  backdrop-filter: blur(18px);
+}
+
+.xq-app-root :is(.md-card, .n-card, .xq-panel, .entry-card, .project-row, .style-card, .wd-card, .admin-card):hover {
+  box-shadow: var(--xq-ui-shadow-hover) !important;
+}
+
+/* Universal controls */
+.xq-app-root :is(
+  button,
+  .md-btn,
+  .n-button,
+  .xq-button,
+  input,
+  textarea,
+  select,
+  .n-input,
+  .n-select,
+  .n-base-selection
+) {
+  border-radius: 16px !important;
+}
+
+.xq-app-root :is(.md-btn, .n-button--primary-type, .xq-button--primary, button.primary, .wd-action--primary) {
+  color: #fff !important;
+  border-color: rgba(37, 99, 235, 0.24) !important;
+  background: linear-gradient(135deg, var(--xq-ui-primary), var(--xq-ui-primary-2)) !important;
+  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.20) !important;
+}
+
+.xq-app-root :is(.md-btn--ghost, .n-button--tertiary-type, .n-button--quaternary-type, .xq-button--secondary, .xq-button--ghost, .wd-action--ghost) {
+  color: #1d4ed8 !important;
+  border-color: rgba(148, 163, 184, 0.25) !important;
+  background: rgba(255, 255, 255, 0.72) !important;
+}
+
+.xq-app-root :is(input, textarea, select, .n-input, .n-base-selection) {
+  border-color: rgba(148, 163, 184, 0.28) !important;
+  background: rgba(255, 255, 255, 0.72) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.70);
+}
+
+.xq-app-root :is(button, .md-btn, .n-button, .xq-button) {
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.xq-app-root :is(button, .md-btn, .n-button, .xq-button):hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+/* Legacy Material cleanup */
+.xq-app-root :is(.md-top-app-bar, .md-toolbar, .md-dialog, .md-dialog-surface) {
+  background: var(--xq-ui-surface-strong) !important;
+  color: var(--xq-ui-ink) !important;
+  border-color: var(--xq-ui-border) !important;
+}
+
+.xq-app-root :is(.md-chip, .n-tag, .reader-chip, .wd-meta-pill, .task-chip) {
+  border-radius: 999px !important;
+  border-color: rgba(148, 163, 184, 0.24) !important;
+  background: rgba(239, 246, 255, 0.78) !important;
+  color: #075985 !important;
+}
+
+/* Prevent local hero systems from drifting into a different product. */
+.xq-app-root :is(.entry-hero, .inspiration-topbar, .style-center-hero, .reader-topbar, .llm-toolbar, .admin-header, .wd-header-shell) {
+  border-color: var(--xq-ui-border) !important;
+  background:
+    radial-gradient(circle at 2% 0%, rgba(37, 99, 235, 0.09), transparent 32%),
+    linear-gradient(135deg, rgba(255,255,255,0.92), rgba(239,246,255,0.86)) !important;
+}

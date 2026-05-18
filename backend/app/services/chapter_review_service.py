@@ -56,7 +56,7 @@ class ChapterReviewService:
     ) -> Dict[str, Any]:
         """
         执行周期性回顾
-        
+
         Args:
             project_id: 项目 ID
             start_chapter: 回顾起始章节
@@ -64,55 +64,56 @@ class ChapterReviewService:
             chapter_summaries: 章节摘要列表
             character_profiles: 角色设定
             foreshadowing_status: 伏笔状态列表
-        
+
         Returns:
             包含各维度分析和调整建议的字典
         """
-        result = {
-            "review_range": f"第 {start_chapter} - {end_chapter} 章",
-            "timestamp": datetime.utcnow().isoformat(),
-            "pacing_analysis": {},
-            "character_analysis": {},
-            "foreshadowing_analysis": {},
-            "consistency_check": {},
-            "recommendations": [],
-            "priority_actions": []
-        }
-        
-        # 构建章节摘要文本
-        summaries_text = ""
-        for summary in chapter_summaries:
-            summaries_text += f"\n第 {summary.get('chapter_number', '?')} 章：{summary.get('title', '')}\n"
-            summaries_text += f"摘要：{summary.get('summary', '')}\n"
-        
-        # 1. 节奏分析
-        result["pacing_analysis"] = await self._analyze_pacing(
-            summaries_text, start_chapter, end_chapter, user_id
-        )
-        
-        # 2. 角色发展分析
-        result["character_analysis"] = await self._analyze_character_development(
-            summaries_text, character_profiles, user_id
-        )
-        
-        # 3. 伏笔状态分析
-        if foreshadowing_status:
-            result["foreshadowing_analysis"] = await self._analyze_foreshadowing(
-                foreshadowing_status, end_chapter, user_id
+        with LLMService.daily_limit_scope(f"chapter_periodic_review:{project_id}:{start_chapter}-{end_chapter}:{user_id}"):
+            result = {
+                "review_range": f"第 {start_chapter} - {end_chapter} 章",
+                "timestamp": datetime.utcnow().isoformat(),
+                "pacing_analysis": {},
+                "character_analysis": {},
+                "foreshadowing_analysis": {},
+                "consistency_check": {},
+                "recommendations": [],
+                "priority_actions": []
+            }
+
+            # 构建章节摘要文本
+            summaries_text = ""
+            for summary in chapter_summaries:
+                summaries_text += f"\n第 {summary.get('chapter_number', '?')} 章：{summary.get('title', '')}\n"
+                summaries_text += f"摘要：{summary.get('summary', '')}\n"
+
+            # 1. 节奏分析
+            result["pacing_analysis"] = await self._analyze_pacing(
+                summaries_text, start_chapter, end_chapter, user_id
             )
-        
-        # 4. 一致性检查
-        result["consistency_check"] = await self._check_consistency(
-            summaries_text, character_profiles, user_id
-        )
-        
-        # 5. 生成综合建议
-        result["recommendations"] = self._generate_recommendations(result)
-        
-        # 6. 确定优先行动
-        result["priority_actions"] = self._determine_priority_actions(result)
-        
-        return result
+
+            # 2. 角色发展分析
+            result["character_analysis"] = await self._analyze_character_development(
+                summaries_text, character_profiles, user_id
+            )
+
+            # 3. 伏笔状态分析
+            if foreshadowing_status:
+                result["foreshadowing_analysis"] = await self._analyze_foreshadowing(
+                    foreshadowing_status, end_chapter, user_id
+                )
+
+            # 4. 一致性检查
+            result["consistency_check"] = await self._check_consistency(
+                summaries_text, character_profiles, user_id
+            )
+
+            # 5. 生成综合建议
+            result["recommendations"] = self._generate_recommendations(result)
+
+            # 6. 确定优先行动
+            result["priority_actions"] = self._determine_priority_actions(result)
+
+            return result
 
     async def _analyze_pacing(
         self,
@@ -443,15 +444,18 @@ class ChapterReviewService:
     ) -> Dict[str, Any]:
         """
         根据回顾结果生成调整计划
-        
+
         Args:
             review_result: 回顾结果
             upcoming_outlines: 接下来几章的大纲
-        
+
         Returns:
             调整计划
         """
-        prompt = f"""根据以下回顾结果，为接下来的章节生成调整计划。
+        with LLMService.daily_limit_scope(
+            f"chapter_adjustment_plan:{review_result.get('review_range', 'unknown')}:{user_id}"
+        ):
+            prompt = f"""根据以下回顾结果，为接下来的章节生成调整计划。
 
 [回顾结果]
 - 节奏评分：{review_result.get('pacing_analysis', {}).get('overall_pacing_score', 'N/A')}
@@ -487,29 +491,29 @@ class ChapterReviewService:
 }}
 ```"""
 
-        try:
-            response = await self.llm_service.get_llm_response(
-                system_prompt="你是一位资深网文策划，擅长根据反馈调整创作计划。",
-                conversation_history=[{"role": "user", "content": prompt}],
-                temperature=0.5,
-                user_id=user_id,
-                timeout=120.0
-            )
-            
-            content = sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(response)))
-            json_start = content.find("{")
-            json_end = content.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                return json.loads(content[json_start:json_end])
-        except Exception as e:
-            logger.warning(f"生成调整计划失败: {e}")
-        
-        return {
-            "chapter_adjustments": [],
-            "global_adjustments": review_result.get("recommendations", []),
-            "foreshadowing_plan": {},
-            "character_focus": {}
-        }
+            try:
+                response = await self.llm_service.get_llm_response(
+                    system_prompt="你是一位资深网文策划，擅长根据反馈调整创作计划。",
+                    conversation_history=[{"role": "user", "content": prompt}],
+                    temperature=0.5,
+                    user_id=user_id,
+                    timeout=120.0
+                )
+
+                content = sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(response)))
+                json_start = content.find("{")
+                json_end = content.rfind("}") + 1
+                if json_start >= 0 and json_end > json_start:
+                    return json.loads(content[json_start:json_end])
+            except Exception as e:
+                logger.warning(f"生成调整计划失败: {e}")
+
+            return {
+                "chapter_adjustments": [],
+                "global_adjustments": review_result.get("recommendations", []),
+                "foreshadowing_plan": {},
+                "character_focus": {}
+            }
 
     def get_review_context(self, review_result: Dict[str, Any]) -> str:
         """生成回顾上下文（用于注入到写作提示词）"""

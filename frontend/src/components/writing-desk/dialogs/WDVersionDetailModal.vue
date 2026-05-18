@@ -1,11 +1,11 @@
 <!-- AIMETA P=版本详情弹窗_版本信息展示|R=版本对比_历史|NR=不含版本管理|E=component:WDVersionDetailModal|X=ui|A=版本弹窗|D=vue|S=dom|RD=./README.ai -->
 <template>
-  <div v-if="show" class="md-dialog-overlay" @click.self="$emit('close')">
-    <div class="md-dialog w-full max-w-5xl m3-detail-dialog flex flex-col">
-      <div class="flex items-center justify-between p-6 border-b" style="border-bottom-color: var(--md-outline-variant);">
+  <div v-if="show" class="xq-dialog-overlay" @click.self="$emit('close')">
+    <div class="xq-dialog-shell xq-dialog-shell--wide m3-detail-dialog flex flex-col">
+      <div class="xq-dialog-header" style="border-bottom-color: var(--md-outline-variant);">
         <div>
-          <h3 class="md-headline-small font-semibold">版本详情</h3>
-          <p class="md-body-small md-on-surface-variant mt-1">
+          <h3 class="xq-dialog-title">版本详情</h3>
+          <p class="xq-dialog-subtitle">
             版本 {{ detailVersionIndex + 1 }}
             <span class="md-on-surface-variant">•</span>
             {{ version?.style || '标准' }}风格
@@ -16,7 +16,7 @@
         <button
           type="button"
           @click="$emit('close')"
-          class="md-icon-btn md-ripple"
+          class="xq-dialog-close md-ripple"
         >
           <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
             <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path>
@@ -24,7 +24,7 @@
         </button>
       </div>
 
-      <div class="flex-1 min-h-0 p-6 overflow-y-auto space-y-5">
+      <div class="xq-dialog-body space-y-5">
         <section v-if="hasReviewInsights" class="m3-review-summary">
           <div class="m3-review-summary__head">
             <div>
@@ -71,6 +71,17 @@
                 <li>优化步数：{{ optimizerStepCount }}</li>
                 <li v-if="targetedDimensionsText">定向维度：{{ targetedDimensionsText }}</li>
                 <li v-for="step in optimizerSteps" :key="step">{{ step }}</li>
+              </ul>
+            </article>
+
+            <article v-if="qualityMetrics" class="m3-review-card">
+              <p class="m3-kicker">质量快照</p>
+              <ul>
+                <li>字数：{{ qualityMetricValue('word_count') }}</li>
+                <li>场景兑现：{{ formatPercent(qualityMetrics.scene_fulfillment_rate) }}（{{ qualityMetricValue('fulfilled_scene_count') }}/{{ qualityMetricValue('scene_count') }}）</li>
+                <li>对白改局势：{{ qualityMetrics.dialogue_changes_state ? '通过' : '未通过' }}</li>
+                <li>章末递压：{{ qualityMetrics.ending_pressure_passed ? '通过' : '未通过' }}</li>
+                <li>静态描写风险：{{ qualityMetrics.static_description_risk ? '偏高' : '可控' }}</li>
               </ul>
             </article>
 
@@ -164,6 +175,24 @@ const runtimeMeta = computed<Record<string, any>>(() => {
   if (!metadata || typeof metadata !== 'object') return {}
   return metadata as Record<string, any>
 })
+const qualityMetrics = computed<Record<string, any> | null>(() => {
+  const direct = runtimeMeta.value.quality_metrics
+  if (direct && typeof direct === 'object') return direct as Record<string, any>
+  const finalMetrics = reviewSummaries.value.final_quality_metrics
+  if (finalMetrics && typeof finalMetrics === 'object') return finalMetrics as Record<string, any>
+  const guardSnapshot = runtimeMeta.value.story_progression_guard?.quality_metric_snapshot
+  if (guardSnapshot && typeof guardSnapshot === 'object') return guardSnapshot as Record<string, any>
+  return null
+})
+const qualityMetricValue = (key: string) => {
+  const value = qualityMetrics.value?.[key]
+  return value === null || value === undefined || value === '' ? '—' : value
+}
+const formatPercent = (value: unknown) => {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return '—'
+  return `${Math.round(numeric * 100)}%`
+}
 const selfCritiquePriorityFixes = computed(() => {
   const items = selfCritiqueSummary.value?.priority_fixes
   if (!Array.isArray(items)) return []
@@ -226,7 +255,7 @@ const runtimeWordReason = computed(() => {
   return map[String(reason)] || String(reason)
 })
 const hasReviewInsights = computed(() => Boolean(
-  selfCritiqueSummary.value || consistencySummary.value || optimizerSummary.value || runtimeWordSummary.value
+  qualityMetrics.value || selfCritiqueSummary.value || consistencySummary.value || optimizerSummary.value || runtimeWordSummary.value
 ))
 </script>
 

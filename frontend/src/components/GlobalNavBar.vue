@@ -1,5 +1,5 @@
 <template>
-  <header class="global-nav-shell">
+  <header class="global-nav-shell xq-topbar xq-topbar--global">
     <div class="global-nav-main">
       <div class="left-actions">
         <button v-if="canGoBack" class="nav-btn" @click="goBack">返回</button>
@@ -78,6 +78,7 @@ import { useLocale } from '@/composables/useLocale'
 import { useNovelStore } from '@/stores/novel'
 import { buildChapterTaskUiModel, isTrackableTask, resolveProjectTaskContext } from '@/utils/chapterGeneration'
 import { stripThinkTags } from '@/utils/safeMarkdown'
+import { navigateBackOrFallback } from '@/utils/safeNavigation'
 
 const router = useRouter()
 const route = useRoute()
@@ -87,8 +88,12 @@ const { languageLabel, switchLabel, toggleLocale } = useLocale()
 const lastProjectId = ref<string | null>(null)
 const pollingTimer = ref<number | null>(null)
 const LAST_PROJECT_KEY = 'xuanqiong_wenshu_last_project_id'
+const PROJECT_POLLING_INTERVAL = 12000
+let loadingProjectId: string | null = null
+let loadingProjectPromise: Promise<void> | null = null
 
 const canGoBack = computed(() => route.name !== 'workspace-entry')
+const isWritingDeskRoute = computed(() => route.name === 'writing-desk')
 const currentProject = computed(() => novelStore.currentProject)
 const taskContext = computed(() => resolveProjectTaskContext(currentProject.value || null))
 const currentTaskChapter = computed(() => taskContext.value.chapter)
@@ -141,27 +146,52 @@ watch(() => currentProject.value?.id, () => {
   syncPolling()
 }, { immediate: true })
 
+watch(isWritingDeskRoute, () => {
+  syncPolling()
+  void ensureProjectLoaded()
+}, { immediate: true })
+
+const handleVisibilityChange = () => {
+  syncPolling()
+}
+
 onMounted(async () => {
   lastProjectId.value = localStorage.getItem(LAST_PROJECT_KEY)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   await ensureProjectLoaded()
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   stopPolling()
 })
 
 async function ensureProjectLoaded() {
-  const targetId = route.name === 'writing-desk' && typeof route.params.id === 'string'
-    ? route.params.id
-    : lastProjectId.value
+  if (isWritingDeskRoute.value) return
 
+  const targetId = lastProjectId.value
   if (!targetId || currentProject.value?.id === targetId) return
 
-  try {
-    await novelStore.loadProject(targetId, true)
-  } catch {
-    // ignore
+  if (loadingProjectPromise && loadingProjectId === targetId) {
+    await loadingProjectPromise
+    return
   }
+
+  loadingProjectId = targetId
+  loadingProjectPromise = (async () => {
+    try {
+      await novelStore.loadProject(targetId, true)
+    } catch {
+      // ignore
+    } finally {
+      if (loadingProjectId === targetId) {
+        loadingProjectId = null
+        loadingProjectPromise = null
+      }
+    }
+  })()
+
+  await loadingProjectPromise
 }
 
 function stopPolling() {
@@ -173,20 +203,20 @@ function stopPolling() {
 
 function syncPolling() {
   stopPolling()
-  if (!currentProject.value?.id || !globalTaskVisible.value) return
+  if (isWritingDeskRoute.value || document.hidden || !currentProject.value?.id || !globalTaskVisible.value) return
 
   pollingTimer.value = window.setInterval(async () => {
-    if (!currentProject.value?.id) return
+    if (document.hidden || !currentProject.value?.id) return
     try {
       await novelStore.loadProject(currentProject.value.id, true)
     } catch {
       // ignore
     }
-  }, 5000)
+  }, PROJECT_POLLING_INTERVAL)
 }
 
-function goBack() {
-  window.history.length > 1 ? router.back() : router.push({ name: 'workspace-entry' })
+async function goBack() {
+  await navigateBackOrFallback(router, route.fullPath, { name: 'workspace-entry' })
 }
 
 function goHome() {
@@ -240,7 +270,6 @@ function openRuntimeLogs() {
   gap: 0;
   border-bottom: 1px solid #e5e7eb;
   background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(14px);
 }
 .global-nav-main,
 .left-actions,

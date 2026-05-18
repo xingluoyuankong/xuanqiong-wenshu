@@ -4,10 +4,14 @@ import logging
 import json
 import os
 import re
-from typing import Any, Callable, Dict, List, Optional
+import time
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 import httpx
 from fastapi import HTTPException, status
+from sqlalchemy.exc import OperationalError
 from openai import (
     AsyncOpenAI,
     APIConnectionError,
@@ -22,6 +26,7 @@ from openai import (
 )
 
 from ..core.config import settings
+from ..db.session import AsyncSessionLocal
 from ..repositories.llm_config_repository import LLMConfigRepository
 from ..repositories.system_config_repository import SystemConfigRepository
 from ..repositories.user_repository import UserRepository
@@ -33,6 +38,11 @@ from ..utils.llm_tool import ChatMessage, LLMClient
 logger = logging.getLogger(__name__)
 
 _PROVIDER_SEMAPHORES: Dict[str, asyncio.Semaphore] = {}
+_PROVIDER_COOLDOWNS: Dict[str, float] = {}
+_DAILY_LIMIT_SCOPE_STATE: ContextVar[Optional[set[int]]] = ContextVar(
+    "llm_daily_limit_scope_state",
+    default=None,
+)
 
 try:  # pragma: no cover - 运行环境未安装时兼容
     from ollama import AsyncClient as OllamaAsyncClient
@@ -51,6 +61,78 @@ class LLMService:
         self.admin_setting_service = AdminSettingService(session)
         self.usage_service = UsageService(session)
         self._embedding_dimensions: Dict[str, int] = {}
+        self._resolved_llm_config_cache: Dict[tuple[int, bool, bool], Dict[str, Any]] = {}
+
+    async def _recover_from_stale_session(self, operation: str, exc: OperationalError) -> None:
+        logger.warning("LLM 服务在 %s 阶段检测到陈旧数据库会话：%s", operation, exc)
+        try:
+            await self.session.rollback()
+        except Exception as rollback_exc:  # noqa: BLE001 - best effort cleanup
+            logger.warning("LLM 服务在 %s 恢复阶段执行会话回滚失败：%s", operation, rollback_exc)
+
+    @staticmethod
+    def _is_session_contention_error(exc: Exception) -> bool:
+        message = str(getattr(exc, "orig", exc) or exc).lower()
+        return (
+            "concurrent operations are not permitted" in message
+            or "provisioning a new connection" in message
+            or "session is provisioning a new connection" in message
+        )
+
+    async def _recover_from_session_contention(self, operation: str, exc: Exception) -> None:
+        logger.warning("LLM 服务在 %s 阶段检测到会话竞争：%s", operation, exc)
+        try:
+            await self.session.rollback()
+        except Exception as rollback_exc:  # noqa: BLE001 - best effort cleanup
+            logger.warning("LLM 服务在 %s 竞争恢复阶段执行会话回滚失败：%s", operation, rollback_exc)
+
+    async def _load_user_llm_config_fresh(self, user_id: int):
+        async with AsyncSessionLocal() as session:
+            return await LLMConfigRepository(session).get_by_user(user_id)
+
+    async def _load_system_config_value_fresh(self, key: str) -> Optional[str]:
+        async with AsyncSessionLocal() as session:
+            record = await SystemConfigRepository(session).get_by_key(key)
+            if record and not self._is_placeholder_config_value(record.value):
+                return record.value
+            return None
+
+    async def _load_daily_request_state_fresh(self, user_id: int) -> tuple[int, int]:
+        async with AsyncSessionLocal() as session:
+            admin_service = AdminSettingService(session)
+            user_repo = UserRepository(session)
+            limit_str = await admin_service.get("daily_request_limit", "100")
+            limit = int(limit_str or 10)
+            used = await user_repo.get_daily_request(user_id)
+            return limit, used
+
+    async def _increment_daily_request_fresh(self, user_id: int) -> None:
+        async with AsyncSessionLocal() as session:
+            user_repo = UserRepository(session)
+            await user_repo.increment_daily_request(user_id)
+            await session.commit()
+
+    @classmethod
+    @contextmanager
+    def daily_limit_scope(cls, scope_name: Optional[str] = None) -> Iterator[set[int]]:
+        parent_scope = _DAILY_LIMIT_SCOPE_STATE.get()
+        charged_users: set[int] = parent_scope if parent_scope is not None else set()
+        token = _DAILY_LIMIT_SCOPE_STATE.set(charged_users)
+        logger.debug(
+            "Opened LLM daily limit scope: scope=%s nested=%s charged_users=%s",
+            scope_name or "anonymous",
+            parent_scope is not None,
+            len(charged_users),
+        )
+        try:
+            yield charged_users
+        finally:
+            _DAILY_LIMIT_SCOPE_STATE.reset(token)
+            logger.debug(
+                "Closed LLM daily limit scope: scope=%s charged_users=%s",
+                scope_name or "anonymous",
+                len(charged_users),
+            )
 
     @staticmethod
     def _extract_provider_error_detail(exc: Exception, default: str) -> str:
@@ -160,7 +242,16 @@ class LLMService:
             value = os.getenv(env_name)
             if value and value.strip():
                 return value
-        return None
+
+        fallback_map = {
+            "llm.api_key": settings.openai_api_key,
+            "llm.base_url": str(settings.openai_base_url) if settings.openai_base_url else None,
+            "llm.model": settings.openai_model_name,
+        }
+        fallback = fallback_map.get(key)
+        if isinstance(fallback, str):
+            fallback = fallback.strip()
+        return fallback or None
 
     async def get_llm_response(
         self,
@@ -259,6 +350,12 @@ class LLMService:
         return await self._stream_and_collect(messages, temperature=temperature, user_id=user_id, timeout=timeout)
 
     @staticmethod
+    def _build_provider_key(base_url: Optional[str], model_name: Optional[str] = None) -> str:
+        base = (base_url or 'default').rstrip('/').lower() or 'default'
+        model = (model_name or 'default').strip().lower() or 'default'
+        return f"{base}::{model}"
+
+    @staticmethod
     def _get_provider_semaphore(base_url: Optional[str]) -> asyncio.Semaphore:
         key = (base_url or 'default').rstrip('/').lower() or 'default'
         semaphore = _PROVIDER_SEMAPHORES.get(key)
@@ -266,6 +363,64 @@ class LLMService:
             semaphore = asyncio.Semaphore(2)
             _PROVIDER_SEMAPHORES[key] = semaphore
         return semaphore
+
+    @staticmethod
+    def _extract_retry_after_seconds(exc: Exception) -> Optional[float]:
+        response = getattr(exc, "response", None)
+        headers = getattr(response, "headers", None)
+        if not headers:
+            return None
+        candidates = (
+            headers.get("retry-after"),
+            headers.get("x-ratelimit-reset-after"),
+            headers.get("x-rate-limit-reset-after"),
+            headers.get("x-ratelimit-reset"),
+        )
+        for raw in candidates:
+            if raw is None:
+                continue
+            try:
+                value = float(str(raw).strip())
+            except (TypeError, ValueError):
+                continue
+            if value <= 0:
+                continue
+            if value > 1_000_000_000:
+                value = max(0.0, value - time.time())
+            return min(max(value, 0.0), 15.0)
+        return None
+
+    @classmethod
+    def _compute_rate_limit_backoff_seconds(cls, exc: Exception, *, retry_index: int) -> float:
+        header_delay = cls._extract_retry_after_seconds(exc)
+        if header_delay is not None:
+            return header_delay
+        return min(15.0, 1.25 * (2 ** retry_index))
+
+    @staticmethod
+    def _register_provider_cooldown(provider_key: str, delay_seconds: float) -> None:
+        if delay_seconds <= 0:
+            return
+        until = time.monotonic() + delay_seconds
+        current_until = _PROVIDER_COOLDOWNS.get(provider_key, 0.0)
+        _PROVIDER_COOLDOWNS[provider_key] = max(current_until, until)
+
+    @staticmethod
+    async def _wait_for_provider_cooldown(provider_key: str) -> None:
+        cooldown_until = _PROVIDER_COOLDOWNS.get(provider_key)
+        if cooldown_until is None:
+            return
+        remaining = cooldown_until - time.monotonic()
+        if remaining <= 0:
+            _PROVIDER_COOLDOWNS.pop(provider_key, None)
+            return
+        logger.warning(
+            "Provider cooldown active, waiting before next request: provider=%s delay=%.2fs",
+            provider_key,
+            remaining,
+        )
+        await asyncio.sleep(remaining)
+        _PROVIDER_COOLDOWNS.pop(provider_key, None)
 
     async def _stream_and_collect(
         self,
@@ -305,6 +460,7 @@ class LLMService:
         last_exception: Optional[HTTPException] = None
         client = LLMClient(api_key=primary_api_key, base_url=primary_base_url)
         provider_semaphore = self._get_provider_semaphore(primary_base_url)
+        provider_key = self._build_provider_key(primary_base_url, primary_model)
 
         try:
             async with provider_semaphore:
@@ -312,6 +468,7 @@ class LLMService:
                     client=client,
                     chat_messages=chat_messages,
                     model_name=primary_model,
+                    provider_key=provider_key,
                     temperature=temperature,
                     user_id=user_id,
                     timeout=timeout,
@@ -339,7 +496,7 @@ class LLMService:
         if finish_reason == "length":
             logger.warning(
                 "LLM response truncated: model=%s user_id=%s response_length=%d",
-                selected_model,
+                primary_model,
                 user_id,
                 len(full_response),
             )
@@ -352,7 +509,7 @@ class LLMService:
         if not full_response:
             logger.error(
                 "LLM returned empty response: model=%s user_id=%s finish_reason=%s",
-                selected_model,
+                primary_model,
                 user_id,
                 finish_reason,
             )
@@ -364,7 +521,7 @@ class LLMService:
         try:
             await self.usage_service.increment("api_request_count")
         except Exception as exc:  # noqa: BLE001 - usage 统计失败不应阻断主流程
-            logger.warning("Usage metric increment failed without blocking response: key=%s error=%s", "api_request_count", exc)
+            logger.warning("接口使用量指标递增失败，但不会阻断响应：key=%s error=%s", "api_request_count", exc)
         logger.debug(
             "LLM response success: model=%s base_url=%s user_id=%s chars=%d",
             primary_model,
@@ -380,6 +537,7 @@ class LLMService:
         client: LLMClient,
         chat_messages: List[ChatMessage],
         model_name: str,
+        provider_key: str,
         temperature: float,
         user_id: Optional[int],
         timeout: float,
@@ -394,9 +552,10 @@ class LLMService:
         network_retry_used = False
 
         max_attempts = 2 if retry_same_model_once else 1
-        for _ in range(max_attempts):
+        for attempt_index in range(max_attempts):
             full_response = ""
             finish_reason = None
+            await self._wait_for_provider_cooldown(provider_key)
             try:
                 async for part in client.stream_chat(
                     messages=chat_messages,
@@ -414,13 +573,31 @@ class LLMService:
                 return full_response, finish_reason
             except RateLimitError as exc:
                 detail = self._extract_provider_error_detail(exc, "AI 服务当前限流，请稍后重试或切换模型")
+                backoff_seconds = self._compute_rate_limit_backoff_seconds(exc, retry_index=attempt_index)
+                self._register_provider_cooldown(provider_key, backoff_seconds)
                 logger.warning(
-                    "LLM stream rate limited: model=%s user_id=%s detail=%s",
+                    "LLM stream rate limited: model=%s user_id=%s detail=%s backoff=%.2fs attempt=%s/%s",
                     model_name,
                     user_id,
                     detail,
+                    backoff_seconds,
+                    attempt_index + 1,
+                    max_attempts,
                 )
-                raise HTTPException(status_code=429, detail=detail) from exc
+                if retry_same_model_once and not network_retry_used:
+                    network_retry_used = True
+                    await asyncio.sleep(backoff_seconds)
+                    continue
+                raise HTTPException(
+                    status_code=429,
+                    detail=self._build_error_detail(
+                        code="PROVIDER_RATE_LIMITED",
+                        message=self._detail_to_message(detail) or "AI 服务当前限流，请稍后重试",
+                        hint="上游 Provider 出现短时限流，系统已执行退避重试；若仍失败，请稍后重试、降低并发或切换 Provider。",
+                        retryable=True,
+                        extra={"retry_after_seconds": round(backoff_seconds, 2)},
+                    ),
+                ) from exc
             except BadRequestError as exc:
                 detail = self._extract_provider_error_detail(exc, "AI 服务请求失败，请检查模型、API Key 或输入内容")
                 if stream_response_format and self._should_retry_without_json_mode(detail):
@@ -911,7 +1088,7 @@ class LLMService:
             try:
                 payload = json.loads(raw_profiles)
             except Exception:
-                logger.warning("Failed to parse llm_provider_profiles JSON, ignore profiles field")
+                logger.warning("解析 llm_provider_profiles JSON 失败，已忽略 profiles 字段")
                 return []
 
         if not isinstance(payload, list):
@@ -968,31 +1145,50 @@ class LLMService:
         enforce_daily_limit: bool = True,
         require_primary_api_key: bool = True,
     ) -> Dict[str, Any]:
+        cache_key = (int(user_id or 0), bool(enforce_daily_limit), bool(require_primary_api_key))
+        cached = self._resolved_llm_config_cache.get(cache_key)
+        if cached is not None:
+            return dict(cached)
+
+        resolved: Dict[str, Any]
         if user_id:
-            config = await self.llm_repo.get_by_user(user_id)
+            try:
+                config = await self.llm_repo.get_by_user(user_id)
+            except OperationalError as exc:
+                await self._recover_from_stale_session("load_user_llm_config", exc)
+                config = await self._load_user_llm_config_fresh(user_id)
+            except Exception as exc:
+                if not self._is_session_contention_error(exc):
+                    raise
+                await self._recover_from_session_contention("load_user_llm_config", exc)
+                config = await self._load_user_llm_config_fresh(user_id)
             if config:
                 parsed_profiles = self._parse_provider_profiles(getattr(config, "llm_provider_profiles", None))
                 if parsed_profiles:
                     primary_profile = parsed_profiles[0]
-                    return {
+                    resolved = {
                         "api_key": primary_profile["api_keys"][0],
                         "base_url": primary_profile.get("base_url"),
                         "model": primary_profile["models"][0],
                     }
+                    self._resolved_llm_config_cache[cache_key] = dict(resolved)
+                    return dict(resolved)
 
                 normalized_user_api_key = self._normalize_config_text(config.llm_provider_api_key)
                 if normalized_user_api_key:
                     primary_api_key = self._take_first_config_value(normalized_user_api_key)
                     normalized_user_model = self._normalize_config_text(config.llm_provider_model)
                     primary_model = self._take_first_config_value(normalized_user_model)
-                    return {
+                    resolved = {
                         "api_key": primary_api_key,
                         "base_url": config.llm_provider_url,
                         "model": primary_model,
                     }
+                    self._resolved_llm_config_cache[cache_key] = dict(resolved)
+                    return dict(resolved)
 
         if user_id and enforce_daily_limit:
-            await self._enforce_daily_limit(user_id)
+            await self._enforce_daily_limit_once_per_scope(user_id)
 
         api_key = self._normalize_config_text(self._get_llm_env_value("llm.api_key"))
         base_url = self._normalize_config_text(self._get_llm_env_value("llm.base_url"))
@@ -1007,11 +1203,13 @@ class LLMService:
                 detail="未配置默认 LLM API Key，请联系管理员配置系统默认 API Key 或在个人设置中配置自定义 API Key"
             )
 
-        return {
+        resolved = {
             "api_key": primary_api_key,
             "base_url": base_url,
             "model": primary_model,
         }
+        self._resolved_llm_config_cache[cache_key] = dict(resolved)
+        return dict(resolved)
 
     async def get_embedding(
         self,
@@ -1111,22 +1309,59 @@ class LLMService:
         vector_size_str = await self._get_config_value("embedding.model_vector_size")
         return int(vector_size_str) if vector_size_str else None
 
+    async def _enforce_daily_limit_once_per_scope(self, user_id: int) -> None:
+        charged_users = _DAILY_LIMIT_SCOPE_STATE.get()
+        if charged_users is None:
+            charged_users = set()
+            _DAILY_LIMIT_SCOPE_STATE.set(charged_users)
+        if user_id in charged_users:
+            logger.debug("Skip duplicate daily limit charge in same logical run: user_id=%s", user_id)
+            return
+        await self._enforce_daily_limit(user_id)
+        charged_users.add(user_id)
+        logger.debug("Daily limit charged for logical run: user_id=%s charged_users=%s", user_id, len(charged_users))
+
     async def _enforce_daily_limit(self, user_id: int) -> None:
-        limit_str = await self.admin_setting_service.get("daily_request_limit", "100")
-        limit = int(limit_str or 10)
-        used = await self.user_repo.get_daily_request(user_id)
+        try:
+            limit_str = await self.admin_setting_service.get("daily_request_limit", "100")
+            limit = int(limit_str or 10)
+            used = await self.user_repo.get_daily_request(user_id)
+            if used >= limit:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="今日请求次数已达上限，请明日再试或设置自定义 API Key。",
+                )
+            await self.user_repo.increment_daily_request(user_id)
+            await self.session.commit()
+            return
+        except OperationalError as exc:
+            await self._recover_from_stale_session("enforce_daily_limit", exc)
+        except Exception as exc:
+            if not self._is_session_contention_error(exc):
+                raise
+            await self._recover_from_session_contention("enforce_daily_limit", exc)
+
+        limit, used = await self._load_daily_request_state_fresh(user_id)
         if used >= limit:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="今日请求次数已达上限，请明日再试或设置自定义 API Key。",
             )
-        await self.user_repo.increment_daily_request(user_id)
-        await self.session.commit()
+        await self._increment_daily_request_fresh(user_id)
 
     async def _get_config_value(self, key: str) -> Optional[str]:
         if key.startswith("llm."):
             return self._get_llm_env_value(key)
-        record = await self.system_config_repo.get_by_key(key)
-        if record and not self._is_placeholder_config_value(record.value):
-            return record.value
-        return None
+        try:
+            record = await self.system_config_repo.get_by_key(key)
+            if record and not self._is_placeholder_config_value(record.value):
+                return record.value
+            return None
+        except OperationalError as exc:
+            await self._recover_from_stale_session(f"load_system_config:{key}", exc)
+            return await self._load_system_config_value_fresh(key)
+        except Exception as exc:
+            if not self._is_session_contention_error(exc):
+                raise
+            await self._recover_from_session_contention(f"load_system_config:{key}", exc)
+            return await self._load_system_config_value_fresh(key)

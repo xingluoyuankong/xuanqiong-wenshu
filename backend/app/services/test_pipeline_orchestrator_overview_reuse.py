@@ -58,3 +58,51 @@ class TestPipelineOrchestratorOverviewReuse:
         assert payload["major_count"] == 1
         assert payload["optimization_logs"] == [{"stage": "structural", "issue_count": 1, "changed": True}]
         assert isinstance(datetime.fromisoformat(payload["reused_at"]), datetime)
+
+    def test_preserve_non_regressive_content_keeps_previous_when_candidate_collapses(self):
+        previous = "甲" * 6000
+        candidate = "乙" * 44
+
+        selected, guard = PipelineOrchestrator._preserve_non_regressive_content(
+            previous_content=previous,
+            candidate_content=candidate,
+            stage_label="reader_polish",
+            min_word_count=5500,
+        )
+
+        assert selected == previous
+        assert guard is not None
+        assert guard["stage"] == "reader_polish"
+        assert guard["reason"] == "catastrophic_shrinkage"
+        assert guard["previous_word_count"] == 6000
+        assert guard["candidate_word_count"] == 44
+        assert guard["min_word_count"] == 5500
+
+    def test_preserve_non_regressive_content_accepts_shorter_candidate_when_still_meets_minimum(self):
+        previous = "甲" * 6000
+        candidate = "乙" * 5600
+
+        selected, guard = PipelineOrchestrator._preserve_non_regressive_content(
+            previous_content=previous,
+            candidate_content=candidate,
+            stage_label="self_critique",
+            min_word_count=5500,
+        )
+
+        assert selected == candidate
+        assert guard is None
+
+    def test_preserve_non_regressive_content_rejects_empty_candidate(self):
+        previous = "甲" * 3200
+
+        selected, guard = PipelineOrchestrator._preserve_non_regressive_content(
+            previous_content=previous,
+            candidate_content="   ",
+            stage_label="consistency_repair",
+            min_word_count=2400,
+        )
+
+        assert selected == previous
+        assert guard is not None
+        assert guard["reason"] == "empty_candidate"
+        assert guard["candidate_word_count"] == 0

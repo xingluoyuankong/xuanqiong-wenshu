@@ -7,6 +7,7 @@ from .user_style_library import UserStyleLibrary
 from .novel import (
     BlueprintCharacter,
     BlueprintRelationship,
+    BlueprintGenerationJob,
     Chapter,
     ChapterEvaluation,
     ChapterOutline,
@@ -89,6 +90,7 @@ __all__ = [
     "UserStyleLibrary",
     "NovelConversation",
     "NovelBlueprint",
+    "BlueprintGenerationJob",
     "BlueprintCharacter",
     "BlueprintRelationship",
     "ChapterOutline",

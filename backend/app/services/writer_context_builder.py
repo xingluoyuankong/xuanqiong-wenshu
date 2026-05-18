@@ -11,7 +11,7 @@ WriterContextBuilder: 写作层信息可见性过滤服务
 
 import re
 from copy import deepcopy
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 
 def _detect_names(all_names: List[str], texts: List[str]) -> Set[str]:
@@ -35,12 +35,128 @@ def _shallow_copy_blueprint(blueprint: dict) -> dict:
 class WriterContextBuilder:
     """
     构建写作层可见的上下文，实现信息可见性过滤。
-    
+
     核心原则：
     - L3 Writer 只能看到「已公开」的信息
     - 未登场角色不能出现在 prompt 中（连名字都不出现）
     - full_synopsis 等剧透字段必须移除
     """
+
+    def analyze_character_scope(
+        self,
+        *,
+        blueprint: dict,
+        completed_summaries: List[str],
+        previous_tail: str,
+        outline_title: str,
+        outline_summary: str,
+        writing_notes: str,
+        allowed_new_characters: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """统一分析本章角色可见范围，供导演脚本与正文阶段共用。"""
+        all_names = [
+            c.get("name") for c in blueprint.get("characters", []) if c.get("name")
+        ]
+
+        introduced = _detect_names(all_names, completed_summaries + [previous_tail])
+        planned = _detect_names(
+            all_names, [outline_title, outline_summary, writing_notes]
+        )
+
+        allowed = introduced | planned
+        if allowed_new_characters:
+            allowed.update(
+                name.strip()
+                for name in allowed_new_characters
+                if isinstance(name, str) and name.strip()
+            )
+
+        return {
+            "all_names": all_names,
+            "introduced": introduced,
+            "planned": planned,
+            "allowed": allowed,
+            "introduced_characters": sorted(list(introduced)),
+            "planned_characters": sorted(list(planned)),
+            "allowed_characters": sorted(list(allowed)),
+        }
+
+    @staticmethod
+    def _compact_text(value: Any, limit: int = 40) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        return text if len(text) <= limit else f"{text[:limit].rstrip()}…"
+
+    @classmethod
+    def _build_macro_continuity_context(
+        cls,
+        *,
+        writer_blueprint: dict,
+        introduced_characters: List[str],
+        planned_characters: List[str],
+        allowed_new_characters: Optional[List[str]],
+    ) -> str:
+        sections: List[str] = []
+
+        if introduced_characters:
+            sections.append("## 已登场角色\n- " + "、".join(introduced_characters[:8]))
+
+        planned_new = [
+            name for name in (allowed_new_characters or [])
+            if isinstance(name, str) and name.strip() and name not in introduced_characters
+        ]
+        if planned_characters or planned_new:
+            lines = []
+            if planned_characters:
+                lines.append("- 本章文本已提及角色：" + "、".join(planned_characters[:6]))
+            if planned_new:
+                lines.append("- 本章允许新登场角色：" + "、".join(planned_new[:4]))
+            sections.append("## 本章角色范围\n" + "\n".join(lines))
+
+        relationships = writer_blueprint.get("relationships") or []
+        relationship_lines: List[str] = []
+        for relation in relationships[:6]:
+            if not isinstance(relation, dict):
+                continue
+            left = str(relation.get("from") or relation.get("character_from") or "").strip()
+            right = str(relation.get("to") or relation.get("character_to") or "").strip()
+            if not left or not right:
+                continue
+            desc = cls._compact_text(
+                relation.get("core_conflict")
+                or relation.get("description")
+                or relation.get("status")
+                or relation.get("relationship_type"),
+                limit=36,
+            )
+            relationship_lines.append(f"- {left} ↔ {right}：{desc or '关系持续变化中'}")
+        if relationship_lines:
+            sections.append("## 当前关键关系\n" + "\n".join(relationship_lines))
+
+        arc_lines: List[str] = []
+        for arc in (writer_blueprint.get("story_arcs") or [])[:4]:
+            if not isinstance(arc, dict):
+                continue
+            title = cls._compact_text(arc.get("title"), limit=20)
+            conflict = cls._compact_text(arc.get("conflict") or arc.get("goal") or arc.get("summary"), limit=40)
+            if title or conflict:
+                arc_lines.append(f"- {title or '剧情线'}：{conflict or '持续推进'}")
+        if arc_lines:
+            sections.append("## 长线剧情压力\n" + "\n".join(arc_lines))
+
+        stage_lines: List[str] = []
+        for stage in (writer_blueprint.get("novel_outline") or [])[:3]:
+            if not isinstance(stage, dict):
+                continue
+            title = cls._compact_text(stage.get("title"), limit=20)
+            conflict = cls._compact_text(stage.get("main_conflict") or stage.get("goal") or stage.get("story_function"), limit=42)
+            if title or conflict:
+                stage_lines.append(f"- {title or '当前阶段'}：{conflict or '保持既定推进'}")
+        if stage_lines:
+            sections.append("## 当前阶段任务\n" + "\n".join(stage_lines))
+
+        return "\n\n".join(section for section in sections if section).strip()
 
     # 禁止传递给 Writer 的蓝图字段（防剧透）
     FORBIDDEN_BLUEPRINT_KEYS = {
@@ -80,23 +196,19 @@ class WriterContextBuilder:
         Returns:
             包含裁剪后蓝图和角色信息的字典
         """
-        # 1. 提取所有角色名
-        all_names = [
-            c.get("name") for c in blueprint.get("characters", []) if c.get("name")
-        ]
-
-        # 2. 检测已登场角色（从已完成章节中）
-        introduced = _detect_names(all_names, completed_summaries + [previous_tail])
-
-        # 3. 检测本章计划提及的角色（从大纲/写作指令中）
-        planned = _detect_names(
-            all_names, [outline_title, outline_summary, writing_notes]
+        scope = self.analyze_character_scope(
+            blueprint=blueprint,
+            completed_summaries=completed_summaries,
+            previous_tail=previous_tail,
+            outline_title=outline_title,
+            outline_summary=outline_summary,
+            writing_notes=writing_notes,
+            allowed_new_characters=allowed_new_characters,
         )
-
-        # 4. 合并允许的角色集合
-        allowed = introduced | planned
-        if allowed_new_characters:
-            allowed.update(allowed_new_characters)
+        all_names = scope["all_names"]
+        introduced = scope["introduced"]
+        planned = scope["planned"]
+        allowed = scope["allowed"]
 
         # 5. 裁剪蓝图
         writer_blueprint = _shallow_copy_blueprint(blueprint)
@@ -120,15 +232,26 @@ class WriterContextBuilder:
                 if r.get("from") in allowed and r.get("to") in allowed
             ]
 
+        introduced_characters = scope["introduced_characters"]
+        planned_characters = scope["planned_characters"]
+        allowed_characters = scope["allowed_characters"]
+
         # 6. 计算禁止角色列表（用于 Guardrails 检查）
         forbidden = set(all_names) - allowed
+        macro_continuity_context = self._build_macro_continuity_context(
+            writer_blueprint=writer_blueprint,
+            introduced_characters=introduced_characters,
+            planned_characters=planned_characters,
+            allowed_new_characters=allowed_new_characters,
+        )
 
         return {
             "writer_blueprint": writer_blueprint,
-            "introduced_characters": sorted(list(introduced)),
-            "planned_characters": sorted(list(planned)),
-            "allowed_characters": sorted(list(allowed)),
+            "introduced_characters": introduced_characters,
+            "planned_characters": planned_characters,
+            "allowed_characters": allowed_characters,
             "forbidden_characters": sorted(list(forbidden)),
+            "macro_continuity_context": macro_continuity_context,
         }
 
     def get_forbidden_names_pattern(self, forbidden_characters: List[str]) -> Optional[re.Pattern]:

@@ -116,9 +116,9 @@ class WriterPersonaService:
     def get_version_style_hint(self, persona: Optional[WriterPersona], version_index: int) -> str:
         """获取版本差异化风格提示"""
         base_hints = [
-            "情绪更细腻，节奏更慢，多写内心戏和感官描写",
-            "冲突更强，节奏更快，多写动作和对话",
-            "悬念更重，多埋伏笔，结尾钩子更强"
+            "冲突推进优先，确保章内有目标、阻碍、转折与后果，多写对话攻防和行动决策",
+            "悬念与反转更强，强化信息差、试探与误导，但不要牺牲当前章的实质推进",
+            "情绪更细腻，但只能围绕已发生的冲突、选择与关系变化展开，避免空转内心戏和静态景物铺陈"
         ]
         
         hint = base_hints[version_index % len(base_hints)]

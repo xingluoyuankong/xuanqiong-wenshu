@@ -1,4 +1,4 @@
-// AIMETA P=小说API客户端_小说和章节接口|R=小说CRUD_章节管理_生成|NR=不含UI逻辑|E=api:novel|X=internal|A=novelApi对象|D=axios|S=net|RD=./README.ai
+﻿// AIMETA P=小说API客户端_小说和章节接口|R=小说CRUD_章节管理_生成|NR=不含UI逻辑|E=api:novel|X=internal|A=novelApi对象|D=axios|S=net|RD=./README.ai
 import { API_BASE_URL, API_PREFIX } from '@/api/config'
 import { normalizeChapterContent } from '@/utils/chapterContent'
 
@@ -17,6 +17,8 @@ export interface ApiErrorDetail {
   requestId?: string
   retryable?: boolean
   responseSnippet?: string
+  rejectionSummary?: Record<string, any>
+  missingChapters?: number[]
 }
 
 export class ApiError extends Error {
@@ -71,7 +73,13 @@ const buildApiErrorDetail = (
     rootCause: readText(rawDetail?.root_cause) ?? readText(rawDetail?.rootCause),
     requestId: readText(rawDetail?.request_id) ?? readText(rawDetail?.requestId) ?? readText(requestIdFromHeader),
     retryable: typeof rawDetail?.retryable === 'boolean' ? rawDetail.retryable : undefined,
-    responseSnippet: readText(responseSnippet)
+    responseSnippet: readText(responseSnippet),
+    rejectionSummary: rawDetail?.rejection_summary && typeof rawDetail.rejection_summary === 'object'
+      ? rawDetail.rejection_summary as Record<string, any>
+      : undefined,
+    missingChapters: Array.isArray(rawDetail?.missing_chapters)
+      ? rawDetail.missing_chapters.filter((item): item is number => typeof item === 'number')
+      : undefined
   }
 }
 
@@ -137,7 +145,10 @@ const normalizeChapterVersion = (value: unknown): ChapterVersion => {
       id: typeof record.id === 'number' ? record.id : undefined,
       content: normalizeChapterContent(rawContent),
       style: typeof record.style === 'string' ? record.style : '标准',
-      evaluation: typeof record.evaluation === 'string' ? record.evaluation : undefined
+      evaluation: typeof record.evaluation === 'string' ? record.evaluation : undefined,
+      metadata: record.metadata && typeof record.metadata === 'object'
+        ? record.metadata as Record<string, any>
+        : undefined
     }
   }
 
@@ -194,6 +205,86 @@ export interface NovelProjectSummary {
   total_chapters: number
 }
 
+export interface WorldSetting {
+  core_rules?: string
+  era?: string
+  time_period?: string
+  atmosphere?: string
+  tone?: string
+  era_background?: unknown
+  world_structure?: unknown
+  power_system?: unknown
+  survival_system?: unknown
+  life_system?: unknown
+  culture_system?: unknown
+  civilization_system?: unknown
+  economy_system?: unknown
+  social_structure?: unknown
+  technology_system?: unknown
+  resource_system?: unknown
+  belief_system?: unknown
+  geography_system?: unknown
+  faction_order?: unknown
+  system_blueprint?: Record<string, unknown>
+  key_locations?: Array<Record<string, unknown>>
+  factions?: Array<Record<string, unknown>>
+  [key: string]: unknown
+}
+
+export interface StoryArc {
+  title?: string
+  theme?: string
+  goal?: string
+  conflict?: string
+  summary?: string
+  [key: string]: unknown
+}
+
+export interface VolumePlanItem {
+  volume?: number | string
+  title?: string
+  focus?: string
+  goal?: string
+  summary?: string
+  [key: string]: unknown
+}
+
+export interface NovelOutlineStage {
+  stage?: number
+  title?: string
+  core_theme?: string
+  goal?: string
+  main_conflict?: string
+  background?: string
+  character_progression?: string
+  world_progression?: string
+  faction_progression?: string
+  power_progression?: string
+  survival_and_life_progression?: string
+  cultural_and_civilizational_progression?: string
+  resource_and_operation_line?: string
+  emotional_core?: string
+  major_setpiece?: string
+  story_function?: string
+  key_events?: string[]
+  turning_points?: string[]
+  stage_tasks?: string[]
+  stage_climax?: string
+  foreshadowing_and_payoff?: string
+  ending_hook?: string
+  expected_chapter_range?: string
+  [key: string]: unknown
+}
+
+export interface BlueprintForeshadowingItem {
+  plant?: unknown
+  payoff?: unknown
+  owner?: string
+  trigger?: string
+  summary?: string
+  [key: string]: unknown
+}
+
 export interface Blueprint {
   title?: string
   target_audience?: string
@@ -202,12 +293,13 @@ export interface Blueprint {
   tone?: string
   one_sentence_summary?: string
   full_synopsis?: string
-  world_setting?: Record<string, any>
+  world_setting?: WorldSetting
   characters?: Character[]
   relationships?: Relationship[]
-  story_arcs?: Array<Record<string, any>>
-  volume_plan?: Array<Record<string, any>>
-  foreshadowing_system?: Array<Record<string, any>>
+  story_arcs?: StoryArc[]
+  volume_plan?: VolumePlanItem[]
+  novel_outline?: NovelOutlineStage[]
+  foreshadowing_system?: BlueprintForeshadowingItem[]
   chapter_outline?: ChapterOutline[]
 }
 
@@ -283,6 +375,7 @@ export interface Chapter {
   title: string
   summary: string
   content: string | null
+  selected_version_id?: number | null
   versions: ChapterVersion[] | null
   evaluation: string | null
   generation_status: 'not_generated' | 'generating' | 'evaluating' | 'selecting' | 'failed' | 'evaluation_failed' | 'waiting_for_confirm' | 'successful'
@@ -355,8 +448,28 @@ export interface BlueprintGenerationResponse {
   ai_message: string
 }
 
+export interface BlueprintGenerationError {
+  code: string
+  message: string
+  detail?: string | null
+  retryable?: boolean
+}
+
+export interface BlueprintGenerationJobResponse {
+  run_id: string
+  project_id: string
+  status: 'idle' | 'queued' | 'generating' | 'polishing' | 'successful' | 'failed' | 'cancelled'
+  progress_stage: string
+  progress_message: string
+  started_at?: string | null
+  updated_at?: string | null
+  blueprint?: Blueprint | null
+  ai_message?: string | null
+  error?: BlueprintGenerationError | string | null
+}
+
 export interface UIControl {
-  type: 'single_choice' | 'text_input'
+  type: 'single_choice' | 'multi_choice' | 'text_input'
   options?: Array<{ id: string; label: string }>
   placeholder?: string
 }
@@ -396,7 +509,7 @@ export interface DeleteNovelsResponse {
 }
 
 // 内容型Section（对应后端NovelSectionType枚举）
-export type NovelSectionType = 'overview' | 'world_setting' | 'characters' | 'relationships' | 'chapter_outline' | 'chapters'
+export type NovelSectionType = 'overview' | 'world_setting' | 'novel_outline' | 'characters' | 'relationships' | 'chapter_outline' | 'chapters'
 
 // 分析型Section（不属于NovelSectionType，使用独立的analytics API）
 export type AnalysisSectionType =
@@ -482,6 +595,28 @@ export class NovelAPI {
 
   static async generateBlueprint(projectId: string): Promise<BlueprintGenerationResponse> {
     return request(`${NOVELS_BASE}/${projectId}/blueprint/generate`, {
+      method: 'POST'
+    })
+  }
+
+  static async startBlueprintGeneration(
+    projectId: string,
+    options: { forceStage?: 'novel_outline' | 'chapter_outline' } = {}
+  ): Promise<BlueprintGenerationJobResponse> {
+    return request(`${NOVELS_BASE}/${projectId}/blueprint/generate/start`, {
+      method: 'POST',
+      body: JSON.stringify({
+        force_stage: options.forceStage,
+      })
+    })
+  }
+
+  static async getBlueprintGenerationStatus(projectId: string): Promise<BlueprintGenerationJobResponse> {
+    return request(`${NOVELS_BASE}/${projectId}/blueprint/generate/status`)
+  }
+
+  static async cancelBlueprintGeneration(projectId: string): Promise<BlueprintGenerationJobResponse> {
+    return request(`${NOVELS_BASE}/${projectId}/blueprint/generate/cancel`, {
       method: 'POST'
     })
   }
@@ -633,6 +768,7 @@ export interface OptimizeRequest {
     | 'rhythm'
   additional_notes?: string
   version_index?: number
+  version_id?: number
 }
 
 export interface OptimizeResponse {

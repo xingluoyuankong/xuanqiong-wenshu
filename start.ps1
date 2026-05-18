@@ -56,23 +56,49 @@ Write-Host "logs: $runDir" -ForegroundColor Gray
 Write-Host "formal backend: $backendBaseUrl" -ForegroundColor Gray
 Write-Host "formal frontend: $frontendBaseUrl" -ForegroundColor Gray
 
+$repoServicePattern = 'xuanqiong-wenshu[\\/](backend|frontend)'
+
 function Test-RepoOwnedProcess {
     param(
-        [System.Diagnostics.Process]$Process,
+        [int]$ProcessId,
         [string]$RepoPath
     )
 
-    if (-not $Process) {
+    if ($ProcessId -le 0) {
         return $false
     }
 
     try {
-        if ($Process.Path -and $Process.Path.StartsWith($RepoPath, [System.StringComparison]::OrdinalIgnoreCase)) {
-            return $true
-        }
-    } catch {}
+        $procInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction Stop
+    } catch {
+        return $false
+    }
 
-    return $false
+    if ($procInfo.ExecutablePath -and $procInfo.ExecutablePath.StartsWith($RepoPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+    }
+
+    $commandLine = [string]$procInfo.CommandLine
+    if ([string]::IsNullOrWhiteSpace($commandLine)) {
+        return $false
+    }
+
+    return $commandLine -match $repoServicePattern
+}
+
+function Get-RepoRuntimeProcesses {
+    param([string]$RepoPath)
+
+    return @(
+        Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.ProcessId -gt 0 -and
+            $_.Name -match '^(python|node)\.exe$' -and
+            (
+                ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($RepoPath, [System.StringComparison]::OrdinalIgnoreCase)) -or
+                ($_.CommandLine -and $_.CommandLine -match $repoServicePattern)
+            )
+        } | Select-Object ProcessId, Name, ExecutablePath, CommandLine
+    )
 }
 
 function Stop-PortProcess {
@@ -109,12 +135,12 @@ function Stop-PortProcess {
 
     foreach ($procId in $pids) {
         try {
-            $proc = Get-Process -Id $procId -ErrorAction Stop
-            if (-not (Test-RepoOwnedProcess -Process $proc -RepoPath $RepoPath)) {
-                Write-Host "  skip PID=$procId ($($proc.ProcessName)) on port $Port because it is not repo-owned" -ForegroundColor DarkYellow
+            $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $procId" -ErrorAction Stop
+            if (-not (Test-RepoOwnedProcess -ProcessId $procId -RepoPath $RepoPath)) {
+                Write-Host "  skip PID=$procId ($($proc.Name)) on port $Port because it is not repo-owned" -ForegroundColor DarkYellow
                 continue
             }
-            Write-Host "  stop PID=$procId ($($proc.ProcessName))" -ForegroundColor Yellow
+            Write-Host "  stop PID=$procId ($($proc.Name))" -ForegroundColor Yellow
             Stop-Process -Id $procId -Force -ErrorAction Stop
             $stoppedCount += 1
         } catch {
@@ -135,24 +161,12 @@ if ($stoppedBackend -gt 0 -or $stoppedFrontend -gt 0) {
 }
 
 Write-Host "  check leftover Python/Node processes..." -ForegroundColor Gray
-$pythonProcesses = Get-Process -Name "python*" -ErrorAction SilentlyContinue | Where-Object {
-    $_.Path -and $_.Path.StartsWith($repo, [System.StringComparison]::OrdinalIgnoreCase)
-}
-$nodeProcesses = Get-Process -Name "node" -ErrorAction SilentlyContinue | Where-Object {
-    $_.Path -and $_.Path.StartsWith($repo, [System.StringComparison]::OrdinalIgnoreCase)
-}
+$repoProcesses = Get-RepoRuntimeProcesses -RepoPath $repo
 
-foreach ($proc in $pythonProcesses) {
+foreach ($proc in $repoProcesses) {
     try {
-        Write-Host "  stop Python PID=$($proc.Id)" -ForegroundColor Yellow
-        Stop-Process -Id $proc.Id -Force
-    } catch {}
-}
-
-foreach ($proc in $nodeProcesses) {
-    try {
-        Write-Host "  stop Node PID=$($proc.Id)" -ForegroundColor Yellow
-        Stop-Process -Id $proc.Id -Force
+        Write-Host "  stop $($proc.Name) PID=$($proc.ProcessId)" -ForegroundColor Yellow
+        Stop-Process -Id $proc.ProcessId -Force
     } catch {}
 }
 
@@ -174,15 +188,15 @@ $backendErr = Join-Path $runDir 'backend-error.log'
 
 $env:XUANQIONG_WENSHU_LOG_DIR = $runDir
 $env:LOGGING_LEVEL = 'INFO'
-$env:CONSOLE_LOGGING_LEVEL = 'WARNING'
-$env:XUANQIONG_WENSHU_UVICORN_LOG_LEVEL = 'warning'
+$env:CONSOLE_LOGGING_LEVEL = 'INFO'
+$env:XUANQIONG_WENSHU_UVICORN_LOG_LEVEL = 'info'
 $env:XUANQIONG_WENSHU_UVICORN_ACCESS_LOG = '0'
 $env:PYTHONUNBUFFERED = '1'
 $env:PYTHONUTF8 = '1'
 $env:PYTHONIOENCODING = 'utf-8'
 
 $backendJob = Start-Process -FilePath $backendPy `
-    -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', $backendHost, '--port', "$backendPort", '--log-level', 'warning', '--no-access-log') `
+    -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', $backendHost, '--port', "$backendPort", '--log-level', 'info', '--no-access-log') `
     -WorkingDirectory $backendWd `
     -RedirectStandardOutput $backendOut `
     -RedirectStandardError $backendErr `

@@ -1,5 +1,5 @@
 ﻿<template>
-  <div class="grid h-full gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+  <div class="clue-tracker-page grid h-full gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
     <aside class="space-y-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
       <div>
         <h3 class="text-lg font-semibold text-slate-900">线索追踪</h3>
@@ -129,7 +129,7 @@
           <h4 class="text-base font-semibold text-slate-900">本轮最值得盯住的线索</h4>
           <p class="mt-1 text-sm text-slate-500">按“未回收且重要”优先，减少主线丢失或红鲱鱼失控。</p>
           <div class="mt-4 space-y-3">
-            <div v-for="clue in focusClues" :key="clue.id" class="rounded-2xl border border-amber-100 bg-amber-50/70 px-4 py-3">
+            <div v-for="clue in focusClues" :key="clue.id" class="rounded-2xl border border-sky-100 bg-sky-50/70 px-4 py-3">
               <div class="flex items-center justify-between gap-3">
                 <div class="text-sm font-medium text-slate-900">{{ clue.name }}</div>
                 <span class="rounded-full bg-white px-2 py-1 text-[11px] text-slate-500">第 {{ clue.planted_chapter || '?' }} 章埋下</span>

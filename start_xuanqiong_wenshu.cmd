@@ -30,8 +30,11 @@ echo Backend:  http://%BACKEND_HOST%:%BACKEND_PORT%
 echo Frontend: http://%FRONTEND_HOST%:%FRONTEND_PORT%
 echo.
 
-echo [1/4] Cleaning old processes (%BACKEND_PORT%, %FRONTEND_PORT%)...
-powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort %BACKEND_PORT%,%FRONTEND_PORT% -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" 2>nul
+echo [1/5] Cleaning old project services...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\stop.ps1"
+if errorlevel 1 (
+  echo [WARN] Stop script reported an issue; continue with startup.
+)
 
 set "BACKEND=%ROOT%\backend"
 set "FRONTEND=%ROOT%\frontend"

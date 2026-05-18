@@ -1,4 +1,4 @@
-﻿// AIMETA P=灏忚鐘舵€乢褰撳墠灏忚鏁版嵁绠＄悊|R=currentNovel_chapters_fetch|NR=涓嶅惈API璋冪敤|E=store:novel|X=internal|A=useNovelStore|D=pinia|S=none|RD=./README.ai
+﻿// AIMETA P=小说状态_store|R=currentNovel_chapters_fetch|NR=不含UI|E=store:novel|X=internal|A=useNovelStore|D=pinia|S=none|RD=./README.ai
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type {
@@ -6,6 +6,7 @@ import type {
   NovelProjectSummary,
   ConverseResponse,
   BlueprintGenerationResponse,
+  BlueprintGenerationJobResponse,
   Blueprint,
   ChapterVersion,
   DeleteNovelsResponse,
@@ -39,6 +40,8 @@ export const useNovelStore = defineStore('novel', () => {
   const isLoading = ref(false)
   const error = ref<string | null>(null)
   const pendingChapterEdits = new Map<string, symbol>()
+  const inflightProjectRequests = new Map<string, Promise<NovelProject>>()
+  let inflightProjectsRequest: Promise<NovelProjectSummary[]> | null = null
   let latestLoadProjectRequestId = 0
 
   // Getters
@@ -74,14 +77,42 @@ export const useNovelStore = defineStore('novel', () => {
     }
   }
 
+  const fetchProjectsOnce = () => {
+    if (inflightProjectsRequest) {
+      return inflightProjectsRequest
+    }
+
+    inflightProjectsRequest = NovelAPI.getAllNovels().finally(() => {
+      inflightProjectsRequest = null
+    })
+
+    return inflightProjectsRequest
+  }
+
+  const fetchProjectOnce = (projectId: string) => {
+    const existingRequest = inflightProjectRequests.get(projectId)
+    if (existingRequest) {
+      return existingRequest
+    }
+
+    const request = NovelAPI.getNovel(projectId).finally(() => {
+      if (inflightProjectRequests.get(projectId) === request) {
+        inflightProjectRequests.delete(projectId)
+      }
+    })
+
+    inflightProjectRequests.set(projectId, request)
+    return request
+  }
+
   // Actions
   async function loadProjects() {
     isLoading.value = true
     error.value = null
     try {
-      projects.value = await NovelAPI.getAllNovels()
+      projects.value = await fetchProjectsOnce()
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '鍔犺浇椤圭洰澶辫触'
+      error.value = err instanceof Error ? err.message : '加载项目失败'
     } finally {
       isLoading.value = false
     }
@@ -99,7 +130,7 @@ export const useNovelStore = defineStore('novel', () => {
       notif.success(`小说《${title}》创建成功！`)
       return project
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '鍒涘缓椤圭洰澶辫触'
+      error.value = err instanceof Error ? err.message : '创建项目失败'
       const notif = useNotificationStore()
       notif.error(`创建失败：${err instanceof Error ? err.message : '未知错误'}`)
       throw err
@@ -119,14 +150,14 @@ export const useNovelStore = defineStore('novel', () => {
     }
     error.value = null
     try {
-      const project = await NovelAPI.getNovel(projectId)
+      const project = await fetchProjectOnce(projectId)
       if (requestId !== latestLoadProjectRequestId) {
         return
       }
       currentProject.value = project
       syncProjectSummary(project)
     } catch (err) {
-      const message = err instanceof Error ? err.message : '鍔犺浇椤圭洰澶辫触'
+      const message = err instanceof Error ? err.message : '加载项目失败'
       if (requestId !== latestLoadProjectRequestId) {
         return
       }
@@ -145,7 +176,7 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('娌℃湁褰撳墠椤圭洰')
+        throw new Error('没有当前项目')
       }
       const chapter = await NovelAPI.getChapter(currentProject.value.id, chapterNumber)
       const project = currentProject.value
@@ -161,7 +192,7 @@ export const useNovelStore = defineStore('novel', () => {
       project.chapters.sort((a, b) => a.chapter_number - b.chapter_number)
       return chapter
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '鍔犺浇绔犺妭澶辫触'
+      error.value = err instanceof Error ? err.message : '加载章节失败'
       throw err
     }
   }
@@ -171,7 +202,7 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('娌℃湁褰撳墠椤圭洰')
+        throw new Error('没有当前项目')
       }
       const response = await NovelAPI.converseConcept(
         currentProject.value.id,
@@ -181,7 +212,7 @@ export const useNovelStore = defineStore('novel', () => {
       currentConversationState.value = response.conversation_state
       return response
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '瀵硅瘽澶辫触'
+      error.value = err instanceof Error ? err.message : '对话失败'
       throw err
     } finally {
       isLoading.value = false
@@ -194,15 +225,47 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('娌℃湁褰撳墠椤圭洰')
+        throw new Error('没有当前项目')
       }
       return await NovelAPI.generateBlueprint(currentProject.value.id)
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '鐢熸垚钃濆浘澶辫触'
+      error.value = err instanceof Error ? err.message : '生成蓝图失败'
       throw err
     } finally {
       isLoading.value = false
     }
+  }
+
+  async function startBlueprintGeneration(
+    options: { forceStage?: 'novel_outline' | 'chapter_outline' } = {}
+  ): Promise<BlueprintGenerationJobResponse> {
+    isLoading.value = true
+    error.value = null
+    try {
+      if (!currentProject.value) {
+        throw new Error('没有当前项目')
+      }
+      return await NovelAPI.startBlueprintGeneration(currentProject.value.id, options)
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : '启动蓝图生成失败'
+      throw err
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  async function getBlueprintGenerationStatus(): Promise<BlueprintGenerationJobResponse> {
+    if (!currentProject.value) {
+      throw new Error('没有当前项目')
+    }
+    return await NovelAPI.getBlueprintGenerationStatus(currentProject.value.id)
+  }
+
+  async function cancelBlueprintGeneration(): Promise<BlueprintGenerationJobResponse> {
+    if (!currentProject.value) {
+      throw new Error('没有当前项目')
+    }
+    return await NovelAPI.cancelBlueprintGeneration(currentProject.value.id)
   }
 
   async function saveBlueprint(blueprint: Blueprint) {
@@ -210,16 +273,16 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('娌℃湁褰撳墠椤圭洰')
+        throw new Error('没有当前项目')
       }
       if (!blueprint) {
-        throw new Error('缂哄皯钃濆浘鏁版嵁')
+        throw new Error('缺少蓝图数据')
       }
       currentProject.value = await NovelAPI.saveBlueprint(currentProject.value.id, blueprint)
       const notif = useNotificationStore()
-      notif.success('灏忚钃濆浘宸蹭繚瀛橈紒')
+      notif.success('小说蓝图已保存！')
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '淇濆瓨钃濆浘澶辫触'
+      error.value = err instanceof Error ? err.message : '保存蓝图失败'
       const notif = useNotificationStore()
       notif.error(`保存失败：${err instanceof Error ? err.message : '未知错误'}`)
       throw err
@@ -232,17 +295,18 @@ export const useNovelStore = defineStore('novel', () => {
     chapterNumber: number,
     options: GenerateChapterOptions = {}
   ): Promise<NovelProject> {
-    // 娉ㄦ剰锛氳繖閲屼笉璁剧疆鍏ㄥ眬 isLoading锛屽洜涓?WritingDesk.vue 鏈夎嚜宸辩殑灞€閮ㄥ姞杞界姸鎬?    error.value = null
+    // 不设置全局 isLoading，由调用方处理局部加载状态
+    error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('娌℃湁褰撳墠椤圭洰')
+        throw new Error('没有当前项目')
       }
       const updatedProject = await generateChapterRequest(currentProject.value.id, chapterNumber, options)
-      currentProject.value = updatedProject // 鏇存柊 store 涓殑褰撳墠椤圭洰
+      currentProject.value = updatedProject // 更新当前项目缓存
       syncProjectSummary(updatedProject)
       return updatedProject
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '鐢熸垚绔犺妭澶辫触'
+      error.value = err instanceof Error ? err.message : '生成章节失败'
       throw err
     }
   }
@@ -254,30 +318,30 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('娌℃湁褰撳墠椤圭洰')
+        throw new Error('没有当前项目')
       }
       const updatedProject = await cancelChapterGenerationRequest(currentProject.value.id, chapterNumber, options)
       currentProject.value = updatedProject
       syncProjectSummary(updatedProject)
       return updatedProject
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '缁堟绔犺妭浠诲姟澶辫触'
+      error.value = err instanceof Error ? err.message : '终止章节任务失败'
       throw err
     }
   }
 
-  async function evaluateChapter(chapterNumber: number, versionIndex?: number): Promise<NovelProject> {
+  async function evaluateChapter(chapterNumber: number, versionIndex?: number, versionId?: number): Promise<NovelProject> {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('娌℃湁褰撳墠椤圭洰')
+        throw new Error('没有当前项目')
       }
-      const updatedProject = await evaluateChapterRequest(currentProject.value.id, chapterNumber, versionIndex)
+      const updatedProject = await evaluateChapterRequest(currentProject.value.id, chapterNumber, versionIndex, versionId)
       currentProject.value = updatedProject
       syncProjectSummary(updatedProject)
       return updatedProject
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '璇勪及绔犺妭澶辫触'
+      error.value = err instanceof Error ? err.message : '评估章节失败'
       throw err
     }
   }
@@ -286,9 +350,9 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('娌℃湁褰撳墠椤圭洰')
+        throw new Error('没有当前项目')
       }
-      const updatedProject = await evaluateChapterRequest(currentProject.value.id, chapterNumber, undefined, true)
+      const updatedProject = await evaluateChapterRequest(currentProject.value.id, chapterNumber, undefined, undefined, true)
       currentProject.value = updatedProject
       syncProjectSummary(updatedProject)
       return updatedProject
@@ -302,20 +366,23 @@ export const useNovelStore = defineStore('novel', () => {
     projectId: string,
     chapterNumber: number,
     versionIndex: number,
+    versionId?: number,
     dimension: 'dialogue' | 'environment' | 'psychology' | 'rhythm' = 'rhythm',
     additionalNotes?: string
   ): Promise<OptimizeResponse> {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('娌℃湁褰撳墠椤圭洰')
+        throw new Error('没有当前项目')
       }
 
       const chapter = currentProject.value.chapters.find((c) => c.chapter_number === chapterNumber)
-      const version = chapter?.versions?.[versionIndex]
+      const version = versionId
+        ? chapter?.versions?.find((item) => item.id === versionId)
+        : chapter?.versions?.[versionIndex]
 
       if (!version?.content) {
-        throw new Error('鐗堟湰鍐呭涓虹┖')
+        throw new Error('版本内容为空')
       }
 
       const result = await OptimizerAPI.optimizeChapter({
@@ -323,54 +390,58 @@ export const useNovelStore = defineStore('novel', () => {
         chapter_number: chapterNumber,
         dimension,
         additional_notes: additionalNotes?.trim() || undefined,
-        version_index: versionIndex
+        version_index: versionIndex,
+        version_id: versionId
       })
 
       if (!result.optimized_content?.trim()) {
-        throw new Error('浼樺寲缁撴灉涓虹┖')
+        throw new Error('优化结果为空')
       }
 
       return result
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '浼樺寲鐗堟湰澶辫触'
+      error.value = err instanceof Error ? err.message : '优化版本失败'
       throw err
     }
   }
 
-  async function selectChapterVersion(chapterNumber: number, versionIndex: number) {
-    // 涓嶈缃叏灞€ isLoading锛岃璋冪敤鏂瑰鐞嗗眬閮ㄥ姞杞界姸鎬?    error.value = null
+  async function selectChapterVersion(chapterNumber: number, versionIndex: number, versionId?: number) {
+    // 不设置全局 isLoading，由调用方处理局部加载状态
+    error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('娌℃湁褰撳墠椤圭洰')
+        throw new Error('没有当前项目')
       }
       const updatedProject = await selectChapterVersionRequest(
         currentProject.value.id,
         chapterNumber,
-        versionIndex
+        versionIndex,
+        versionId
       )
-      currentProject.value = updatedProject // 鏇存柊 store
+      currentProject.value = updatedProject // 更新当前项目缓存
       syncProjectSummary(updatedProject)
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '閫夋嫨绔犺妭鐗堟湰澶辫触'
+      error.value = err instanceof Error ? err.message : '选择章节版本失败'
       throw err
     }
   }
 
-  async function deleteChapterVersion(chapterNumber: number, versionIndex: number) {
+  async function deleteChapterVersion(chapterNumber: number, versionIndex: number, versionId?: number) {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('娌℃湁褰撳墠椤圭洰')
+        throw new Error('没有当前项目')
       }
       const updatedProject = await deleteChapterVersionRequest(
         currentProject.value.id,
         chapterNumber,
-        versionIndex
+        versionIndex,
+        versionId
       )
-      currentProject.value = updatedProject // 鏇存柊 store
+      currentProject.value = updatedProject // 更新当前项目缓存
       syncProjectSummary(updatedProject)
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '鍒犻櫎绔犺妭鐗堟湰澶辫触'
+      error.value = err instanceof Error ? err.message : '删除章节版本失败'
       throw err
     }
   }
@@ -381,10 +452,10 @@ export const useNovelStore = defineStore('novel', () => {
     try {
       const response = await NovelAPI.deleteNovels(projectIds)
 
-      // 浠庢湰鍦伴」鐩垪琛ㄤ腑绉婚櫎宸插垹闄ょ殑椤圭洰
+      // 从本地项目列表中移除已删除的项目
       projects.value = projects.value.filter(project => !projectIds.includes(project.id))
 
-      // 濡傛灉褰撳墠椤圭洰琚垹闄わ紝娓呯┖褰撳墠椤圭洰
+      // 如果当前项目被删除，则清空当前项目
       if (currentProject.value && projectIds.includes(currentProject.value.id)) {
         currentProject.value = null
         currentConversationState.value = {}
@@ -395,7 +466,7 @@ export const useNovelStore = defineStore('novel', () => {
 
       return response
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '鍒犻櫎椤圭洰澶辫触'
+      error.value = err instanceof Error ? err.message : '删除项目失败'
       const notif = useNotificationStore()
       notif.error(`删除失败：${err instanceof Error ? err.message : '未知错误'}`)
       throw err
@@ -405,19 +476,20 @@ export const useNovelStore = defineStore('novel', () => {
   }
 
   async function updateChapterOutline(chapterOutline: ChapterOutline) {
-    // 涓嶈缃叏灞€ isLoading锛岃璋冪敤鏂瑰鐞嗗眬閮ㄥ姞杞界姸鎬?    error.value = null
+    // 不设置全局 isLoading，由调用方处理局部加载状态
+    error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('娌℃湁褰撳墠椤圭洰')
+        throw new Error('没有当前项目')
       }
       const updatedProject = await updateChapterOutlineRequest(
         currentProject.value.id,
         chapterOutline
       )
-      currentProject.value = updatedProject // 鏇存柊 store
+      currentProject.value = updatedProject // 更新当前项目缓存
       syncProjectSummary(updatedProject)
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '鏇存柊绔犺妭澶х翰澶辫触'
+      error.value = err instanceof Error ? err.message : '更新章节大纲失败'
       throw err
     }
   }
@@ -429,7 +501,7 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('娌℃湁褰撳墠椤圭洰')
+        throw new Error('没有当前项目')
       }
       const updatedProject = await rewriteChapterOutlineRequest(
         currentProject.value.id,
@@ -440,7 +512,7 @@ export const useNovelStore = defineStore('novel', () => {
       syncProjectSummary(updatedProject)
       return updatedProject
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'AI 閲嶅啓绔犺妭澶х翰澶辫触'
+      error.value = err instanceof Error ? err.message : 'AI 重写章节大纲失败'
       throw err
     }
   }
@@ -449,17 +521,17 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('娌℃湁褰撳墠椤圭洰')
+        throw new Error('没有当前项目')
       }
       const numbersToDelete = Array.isArray(chapterNumbers) ? chapterNumbers : [chapterNumbers]
       const updatedProject = await deleteChapterRequest(
         currentProject.value.id,
         numbersToDelete
       )
-      currentProject.value = updatedProject // 鏇存柊 store
+      currentProject.value = updatedProject // 更新当前项目缓存
       syncProjectSummary(updatedProject)
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '鍒犻櫎绔犺妭澶辫触'
+      error.value = err instanceof Error ? err.message : '删除章节失败'
       throw err
     }
   }
@@ -472,7 +544,7 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('娌℃湁褰撳墠椤圭洰')
+        throw new Error('没有当前项目')
       }
       const updatedProject = await generateChapterOutlineRequest(
         currentProject.value.id,
@@ -480,9 +552,9 @@ export const useNovelStore = defineStore('novel', () => {
         numChapters,
         options
       )
-      currentProject.value = updatedProject // 鏇存柊 store
+      currentProject.value = updatedProject // 更新当前项目缓存
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '鐢熸垚澶х翰澶辫触'
+      error.value = err instanceof Error ? err.message : '生成大纲失败'
       throw err
     }
   }
@@ -512,7 +584,7 @@ export const useNovelStore = defineStore('novel', () => {
         if (versionIndex >= 0) {
           const currentVersion = chapter.versions[versionIndex]
           chapter.versions.splice(versionIndex, 1, {
-            ...(currentVersion || ({ style: '鏍囧噯' } as ChapterVersion)),
+            ...(currentVersion || ({ style: '标准' } as ChapterVersion)),
             content,
           })
         }
@@ -546,7 +618,7 @@ export const useNovelStore = defineStore('novel', () => {
             : previousSnapshot.versions ?? null
         }
       }
-      error.value = err instanceof Error ? err.message : '缂栬緫绔犺妭鍐呭澶辫触'
+      error.value = err instanceof Error ? err.message : '编辑章节内容失败'
       throw err
     }
   }
@@ -576,6 +648,9 @@ export const useNovelStore = defineStore('novel', () => {
     loadChapter,
     sendConversation,
     generateBlueprint,
+    startBlueprintGeneration,
+    getBlueprintGenerationStatus,
+    cancelBlueprintGeneration,
     saveBlueprint,
     generateChapter,
     cancelChapterGeneration,

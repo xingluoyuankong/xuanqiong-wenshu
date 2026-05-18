@@ -1,190 +1,109 @@
-<!-- AIMETA P=蓝图确认_蓝图确认对话框|R=确认操作|NR=不含编辑功能|E=component:BlueprintConfirmation|X=internal|A=确认对话框|D=vue|S=dom|RD=./README.ai -->
+﻿<!-- AIMETA P=蓝图确认_后台生成任务|R=蓝图确认|NR=不含蓝图编辑|E=component:BlueprintConfirmation|X=internal|A=蓝图生成|D=vue|S=dom|RD=./README.ai -->
 <template>
-  <section class="flex min-h-0 flex-col overflow-hidden rounded-[32px] border border-slate-200/80 bg-white/95 shadow-[0_24px_90px_-40px_rgba(15,23,42,0.34)] backdrop-blur-xl">
-    <header class="shrink-0 border-b border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.24),transparent_35%),linear-gradient(135deg,#0f172a_0%,#1e1b4b_55%,#155e75_100%)] px-5 py-5 text-white sm:px-6 lg:px-8">
-      <div class="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-        <div class="min-w-0 space-y-4">
-          <div class="flex flex-wrap items-center gap-2 text-xs font-medium">
-            <span class="rounded-full border border-white/10 bg-white/12 px-3 py-1 text-white">蓝图确认台</span>
-            <span
-              class="rounded-full border px-3 py-1"
-              :class="isGenerating ? 'border-cyan-300/30 bg-cyan-400/15 text-cyan-100' : 'border-emerald-300/30 bg-emerald-400/15 text-emerald-100'"
-            >
-              {{ isGenerating ? '生成中' : '待确认' }}
-            </span>
-            <span class="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-slate-100">
-              预计 {{ maxTime }} 秒内完成
-            </span>
-            <span v-if="isGenerating" class="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-slate-100">
-              剩余约 {{ timeRemaining }} 秒
-            </span>
-          </div>
-
-          <div class="space-y-3">
-            <h2 class="text-2xl font-semibold tracking-tight sm:text-3xl">把这段对话收成一份能直接开写的蓝图</h2>
-            <p class="max-w-3xl text-sm leading-6 text-slate-200 sm:text-base">
-              这里不继续编辑，只负责最后确认。确认后会进入蓝图生成，生成完成后直接切到蓝图展示页。
-            </p>
-          </div>
+  <section class="blueprint-confirm xq-paper-grain">
+    <header class="blueprint-confirm__hero">
+      <div class="blueprint-confirm__copy">
+        <div class="blueprint-confirm__badges">
+          <span>蓝图确认</span>
+          <span :class="isGenerating ? 'is-running' : 'is-ready'">{{ isGenerating ? '后台生成中' : '准备就绪' }}</span>
+          <span>长等待提醒 {{ Math.floor(longWaitNoticeSeconds / 60) }} 分钟</span>
+          <span v-if="isGenerating">已等待 {{ elapsedSeconds }} 秒</span>
         </div>
-
-        <div class="flex flex-wrap items-center gap-3 xl:justify-end">
-          <button
-            type="button"
-            class="inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition-all hover:-translate-y-0.5 hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-70"
-            :disabled="isGenerating"
-            @click="emit('back')"
-          >
-            返回对话补充
-          </button>
-          <button
-            v-if="isGenerating"
-            type="button"
-            class="inline-flex items-center justify-center rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 shadow-lg shadow-cyan-950/20"
-            disabled
-          >
-            正在生成蓝图
-          </button>
-          <button
-            v-else
-            type="button"
-            class="inline-flex items-center justify-center rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 shadow-lg shadow-cyan-950/20 transition-all hover:-translate-y-0.5 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
-            :disabled="!hasAiMessage"
-            @click="generateBlueprint"
-          >
-            {{ hasAiMessage ? '确认方向并生成蓝图' : '等待可确认内容' }}
-          </button>
-        </div>
+        <h2>{{ heroTitle }}</h2>
+        <p>{{ heroDescription }}</p>
       </div>
 
-      <div class="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <div
-          v-for="item in confirmationStats"
-          :key="item.label"
-          class="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 backdrop-blur"
-        >
-          <p class="text-xs uppercase tracking-[0.24em] text-slate-300">{{ item.label }}</p>
-          <p class="mt-1 text-lg font-semibold text-white">{{ item.value }}</p>
-          <p class="mt-1 text-xs leading-5 text-slate-300">{{ item.hint }}</p>
-        </div>
+      <div class="blueprint-confirm__actions">
+        <XqButton variant="ghost" :disabled="isGenerating" @click="emit('back')">返回补充</XqButton>
+        <XqButton v-if="isGenerating" variant="secondary" @click="cancelBlueprint">取消生成</XqButton>
+        <XqButton v-if="isGenerating" variant="secondary" loading disabled>正在生成</XqButton>
+        <XqButton v-else :disabled="!hasAiMessage" @click="generateBlueprint">
+          {{ hasAiMessage ? '确认蓝图并生成大纲' : '等待可确认内容' }}
+        </XqButton>
       </div>
     </header>
 
-    <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 lg:px-8">
-      <div class="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,360px)]">
-        <main class="space-y-4">
-          <section class="rounded-[28px] border border-slate-200/80 bg-white/95 p-5 shadow-[0_12px_40px_-28px_rgba(15,23,42,0.24)]">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-              <div class="min-w-0">
-                <p class="text-xs font-medium uppercase tracking-[0.24em] text-indigo-600">收束结果</p>
-                <h3 class="mt-2 text-lg font-semibold text-slate-950">当前对话已经整理出的关键方向</h3>
-                <p class="mt-2 text-sm leading-6 text-slate-600">
-                  确认后会直接进入蓝图生成，不再继续堆消息。先看这份总结是否已经足够清楚。
-                </p>
-              </div>
-              <span class="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                {{ hasAiMessage ? '可直接生成' : '等待补充' }}
-              </span>
+    <div class="blueprint-confirm__stats">
+      <XqStatCard
+        v-for="(item, index) in confirmationStats"
+        :key="item.label"
+        :label="item.label"
+        :value="item.value"
+        :hint="item.hint"
+        :tone="index === 0 ? 'ink' : index === 1 ? 'gold' : index === 2 ? 'jade' : 'paper'"
+      />
+    </div>
+
+    <div class="blueprint-confirm__body">
+      <main class="blueprint-confirm__main">
+        <XqPanel title="即将用于生成蓝图的确认内容" subtitle="请确认下面内容已经表达了你的故事方向；如有遗漏，先返回灵感对话补充。">
+          <template #kicker>确认材料</template>
+          <template #actions>
+            <span class="blueprint-confirm__state">{{ hasAiMessage ? '可生成' : '待补充' }}</span>
+          </template>
+          <div class="blueprint-confirm__markdown-shell">
+            <div class="blueprint-markdown" v-html="renderedAiMessage"></div>
+          </div>
+        </XqPanel>
+
+        <XqPanel v-if="isGenerating" class="blueprint-confirm__progress" :title="loadingText" :subtitle="progressHint">
+          <template #kicker>后台任务</template>
+          <div class="blueprint-confirm__progress-row">
+            <div class="blueprint-confirm__ring" :class="{ 'is-complete': progress >= 100 }" :style="{ '--progress': progress }">
+              <span>{{ Math.round(progress) }}%</span>
             </div>
-
-            <div class="mt-4 rounded-[24px] border border-slate-200/80 bg-slate-50/80 p-5">
-              <div class="blueprint-markdown text-slate-700" v-html="renderedAiMessage"></div>
-            </div>
-          </section>
-
-          <section
-            v-if="isGenerating"
-            class="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-[0_12px_40px_-28px_rgba(15,23,42,0.24)]"
-          >
-            <div class="flex flex-col gap-5 sm:flex-row sm:items-center">
-              <div class="relative mx-auto h-24 w-24 shrink-0 sm:mx-0">
-                <div class="absolute inset-0 rounded-full border-4 border-slate-100"></div>
-                <div
-                  class="absolute inset-0 rounded-full border-4 border-transparent border-t-indigo-500 border-r-cyan-400"
-                  :class="progress < 100 ? 'animate-spin' : ''"
-                ></div>
-                <div
-                  class="absolute inset-3 rounded-full transition-colors duration-500"
-                  :class="progress >= 100 ? 'bg-emerald-500/15' : 'bg-indigo-500/10'"
-                ></div>
-                <div class="absolute inset-6 flex items-center justify-center rounded-full text-sm font-semibold text-slate-900">
-                  {{ Math.round(progress) }}%
-                </div>
+            <div class="blueprint-confirm__progress-copy">
+              <div class="blueprint-confirm__track">
+                <div :style="{ width: `${progress}%` }"></div>
               </div>
-
-              <div class="min-w-0 flex-1 space-y-3">
-                <div>
-                  <h3 class="text-xl font-semibold text-slate-950">{{ loadingText }}</h3>
-                  <p class="mt-1 text-sm leading-6 text-slate-600">{{ progressHint }}</p>
-                </div>
-
-                <div class="h-2 overflow-hidden rounded-full bg-slate-100">
-                  <div
-                    class="h-full rounded-full bg-gradient-to-r from-indigo-500 via-cyan-500 to-emerald-500 transition-all duration-500"
-                    :style="{ width: `${progress}%` }"
-                  ></div>
-                </div>
-
-                <div class="flex flex-wrap gap-2 text-xs font-medium text-slate-500">
-                  <span class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">收束对话</span>
-                  <span class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">整理蓝图骨架</span>
-                  <span class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">准备切换展示</span>
-                </div>
+              <p class="blueprint-confirm__task-log-current">{{ currentProgressMessage }}</p>
+              <div class="blueprint-confirm__chips">
+                <span>整理访谈</span>
+                <span>世界骨架</span>
+                <span>总纲骨架</span>
+                <span>总纲细化</span>
+                <span>章节分批</span>
+                <span>保存结果</span>
               </div>
+              <ul v-if="progressLogs.length" class="blueprint-confirm__task-log-list">
+                <li v-for="(log, index) in progressLogs" :key="`${index}-${log}`">{{ log }}</li>
+              </ul>
             </div>
-          </section>
+          </div>
+        </XqPanel>
 
-          <section
-            v-else
-            class="rounded-[28px] border border-slate-200/80 bg-gradient-to-br from-indigo-50 via-white to-cyan-50 p-5 shadow-[0_12px_40px_-28px_rgba(15,23,42,0.24)]"
-          >
-            <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <div class="space-y-2">
-                <p class="text-sm font-semibold text-slate-950">确认后会发生什么</p>
-                <p class="max-w-2xl text-sm leading-6 text-slate-600">
-                  这一步只保留一个主动作：确认当前方向并生成蓝图。若还想补充内容，请回到对话区继续收束，再回来确认。
-                </p>
-              </div>
-              <div class="rounded-2xl border border-white/70 bg-white/80 px-4 py-3 text-sm leading-6 text-slate-600 shadow-sm">
-                <p class="font-semibold text-slate-900">生成完成后</p>
-                <p class="mt-1">系统会自动切到蓝图展示页，再由你决定是否直接进入开写。</p>
-              </div>
-            </div>
-          </section>
-        </main>
+        <XqPanel v-else tone="glass" :title="nextStepTitle" :subtitle="nextStepSubtitle">
+          <div class="blueprint-confirm__next">
+            <strong>生成完成后</strong>
+            <span>{{ nextStepDescription }}</span>
+          </div>
+        </XqPanel>
+      </main>
 
-        <aside class="space-y-4">
-          <section class="rounded-[28px] border border-slate-200/80 bg-slate-950 p-5 text-white shadow-[0_16px_48px_-30px_rgba(15,23,42,0.55)]">
-            <p class="text-xs uppercase tracking-[0.28em] text-slate-400">确认前再看一眼</p>
-            <h3 class="mt-2 text-lg font-semibold">生成之前，先过这三件事</h3>
-            <div class="mt-4 space-y-3 text-sm leading-6 text-slate-300">
-              <p v-for="item in preflightItems" :key="item.title" class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                <span class="block font-semibold text-white">{{ item.title }}</span>
-                <span class="mt-1 block">{{ item.desc }}</span>
-              </p>
-            </div>
-          </section>
+      <aside class="blueprint-confirm__side">
+        <XqPanel tone="ink" title="生成前检查清单">
+          <template #kicker>质量闸门</template>
+          <div class="blueprint-confirm__checklist">
+            <article v-for="item in preflightItems" :key="item.title">
+              <strong>{{ item.title }}</strong>
+              <span>{{ item.desc }}</span>
+            </article>
+          </div>
+        </XqPanel>
 
-          <section class="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-[0_12px_40px_-28px_rgba(15,23,42,0.24)]">
-            <p class="text-xs font-medium uppercase tracking-[0.24em] text-slate-400">生成流程</p>
-            <div class="mt-4 space-y-3">
-              <div
-                v-for="(step, index) in flowSteps"
-                :key="step.title"
-                class="flex gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3"
-              >
-                <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-700">
-                  {{ index + 1 }}
-                </span>
-                <div class="min-w-0">
-                  <p class="text-sm font-semibold text-slate-900">{{ step.title }}</p>
-                  <p class="mt-1 text-sm leading-6 text-slate-600">{{ step.desc }}</p>
-                </div>
+        <XqPanel title="蓝图生成流程">
+          <template #kicker>流程</template>
+          <div class="blueprint-confirm__flow">
+            <article v-for="(step, index) in flowSteps" :key="step.title">
+              <span>{{ index + 1 }}</span>
+              <div>
+                <strong>{{ step.title }}</strong>
+                <p>{{ step.desc }}</p>
               </div>
-            </div>
-          </section>
-        </aside>
-      </div>
+            </article>
+          </div>
+        </XqPanel>
+      </aside>
     </div>
   </section>
 </template>
@@ -194,12 +113,16 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import { useNovelStore } from '@/stores/novel'
 import { globalAlert } from '@/composables/useAlert'
 import { renderSafeMarkdown } from '@/utils/safeMarkdown'
+import { XqButton, XqPanel, XqStatCard } from '@/shared/ui'
+import type { BlueprintGenerationJobResponse } from '@/api/novel'
 
 interface Props {
   aiMessage: string
+  forceStage?: 'novel_outline' | 'chapter_outline'
 }
 
 const props = defineProps<Props>()
+const isChapterOutlineStage = computed(() => props.forceStage === 'chapter_outline')
 
 const emit = defineEmits<{
   blueprintGenerated: [response: any]
@@ -210,49 +133,87 @@ const novelStore = useNovelStore()
 const isGenerating = ref(false)
 const progress = ref(0)
 const timeElapsed = ref(0)
-const maxTime = 180
+const currentProgressMessage = ref('后台任务已启动，正在等待首条进度日志…')
+const progressLogs = ref<string[]>([])
+const longWaitNoticeSeconds = 900
 let progressTimer: ReturnType<typeof setInterval> | null = null
 let timeoutTimer: ReturnType<typeof setTimeout> | null = null
+let cancelRequested = false
+const longWaitNotified = ref(false)
 
-const preflightItems = [
-  { title: '先确认方向', desc: '这一步只收束思路，不做编辑。方向一旦清楚，生成后的蓝图会更稳。' },
-  { title: '再确认结构', desc: '蓝图会带着章节、角色和世界观一起进入后续写作流程。' },
-  { title: '最后再开写', desc: '如果还有犹豫，先返回对话补一句，比生成后再反复改更省时间。' },
-]
+const preflightItems = computed(() => [
+  { title: '方向清楚', desc: '核心卖点、主角欲望、冲突压力已经说清楚。' },
+  {
+    title: isChapterOutlineStage.value ? '继续拆章' : '先看总纲',
+    desc: isChapterOutlineStage.value
+      ? '这一轮会基于已确认的小说总大纲，继续细化出可执行的前 12 章章节大纲。'
+      : '这一轮先产出全书级小说总大纲，不会直接跳到章节大纲。',
+  },
+  { title: '允许等待', desc: '该任务已改为后台轮询；等待期间不要关闭服务。' },
+])
 
-const flowSteps = [
-  { title: '收束方向', desc: '把当前对话整理成蓝图可执行的信息骨架。' },
-  { title: '生成蓝图', desc: '补齐世界、角色、章节和整体节奏。' },
-  { title: '切换展示', desc: '完成后自动进入蓝图展示页，继续下一步创作。' },
-]
+const flowSteps = computed(() => [
+  { title: '启动任务', desc: '前端只负责启动并轮询，不再让请求长时间挂起。' },
+  {
+    title: isChapterOutlineStage.value ? '生成章节大纲' : '生成总纲',
+    desc: isChapterOutlineStage.value
+      ? '后端会复用已确认的世界骨架与小说总大纲，按批次生成并润色章节大纲。'
+      : '后端整理访谈、补齐蓝图结构，并先生成小说总大纲。',
+  },
+  {
+    title: '继续细化',
+    desc: isChapterOutlineStage.value
+      ? '成功后回到蓝图展示页，你可以直接检查 12 章章节大纲并进入写作台。'
+      : '成功后进入蓝图展示页；你确认总纲后，再继续生成章节大纲。',
+  },
+])
+
+const heroTitle = computed(() => (
+  isChapterOutlineStage.value ? '确认当前总纲，继续生成章节大纲。' : '确认故事方向，先生成小说总大纲。'
+))
+
+const heroDescription = computed(() => (
+  isChapterOutlineStage.value
+    ? '系统会基于已确认的世界骨架与小说总大纲，继续拆解前 12 章章节大纲。生成过程仍采用后台任务，可取消、可轮询、可恢复失败态。'
+    : '系统会先基于已确认的蓝图材料生成全书级小说总大纲；章节大纲会在你确认总大纲后再继续生成。生成过程已改为后台任务，可取消、可轮询、可恢复失败态。'
+))
+
+const nextStepTitle = computed(() => (isChapterOutlineStage.value ? '下一步会发生什么' : '下一步会发生什么'))
+const nextStepSubtitle = computed(() => (
+  isChapterOutlineStage.value
+    ? '系统会启动后台任务，直接基于当前小说总大纲继续生成章节大纲。'
+    : '确认后系统会启动后台任务，先生成小说总大纲，再进入蓝图展示页。'
+))
+const nextStepDescription = computed(() => (
+  isChapterOutlineStage.value
+    ? '你可以直接检查前 12 章章节大纲；确认无误后就进入写作台。'
+    : '你可以先检查世界观、人物关系和小说总大纲，确认无误后再继续生成章节大纲。'
+))
 
 const confirmationStats = computed(() => [
   {
     label: '当前状态',
     value: isGenerating.value ? '生成中' : (hasAiMessage.value ? '待确认' : '待补充'),
-    hint: isGenerating.value ? '请保持页面打开' : (hasAiMessage.value ? '确认后立刻开始生成' : '需要先补充可确认内容'),
+    hint: isGenerating.value ? '后台任务轮询中' : (hasAiMessage.value ? '确认后启动后台任务' : '先返回补充灵感内容'),
   },
   {
-    label: '当前动作',
-    value: isGenerating.value ? '生成蓝图' : '确认方向',
-    hint: '这一屏不再继续编辑蓝图内容',
+    label: '生成模式',
+    value: '后台轮询',
+    hint: '支持取消、失败恢复和状态查询',
   },
   {
-    label: '剩余时间',
-    value: isGenerating.value ? `${timeRemaining.value}s` : '—',
-    hint: '超时后会提示重试',
+    label: '已等待',
+    value: isGenerating.value ? `${elapsedSeconds.value}s` : '—',
+    hint: '长时间生成只提醒，不会自动取消后台任务',
   },
   {
     label: '下一步',
-    value: '进入蓝图展示',
-    hint: '完成后再决定是否直接开写',
+    value: '蓝图展示',
+    hint: '检查蓝图后进入正文生成',
   },
 ])
 
-const hasAiMessage = computed(() => {
-  return optionalText(props.aiMessage).length > 0
-})
-
+const hasAiMessage = computed(() => optionalText(props.aiMessage).length > 0)
 const renderedAiMessage = ref('<p class="text-sm leading-6 text-slate-500">暂无可确认内容，请返回对话补充后再试。</p>')
 
 const renderAiMessage = (raw: string) => {
@@ -268,43 +229,113 @@ watch(
   (value) => {
     renderAiMessage(value)
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 const loadingText = computed(() => {
-  if (progress.value >= 100) {
-    return '蓝图已完成，正在准备切换页面'
-  }
-
-  if (progress.value >= 75) {
-    return '正在整理蓝图结构'
-  }
-
-  if (progress.value >= 40) {
-    return '正在压缩对话要点'
-  }
-
-  return '正在收集蓝图核心信息'
+  if (progress.value >= 100) return '小说总大纲已完成，正在准备切换页面'
+  if (longWaitNotified.value) return '生成耗时较长，后台任务仍在继续执行'
+  if (currentProgressMessage.value) return currentProgressMessage.value
+  if (progress.value >= 75) return '正在保存蓝图与总纲结构'
+  if (progress.value >= 40) return '正在生成蓝图结构与小说总大纲'
+  return '正在启动并整理蓝图核心信息'
 })
 
 const progressHint = computed(() => {
   if (progress.value >= 100) return '生成完成后会自动切换到蓝图展示页。'
-  if (progress.value >= 75) return '系统正在把对话信息整理成可写的蓝图结构。'
-  if (progress.value >= 40) return '当前阶段会保留关键信息，同时去掉噪音内容。'
-  return '先把最关键的方向收束起来，再进入蓝图生成。'
+  if (longWaitNotified.value) return '当前只是前端等待时间较长；后台任务没有被自动中断。'
+  if (progress.value >= 75) return '系统正在写入项目蓝图和小说总大纲，并准备更新项目状态。'
+  if (progress.value >= 40) return '当前阶段会补齐世界设定、人物关系、故事弧，并生成全书级小说总大纲。'
+  return '任务已经后台化；页面会持续轮询任务状态。'
 })
 
-const timeRemaining = computed(() => Math.max(0, Math.ceil(maxTime - timeElapsed.value)))
+const elapsedSeconds = computed(() => Math.ceil(timeElapsed.value))
 
 const clearTimers = () => {
   if (progressTimer) {
     clearInterval(progressTimer)
     progressTimer = null
   }
-
   if (timeoutTimer) {
     clearTimeout(timeoutTimer)
     timeoutTimer = null
+  }
+}
+
+function optionalText(value: unknown): string {
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return ''
+}
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const extractJobError = (status: BlueprintGenerationJobResponse): string => {
+  const rawError = status.error
+  if (!rawError) return status.progress_message || '蓝图生成失败，请稍后重试'
+  if (typeof rawError === 'string') return rawError
+  return rawError.detail || rawError.message || status.progress_message || '蓝图生成失败，请稍后重试'
+}
+
+const pushProgressLog = (message: string) => {
+  const normalized = optionalText(message)
+  if (!normalized) return
+  currentProgressMessage.value = normalized
+  if (progressLogs.value[progressLogs.value.length - 1] === normalized) return
+  progressLogs.value = [...progressLogs.value, normalized].slice(-6)
+}
+
+const resolveProgressFromMessage = (message: string, status: BlueprintGenerationJobResponse['status']) => {
+  const text = optionalText(message)
+  if (status === 'queued') return 8
+  if (status === 'successful') return 100
+  if (status === 'cancelled' || status === 'failed') return progress.value
+  if (!text) return status === 'polishing' ? 72 : 24
+  if (text.includes('整理灵感访谈')) return 16
+  if (text.includes('世界体系') || text.includes('世界骨架')) return 28
+  if (text.includes('总大纲（阶段骨架首轮）')) return 42
+  if (text.includes('解析小说总大纲骨架')) return 50
+  if (text.includes('校验小说总大纲骨架连续性')) return 56
+  if (text.includes('细化小说总大纲')) return 64
+  if (text.includes('生成可执行章节大纲')) return 76
+  if (text.includes('解析章节大纲批次')) return 82
+  if (text.includes('润色章节大纲')) return 88
+  if (text.includes('解析润色结果')) return 92
+  if (text.includes('保存蓝图')) return 96
+  if (status === 'polishing') return 72
+  if (status === 'generating') return 38
+  return progress.value
+}
+
+const updateProgressByStatus = (status: BlueprintGenerationJobResponse) => {
+  const message = status.progress_message || ''
+  pushProgressLog(message)
+  progress.value = Math.max(progress.value, resolveProgressFromMessage(message, status.status))
+}
+
+const pollBlueprintJob = async (initialStatus: BlueprintGenerationJobResponse) => {
+  let status = initialStatus
+  updateProgressByStatus(status)
+
+  while (!cancelRequested && ['queued', 'generating', 'polishing'].includes(status.status)) {
+    await delay(2000)
+    status = await novelStore.getBlueprintGenerationStatus()
+    updateProgressByStatus(status)
+  }
+
+  if (cancelRequested || status.status === 'cancelled') {
+    throw new Error('蓝图生成已取消')
+  }
+  if (status.status === 'failed') {
+    throw new Error(extractJobError(status))
+  }
+  if (status.status !== 'successful' || !status.blueprint) {
+    throw new Error(status.progress_message || '蓝图任务未返回有效结果')
+  }
+
+  return {
+    blueprint: status.blueprint,
+    ai_message: status.ai_message || '蓝图已生成，请确认后进入写作阶段。',
   }
 }
 
@@ -312,38 +343,32 @@ const generateBlueprint = async () => {
   if (isGenerating.value) return
 
   isGenerating.value = true
+  cancelRequested = false
+  longWaitNotified.value = false
   progress.value = 0
   timeElapsed.value = 0
+  currentProgressMessage.value = '后台任务已启动，正在等待首条进度日志…'
+  progressLogs.value = []
 
   progressTimer = setInterval(() => {
-    timeElapsed.value += 0.1
-
-    const normalizedTime = timeElapsed.value / maxTime
-    if (normalizedTime < 0.7) {
-      progress.value = Math.min(80, (normalizedTime / 0.7) * 80)
-    } else {
-      const remainingProgress = (normalizedTime - 0.7) / 0.3
-      progress.value = Math.min(95, 80 + remainingProgress * 15)
-    }
-  }, 100)
+    timeElapsed.value += 0.5
+    const normalizedProgressBase = longWaitNoticeSeconds > 0 ? (timeElapsed.value / longWaitNoticeSeconds) * 95 : 0
+    const timeProgress = Math.min(95, normalizedProgressBase)
+    progress.value = Math.max(progress.value, timeProgress)
+  }, 500)
 
   timeoutTimer = setTimeout(() => {
-    clearTimers()
-    isGenerating.value = false
-    globalAlert.showError('生成超时，请稍后重试。如果问题持续存在，请检查网络连接。', '生成超时')
-  }, maxTime * 1000)
+    longWaitNotified.value = true
+    globalAlert.showInfo('蓝图生成耗时较长，但后台任务仍会继续执行，不会被前端自动取消。你可以继续等待，或手动点击“取消生成”。', '仍在生成')
+  }, longWaitNoticeSeconds * 1000)
 
   try {
-    const response = await novelStore.generateBlueprint()
-
-    if (progressTimer) {
-      clearInterval(progressTimer)
-      progressTimer = null
-    }
-
+    const initialStatus = await novelStore.startBlueprintGeneration(
+      props.forceStage ? { forceStage: props.forceStage } : {}
+    )
+    const response = await pollBlueprintJob(initialStatus)
     progress.value = 100
-    await new Promise((resolve) => setTimeout(resolve, 600))
-
+    await delay(600)
     clearTimers()
     isGenerating.value = false
     emit('blueprintGenerated', response)
@@ -352,30 +377,308 @@ const generateBlueprint = async () => {
     clearTimers()
     isGenerating.value = false
     globalAlert.showError(
-      `生成蓝图失败: ${error instanceof Error ? error.message : '未知错误'}`,
+      `生成蓝图失败：${error instanceof Error ? error.message : '未知错误'}`,
       '生成失败',
     )
   }
 }
 
-const optionalText = (value: unknown): string => {
-  if (typeof value === 'string') {
-    return value.trim()
+const cancelBlueprint = async () => {
+  if (!isGenerating.value) return
+  cancelRequested = true
+  try {
+    const status = await novelStore.cancelBlueprintGeneration()
+    progress.value = Math.max(progress.value, 5)
+    globalAlert.showInfo(status.progress_message || '蓝图生成已取消', '已取消')
+  } catch (error) {
+    globalAlert.showError(`取消蓝图生成失败：${error instanceof Error ? error.message : '未知错误'}`, '取消失败')
+  } finally {
+    clearTimers()
+    isGenerating.value = false
   }
-
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value)
-  }
-
-  return ''
 }
 
+const autoStarted = ref(false)
+watch(
+  () => props.forceStage,
+  (stage) => {
+    if (stage !== 'chapter_outline' || autoStarted.value) return
+    autoStarted.value = true
+    void generateBlueprint()
+  },
+  { immediate: true },
+)
+
 onUnmounted(() => {
+  cancelRequested = true
   clearTimers()
 })
 </script>
-
 <style scoped>
+.blueprint-confirm {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--xq-border);
+  border-radius: var(--xq-radius-lg);
+  background: rgba(255, 250, 240, 0.86);
+  box-shadow: var(--xq-shadow-floating);
+  backdrop-filter: blur(18px);
+}
+
+.blueprint-confirm__hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: clamp(1.25rem, 3vw, 2rem);
+  color: #fffaf0;
+  background:
+    radial-gradient(circle at 82% 0%, rgba(214, 169, 79, 0.28), transparent 18rem),
+    radial-gradient(circle at 12% 12%, rgba(61, 143, 125, 0.2), transparent 14rem),
+    linear-gradient(135deg, var(--xq-bg-ink), var(--xq-bg-midnight));
+}
+
+.blueprint-confirm__copy h2 {
+  max-width: 760px;
+  margin: 1rem 0 0;
+  font-family: var(--xq-font-serif);
+  font-size: clamp(1.65rem, 3vw, 2.4rem);
+  line-height: 1.18;
+}
+
+.blueprint-confirm__copy p {
+  max-width: 760px;
+  margin: 0.75rem 0 0;
+  color: rgba(255, 250, 240, 0.7);
+  line-height: 1.8;
+}
+
+.blueprint-confirm__badges,
+.blueprint-confirm__actions,
+.blueprint-confirm__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.blueprint-confirm__badges span,
+.blueprint-confirm__state,
+.blueprint-confirm__chips span {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--xq-radius-pill);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.blueprint-confirm__badges span {
+  min-height: 1.9rem;
+  padding: 0 0.75rem;
+  border: 1px solid rgba(255, 250, 240, 0.14);
+  background: rgba(255, 250, 240, 0.1);
+  color: rgba(255, 250, 240, 0.86);
+}
+
+.blueprint-confirm__badges .is-running {
+  border-color: rgba(214, 169, 79, 0.36);
+  background: rgba(214, 169, 79, 0.18);
+  color: #ffe7a8;
+}
+
+.blueprint-confirm__badges .is-ready {
+  border-color: rgba(61, 143, 125, 0.36);
+  background: rgba(61, 143, 125, 0.18);
+  color: #c7fff3;
+}
+
+.blueprint-confirm__actions {
+  align-content: flex-start;
+  justify-content: flex-end;
+}
+
+.blueprint-confirm__stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.85rem;
+  padding: 1rem clamp(1rem, 3vw, 1.5rem) 0;
+}
+
+.blueprint-confirm__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 360px);
+  gap: 1rem;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1rem clamp(1rem, 3vw, 1.5rem) 1.5rem;
+}
+
+.blueprint-confirm__main,
+.blueprint-confirm__side {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+}
+
+.blueprint-confirm__state {
+  min-height: 1.9rem;
+  padding: 0 0.75rem;
+  border: 1px solid var(--xq-border);
+  background: rgba(255, 250, 240, 0.72);
+  color: var(--xq-ink-muted);
+}
+
+.blueprint-confirm__markdown-shell {
+  border: 1px solid var(--xq-border);
+  border-radius: var(--xq-radius-md);
+  padding: 1.25rem;
+  background: rgba(255, 250, 240, 0.58);
+}
+
+.blueprint-confirm__progress-row {
+  display: flex;
+  gap: 1.25rem;
+  align-items: center;
+}
+
+.blueprint-confirm__ring {
+  display: grid;
+  flex: none;
+  width: 6rem;
+  height: 6rem;
+  place-items: center;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at center, rgba(255, 250, 240, 0.96) 0 52%, transparent 54%),
+    conic-gradient(var(--xq-gold) calc(var(--progress, 0) * 1%), rgba(93, 70, 43, 0.12) 0);
+  box-shadow: inset 0 0 0 0.35rem rgba(214, 169, 79, 0.12);
+  animation: xq-breathe 1.4s ease-in-out infinite;
+}
+
+.blueprint-confirm__ring.is-complete {
+  animation: none;
+}
+
+.blueprint-confirm__ring span {
+  font-weight: 900;
+}
+
+.blueprint-confirm__progress-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.blueprint-confirm__track {
+  height: 0.6rem;
+  overflow: hidden;
+  border-radius: var(--xq-radius-pill);
+  background: rgba(93, 70, 43, 0.12);
+}
+
+.blueprint-confirm__track div {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--xq-gold-deep), var(--xq-gold), var(--xq-jade));
+  transition: width var(--xq-normal);
+}
+
+.blueprint-confirm__task-log-current {
+  margin-top: 0.85rem;
+  color: var(--xq-ink);
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+.blueprint-confirm__chips {
+  margin-top: 0.9rem;
+}
+
+.blueprint-confirm__chips span {
+  padding: 0.35rem 0.7rem;
+  background: rgba(214, 169, 79, 0.12);
+  color: var(--xq-gold-deep);
+}
+
+.blueprint-confirm__task-log-list {
+  margin-top: 0.85rem;
+  display: grid;
+  gap: 0.45rem;
+  padding-left: 1.1rem;
+  color: var(--xq-ink-muted);
+  font-size: 0.86rem;
+  line-height: 1.65;
+}
+
+.blueprint-confirm__next {
+  display: grid;
+  gap: 0.4rem;
+  border: 1px solid var(--xq-border);
+  border-radius: var(--xq-radius-md);
+  padding: 1rem;
+  background: rgba(255, 250, 240, 0.66);
+  color: var(--xq-ink-muted);
+  line-height: 1.7;
+}
+
+.blueprint-confirm__next strong {
+  color: var(--xq-ink);
+}
+
+.blueprint-confirm__checklist,
+.blueprint-confirm__flow {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.blueprint-confirm__checklist article,
+.blueprint-confirm__flow article {
+  border: 1px solid var(--xq-border);
+  border-radius: var(--xq-radius-sm);
+  padding: 0.9rem;
+  background: rgba(255, 250, 240, 0.08);
+}
+
+.blueprint-confirm__checklist strong,
+.blueprint-confirm__checklist span {
+  display: block;
+}
+
+.blueprint-confirm__checklist span {
+  margin-top: 0.35rem;
+  color: rgba(255, 250, 240, 0.68);
+  line-height: 1.65;
+}
+
+.blueprint-confirm__flow article {
+  display: flex;
+  gap: 0.75rem;
+  background: rgba(255, 250, 240, 0.58);
+}
+
+.blueprint-confirm__flow article > span {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(214, 169, 79, 0.16);
+  color: var(--xq-gold-deep);
+  font-weight: 900;
+}
+
+.blueprint-confirm__flow strong {
+  display: block;
+  color: var(--xq-ink);
+}
+
+.blueprint-confirm__flow p {
+  margin: 0.3rem 0 0;
+  color: var(--xq-ink-muted);
+  line-height: 1.65;
+}
+
 .blueprint-markdown :deep(p) {
   margin: 0 0 0.85rem;
   line-height: 1.85;
@@ -397,16 +700,53 @@ onUnmounted(() => {
 }
 
 .blueprint-markdown :deep(strong) {
-  color: rgb(15 23 42);
-  font-weight: 700;
+  color: var(--xq-ink);
+  font-weight: 800;
 }
 
 .blueprint-markdown :deep(a) {
-  color: rgb(79 70 229);
+  color: var(--xq-gold-deep);
   text-decoration: none;
 }
 
 .blueprint-markdown :deep(a:hover) {
   text-decoration: underline;
 }
+
+@keyframes xq-breathe {
+  50% { transform: scale(1.035); }
+}
+
+@media (max-width: 1100px) {
+  .blueprint-confirm__hero,
+  .blueprint-confirm__body {
+    grid-template-columns: 1fr;
+  }
+
+  .blueprint-confirm__hero {
+    flex-direction: column;
+  }
+
+  .blueprint-confirm__actions {
+    justify-content: flex-start;
+  }
+
+  .blueprint-confirm__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .blueprint-confirm__stats {
+    grid-template-columns: 1fr;
+  }
+
+  .blueprint-confirm__progress-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
 </style>
+
+
+

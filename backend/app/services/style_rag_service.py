@@ -251,63 +251,64 @@ class StyleRAGService:
         Returns:
             StyleFeature: 提取的风格特征
         """
-        from ..models.novel import Chapter
+        with LLMService.daily_limit_scope(f"style_extract:{project_id}:{user_id}:{','.join(str(num) for num in chapter_numbers[:20])}"):
+            from ..models.novel import Chapter
 
-        # 获取章节内容
-        result = await self.db.execute(
-            select(Chapter)
-            .options(selectinload(Chapter.selected_version), selectinload(Chapter.versions))
-            .where(
-                Chapter.project_id == project_id,
-                Chapter.chapter_number.in_(chapter_numbers)
+            # 获取章节内容
+            result = await self.db.execute(
+                select(Chapter)
+                .options(selectinload(Chapter.selected_version), selectinload(Chapter.versions))
+                .where(
+                    Chapter.project_id == project_id,
+                    Chapter.chapter_number.in_(chapter_numbers)
+                )
             )
-        )
-        chapters = result.scalars().all()
+            chapters = result.scalars().all()
 
-        if not chapters:
-            raise ValueError("未找到指定章节")
+            if not chapters:
+                raise ValueError("未找到指定章节")
 
-        # 合并章节内容（取前5000字，避免过长）
-        combined_text = ""
-        for ch in chapters:
-            chapter_content = ""
-            if ch.selected_version and ch.selected_version.content:
-                chapter_content = ch.selected_version.content
-            elif ch.versions:
-                latest_version = sorted(ch.versions, key=lambda item: item.created_at or 0)[-1]
-                chapter_content = latest_version.content or ""
-            if chapter_content:
-                combined_text += chapter_content + "\n\n"
-                if len(combined_text) > 5000:
-                    break
+            # 合并章节内容（取前5000字，避免过长）
+            combined_text = ""
+            for ch in chapters:
+                chapter_content = ""
+                if ch.selected_version and ch.selected_version.content:
+                    chapter_content = ch.selected_version.content
+                elif ch.versions:
+                    latest_version = sorted(ch.versions, key=lambda item: item.created_at or 0)[-1]
+                    chapter_content = latest_version.content or ""
+                if chapter_content:
+                    combined_text += chapter_content + "\n\n"
+                    if len(combined_text) > 5000:
+                        break
 
-        if not combined_text.strip():
-            raise ValueError("章节内容为空")
+            if not combined_text.strip():
+                raise ValueError("章节内容为空")
 
-        # 调用 LLM 提取风格
-        prompt = STYLE_EXTRACTION_PROMPT.format(
-            text_content=combined_text[:3000]
-        )
-
-        try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
-                user_id=user_id,
-                max_tokens=2000,
-                temperature=0.3
+            # 调用 LLM 提取风格
+            prompt = STYLE_EXTRACTION_PROMPT.format(
+                text_content=combined_text[:3000]
             )
 
-            if response:
-                style_data = self._parse_json_response(response)
-                if style_data:
-                    style_feature = StyleFeature(style_data)
-                    await self._save_style_feature(project_id, style_feature)
-                    return style_feature
+            try:
+                response = await self.llm_service.generate(
+                    prompt=prompt,
+                    user_id=user_id,
+                    max_tokens=2000,
+                    temperature=0.3
+                )
 
-        except Exception as e:
-            logger.error(f"风格提取失败: {e}")
+                if response:
+                    style_data = self._parse_json_response(response)
+                    if style_data:
+                        style_feature = StyleFeature(style_data)
+                        await self._save_style_feature(project_id, style_feature)
+                        return style_feature
 
-        raise ValueError("风格提取失败")
+            except Exception as e:
+                logger.error(f"风格提取失败: {e}")
+
+            raise ValueError("风格提取失败")
 
     async def generate_with_style(
         self,
@@ -330,35 +331,36 @@ class StyleRAGService:
         Returns:
             str: 续写内容
         """
-        # 获取风格特征（优先使用当前激活的外部风格画像，其次回退到旧的项目内风格）
-        style_feature = await self.get_effective_style_for_project(project_id, user_id)
+        with LLMService.daily_limit_scope(f"style_generate:{project_id}:{user_id}:{len(existing_content or '')}:{max_tokens}"):
+            # 获取风格特征（优先使用当前激活的外部风格画像，其次回退到旧的项目内风格）
+            style_feature = await self.get_effective_style_for_project(project_id, user_id)
 
-        if not style_feature:
-            logger.warning(f"项目 {project_id} 没有风格配置，使用默认生成")
-            return existing_content
+            if not style_feature:
+                logger.warning(f"项目 {project_id} 没有风格配置，使用默认生成")
+                return existing_content
 
-        style_context = style_feature.to_prompt_context()
+            style_context = style_feature.to_prompt_context()
 
-        prompt = STYLE_INJECTION_PROMPT.format(
-            style_features=style_context,
-            existing_content=existing_content[-1000:] if existing_content else "",
-            direction=direction
-        )
-
-        try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
-                user_id=user_id,
-                max_tokens=max_tokens,
-                temperature=0.7
+            prompt = STYLE_INJECTION_PROMPT.format(
+                style_features=style_context,
+                existing_content=existing_content[-1000:] if existing_content else "",
+                direction=direction
             )
 
-            cleaned = remove_think_tags(response) if response else ""
-            return cleaned.strip() if cleaned else ""
+            try:
+                response = await self.llm_service.generate(
+                    prompt=prompt,
+                    user_id=user_id,
+                    max_tokens=max_tokens,
+                    temperature=0.7
+                )
 
-        except Exception as e:
-            logger.error(f"风格化生成失败: {e}")
-            raise
+                cleaned = remove_think_tags(response) if response else ""
+                return cleaned.strip() if cleaned else ""
+
+            except Exception as e:
+                logger.error(f"风格化生成失败: {e}")
+                raise
 
     async def _get_project_memory(self, project_id: str) -> ProjectMemory:
         result = await self.db.execute(
@@ -626,87 +628,88 @@ class StyleRAGService:
         name: Optional[str] = None,
         append_to_profile_id: Optional[str] = None,
     ) -> StyleProfile:
-        sources = await self.list_style_sources(user_id)
-        selected = [source for source in sources if source.id in source_ids]
-        if not selected:
-            raise ValueError("未找到可用的参考文本")
+        with LLMService.daily_limit_scope(f"style_profile:{user_id}:{append_to_profile_id or 'new'}:{len(source_ids)}"):
+            sources = await self.list_style_sources(user_id)
+            selected = [source for source in sources if source.id in source_ids]
+            if not selected:
+                raise ValueError("未找到可用的参考文本")
 
-        profiles = await self.list_style_profiles(user_id)
-        existing_profile = next((profile for profile in profiles if profile.id == append_to_profile_id), None) if append_to_profile_id else None
+            profiles = await self.list_style_profiles(user_id)
+            existing_profile = next((profile for profile in profiles if profile.id == append_to_profile_id), None) if append_to_profile_id else None
 
-        combined_segments: List[str] = []
-        if existing_profile and existing_profile.prompt_context:
-            combined_segments.append(f"已有画像摘要：\n{existing_profile.prompt_context}")
-        combined_segments.extend(source.content_text for source in selected if source.content_text)
-        combined_text = "\n\n".join(segment for segment in combined_segments if segment).strip()
+            combined_segments: List[str] = []
+            if existing_profile and existing_profile.prompt_context:
+                combined_segments.append(f"已有画像摘要：\n{existing_profile.prompt_context}")
+            combined_segments.extend(source.content_text for source in selected if source.content_text)
+            combined_text = "\n\n".join(segment for segment in combined_segments if segment).strip()
 
-        min_chars = 5000 if any(source.source_type == "external_novel" for source in selected) else 500
-        if any(bool((source.extra or {}).get("is_batch_note")) for source in selected):
-            min_chars = 20
-        if len(combined_text) < min_chars:
-            raise ValueError("参考文本内容不足，无法提取文风")
+            min_chars = 5000 if any(source.source_type == "external_novel" for source in selected) else 500
+            if any(bool((source.extra or {}).get("is_batch_note")) for source in selected):
+                min_chars = 20
+            if len(combined_text) < min_chars:
+                raise ValueError("参考文本内容不足，无法提取文风")
 
-        prompt = STYLE_EXTRACTION_PROMPT.format(text_content=combined_text[:12000])
-        response = await self.llm_service.generate(
-            prompt=prompt,
-            user_id=user_id,
-            max_tokens=2000,
-            temperature=0.3,
-        )
-        style_data = self._parse_json_response(response or "")
-        if not style_data:
-            raise ValueError("外部参考文风提取失败")
+            prompt = STYLE_EXTRACTION_PROMPT.format(text_content=combined_text[:12000])
+            response = await self.llm_service.generate(
+                prompt=prompt,
+                user_id=user_id,
+                max_tokens=2000,
+                temperature=0.3,
+            )
+            style_data = self._parse_json_response(response or "")
+            if not style_data:
+                raise ValueError("外部参考文风提取失败")
 
-        style_feature = StyleFeature(style_data)
-        source_titles = [source.title for source in selected if source.title]
-        now = datetime.now(timezone.utc).isoformat()
+            style_feature = StyleFeature(style_data)
+            source_titles = [source.title for source in selected if source.title]
+            now = datetime.now(timezone.utc).isoformat()
 
-        if existing_profile:
-            merged_source_ids = list(dict.fromkeys([*existing_profile.source_ids, *[source.id for source in selected]]))
-            merged_source_titles = list(dict.fromkeys([*(existing_profile.extra.get("source_titles", []) or []), *source_titles]))
-            previous_chars = int((existing_profile.quality_metrics or {}).get("total_chars") or 0)
-            existing_profile.name = (name or existing_profile.name or selected[0].title or "外部参考文风").strip()
-            existing_profile.source_ids = merged_source_ids
-            existing_profile.summary = style_feature.to_summary_dict()
-            existing_profile.style_feature = style_feature.to_dict()
-            existing_profile.prompt_context = style_feature.to_prompt_context()
-            existing_profile.quality_metrics = {
-                **(existing_profile.quality_metrics or {}),
-                "source_count": len(merged_source_ids),
-                "total_chars": previous_chars + sum(source.char_count for source in selected),
-                "merge_rounds": int((existing_profile.quality_metrics or {}).get("merge_rounds") or 0) + 1,
-            }
-            existing_profile.extra = {
-                **(existing_profile.extra or {}),
-                "source_titles": merged_source_titles,
-                "profile_mode": "incremental",
-            }
-            existing_profile.updated_at = now
-            await self._save_user_profiles(user_id, profiles)
-            return existing_profile
+            if existing_profile:
+                merged_source_ids = list(dict.fromkeys([*existing_profile.source_ids, *[source.id for source in selected]]))
+                merged_source_titles = list(dict.fromkeys([*(existing_profile.extra.get("source_titles", []) or []), *source_titles]))
+                previous_chars = int((existing_profile.quality_metrics or {}).get("total_chars") or 0)
+                existing_profile.name = (name or existing_profile.name or selected[0].title or "外部参考文风").strip()
+                existing_profile.source_ids = merged_source_ids
+                existing_profile.summary = style_feature.to_summary_dict()
+                existing_profile.style_feature = style_feature.to_dict()
+                existing_profile.prompt_context = style_feature.to_prompt_context()
+                existing_profile.quality_metrics = {
+                    **(existing_profile.quality_metrics or {}),
+                    "source_count": len(merged_source_ids),
+                    "total_chars": previous_chars + sum(source.char_count for source in selected),
+                    "merge_rounds": int((existing_profile.quality_metrics or {}).get("merge_rounds") or 0) + 1,
+                }
+                existing_profile.extra = {
+                    **(existing_profile.extra or {}),
+                    "source_titles": merged_source_titles,
+                    "profile_mode": "incremental",
+                }
+                existing_profile.updated_at = now
+                await self._save_user_profiles(user_id, profiles)
+                return existing_profile
 
-        profile = StyleProfile({
-            "name": (name or selected[0].title or "外部参考文风").strip(),
-            "profile_type": "external",
-            "source_ids": [source.id for source in selected],
-            "summary": style_feature.to_summary_dict(),
-            "style_feature": style_feature.to_dict(),
-            "prompt_context": style_feature.to_prompt_context(),
-            "quality_metrics": {
-                "source_count": len(selected),
-                "total_chars": sum(source.char_count for source in selected),
-                "merge_rounds": 1,
-            },
-            "created_at": now,
-            "updated_at": now,
-            "extra": {
-                "source_titles": source_titles,
-                "profile_mode": "incremental",
-            },
-        })
+            profile = StyleProfile({
+                "name": (name or selected[0].title or "外部参考文风").strip(),
+                "profile_type": "external",
+                "source_ids": [source.id for source in selected],
+                "summary": style_feature.to_summary_dict(),
+                "style_feature": style_feature.to_dict(),
+                "prompt_context": style_feature.to_prompt_context(),
+                "quality_metrics": {
+                    "source_count": len(selected),
+                    "total_chars": sum(source.char_count for source in selected),
+                    "merge_rounds": 1,
+                },
+                "created_at": now,
+                "updated_at": now,
+                "extra": {
+                    "source_titles": source_titles,
+                    "profile_mode": "incremental",
+                },
+            })
 
-        for item in profiles:
-            item.active = False
+            for item in profiles:
+                item.active = False
         profiles.append(profile)
         await self._save_user_profiles(user_id, profiles)
         return profile

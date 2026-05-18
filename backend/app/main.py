@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
 import logging
 from logging.config import dictConfig
+import re
+import sys
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
@@ -18,6 +20,118 @@ from .services.prompt_service import PromptService
 _logging_boot_error: str | None = None
 
 
+for _stream_name in ("stdout", "stderr"):
+    _stream = getattr(sys, _stream_name, None)
+    if _stream and hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
+
+_LEVEL_LABELS = {
+    "DEBUG": "调试",
+    "INFO": "信息",
+    "WARNING": "警告",
+    "ERROR": "错误",
+    "CRITICAL": "严重",
+}
+
+_LEVEL_GLYPHS = {
+    "DEBUG": "┆",
+    "INFO": "●",
+    "WARNING": "▲",
+    "ERROR": "✖",
+    "CRITICAL": "※",
+}
+
+_TRANSLATION_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"^Started server process \[(?P<pid>\d+)\]$"), "已启动服务进程 [\\g<pid>]"),
+    (re.compile(r"^Finished server process \[(?P<pid>\d+)\]$"), "服务进程已结束 [\\g<pid>]"),
+    (re.compile(r"^Started reloader process \[(?P<pid>\d+)\] using (?P<backend>.+)$"), "已启动热重载进程 [\\g<pid>]，模式=\\g<backend>"),
+    (re.compile(r"^Waiting for application startup\.$"), "等待应用启动。"),
+    (re.compile(r"^Application startup complete\.$"), "应用启动完成。"),
+    (re.compile(r"^Application shutdown complete\.$"), "应用已完成关闭。"),
+    (re.compile(r"^Shutting down$"), "正在关闭服务。"),
+    (re.compile(r"^Uvicorn running on (?P<addr>.+) \(Press CTRL\+C to quit\)$"), "服务已启动：\\g<addr>（按 CTRL+C 停止）"),
+)
+
+_BENIGN_WARNING_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"^Can't create database '(?P<db>.+)'; database exists$"),
+        "数据库「\\g<db>」已存在，跳过创建。",
+    ),
+)
+
+_LOGGER_NAME_ALIASES = {
+    "app": "应用",
+    "app.errors": "异常处理",
+    "uvicorn.error": "Uvicorn",
+    "uvicorn.access": "访问日志",
+    "asyncmy": "MySQL",
+    "sqlalchemy.engine": "SQL引擎",
+    "sqlalchemy.pool": "连接池",
+    "watchfiles.main": "热重载",
+    "httpx": "HTTP客户端",
+    "urllib3": "网络底层",
+}
+
+
+def _humanize_logger_name(name: str) -> str:
+    if name in _LOGGER_NAME_ALIASES:
+        return _LOGGER_NAME_ALIASES[name]
+    if name.startswith("app.api.routers."):
+        return f"接口/{name.rsplit('.', 1)[-1]}"
+    if name.startswith("app.services."):
+        return f"服务/{name.rsplit('.', 1)[-1]}"
+    if name.startswith("app.db."):
+        return f"数据库/{name.rsplit('.', 1)[-1]}"
+    if name.startswith("app.core."):
+        return f"核心/{name.rsplit('.', 1)[-1]}"
+    if name.startswith("backend.api."):
+        return f"接口/{name.rsplit('.', 1)[-1]}"
+    if name.startswith("backend.services."):
+        return f"服务/{name.rsplit('.', 1)[-1]}"
+    return name.replace(".", "/")
+
+
+class LocalizedConsoleFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        record.level_label = _LEVEL_LABELS.get(record.levelname, record.levelname)
+        record.level_glyph = _LEVEL_GLYPHS.get(record.levelname, "·")
+        record.logger_alias = _humanize_logger_name(record.name)
+        record.source_loc = f"{record.filename}:{record.lineno}"
+        return super().format(record)
+
+
+class LocalizedFileFormatter(LocalizedConsoleFormatter):
+    pass
+
+
+class HumanizedLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            rendered_message = record.getMessage()
+        except Exception:
+            return True
+
+        for pattern, template in _BENIGN_WARNING_RULES:
+            matched = pattern.match(rendered_message)
+            if matched:
+                record.levelno = logging.INFO
+                record.levelname = logging.getLevelName(logging.INFO)
+                record.msg = pattern.sub(template, rendered_message)
+                record.args = ()
+                return True
+
+        for pattern, template in _TRANSLATION_RULES:
+            if pattern.match(rendered_message):
+                record.msg = pattern.sub(template, rendered_message)
+                record.args = ()
+                break
+        return True
+
+
 def _configure_logging() -> None:
     global _logging_boot_error
 
@@ -26,6 +140,7 @@ def _configure_logging() -> None:
             "class": "logging.StreamHandler",
             "level": settings.console_logging_level,
             "formatter": "console",
+            "filters": ["humanize"],
             "stream": "ext://sys.stdout",
         }
     }
@@ -34,23 +149,29 @@ def _configure_logging() -> None:
     if settings.file_logging_enabled:
         try:
             settings.resolved_log_dir.mkdir(parents=True, exist_ok=True)
+            settings.runtime_log_dir.mkdir(parents=True, exist_ok=True)
+            settings.latest_run_file.write_text(str(settings.runtime_log_dir), encoding="utf-8")
             handlers["app_file"] = {
                 "class": "logging.handlers.RotatingFileHandler",
                 "level": settings.logging_level,
                 "formatter": "file",
+                "filters": ["humanize"],
                 "filename": str(settings.app_log_file),
                 "maxBytes": settings.log_file_max_bytes,
                 "backupCount": settings.log_file_backup_count,
                 "encoding": "utf-8",
+                "delay": True,
             }
             handlers["error_file"] = {
                 "class": "logging.handlers.RotatingFileHandler",
                 "level": "ERROR",
                 "formatter": "file",
+                "filters": ["humanize"],
                 "filename": str(settings.error_log_file),
                 "maxBytes": settings.log_file_max_bytes,
                 "backupCount": settings.log_file_backup_count,
                 "encoding": "utf-8",
+                "delay": True,
             }
             shared_handlers.extend(["app_file", "error_file"])
         except Exception as exc:  # pragma: no cover - depends on host filesystem
@@ -60,13 +181,20 @@ def _configure_logging() -> None:
     config = {
         "version": 1,
         "disable_existing_loggers": False,
+        "filters": {
+            "humanize": {
+                "()": HumanizedLogFilter,
+            }
+        },
         "formatters": {
             "console": {
-                "format": "%(asctime)s %(levelname).1s %(name)s | %(message)s",
+                "()": LocalizedConsoleFormatter,
+                "format": "%(asctime)s %(level_glyph)s %(level_label)s %(logger_alias)s | %(message)s",
                 "datefmt": "%H:%M:%S",
             },
             "file": {
-                "format": "%(asctime)s [%(levelname)s] %(name)s %(filename)s:%(lineno)d | %(message)s",
+                "()": LocalizedFileFormatter,
+                "format": "%(asctime)s %(level_glyph)s %(level_label)s %(logger_alias)s %(source_loc)s | %(message)s",
                 "datefmt": "%Y-%m-%d %H:%M:%S",
             },
         },
@@ -109,6 +237,11 @@ def _configure_logging() -> None:
             },
             "uvicorn.access": {
                 "level": access_log_level,
+                "handlers": shared_handlers,
+                "propagate": False,
+            },
+            "asyncmy": {
+                "level": "ERROR",
                 "handlers": shared_handlers,
                 "propagate": False,
             },
@@ -155,8 +288,9 @@ if _logging_boot_error:
     error_logger.warning("文件日志初始化失败，已退回控制台日志：%s", _logging_boot_error)
 elif settings.file_logging_enabled:
     app_logger.info(
-        "日志初始化完成: log_dir=%s console_level=%s access_log=%s",
+        "日志初始化完成：root_dir=%s current_run=%s console_level=%s access_log=%s",
         settings.resolved_log_dir,
+        settings.runtime_log_dir,
         settings.console_logging_level,
         settings.uvicorn_access_log_enabled,
     )
@@ -249,7 +383,7 @@ def _log_request_failure(
         return
     log_method = error_logger.error if status_code >= 500 else error_logger.warning
     log_method(
-        "Request failed: request_id=%s method=%s path=%s status=%s code=%s message=%s root_cause=%s",
+        "请求失败｜请求ID=%s 方法=%s 路径=%s 状态=%s 错误码=%s 信息=%s 根因=%s",
         request_id,
         request.method,
         request.url.path,
