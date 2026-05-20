@@ -4,18 +4,70 @@
 提供知识图谱的 CRUD 操作、关系查询和情节分析功能。
 将角色视为对象，情节视为有向图，实现复杂的叙事关系追踪。
 """
+import json
 from typing import Optional, List, Dict, Any
 from collections import defaultdict
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, delete
 
 from ..models.knowledge_graph import CharacterNode, EventEdge, KnowledgeGraphMetadata
-from ..models.novel import BlueprintCharacter
+from ..models.novel import BlueprintCharacter, BlueprintRelationship
 from ..models.memory_layer import CharacterState, TimelineEvent
 
 logger = logging.getLogger(__name__)
+
+
+_RELATIONSHIP_META_MARKERS: tuple[str, ...] = (
+    "\n[[XUANQIONG_WENSHU_RELATIONSHIP_META]]\n",
+    "\n[[ARBORIS_RELATIONSHIP_META]]\n",
+)
+
+
+def _decode_relationship_description(text: str | None) -> tuple[str, Dict[str, Any]]:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return "", {}
+    for marker in _RELATIONSHIP_META_MARKERS:
+        if marker not in cleaned:
+            continue
+        description, _, payload = cleaned.partition(marker)
+        try:
+            meta = json.loads(payload.strip()) if payload.strip() else {}
+        except json.JSONDecodeError:
+            meta = {}
+        return description.strip(), meta if isinstance(meta, dict) else {}
+    return cleaned, {}
+
+
+def _edge_type_from_relationship(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"conflict", "enemy", "hostile", "rivalry"}:
+        return "conflict"
+    if text in {"alliance", "ally", "partner", "mentor", "family"}:
+        return "alliance"
+    if text in {"romance"}:
+        return "transformation"
+    return "relationship"
+
+
+_LEGACY_SUPPLEMENTAL_NODE_PREFIXES: tuple[str, ...] = (
+    "线索持有者",
+    "旧日盟友",
+    "对立代理人",
+    "边缘证人",
+    "信息中介",
+    "失联亲属",
+)
+
+
+def _is_legacy_supplemental_node(node: CharacterNode) -> bool:
+    name = (node.name or "").strip()
+    role_type = (node.role_type or "").strip()
+    if role_type.startswith("补强角色位"):
+        return True
+    return any(name.startswith(prefix) and any(ch.isdigit() for ch in name) for prefix in _LEGACY_SUPPLEMENTAL_NODE_PREFIXES)
 
 
 class PlotThread:
@@ -55,6 +107,8 @@ class KnowledgeGraphService:
         """从蓝图角色、角色状态和时间线事件自动回填知识图谱。"""
         created_nodes = 0
         created_edges = 0
+        removed_nodes = 0
+        removed_edges = 0
 
         blueprint_result = await self.db.execute(
             select(BlueprintCharacter)
@@ -62,6 +116,8 @@ class KnowledgeGraphService:
             .order_by(BlueprintCharacter.position.asc(), BlueprintCharacter.id.asc())
         )
         blueprint_characters = list(blueprint_result.scalars().all())
+        blueprint_names = {(character.name or "").strip() for character in blueprint_characters if (character.name or "").strip()}
+        blueprint_ids = {character.id for character in blueprint_characters if character.id is not None}
 
         state_result = await self.db.execute(
             select(CharacterState)
@@ -75,6 +131,37 @@ class KnowledgeGraphService:
                 latest_states[name] = state
 
         existing_nodes = await self.get_project_nodes(project_id)
+        stale_nodes = [
+            node for node in existing_nodes
+            if (node.name or "").strip() not in blueprint_names
+            and (node.name or "").strip() not in latest_states
+            and (
+                _is_legacy_supplemental_node(node)
+                or (
+                    node.blueprint_character_id is not None
+                    and node.blueprint_character_id not in blueprint_ids
+                )
+            )
+        ]
+        if stale_nodes:
+            stale_node_ids = [node.id for node in stale_nodes if node.id is not None]
+            if stale_node_ids:
+                edge_delete_result = await self.db.execute(
+                    delete(EventEdge).where(
+                        EventEdge.project_id == project_id,
+                        or_(
+                            EventEdge.source_node_id.in_(stale_node_ids),
+                            EventEdge.target_node_id.in_(stale_node_ids),
+                        ),
+                    )
+                )
+                removed_edges = int(edge_delete_result.rowcount or 0)
+            for node in stale_nodes:
+                await self.db.delete(node)
+            await self.db.flush()
+            removed_nodes = len(stale_nodes)
+            stale_ids = {node.id for node in stale_nodes}
+            existing_nodes = [node for node in existing_nodes if node.id not in stale_ids]
         node_map = {(node.name or "").strip(): node for node in existing_nodes if (node.name or "").strip()}
 
         for character in blueprint_characters:
@@ -117,6 +204,54 @@ class KnowledgeGraphService:
             for edge in existing_edges
         }
 
+        relationship_result = await self.db.execute(
+            select(BlueprintRelationship)
+            .where(BlueprintRelationship.project_id == project_id)
+            .order_by(BlueprintRelationship.position.asc(), BlueprintRelationship.id.asc())
+        )
+        for relation in relationship_result.scalars():
+            source_name = (relation.character_from or "").strip()
+            target_name = (relation.character_to or "").strip()
+            if not source_name or not target_name or source_name == target_name:
+                continue
+            source_node = node_map.get(source_name)
+            target_node = node_map.get(target_name)
+            if not source_node or not target_node:
+                continue
+            description, meta = _decode_relationship_description(relation.description)
+            relation_type = str(meta.get("relationship_type") or "relationship").strip()
+            event_type = _edge_type_from_relationship(relation_type)
+            key = (source_node.id, target_node.id, 0, event_type, (description or relation_type)[:120])
+            if key in edge_keys:
+                continue
+            try:
+                importance = int(meta.get("importance") or 3)
+            except (TypeError, ValueError):
+                importance = 3
+            edge = EventEdge(
+                project_id=project_id,
+                source_node_id=source_node.id,
+                target_node_id=target_node.id,
+                event_type=event_type,
+                description=description or f"{source_name}与{target_name}存在{relation_type}关系",
+                chapter_number=None,
+                importance=max(1, min(10, importance)),
+                emotional_impact=str(meta.get("tension") or meta.get("status") or "ongoing"),
+                plot_advancement=str(meta.get("direction") or "relationship_arc"),
+                causality=str(meta.get("core_conflict") or meta.get("trigger_event") or ""),
+                extra={
+                    "source": "blueprint_relationship",
+                    "relationship_id": relation.id,
+                    "relationship_type": relation_type,
+                    "status": meta.get("status"),
+                    "trigger_event": meta.get("trigger_event"),
+                    "is_supplemental": bool(meta.get("is_supplemental", False)),
+                },
+            )
+            self.db.add(edge)
+            edge_keys.add(key)
+            created_edges += 1
+
         for event in timeline_events:
             names = [str(name or "").strip() for name in (event.involved_characters or []) if str(name or "").strip()]
             if len(names) < 2:
@@ -149,7 +284,12 @@ class KnowledgeGraphService:
 
         await self.db.commit()
         await self._update_metadata(project_id)
-        return {"created_nodes": created_nodes, "created_edges": created_edges}
+        return {
+            "created_nodes": created_nodes,
+            "created_edges": created_edges,
+            "removed_nodes": removed_nodes,
+            "removed_edges": removed_edges,
+        }
 
     # ===== 节点 CRUD =====
 

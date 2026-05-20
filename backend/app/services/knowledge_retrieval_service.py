@@ -20,6 +20,7 @@ from ..models.project_memory import ProjectMemory
 from ..models.chapter_blueprint import ChapterBlueprint
 from .llm_service import LLMService
 from .vector_store_service import VectorStoreService
+from .generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
 
 logger = logging.getLogger(__name__)
@@ -365,13 +366,22 @@ class KnowledgeRetrievalService:
             )
 
             try:
-                response = await self.llm_service.generate(
-                    prompt=prompt,
+                result = await call_generation_text(
+                    llm_service=self.llm_service,
+                    system_prompt="你是长篇小说上下文摘要助手，请只输出当前章节写作摘要文本。",
+                    conversation_history=[{"role": "user", "content": prompt}],
                     user_id=user_id,
-                    max_tokens=1000,
-                    temperature=0.3
+                    timeout=90.0,
+                    temperature=0.3,
+                    policy=GenerationCallPolicy(
+                        stage_label="知识检索-章节上下文摘要",
+                        progress_stage="knowledge_chapter_summary",
+                        retry_attempts=2,
+                        response_format=None,
+                        max_tokens=1000,
+                    ),
                 )
-                cleaned = remove_think_tags(response) if response else ""
+                cleaned = remove_think_tags(result.text) if result.text else ""
                 return cleaned.strip() if cleaned else None
             except Exception as e:
                 logger.error(f"生成章节摘要失败: {e}")
@@ -411,15 +421,24 @@ class KnowledgeRetrievalService:
         )
         
         try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
+            result = await call_generation_text(
+                llm_service=self.llm_service,
+                system_prompt="你是长篇小说知识库检索词规划助手，请只输出检索词列表。",
+                conversation_history=[{"role": "user", "content": prompt}],
                 user_id=user_id,
-                max_tokens=500,
-                temperature=0.5
+                timeout=60.0,
+                temperature=0.5,
+                policy=GenerationCallPolicy(
+                    stage_label="知识检索-关键词生成",
+                    progress_stage="knowledge_query_generation",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=500,
+                ),
             )
             
-            if response:
-                cleaned = remove_think_tags(response)
+            if result.text:
+                cleaned = remove_think_tags(result.text)
                 queries = [
                     line.strip().replace("·", " ")
                     for line in cleaned.split("\n")
@@ -523,37 +542,30 @@ class KnowledgeRetrievalService:
         )
         
         try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
+            result = await call_generation_json(
+                llm_service=self.llm_service,
+                system_prompt="你是长篇小说RAG上下文过滤助手，请只输出 JSON 对象。",
+                conversation_history=[{"role": "user", "content": prompt}],
                 user_id=user_id,
-                max_tokens=2000,
-                temperature=0.3
+                timeout=90.0,
+                temperature=0.3,
+                policy=GenerationCallPolicy(
+                    stage_label="知识检索-上下文过滤",
+                    progress_stage="knowledge_filter_context",
+                    retry_attempts=2,
+                    max_tokens=2000,
+                    json_repair_attempts=1,
+                ),
             )
             
-            if response:
-                import json
-                content = sanitize_json_like_text(
-                    unwrap_markdown_json(remove_think_tags(response))
-                )
-                json_start = content.find("{")
-                json_end = content.rfind("}") + 1
-                if json_start < 0 or json_end <= json_start:
-                    return FilteredContext(
-                        plot_fuel=[],
-                        character_info=[],
-                        world_fragments=[],
-                        narrative_techniques=[],
-                        warnings=[]
-                    )
-
-                data = json.loads(content[json_start:json_end])
-                return FilteredContext(
-                    plot_fuel=data.get("plot_fuel", []),
-                    character_info=data.get("character_info", []),
-                    world_fragments=data.get("world_fragments", []),
-                    narrative_techniques=data.get("narrative_techniques", []),
-                    warnings=data.get("warnings", [])
-                )
+            data = result.data
+            return FilteredContext(
+                plot_fuel=data.get("plot_fuel", []),
+                character_info=data.get("character_info", []),
+                world_fragments=data.get("world_fragments", []),
+                narrative_techniques=data.get("narrative_techniques", []),
+                warnings=data.get("warnings", []),
+            )
         except Exception as e:
             logger.error(f"过滤知识失败: {e}")
         

@@ -26,6 +26,7 @@ from ..models.chapter_blueprint import ChapterBlueprint
 from .chapter_ingest_service import ChapterIngestionService
 from .llm_service import LLMService
 from .vector_store_service import VectorStoreService
+from .generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
 
 logger = logging.getLogger(__name__)
@@ -360,13 +361,22 @@ class FinalizeService:
         )
         
         try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
+            result = await call_generation_text(
+                llm_service=self.llm_service,
+                system_prompt="你是长篇连载小说记忆摘要编辑，请只输出更新后的前文摘要。",
+                conversation_history=[{"role": "user", "content": prompt}],
                 user_id=user_id,
-                max_tokens=3000,
-                temperature=0.3
+                timeout=120.0,
+                temperature=0.3,
+                policy=GenerationCallPolicy(
+                    stage_label="定稿闭环-全局摘要更新",
+                    progress_stage="finalize_global_summary",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=3000,
+                ),
             )
-            cleaned = remove_think_tags(response) if response else ""
+            cleaned = remove_think_tags(result.text) if result.text else ""
             return cleaned.strip() if cleaned else None
         except Exception as e:
             logger.error(f"更新全局摘要失败: {e}")
@@ -422,13 +432,22 @@ class FinalizeService:
         )
         
         try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
+            result = await call_generation_text(
+                llm_service=self.llm_service,
+                system_prompt="你是长篇连载小说角色状态维护助手，请只输出更新后的角色状态文本。",
+                conversation_history=[{"role": "user", "content": prompt}],
                 user_id=user_id,
-                max_tokens=4000,
-                temperature=0.3
+                timeout=120.0,
+                temperature=0.3,
+                policy=GenerationCallPolicy(
+                    stage_label="定稿闭环-角色状态更新",
+                    progress_stage="finalize_character_state",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=4000,
+                ),
             )
-            cleaned = remove_think_tags(response) if response else ""
+            cleaned = remove_think_tags(result.text) if result.text else ""
             return cleaned.strip() if cleaned else None
         except Exception as e:
             logger.error(f"更新角色状态失败: {e}")
@@ -464,20 +483,22 @@ class FinalizeService:
         )
         
         try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
+            result = await call_generation_json(
+                llm_service=self.llm_service,
+                system_prompt="你是长篇连载小说剧情线和伏笔账本维护助手，请只输出 JSON 对象。",
+                conversation_history=[{"role": "user", "content": prompt}],
                 user_id=user_id,
-                max_tokens=2000,
-                temperature=0.3
+                timeout=120.0,
+                temperature=0.3,
+                policy=GenerationCallPolicy(
+                    stage_label="定稿闭环-剧情线更新",
+                    progress_stage="finalize_plot_arcs",
+                    retry_attempts=2,
+                    max_tokens=2000,
+                    json_repair_attempts=1,
+                ),
             )
-            if response:
-                content = sanitize_json_like_text(
-                    unwrap_markdown_json(remove_think_tags(response))
-                )
-                json_start = content.find("{")
-                json_end = content.rfind("}") + 1
-                if json_start >= 0 and json_end > json_start:
-                    return json.loads(content[json_start:json_end])
+            return result.data
         except json.JSONDecodeError as e:
             logger.error(f"解析剧情线JSON失败: {e}")
         except Exception as e:
@@ -525,13 +546,22 @@ class FinalizeService:
         )
         
         try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
+            result = await call_generation_text(
+                llm_service=self.llm_service,
+                system_prompt="你是长篇连载小说章节摘要助手，请只输出章节摘要文本。",
+                conversation_history=[{"role": "user", "content": prompt}],
                 user_id=user_id,
-                max_tokens=500,
-                temperature=0.3
+                timeout=90.0,
+                temperature=0.3,
+                policy=GenerationCallPolicy(
+                    stage_label="定稿闭环-章节摘要",
+                    progress_stage="finalize_chapter_summary",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=500,
+                ),
             )
-            cleaned = remove_think_tags(response) if response else ""
+            cleaned = remove_think_tags(result.text) if result.text else ""
             return cleaned.strip() if cleaned else None
         except Exception as e:
             logger.error(f"生成章节摘要失败: {e}")

@@ -13,6 +13,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from ..services.generation_call_service import GenerationCallPolicy, call_generation_text
 from ..services.llm_service import LLMService
 from ..services.prompt_service import PromptService
 from ..utils.json_utils import remove_think_tags, unwrap_markdown_json
@@ -84,14 +85,23 @@ class AIReviewService:
             review_input = self._build_review_input(versions, chapter_mission)
 
             try:
-                response = await self.llm_service.get_llm_response(
+                text_result = await call_generation_text(
+                    llm_service=self.llm_service,
                     system_prompt=review_prompt,
                     conversation_history=[{"role": "user", "content": review_input}],
                     temperature=0.3,
                     user_id=user_id,
                     timeout=180.0,
+                    policy=GenerationCallPolicy(
+                        stage_label="多候选版本 AI 评审",
+                        progress_stage="review",
+                        retry_attempts=2,
+                        response_format="json_object",
+                        max_tokens=5000,
+                        retry_same_model_once=True,
+                    ),
                 )
-                cleaned = remove_think_tags(response)
+                cleaned = remove_think_tags(text_result.text)
                 normalized = unwrap_markdown_json(cleaned)
 
                 result = self._parse_review_response(normalized)
@@ -485,14 +495,23 @@ class AIReviewService:
 
         review_input = self._build_single_review_input(version, chapter_mission)
         try:
-            response = await self.llm_service.get_llm_response(
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
                 system_prompt=review_prompt,
                 conversation_history=[{"role": "user", "content": review_input}],
                 temperature=0.25,
                 user_id=user_id,
                 timeout=180.0,
+                policy=GenerationCallPolicy(
+                    stage_label="单候选版本 AI 评审",
+                    progress_stage="review",
+                    retry_attempts=2,
+                    response_format="json_object",
+                    max_tokens=4000,
+                    retry_same_model_once=True,
+                ),
             )
-            cleaned = remove_think_tags(response)
+            cleaned = remove_think_tags(text_result.text)
             normalized = unwrap_markdown_json(cleaned)
             result = self._parse_review_response(normalized)
             result.raw_response = cleaned

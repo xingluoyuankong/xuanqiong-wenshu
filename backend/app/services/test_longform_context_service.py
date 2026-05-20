@@ -7,12 +7,19 @@ from app.db.base import Base
 from app.models.clue_tracker import StoryClue
 from app.models.foreshadowing import Foreshadowing
 from app.models.memory_layer import CharacterState, TimelineEvent
-from app.models.novel import BlueprintCharacter, Chapter, ChapterOutline, NovelBlueprint, NovelProject
+from app.models.knowledge_graph import CharacterNode, EventEdge
+from app.models.novel import BlueprintCharacter, BlueprintRelationship, Chapter, ChapterOutline, NovelBlueprint, NovelProject
 from app.models.project_memory import ProjectMemory
 from app.models.user import User
 from app.services.foreshadowing_service import ForeshadowingService
+from app.services.knowledge_graph_service import KnowledgeGraphService
 from app.services.longform_context_service import LongformContextService
-from app.services.novel_service import _normalize_blueprint_characters_for_storage, _target_character_count
+from app.services.novel_service import (
+    _infer_total_chapters_for_cast,
+    _normalize_blueprint_characters_for_storage,
+    _normalize_blueprint_relationships_for_storage,
+    _target_character_count,
+)
 
 
 @pytest.mark.anyio
@@ -118,6 +125,7 @@ async def test_longform_context_package_classifies_due_hooks_and_cast_slots(tmp_
             assert package.cast_plan.planned_character_count == 2
             assert package.foreshadowing_task.must_resolve
             assert "旧账册边角有盐渍编号" in package.prompt_text
+            assert "无论篇幅长短" in package.prompt_text
 
             missing_gate = LongformContextService.evaluate_continuity_quality(
                 content="林七只在旧档案馆徘徊，没有碰那本旧账。",
@@ -126,6 +134,15 @@ async def test_longform_context_package_classifies_due_hooks_and_cast_slots(tmp_
             )
             assert missing_gate.passed is False
             assert any(item["code"] == "due_foreshadowing_not_visible" for item in missing_gate.blockers)
+
+            weak_payoff_gate = LongformContextService.evaluate_continuity_quality(
+                content="林七终于看见潮雾账册上的盐渍编号，却只是把它放回桌角，转身继续沉默。",
+                package=package,
+                chapter_mission={},
+            )
+            assert weak_payoff_gate.passed is True
+            assert any(item["code"] == "due_foreshadowing_payoff_weak" for item in weak_payoff_gate.warnings)
+            assert any(item["code"] == "strengthen_payoff_patch" for item in weak_payoff_gate.patch_suggestions)
 
             resolved_gate = LongformContextService.evaluate_continuity_quality(
                 content="林七终于看懂潮雾账册上的盐渍编号，原来它指向旧码头的真相。",
@@ -206,3 +223,120 @@ def test_longform_character_targets_scale_for_million_word_projects():
     assert characters[0]["extra"]["cast_tier"] == "protagonist"
     assert "knowledge_boundary" in characters[0]["extra"]
     assert any(item["extra"].get("cast_tier") in {"stage_support", "faction_member"} for item in characters)
+    assert not any("补强角色位" in (item.get("identity") or "") for item in characters)
+    assert not any((item.get("name") or "").startswith("线索持有者") for item in characters)
+
+
+def test_length_contract_controls_cast_scale_before_generated_outline_ranges():
+    total = _infer_total_chapters_for_cast(
+        world_setting={"system_blueprint": {"length_contract": {"target_chapter_count": 12}}},
+        novel_outline=[{"expected_chapter_range": "346-390章"}],
+        fallback=390,
+    )
+
+    assert total == 12
+
+    characters = _normalize_blueprint_characters_for_storage(
+        [{"name": "沈文朝", "identity": "主角"}],
+        total_chapters=total,
+        blueprint_title="潮印迷城",
+        genre="东方玄幻",
+    )
+
+    assert len(characters) == 8
+    assert {item["name"] for item in characters[1:]}
+    assert not any("补强角色位" in (item.get("identity") or "") for item in characters)
+
+
+def test_legacy_supplemental_characters_are_cleaned_from_saved_blueprints():
+    raw_characters = [
+        {"name": "沈文朝", "identity": "主角"},
+        {"name": "季阿七", "identity": "核心盟友"},
+    ] + [
+        {
+            "name": f"线索持有者{index}",
+            "identity": f"补强角色位{index}",
+            "extra": {"is_supplemental": True},
+        }
+        for index in range(3, 15)
+    ]
+
+    characters = _normalize_blueprint_characters_for_storage(
+        raw_characters,
+        total_chapters=12,
+        blueprint_title="潮印迷城",
+        genre="东方玄幻",
+    )
+
+    assert len(characters) == 8
+    assert not any((item.get("name") or "").startswith("线索持有者") for item in characters)
+    assert not any("补强角色位" in (item.get("identity") or "") for item in characters)
+
+    relationships = _normalize_blueprint_relationships_for_storage(
+        [
+            {"character_from": "沈文朝", "character_to": "季阿七", "description": "互相试探后合作"},
+            {"character_from": "沈文朝", "character_to": "线索持有者13", "description": "旧占位角色残留关系"},
+        ],
+        characters=characters,
+        total_chapters=12,
+        blueprint_title="潮印迷城",
+    )
+
+    assert relationships
+    assert all("线索持有者13" not in {item["character_from"], item["character_to"]} for item in relationships)
+
+
+@pytest.mark.anyio
+async def test_knowledge_graph_sync_backfills_blueprint_relationship_edges(tmp_path):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'knowledge-graph.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        async with session_factory() as session:
+            session.add(User(id=1, username="tester", email="tester@example.com", hashed_password="hash"))
+            session.add(NovelProject(id="p-kg", user_id=1, title="图谱", initial_prompt="测试", status="draft"))
+            session.add(BlueprintCharacter(project_id="p-kg", name="林七", identity="主角", position=0))
+            session.add(BlueprintCharacter(project_id="p-kg", name="沈舟", identity="盟友", position=1))
+            stale_a = CharacterNode(project_id="p-kg", name="线索持有者13", role_type="补强角色位13")
+            stale_b = CharacterNode(project_id="p-kg", name="旧日盟友14", role_type="补强角色位14")
+            session.add_all([stale_a, stale_b])
+            await session.flush()
+            session.add(
+                EventEdge(
+                    project_id="p-kg",
+                    source_node_id=stale_a.id,
+                    target_node_id=stale_b.id,
+                    event_type="relationship",
+                    description="旧占位关系",
+                )
+            )
+            session.add(
+                BlueprintRelationship(
+                    project_id="p-kg",
+                    character_from="林七",
+                    character_to="沈舟",
+                    description='林七与沈舟围绕旧账册形成互信。\n[[XUANQIONG_WENSHU_RELATIONSHIP_META]]\n{"relationship_type":"alliance","importance":4,"tension":"medium"}',
+                    position=0,
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            result = await KnowledgeGraphService(session).sync_from_story_memory("p-kg")
+            assert result["created_nodes"] == 2
+            assert result["created_edges"] == 1
+            assert result["removed_nodes"] == 2
+            assert result["removed_edges"] == 1
+
+            remaining_nodes = (await session.execute(select(CharacterNode).where(CharacterNode.project_id == "p-kg"))).scalars().all()
+            assert {node.name for node in remaining_nodes} == {"林七", "沈舟"}
+
+            edge = (await session.execute(select(EventEdge).where(EventEdge.project_id == "p-kg"))).scalar_one()
+            assert edge.event_type == "alliance"
+            assert edge.importance == 4
+            assert edge.extra["source"] == "blueprint_relationship"
+    finally:
+        await engine.dispose()

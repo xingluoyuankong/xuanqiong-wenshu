@@ -13,10 +13,9 @@ describe('ChapterEmpty', () => {
     })
 
     expect(wrapper.text()).toContain('第 3 章还没有正文')
-    expect(wrapper.text()).toContain('开始生成第 3 章')
-
-    await wrapper.get('button.ce-primary').trigger('click')
-    expect(wrapper.emitted('generateChapter')?.[0]).toEqual([3])
+    expect(wrapper.text()).toContain('请使用顶部主命令栏开始生成')
+    expect(wrapper.find('button.ce-primary').exists()).toBe(false)
+    expect(wrapper.emitted('generateChapter')).toBeUndefined()
   })
 
   it('未解锁时不展示生成按钮', () => {

@@ -17,6 +17,7 @@ from ..models.foreshadowing import (
 )
 from .llm_service import LLMService
 from .prompt_service import PromptService
+from .generation_call_service import GenerationCallPolicy, call_generation_json
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
 
 
@@ -180,29 +181,25 @@ class ForeshadowingTrackerService:
             prompt = prompt.replace("{{chapter_outline}}", chapter_outline or "（无大纲）")
             prompt = prompt.replace("{{active_foreshadowings}}", active_context)
 
-            # 调用 LLM 获取建议
-            response = await self.llm_service.generate(
-                prompt=prompt,
-                system_prompt="你是一位专业的小说编辑，负责追踪伏笔状态并提供发展建议。请以 JSON 格式输出。",
-                user_id=user_id,
-                timeout=45.0,
-                response_format=None,
-            )
-
-            # 解析结果
             try:
-                content = sanitize_json_like_text(
-                    unwrap_markdown_json(remove_think_tags(response or ""))
+                # 调用 LLM 获取建议
+                result = await call_generation_json(
+                    llm_service=self.llm_service,
+                    system_prompt="你是一位专业的小说编辑，负责追踪伏笔状态并提供发展建议。请以 JSON 格式输出。",
+                    conversation_history=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    user_id=user_id,
+                    timeout=45.0,
+                    policy=GenerationCallPolicy(
+                        stage_label="伏笔账本-章节提醒",
+                        progress_stage="foreshadowing_chapter_task",
+                        retry_attempts=2,
+                        json_repair_attempts=1,
+                    ),
                 )
-                json_start = content.find("{")
-                json_end = content.rfind("}") + 1
-                if json_start >= 0 and json_end > json_start:
-                    result = json.loads(content[json_start:json_end])
-                    return result
-            except json.JSONDecodeError:
-                pass
-
-            return self._create_basic_reminders(categorized, chapter_number)
+                return result.data
+            except Exception:
+                return self._create_basic_reminders(categorized, chapter_number)
 
     def _build_foreshadowing_context(self, categorized: Dict[str, List[Foreshadowing]]) -> str:
         """构建伏笔上下文"""

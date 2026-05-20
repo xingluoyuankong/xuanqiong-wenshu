@@ -13,6 +13,7 @@ from sqlalchemy import select, and_, desc
 
 from .llm_service import LLMService
 from .prompt_service import PromptService
+from .generation_call_service import GenerationCallPolicy, call_generation_json
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
 
 logger = logging.getLogger(__name__)
@@ -153,19 +154,21 @@ class ChapterReviewService:
 ```"""
 
         try:
-            response = await self.llm_service.get_llm_response(
+            result = await call_generation_json(
+                llm_service=self.llm_service,
                 system_prompt="你是一位资深网文编辑，擅长分析故事节奏。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 user_id=user_id,
-                timeout=120.0
+                timeout=120.0,
+                policy=GenerationCallPolicy(
+                    stage_label="周期回顾-节奏分析",
+                    progress_stage="periodic_review_pacing",
+                    retry_attempts=2,
+                    json_repair_attempts=1,
+                ),
             )
-            
-            content = sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(response)))
-            json_start = content.find("{")
-            json_end = content.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                return json.loads(content[json_start:json_end])
+            return result.data
         except Exception as e:
             logger.warning(f"节奏分析失败: {e}")
         
@@ -220,19 +223,21 @@ class ChapterReviewService:
 ```"""
 
         try:
-            response = await self.llm_service.get_llm_response(
+            result = await call_generation_json(
+                llm_service=self.llm_service,
                 system_prompt="你是一位资深网文编辑，擅长分析角色塑造。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 user_id=user_id,
-                timeout=120.0
+                timeout=120.0,
+                policy=GenerationCallPolicy(
+                    stage_label="周期回顾-角色发展分析",
+                    progress_stage="periodic_review_character",
+                    retry_attempts=2,
+                    json_repair_attempts=1,
+                ),
             )
-            
-            content = sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(response)))
-            json_start = content.find("{")
-            json_end = content.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                return json.loads(content[json_start:json_end])
+            return result.data
         except Exception as e:
             logger.warning(f"角色发展分析失败: {e}")
         
@@ -341,19 +346,21 @@ class ChapterReviewService:
 ```"""
 
         try:
-            response = await self.llm_service.get_llm_response(
+            result = await call_generation_json(
+                llm_service=self.llm_service,
                 system_prompt="你是一位细心的网文编辑，擅长发现一致性问题。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 user_id=user_id,
-                timeout=120.0
+                timeout=120.0,
+                policy=GenerationCallPolicy(
+                    stage_label="周期回顾-连续性检查",
+                    progress_stage="periodic_review_continuity",
+                    retry_attempts=2,
+                    json_repair_attempts=1,
+                ),
             )
-            
-            content = sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(response)))
-            json_start = content.find("{")
-            json_end = content.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                return json.loads(content[json_start:json_end])
+            return result.data
         except Exception as e:
             logger.warning(f"一致性检查失败: {e}")
         
@@ -492,19 +499,21 @@ class ChapterReviewService:
 ```"""
 
             try:
-                response = await self.llm_service.get_llm_response(
+                result = await call_generation_json(
+                    llm_service=self.llm_service,
                     system_prompt="你是一位资深网文策划，擅长根据反馈调整创作计划。",
                     conversation_history=[{"role": "user", "content": prompt}],
                     temperature=0.5,
                     user_id=user_id,
-                    timeout=120.0
+                    timeout=120.0,
+                    policy=GenerationCallPolicy(
+                        stage_label="周期回顾-调整计划",
+                        progress_stage="periodic_review_adjustment_plan",
+                        retry_attempts=2,
+                        json_repair_attempts=1,
+                    ),
                 )
-
-                content = sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(response)))
-                json_start = content.find("{")
-                json_end = content.rfind("}") + 1
-                if json_start >= 0 and json_end > json_start:
-                    return json.loads(content[json_start:json_end])
+                return result.data
             except Exception as e:
                 logger.warning(f"生成调整计划失败: {e}")
 

@@ -663,14 +663,15 @@ class LongformContextService:
         }
         compact_json = json.dumps(payload, ensure_ascii=False, indent=2)
         return (
-            "你正在写一部长篇/百万字项目。本节是写前长期上下文包，必须作为约束使用，不要照抄成正文。\n"
+            "你正在写一个需要跨章节连续的小说项目；无论篇幅长短，本节写前长期上下文包都必须作为约束使用，不要照抄成正文。\n"
             "核心目标：跨章节、跨卷、跨剧情线保持连续；角色、伏笔、线索、时间线、势力和知识边界都要闭环。\n\n"
             f"{compact_json}\n\n"
             "[执行要求]\n"
             "- 开篇承接上一章和长期账本，不只承接相邻章节。\n"
             "- 正文必须让角色状态、物品、伤势、知识边界、势力立场与前文一致。\n"
             "- 本章新增角色必须有层级、归属、目标、信息边界和后续去向；禁止凭空出现又消失。\n"
-            "- 伏笔处理顺序：到期回收 > 逾期补偿 > 临近强化 > 本章新埋。未回收时必须在正文里给读者可感知的强化。"
+            "- 当角色池低于目标规模时，优先安排阶段配角、势力成员或功能性路人承担明确职责；新增后必须进入角色/势力/知识边界账本。\n"
+            "- 伏笔处理顺序：到期回收 > 逾期补偿 > 临近强化 > 本章新埋。回收必须写出因果揭示和后果，不得只提关键词。"
         )
 
     @staticmethod
@@ -720,12 +721,45 @@ class LongformContextService:
                 )
 
         unresolved_due: List[Dict[str, Any]] = []
+        payoff_signal_words = (
+            "揭开",
+            "真相",
+            "原来",
+            "证据",
+            "兑现",
+            "回收",
+            "解释",
+            "指向",
+            "导致",
+            "因此",
+            "代价",
+            "暴露",
+            "确认",
+            "证实",
+        )
         for item in package.foreshadowing_task.must_resolve:
             keywords = [str(value).strip() for value in item.get("keywords") or [] if str(value).strip()]
             if not keywords:
                 keywords = [str(item.get("name") or "").strip(), str(item.get("content") or "").strip()[:12]]
             hit = any(keyword and keyword in text for keyword in keywords if len(keyword) >= 2)
-            if hit:
+            payoff_signal_hit = any(word in text for word in payoff_signal_words)
+            if hit and payoff_signal_hit:
+                continue
+            if hit and not payoff_signal_hit:
+                warnings.append(
+                    {
+                        "code": "due_foreshadowing_payoff_weak",
+                        "message": "到期伏笔虽然被提到，但缺少揭示、兑现或后果，容易像没有真正回收。",
+                        "foreshadowing": item.get("name") or item.get("id"),
+                    }
+                )
+                patch_suggestions.append(
+                    {
+                        "code": "strengthen_payoff_patch",
+                        "target": item.get("name") or item.get("id"),
+                        "suggestion": "保留当前正文，只在命中伏笔的场景附近补1-2段：写清它揭开了什么、改变了谁的判断、带来什么代价或新压力。",
+                    }
+                )
                 continue
             unresolved_due.append(item)
             warning = {

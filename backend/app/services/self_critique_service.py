@@ -10,6 +10,7 @@ import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text
 from .llm_service import LLMService
 from .prompt_service import PromptService
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
@@ -135,7 +136,11 @@ class SelfCritiqueService:
     ]
     DIMENSION_ENUM_MAP: Dict[str, CritiqueDimension] = {dimension.value: dimension for dimension in CritiqueDimension}
     EXECUTION_REQUIREMENT_LIMIT = 10
-    MAX_STAGEWIDE_REWRITES_PER_ITERATION = 1
+    # Automatic optimization must preserve continuity. Whole-chapter candidates
+    # are kept behind an explicit/manual path; normal generation uses anchored
+    # local patches and reports deferred broad fixes instead of silently
+    # replacing the chapter.
+    MAX_STAGEWIDE_REWRITES_PER_ITERATION = 0
     MAX_DEFERRED_STAGE_DRAIN_ITERATIONS = 1
     STAGEWIDE_SAFETY_DIMENSIONS: List[CritiqueDimension] = [
         CritiqueDimension.CONTINUITY,
@@ -680,18 +685,25 @@ class SelfCritiqueService:
   "summary": "一句话总结"
 }}"""
         try:
-            response = await self.llm_service.get_llm_response(
+            json_result = await call_generation_json(
+                llm_service=self.llm_service,
                 system_prompt=f"你是一位专注于{stage_name}阶段审查的严格长篇小说编辑。请聚合输出问题，避免拆成多次独立诊断。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.2,
                 user_id=user_id,
                 timeout=180.0,
+                policy=GenerationCallPolicy(
+                    stage_label=f"{stage_name} 聚合诊断",
+                    progress_stage="diagnose_once",
+                    retry_attempts=2,
+                    response_format="json_object",
+                    max_tokens=2600,
+                    retry_same_model_once=True,
+                    json_repair_attempts=1,
+                ),
             )
-            content = sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(response)))
-            json_start = content.find("{")
-            json_end = content.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                result = json.loads(content[json_start:json_end])
+            result = json_result.data
+            if result:
                 issues = []
                 for issue in result.get("issues", []) or []:
                     if not isinstance(issue, dict):
@@ -1485,15 +1497,23 @@ class SelfCritiqueService:
 {length_guidance}
 7. 不要为了修文新增无关设定、无关角色或跳出当前 POV 的解释性旁白。"""
         try:
-            response = await self.llm_service.get_llm_response(
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
                 system_prompt="你是一位擅长整章强修的白金网文作者，能在不跑偏主线的前提下重构问题段落并保留连载张力。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.45,
                 user_id=user_id,
                 timeout=240.0,
-                retry_same_model_once=False,
+                policy=GenerationCallPolicy(
+                    stage_label=f"{strategy.get('label', '强修')}候选补丁",
+                    progress_stage="optimize_content",
+                    retry_attempts=1,
+                    response_format=None,
+                    max_tokens=12000,
+                    retry_same_model_once=False,
+                ),
             )
-            revised = remove_think_tags(response).strip()
+            revised = remove_think_tags(text_result.text).strip()
             failure_reason = self._stagewide_revision_guard_failure_reason(
                 chapter_content,
                 revised,
@@ -1575,15 +1595,23 @@ class SelfCritiqueService:
 7. 如果同一事件、线索、对话或发现动作在片段里出现了两个版本，只保留一个正式版本，删掉被废弃版本，不要并排保留。
 8. 如果人物在前文已经确认某个事实，本次片段不得再写成“第一次发现/第一次核对/第一次得知”。"""
         try:
-            response = await self.llm_service.get_llm_response(
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
                 system_prompt="你是一位擅长局部修文的白金网文作者，能在不跑偏剧情的前提下只重写必要片段。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.55,
                 user_id=user_id,
                 timeout=180.0,
-                retry_same_model_once=False,
+                policy=GenerationCallPolicy(
+                    stage_label=f"{strategy_label}局部补丁",
+                    progress_stage="optimize_content",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=5000,
+                    retry_same_model_once=False,
+                ),
             )
-            localized = remove_think_tags(response).strip()
+            localized = remove_think_tags(text_result.text).strip()
             if not localized:
                 return chapter_content
             failure_reason = self._local_cohesion_failure_reason(plan, localized)
@@ -2130,18 +2158,24 @@ class SelfCritiqueService:
   "pass": true
 }}"""
             try:
-                response = await self.llm_service.get_llm_response(
+                json_result = await call_generation_json(
+                    llm_service=self.llm_service,
                     system_prompt="你是一位快速审稿编辑，请简洁指出最关键的问题。",
                     conversation_history=[{"role": "user", "content": prompt}],
                     temperature=0.2,
                     user_id=user_id,
                     timeout=60.0,
+                    policy=GenerationCallPolicy(
+                        stage_label="快速质量复核",
+                        progress_stage="review",
+                        retry_attempts=2,
+                        response_format="json_object",
+                        max_tokens=1200,
+                        retry_same_model_once=True,
+                        json_repair_attempts=1,
+                    ),
                 )
-                content = sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(response)))
-                json_start = content.find("{")
-                json_end = content.rfind("}") + 1
-                if json_start >= 0 and json_end > json_start:
-                    return json.loads(content[json_start:json_end])
+                return json_result.data
             except Exception as exc:
                 logger.warning("Quick critique failed: %s", exc)
             return {"quick_score": 70, "critical_issues": [], "ai_words_found": [], "has_hook": True, "pass": True}

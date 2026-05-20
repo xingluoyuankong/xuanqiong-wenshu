@@ -1,11 +1,5 @@
 <template>
   <div>
-    <div
-      v-if="sidebarOpen"
-      class="fixed inset-0 z-40 bg-slate-950/18 backdrop-blur-sm lg:hidden"
-      @click="$emit('closeSidebar')"
-    ></div>
-
     <aside
       :class="[
         'wd-sidebar',
@@ -16,9 +10,10 @@
         <div class="wd-sidebar__head">
           <div>
             <p class="wd-section-label">项目面板</p>
-            <h2 class="wd-section-title">当前章节操作</h2>
+            <h2 class="wd-section-title">章节导航与故事账本</h2>
           </div>
           <button type="button" class="wd-mini-btn lg:hidden" @click="$emit('closeSidebar')">
+            <X class="wd-btn-icon" aria-hidden="true" />
             {{ closeLabel }}
           </button>
         </div>
@@ -58,6 +53,7 @@
             </p>
           </div>
           <button type="button" class="wd-mini-btn wd-mini-btn--primary" @click="$emit('selectChapter', workspaceSummary.next_chapter_to_generate)">
+            <LocateFixed class="wd-btn-icon" aria-hidden="true" />
             定位到该章
           </button>
         </div>
@@ -94,22 +90,24 @@
 
           <div class="wd-current-actions">
             <div class="wd-current-actions__summary">
-              <p class="wd-current-actions__label">主操作已收口到顶部</p>
+            <p class="wd-current-actions__label">主命令栏负责生成/确认</p>
               <p class="wd-current-card__hint">{{ currentActionGuidance }}</p>
             </div>
             <button
               type="button"
-              class="wd-mini-btn wd-mini-btn--accent"
-              @click="$emit('editChapter', selectedOutline)"
-            >
-              编辑当前大纲
-            </button>
+            class="wd-mini-btn wd-mini-btn--accent"
+            @click="$emit('editChapter', selectedOutline)"
+          >
+            <Pencil class="wd-btn-icon" aria-hidden="true" />
+            编辑当前大纲
+          </button>
             <button
               v-if="canDeleteSelectedChapter"
               type="button"
               class="wd-mini-btn wd-mini-btn--danger"
               @click="handleDeleteCurrentChapter"
             >
+              <Trash2 class="wd-btn-icon" aria-hidden="true" />
               删除当前章
             </button>
           </div>
@@ -126,6 +124,7 @@
             :disabled="isGeneratingOutline"
             @click="$emit('generateOutline')"
           >
+            <FilePlus class="wd-btn-icon" aria-hidden="true" />
             {{ isGeneratingOutline ? '正在生成大纲...' : '生成后续大纲' }}
           </button>
         </div>
@@ -136,6 +135,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { FilePlus, LocateFixed, Pencil, Trash2, X } from 'lucide-vue-next'
 import { globalAlert } from '@/composables/useAlert'
 import type { ChapterOutline, NovelProject, WorkspaceSummary } from '@/api/novel'
 import { resolveChapterActionDecision } from '@/utils/chapterGeneration'
@@ -222,7 +222,7 @@ const currentActionGuidance = computed(() => {
   if (decision.mode === 'disabled') {
     return '当前章暂时没有可执行的主动作，请先按顶部提示推进或切换章节。'
   }
-  return `当前章的主动作已经收口到顶部命令栏：${decision.label}。`
+  return `主操作已收口到顶部命令栏：${decision.label}。`
 })
 
 const statusText = (chapterNumber: number) => {
@@ -299,18 +299,22 @@ async function handleDeleteCurrentChapter() {
 
 @media (max-width: 1023px) {
   .wd-sidebar {
-    position: fixed;
-    left: 14px;
-    top: 102px;
-    bottom: 14px;
-    width: min(24rem, calc(100vw - 24px));
-    z-index: 50;
-    transform: translateX(calc(-100% - 18px));
-    transition: transform 0.24s ease, opacity 0.2s ease;
+    position: relative;
+    width: 100%;
+    flex-basis: auto;
+    transform: none;
+    transition: opacity 0.2s ease;
   }
 
   .wd-sidebar--open {
-    transform: translateX(0);
+    width: 100%;
+    flex-basis: auto;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .wd-sidebar--closed {
+    display: none;
   }
 }
 
@@ -322,7 +326,7 @@ async function handleDeleteCurrentChapter() {
   flex-direction: column;
   gap: 10px;
   padding: 10px;
-  border-radius: 20px;
+  border-radius: 8px;
   background: linear-gradient(180deg, rgba(252, 254, 255, 0.98), rgba(241, 247, 255, 0.96));
   border: 1px solid rgba(156, 183, 220, 0.26);
   box-shadow: 0 24px 48px rgba(92, 130, 182, 0.16);
@@ -361,7 +365,7 @@ async function handleDeleteCurrentChapter() {
 .wd-story-card,
 .wd-current-card,
 .wd-callout {
-  border-radius: 18px;
+  border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(255, 255, 255, 0.92);
   padding: 14px;
@@ -406,7 +410,7 @@ async function handleDeleteCurrentChapter() {
 .wd-story-stats div {
   display: grid;
   gap: 4px;
-  border-radius: 14px;
+  border-radius: 8px;
   background: #f8fafc;
   padding: 10px;
   text-align: center;
@@ -520,7 +524,7 @@ async function handleDeleteCurrentChapter() {
   display: grid;
   gap: 4px;
   padding: 12px 12px 10px;
-  border-radius: 16px;
+  border-radius: 8px;
   background: #f8fafc;
   border: 1px solid rgba(148, 163, 184, 0.16);
 }
@@ -563,7 +567,7 @@ async function handleDeleteCurrentChapter() {
 }
 
 .wd-empty {
-  border-radius: 18px;
+  border-radius: 8px;
   border: 1px dashed rgba(148, 163, 184, 0.34);
   padding: 18px 14px;
   color: #64748b;
@@ -576,15 +580,22 @@ async function handleDeleteCurrentChapter() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 7px;
   min-height: 42px;
   padding: 0 15px;
-  border-radius: 14px;
+  border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.24);
   background: #fff;
   color: #334155;
   font-size: 0.88rem;
   font-weight: 850;
   cursor: pointer;
+}
+
+.wd-btn-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
 }
 
 .wd-mini-btn:disabled,

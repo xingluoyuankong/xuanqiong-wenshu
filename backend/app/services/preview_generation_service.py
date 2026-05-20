@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .llm_service import LLMService
 from .prompt_service import PromptService
+from .generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
 
 logger = logging.getLogger(__name__)
@@ -91,21 +92,26 @@ class PreviewGenerationService:
 ```"""
 
         try:
-            response = await self.llm_service.get_llm_response(
+            json_result = await call_generation_json(
+                llm_service=self.llm_service,
                 system_prompt="你是一位资深网文作者，擅长规划章节结构。请严格按照 JSON 格式输出。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.7,
                 user_id=user_id,
-                timeout=120.0
+                timeout=120.0,
+                policy=GenerationCallPolicy(
+                    stage_label="章节预演规划",
+                    progress_stage="generate_mission",
+                    retry_attempts=2,
+                    response_format="json_object",
+                    max_tokens=2600,
+                    retry_same_model_once=True,
+                    json_repair_attempts=1,
+                ),
             )
-            
-            content = sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(response)))
-            json_start = content.find("{")
-            json_end = content.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                result = json.loads(content[json_start:json_end])
-                result["status"] = "success"
-                return result
+            result = dict(json_result.data)
+            result["status"] = "success"
+            return result
         except Exception as e:
             logger.warning(f"生成章节预览失败: {e}")
         
@@ -175,19 +181,24 @@ class PreviewGenerationService:
 ```"""
 
         try:
-            response = await self.llm_service.get_llm_response(
+            json_result = await call_generation_json(
+                llm_service=self.llm_service,
                 system_prompt="你是一位资深网文编辑，擅长评估章节结构。请严格按照 JSON 格式输出。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 user_id=user_id,
-                timeout=90.0
+                timeout=90.0,
+                policy=GenerationCallPolicy(
+                    stage_label="章节预演评估",
+                    progress_stage="review",
+                    retry_attempts=2,
+                    response_format="json_object",
+                    max_tokens=2000,
+                    retry_same_model_once=True,
+                    json_repair_attempts=1,
+                ),
             )
-            
-            content = sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(response)))
-            json_start = content.find("{")
-            json_end = content.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                return json.loads(content[json_start:json_end])
+            return json_result.data
         except Exception as e:
             logger.warning(f"评估章节预览失败: {e}")
         
@@ -267,16 +278,24 @@ class PreviewGenerationService:
         try:
             # 根据目标字数计算 max_tokens（中文约 1.5 字/token，留出余量）
             max_tokens = max(4000, int(target_word_count * 1.8))
-            response = await self.llm_service.get_llm_response(
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
                 system_prompt="你是一位资深网文作者，文笔流畅，擅长写出让读者欲罢不能的章节。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.8,
                 user_id=user_id,
                 timeout=180.0,
-                max_tokens=max_tokens
+                policy=GenerationCallPolicy(
+                    stage_label="预演扩写完整章节",
+                    progress_stage="generate_variants",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=max_tokens,
+                    retry_same_model_once=True,
+                ),
             )
             
-            cleaned = remove_think_tags(response) if response else ""
+            cleaned = remove_think_tags(text_result.text) if text_result.text else ""
             return cleaned.strip()
         except Exception as e:
             logger.error(f"扩写章节失败: {e}")

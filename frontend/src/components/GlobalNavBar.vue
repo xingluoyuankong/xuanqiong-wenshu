@@ -1,5 +1,5 @@
 <template>
-  <header class="global-nav-shell xq-topbar xq-topbar--global">
+  <header :class="['global-nav-shell xq-topbar xq-topbar--global', { 'global-nav-shell--writing': isWritingDeskRoute }]">
     <div class="global-nav-main">
       <div class="left-actions">
         <button v-if="canGoBack" class="nav-btn" @click="goBack">返回</button>
@@ -105,7 +105,12 @@ const taskUiModel = computed(() => buildChapterTaskUiModel(currentTaskRuntime.va
 }))
 
 const globalTaskVisible = computed(() =>
-  Boolean(currentProject.value?.id && currentTaskChapter.value?.chapter_number && isTrackableTask(currentTaskChapter.value, currentTaskRuntime.value))
+  Boolean(
+    !isWritingDeskRoute.value &&
+    currentProject.value?.id &&
+    currentTaskChapter.value?.chapter_number &&
+    isTrackableTask(currentTaskChapter.value, currentTaskRuntime.value)
+  )
 )
 
 const currentTaskProjectTitle = computed(() => currentProject.value?.title || '当前项目')
@@ -306,7 +311,7 @@ function openRuntimeLogs() {
   border: 0;
   cursor: pointer;
   font-weight: 700;
-  border-radius: 999px;
+  border-radius: 8px;
 }
 .brand { background: #111827; color: #fff; padding: 6px 12px; font-size: 0.86rem; }
 .nav-btn,
@@ -370,5 +375,19 @@ function openRuntimeLogs() {
 @media (max-width: 768px) {
   .global-nav-main { min-height: auto; padding: 10px 12px; align-items: flex-start; }
   .left-actions, .nav-links, .right-actions { flex-wrap: wrap; }
+  .global-nav-shell--writing .global-nav-main {
+    align-items: center;
+    min-height: 52px;
+    padding: 8px 10px;
+  }
+  .global-nav-shell--writing .nav-links {
+    display: none;
+  }
+  .global-nav-shell--writing .right-actions {
+    margin-left: auto;
+  }
+  .global-nav-shell--writing .continue-btn {
+    display: none;
+  }
 }
 </style>

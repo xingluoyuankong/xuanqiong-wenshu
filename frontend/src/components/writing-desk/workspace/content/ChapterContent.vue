@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="wc-shell">
     <section class="wc-topbar">
       <div class="wc-topbar__lead">
@@ -310,7 +310,7 @@ const applyOptimization = async () => {
 .wc-reader,
 .wc-dialog,
 .wc-result {
-  border-radius: 24px;
+  border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.16);
 }
 
@@ -388,7 +388,7 @@ const applyOptimization = async () => {
   gap: 3px;
   min-height: 78px;
   padding: 12px 14px;
-  border-radius: 22px;
+  border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
@@ -417,7 +417,6 @@ const applyOptimization = async () => {
 .wc-health-card--primary {
   border-color: rgba(37, 99, 235, 0.24);
   background:
-    radial-gradient(circle at 12% 16%, rgba(37, 99, 235, 0.16), transparent 36%),
     linear-gradient(180deg, rgba(239, 246, 255, 0.98), rgba(255, 255, 255, 0.9));
 }
 
@@ -513,7 +512,7 @@ const applyOptimization = async () => {
   gap: 6px;
   padding: 16px;
   text-align: left;
-  border-radius: 18px;
+  border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   background: rgba(248, 250, 252, 0.92);
 }

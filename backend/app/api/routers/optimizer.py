@@ -112,6 +112,26 @@ def _compact_len(text: str) -> int:
     return len("".join((text or "").split()))
 
 
+def _anchor_overlap_count(original_sample: str, optimized_content: str, *, chunk_size: int = 16) -> int:
+    sample = "".join((original_sample or "").split())
+    optimized = "".join((optimized_content or "").split())
+    if not sample or not optimized:
+        return 0
+    if len(sample) <= chunk_size:
+        return 1 if sample in optimized else 0
+    hits = 0
+    seen: set[str] = set()
+    step = max(8, chunk_size)
+    for start in range(0, max(1, len(sample) - chunk_size + 1), step):
+        chunk = sample[start:start + chunk_size]
+        if len(chunk) < chunk_size or chunk in seen:
+            continue
+        seen.add(chunk)
+        if chunk in optimized:
+            hits += 1
+    return hits
+
+
 def _build_nearby_outline_context(project: Any, chapter_number: int, *, radius: int = 2) -> list[Dict[str, Any]]:
     outlines = sorted(getattr(project, "outlines", []) or [], key=lambda item: item.chapter_number)
     payload: list[Dict[str, Any]] = []
@@ -180,6 +200,11 @@ def _continuity_guard_failure(original_content: str, optimized_content: str) -> 
     stripped = (optimized_content or "").strip()
     if stripped.startswith("{") and "optimized_content" in stripped[:300]:
         return "optimized content still looks like raw JSON"
+    if original_len >= 500:
+        opening_hits = _anchor_overlap_count(original_content[:360], optimized_content)
+        ending_hits = _anchor_overlap_count(original_content[-360:], optimized_content)
+        if opening_hits == 0 and ending_hits == 0:
+            return "optimized content lost both opening and ending continuity anchors"
     return None
 
 

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="wi-shell">
     <div class="wi-panel">
       <div class="wi-kicker">写作工作台</div>
@@ -32,9 +32,8 @@
 .wi-panel {
   width: min(720px, 100%);
   padding: 28px;
-  border-radius: 28px;
+  border-radius: 8px;
   background:
-    radial-gradient(circle at top right, rgba(37, 99, 235, 0.12), transparent 28%),
     rgba(255, 255, 255, 0.86);
   border: 1px solid rgba(148, 163, 184, 0.18);
   box-shadow: 0 24px 48px rgba(15, 23, 42, 0.06);
@@ -77,7 +76,7 @@
   display: grid;
   gap: 10px;
   padding: 16px;
-  border-radius: 20px;
+  border-radius: 8px;
   background: rgba(248, 250, 252, 0.96);
 }
 

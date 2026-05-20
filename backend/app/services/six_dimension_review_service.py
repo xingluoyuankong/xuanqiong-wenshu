@@ -12,6 +12,7 @@ from .constitution_service import ConstitutionService
 from .writer_persona_service import WriterPersonaService
 from .llm_service import LLMService
 from .prompt_service import PromptService
+from .generation_call_service import GenerationCallPolicy, call_generation_json
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
 
 logger = logging.getLogger(__name__)
@@ -138,15 +139,24 @@ class SixDimensionReviewService:
             )
 
             try:
-                response = await self.llm_service.generate(
-                    prompt=prompt,
+                result = await call_generation_json(
+                    llm_service=self.llm_service,
                     system_prompt=(
                         '你是一位严格的长篇连载小说总编审。'
                         '请从六个维度输出结构化 JSON，少而准地指出真正影响阅读和连载稳定性的问题。'
                     ),
+                    conversation_history=[{"role": "user", "content": prompt}],
+                    temperature=0.2,
                     user_id=user_id,
+                    timeout=120.0,
+                    policy=GenerationCallPolicy(
+                        stage_label="六维评审",
+                        progress_stage="six_dimension_review",
+                        retry_attempts=2,
+                        json_repair_attempts=1,
+                    ),
                 )
-                parsed = self._parse_response(response)
+                parsed = self._normalize_review_result(result.data)
                 if parsed:
                     return parsed
             except Exception as exc:

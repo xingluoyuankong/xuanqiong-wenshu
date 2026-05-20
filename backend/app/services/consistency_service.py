@@ -25,6 +25,7 @@ from ..models.memory_layer import CharacterState
 from ..models.novel import NovelBlueprint
 from ..models.project_memory import ProjectMemory
 from ..utils.json_utils import remove_think_tags, unwrap_markdown_json
+from .generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text
 from .llm_service import LLMService
 
 logger = logging.getLogger(__name__)
@@ -281,13 +282,24 @@ class ConsistencyService:
                 chapter_text=self._excerpt_chapter_for_check(chapter_text),
             )
             try:
-                response = await self.llm_service.generate(
-                    prompt=prompt,
-                    user_id=user_id,
-                    max_tokens=2000,
+                json_result = await call_generation_json(
+                    llm_service=self.llm_service,
+                    system_prompt="你是一位长篇小说连续性审校，必须只输出 JSON。",
+                    conversation_history=[{"role": "user", "content": prompt}],
                     temperature=0.2,
+                    user_id=user_id,
+                    timeout=120.0,
+                    policy=GenerationCallPolicy(
+                        stage_label="跨章节一致性检查",
+                        progress_stage="continuity_gate",
+                        retry_attempts=2,
+                        response_format="json_object",
+                        max_tokens=2200,
+                        retry_same_model_once=True,
+                        json_repair_attempts=1,
+                    ),
                 )
-                result = self._parse_check_response(response)
+                result = self._parse_check_response(json.dumps(json_result.data, ensure_ascii=False))
                 result.check_time_ms = int((time.time() - started_at) * 1000)
                 return result
             except Exception as exc:
@@ -365,13 +377,23 @@ class ConsistencyService:
 7. 必须把修复落到正文动作、证据或说法上，不要只抽象解释“这里存在问题”。
 """
         try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
-                user_id=user_id,
-                max_tokens=2500,
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
+                system_prompt="你是一位只做局部补丁的长篇小说连续性编辑。",
+                conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.35,
+                user_id=user_id,
+                timeout=150.0,
+                policy=GenerationCallPolicy(
+                    stage_label="局部一致性修复",
+                    progress_stage="consistency",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=2500,
+                    retry_same_model_once=True,
+                ),
             )
-            cleaned = remove_think_tags(response).strip() if response else ""
+            cleaned = remove_think_tags(text_result.text).strip() if text_result.text else ""
             if not cleaned:
                 return None
 
@@ -433,13 +455,23 @@ class ConsistencyService:
                 global_summary=self._truncate_text(context.get("global_summary"), 1200),
             )
             try:
-                response = await self.llm_service.generate(
-                    prompt=prompt,
-                    user_id=user_id,
-                    max_tokens=8000,
+                text_result = await call_generation_text(
+                    llm_service=self.llm_service,
+                    system_prompt="你是一位长篇小说修复编辑。默认只做必要补丁，保持既有剧情和连续性。",
+                    conversation_history=[{"role": "user", "content": prompt}],
                     temperature=0.5,
+                    user_id=user_id,
+                    timeout=240.0,
+                    policy=GenerationCallPolicy(
+                        stage_label="一致性补丁兜底",
+                        progress_stage="consistency",
+                        retry_attempts=2,
+                        response_format=None,
+                        max_tokens=8000,
+                        retry_same_model_once=True,
+                    ),
                 )
-                cleaned = remove_think_tags(response) if response else ""
+                cleaned = remove_think_tags(text_result.text) if text_result.text else ""
                 return cleaned.strip() if cleaned else None
             except Exception as exc:
                 logger.error("自动修复失败: %s", exc)

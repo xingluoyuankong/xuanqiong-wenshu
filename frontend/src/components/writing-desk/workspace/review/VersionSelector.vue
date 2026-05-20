@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="version-selector-shell">
     <section class="version-selector-head">
       <div>
@@ -458,7 +458,7 @@ watch(() => props.selectedVersionIndex, index => { void scrollCardIntoView(index
 .version-selector-list,
 .version-preview {
   border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 18px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.96);
   padding: 12px 14px;
 }
@@ -498,7 +498,7 @@ watch(() => props.selectedVersionIndex, index => { void scrollCardIntoView(index
 .version-selector-head__action {
   min-height: 40px;
   padding: 0 16px;
-  border-radius: 14px;
+  border-radius: 8px;
   font-size: 0.84rem;
   font-weight: 850;
 }
@@ -554,10 +554,9 @@ watch(() => props.selectedVersionIndex, index => { void scrollCardIntoView(index
   grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1.6fr);
   gap: 12px;
   padding: 14px;
-  border-radius: 26px;
+  border-radius: 8px;
   border: 1px solid rgba(99, 102, 241, 0.16);
   background:
-    radial-gradient(circle at 8% 16%, rgba(99, 102, 241, 0.16), transparent 30%),
     linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(245, 247, 255, 0.94));
   box-shadow: 0 18px 44px rgba(79, 70, 229, 0.08);
 }
@@ -593,7 +592,7 @@ watch(() => props.selectedVersionIndex, index => { void scrollCardIntoView(index
   gap: 2px;
   min-height: 72px;
   padding: 10px 12px;
-  border-radius: 20px;
+  border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   background: rgba(255, 255, 255, 0.78);
 }
@@ -705,7 +704,7 @@ watch(() => props.selectedVersionIndex, index => { void scrollCardIntoView(index
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
   padding: 8px 9px;
-  border-radius: 20px;
+  border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.94));
@@ -721,7 +720,6 @@ watch(() => props.selectedVersionIndex, index => { void scrollCardIntoView(index
 
 .version-card--selected {
   background:
-    radial-gradient(circle at 14% 16%, rgba(99, 102, 241, 0.16), transparent 34%),
     linear-gradient(180deg, #eef2ff, #ffffff);
   border-color: rgba(79, 70, 229, 0.34);
 }
@@ -847,7 +845,7 @@ watch(() => props.selectedVersionIndex, index => { void scrollCardIntoView(index
   min-height: 560px;
   max-height: 820px;
   overflow: auto;
-  border-radius: 16px;
+  border-radius: 8px;
   background: #f8fafc;
   padding: 18px 20px;
 }
@@ -867,7 +865,7 @@ watch(() => props.selectedVersionIndex, index => { void scrollCardIntoView(index
   margin-bottom: 14px;
   padding: 12px 14px;
   border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 14px;
+  border-radius: 8px;
   background: #fff;
 }
 
@@ -937,7 +935,7 @@ watch(() => props.selectedVersionIndex, index => { void scrollCardIntoView(index
   flex: 1;
   min-width: 0;
   padding: 8px 10px;
-  border-radius: 16px;
+  border-radius: 8px;
   background: #f8fafc;
 }
 
@@ -960,7 +958,7 @@ watch(() => props.selectedVersionIndex, index => { void scrollCardIntoView(index
 .version-preview__confirm {
   min-height: 42px;
   padding: 0 18px;
-  border-radius: 14px;
+  border-radius: 8px;
   font-size: 0.86rem;
   font-weight: 850;
   box-shadow: 0 14px 28px rgba(37, 99, 235, 0.18);

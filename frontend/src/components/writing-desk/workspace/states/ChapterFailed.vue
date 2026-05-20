@@ -1,4 +1,4 @@
-<!-- AIMETA P=生成失败_生成错误状态|R=错误提示_重试|NR=不含生成逻辑|E=component:ChapterFailed|X=internal|A=错误状态|D=vue|S=dom|RD=./README.ai -->
+﻿<!-- AIMETA P=生成失败_生成错误状态|R=错误提示_重试|NR=不含生成逻辑|E=component:ChapterFailed|X=internal|A=错误状态|D=vue|S=dom|RD=./README.ai -->
 <template>
   <div class="cf-shell">
     <section class="cf-panel">
@@ -126,10 +126,9 @@ const latestErrorEvent = computed(() => {
   display: grid;
   gap: 18px;
   padding: clamp(24px, 4vw, 36px);
-  border-radius: 34px;
+  border-radius: 8px;
   border: 1px solid rgba(248, 113, 113, 0.25);
   background:
-    radial-gradient(circle at 12% 12%, rgba(248, 113, 113, 0.18), transparent 30%),
     linear-gradient(135deg, rgba(255, 247, 247, 0.98), rgba(255, 255, 255, 0.94));
   box-shadow: 0 26px 72px rgba(127, 29, 29, 0.12);
 }
@@ -145,7 +144,7 @@ const latestErrorEvent = computed(() => {
 .cf-visual__ring {
   position: absolute;
   inset: 0;
-  border-radius: 24px;
+  border-radius: 8px;
   background: linear-gradient(135deg, #ef4444, #f97316);
   opacity: 0.14;
 }
@@ -156,7 +155,7 @@ const latestErrorEvent = computed(() => {
   height: 52px;
   display: grid;
   place-items: center;
-  border-radius: 18px;
+  border-radius: 8px;
   color: #b91c1c;
   background: #fff;
   font-size: 1.8rem;
@@ -201,7 +200,7 @@ const latestErrorEvent = computed(() => {
   display: grid;
   gap: 5px;
   padding: 14px;
-  border-radius: 20px;
+  border-radius: 8px;
   border: 1px solid rgba(248, 113, 113, 0.18);
   background: rgba(255, 255, 255, 0.72);
 }
@@ -223,7 +222,7 @@ const latestErrorEvent = computed(() => {
   justify-content: space-between;
   gap: 14px;
   padding: 14px 16px;
-  border-radius: 22px;
+  border-radius: 8px;
   border: 1px solid rgba(248, 113, 113, 0.2);
   background: linear-gradient(135deg, rgba(254, 242, 242, 0.96), rgba(255, 255, 255, 0.92));
 }
@@ -232,7 +231,7 @@ const latestErrorEvent = computed(() => {
   display: grid;
   gap: 12px;
   padding: 16px;
-  border-radius: 22px;
+  border-radius: 8px;
   border: 1px solid rgba(185, 28, 28, 0.18);
   background: rgba(255, 255, 255, 0.78);
 }
@@ -260,7 +259,7 @@ const latestErrorEvent = computed(() => {
   gap: 4px;
   min-width: 0;
   padding: 10px 12px;
-  border-radius: 14px;
+  border-radius: 8px;
   background: rgba(254, 242, 242, 0.72);
 }
 
@@ -289,7 +288,7 @@ const latestErrorEvent = computed(() => {
   max-height: 220px;
   margin: 10px 0 0;
   padding: 12px;
-  border-radius: 14px;
+  border-radius: 8px;
   background: #111827;
   color: #f9fafb;
   font-size: 0.76rem;

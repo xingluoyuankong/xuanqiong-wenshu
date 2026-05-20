@@ -67,12 +67,11 @@ from ...services.finalize_service import FinalizeService
 from ...services.foreshadowing_service import ForeshadowingService
 from ...services.clue_tracker_service import ClueTrackerService
 from ...services.knowledge_graph_service import KnowledgeGraphService
-from ...services.generation_call_service import GenerationCallPolicy, GenerationJSONDecodeError, call_generation_json
+from ...services.generation_call_service import GenerationCallPolicy, GenerationJSONDecodeError, call_generation_json, call_generation_text
 from ...services.enrichment_service import EnrichmentService
 from ...services.memory_layer_service import MemoryLayerService
-from ...utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
+from ...utils.json_utils import remove_think_tags, unwrap_markdown_json
 from ...services.pipeline_orchestrator import PipelineOrchestrator
-from .novels import _call_llm_with_stage_retries
 
 router = APIRouter(prefix="/api/writer", tags=["Writer"])
 logger = logging.getLogger(__name__)
@@ -723,6 +722,80 @@ def _validate_outline_item_executability(
         "payoff_window": payoff_window or None,
     }
     return not reasons, reasons, normalized
+
+
+OUTLINE_EXECUTION_METADATA_KEYS = (
+    "narrative_phase",
+    "chapter_role",
+    "suspense_hook",
+    "emotional_progression",
+    "character_focus",
+    "cast_delta",
+    "conflict_escalation",
+    "continuity_notes",
+    "foreshadowing",
+    "foreshadowing_tasks",
+    "payoff_window",
+)
+
+
+def _unwrap_outline_payload_root(payload: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    chapter_payload = payload.get("chapter")
+    if isinstance(chapter_payload, dict):
+        return {**payload, **chapter_payload}
+    return payload
+
+
+def _build_rewritten_outline_metadata(
+    *,
+    parsed_payload: Dict[str, Any],
+    existing_metadata: Optional[Dict[str, Any]],
+    chapter_no: int,
+    title: str,
+    summary: str,
+    direction: str,
+) -> Dict[str, Any]:
+    """Merge a rewritten outline back into the existing execution metadata."""
+
+    old_metadata = dict(existing_metadata or {})
+    parsed = _unwrap_outline_payload_root(parsed_payload)
+    merged_for_gate = {
+        **old_metadata,
+        **parsed,
+        "title": title,
+        "summary": summary,
+    }
+    valid, rejection_reasons, normalized = _validate_outline_item_executability(
+        merged_for_gate,
+        chapter_no=chapter_no,
+        summary_min_chars=120,
+        summary_max_chars=420,
+    )
+
+    metadata = dict(old_metadata)
+    for key in OUTLINE_EXECUTION_METADATA_KEYS:
+        value = normalized.get(key)
+        if value not in (None, "", [], {}):
+            metadata[key] = value
+
+    metadata["outline_quality"] = {
+        **(old_metadata.get("outline_quality") if isinstance(old_metadata.get("outline_quality"), dict) else {}),
+        "rewrite_executability_gate_passed": valid,
+        "rewrite_rejection_reasons": rejection_reasons,
+        "rewrite_checked_at": datetime.now(timezone.utc).isoformat(),
+    }
+    metadata["last_rewrite"] = {
+        "direction": direction,
+        "preserved_existing_metadata": bool(old_metadata),
+        "updated_fields": [
+            key
+            for key in OUTLINE_EXECUTION_METADATA_KEYS
+            if key in parsed and parsed.get(key) not in (None, "", [], {})
+        ],
+    }
+    return metadata
 
 
 def _truncate_text(text: Optional[str], limit: int) -> str:
@@ -1903,12 +1976,23 @@ async def evaluate_chapter(
             return await _load_project_schema(novel_service, project_id, current_user.id)
 
         with LLMService.daily_limit_scope(f"chapter_review_single:{project_id}:{request.chapter_number}:{current_user.id}"):
-            evaluation_raw = await llm_service.get_llm_response(
+            evaluation_result = await call_generation_text(
+                llm_service=llm_service,
                 system_prompt=eval_prompt,
                 conversation_history=[{"role": "user", "content": version_to_evaluate.content}],
                 temperature=0.3,
                 user_id=current_user.id,
+                timeout=180.0,
+                policy=GenerationCallPolicy(
+                    stage_label="单版本章节评审",
+                    progress_stage="review",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=4000,
+                    retry_same_model_once=True,
+                ),
             )
+            evaluation_raw = evaluation_result.text
         evaluation_text = remove_think_tags(evaluation_raw)
 
         if not evaluation_text or len(evaluation_text.strip()) == 0:
@@ -2060,13 +2144,23 @@ async def _evaluate_all_versions(
         )
 
         with LLMService.daily_limit_scope(f"chapter_review_all:{project_id}:{chapter_number}:{user_id}"):
-            evaluation_raw = await llm_service.get_llm_response(
+            evaluation_result = await call_generation_text(
+                llm_service=llm_service,
                 system_prompt=eval_prompt,
                 conversation_history=[{"role": "user", "content": eval_input_text}],
                 temperature=0.3,
                 user_id=user_id,
                 timeout=180.0,
+                policy=GenerationCallPolicy(
+                    stage_label="多版本章节评审",
+                    progress_stage="review",
+                    retry_attempts=2,
+                    response_format="json_object",
+                    max_tokens=6000,
+                    retry_same_model_once=True,
+                ),
             )
+            evaluation_raw = evaluation_result.text
         evaluation_text = remove_think_tags(evaluation_raw)
 
         if not evaluation_text or len(evaluation_text.strip()) == 0:
@@ -2194,12 +2288,18 @@ async def rewrite_chapter_outline(
     rewrite_prompt = await prompt_service.get_prompt("outline_rewrite")
     if not rewrite_prompt:
         rewrite_prompt = (
-            "你是顶级网文编辑，请在不改变主线剧情的前提下，重写章节标题与章节摘要。"
-            "要求：更抓人、更有冲突、更有悬念、可直接用于正文写作。"
-            "只输出 JSON：{\"title\":\"...\",\"summary\":\"...\"}"
+            "你是顶级网文编辑，请在不改变主线剧情的前提下，重写章节标题、章节摘要与执行字段。"
+            "要求：更抓人、更有冲突、更有悬念、可直接用于正文写作，并保留角色、伏笔和连续性承接。"
+            "只输出 JSON 对象。"
         )
 
     direction = (request.direction or "").strip() or "无额外方向"
+    existing_metadata = dict(getattr(outline, "metadata", None) or {})
+    metadata_context = (
+        json.dumps(existing_metadata, ensure_ascii=False, indent=2)
+        if existing_metadata
+        else "暂无执行 metadata"
+    )
     neighbor_lines = []
     for candidate in sorted(getattr(project, "outlines", []) or [], key=lambda item: item.chapter_number):
         if abs(candidate.chapter_number - request.chapter_number) <= 2 and candidate.chapter_number != request.chapter_number:
@@ -2224,12 +2324,18 @@ async def rewrite_chapter_outline(
 [相邻章节连续性锚点]
 {neighbor_context}
 
+[当前执行字段 metadata]
+{metadata_context}
+
 [硬性要求]
 1. 标题更有辨识度，建议 8-22 字。
 2. 摘要长度 160-360 字，必须包含：本章冲突、角色目标/阻碍、关键转折、章尾钩子。
 3. 保持与前后章节连续，不得胡乱跳剧情。
 4. 不要改变本章在前后两章之间承担的因果位置，不要新增无法承接的支线。
-5. 只输出 JSON，不要附加说明。
+5. 同步输出可执行字段：narrative_phase、chapter_role、suspense_hook、emotional_progression、character_focus、cast_delta、conflict_escalation、continuity_notes、foreshadowing、foreshadowing_tasks、payoff_window。
+6. cast_delta 要说明新增/回归/退出角色如何进入角色池、势力或功能路人规划；foreshadowing_tasks 要说明本章回收、强化、禁忘和可新增伏笔。
+7. 只输出 JSON，不要附加说明。格式：
+{{"title":"...","summary":"...","narrative_phase":"...","chapter_role":"...","suspense_hook":"...","emotional_progression":"...","character_focus":["..."],"cast_delta":{{"new":[],"returning":[],"exit_or_absent":[],"faction_roles":[]}},"conflict_escalation":["..."],"continuity_notes":["..."],"foreshadowing":{{"plant":[],"payoff":[]}},"foreshadowing_tasks":{{"plant":[],"reinforce":[],"payoff":[],"avoid_forgetting":[]}},"payoff_window":"..."}}
 """
 
     try:
@@ -2249,7 +2355,7 @@ async def rewrite_chapter_outline(
                     json_repair_attempts=1,
                 ),
             )
-        parsed = json_result.data
+        parsed = _unwrap_outline_payload_root(json_result.data)
 
         rewritten_title = str(parsed.get("title") or request.title).strip()
         rewritten_summary = str(parsed.get("summary") or request.summary).strip()
@@ -2260,6 +2366,14 @@ async def rewrite_chapter_outline(
 
         outline.title = rewritten_title
         outline.summary = rewritten_summary
+        outline.metadata = _build_rewritten_outline_metadata(
+            parsed_payload=parsed,
+            existing_metadata=existing_metadata,
+            chapter_no=request.chapter_number,
+            title=rewritten_title,
+            summary=rewritten_summary,
+            direction=direction,
+        )
         await session.commit()
     except GenerationJSONDecodeError as exc:
         logger.warning(
@@ -2447,25 +2561,28 @@ async def generate_chapters_outline(
 11. 代码会拒绝缺少 chapter_role / suspense_hook / conflict_escalation / continuity_notes 的空泛章节；请一次生成可直接进入正文写作的执行型大纲。
 """
 
-                response = await _call_llm_with_stage_retries(
-                    llm_service=llm_service,
-                    system_prompt=outline_prompt,
-                    conversation_history=[{"role": "user", "content": prompt_input}],
-                    temperature=0.7,
-                    user_id=current_user.id,
-                    allow_truncated_response=True,
-                    timeout=180.0,
-                    stage_label="章节大纲分批生成",
-                    retry_attempts=3,
-                )
-
-                cleaned = remove_think_tags(response)
-                normalized = unwrap_markdown_json(cleaned)
-                sanitized = sanitize_json_like_text(normalized)
                 try:
-                    data = json.loads(sanitized)
+                    json_result = await call_generation_json(
+                        llm_service=llm_service,
+                        system_prompt=outline_prompt,
+                        conversation_history=[{"role": "user", "content": prompt_input}],
+                        temperature=0.7,
+                        user_id=current_user.id,
+                        timeout=180.0,
+                        policy=GenerationCallPolicy(
+                            stage_label="章节大纲分批生成",
+                            progress_stage="outline_chapter_skeleton",
+                            retry_attempts=3,
+                            response_format="json_object",
+                            max_tokens=5000,
+                            allow_truncated_response=True,
+                            retry_same_model_once=True,
+                            json_repair_attempts=1,
+                        ),
+                    )
+                    data = json_result.data
                 except Exception as exc:
-                    logger.warning("大纲生成分批第 %s 次解析失败: %s", attempt + 1, exc)
+                    logger.warning("大纲生成分批第 %s 次生成/解析失败: %s", attempt + 1, exc)
                     continue
 
                 chapters_payload = []
