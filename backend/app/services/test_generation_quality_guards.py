@@ -2,6 +2,7 @@ import pytest
 
 from app.services.ai_review_service import AIReviewService, ReviewResult
 from app.services.enrichment_service import ENRICH_CHAPTER_PROMPT, ENRICH_DIALOGUE_PROMPT, ENRICH_SCENE_PROMPT, EnrichmentService
+from app.services.longform_context_service import CastPlan, ForeshadowingChapterTask, LongformContextPackage
 from app.services.pipeline_orchestrator import PipelineOrchestrator
 from app.services.self_critique_service import SelfCritiqueService
 
@@ -760,6 +761,37 @@ class TestGenerationQualityGuards:
         assert "[整章结构地图]" in review_input
         assert "推进标记" in review_input
         assert "静态段落" in review_input
+
+    def test_ai_review_mission_carries_longform_context_and_patch_rules(self):
+        package = LongformContextPackage(
+            project_id="project-1",
+            chapter_number=8,
+            prompt_text="previous chapter ends with the salt mark burning",
+            cast_plan=CastPlan(
+                target_character_count=18,
+                planned_character_count=12,
+                chapter_focus_names=["Lin Qi", "Archivist"],
+            ),
+            foreshadowing_task=ForeshadowingChapterTask(
+                must_resolve=[{"name": "door handle"}],
+                should_reinforce=[{"name": "salt mark"}],
+                avoid_forgetting=[{"name": "ledger swap"}],
+            ),
+            memory_digest={"recent": ["the rival knows only half the secret"]},
+            timeline_digest={"latest": ["chapter 7 night"]},
+        )
+
+        mission = PipelineOrchestrator._build_ai_review_mission(
+            chapter_mission={"chapter_purpose": "force a decision"},
+            longform_context=package,
+        )
+        checklist = AIReviewService._format_mission_checklist(mission)
+
+        assert mission["longform_review_context"]["cast_plan"]["chapter_focus_names"] == ["Lin Qi", "Archivist"]
+        assert any("局部锚点补丁" in rule for rule in mission["review_quality_rules"])
+        assert "Lin Qi" in checklist
+        assert "must_resolve=1" in checklist
+        assert "伏笔/线索账本" in checklist
 
     def test_story_quality_metrics_reject_all_description_sample(self):
         guard = PipelineOrchestrator._score_story_quality_candidate(
