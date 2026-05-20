@@ -2281,9 +2281,13 @@ class PipelineOrchestrator:
             )
 
         review_started_at = time.perf_counter()
+        review_chapter_mission = self._build_ai_review_mission(
+            chapter_mission=chapter_mission,
+            longform_context=longform_context,
+        )
         best_version_index, ai_review_result = await self._run_ai_review(
             versions=versions,
-            chapter_mission=chapter_mission,
+            chapter_mission=review_chapter_mission,
             user_id=user_id,
         )
         await mark_stage("ai_review", review_started_at, detail="AI 评审阶段完成")
@@ -5573,6 +5577,35 @@ class PipelineOrchestrator:
             "ai_candidate": ai_candidate,
             "fallback_candidate": fallback_candidate,
         }
+
+    @staticmethod
+    def _build_ai_review_mission(
+        *,
+        chapter_mission: Optional[dict],
+        longform_context: Optional[LongformContextPackage],
+    ) -> Optional[dict]:
+        if not isinstance(chapter_mission, dict) and not longform_context:
+            return None
+
+        review_mission = deepcopy(chapter_mission) if isinstance(chapter_mission, dict) else {}
+        review_mission.setdefault("review_quality_rules", [])
+        review_mission["review_quality_rules"] = list(review_mission.get("review_quality_rules") or []) + [
+            "候选稿必须承接前文角色状态、时间线、知识边界和章末压力。",
+            "必须检查本章伏笔/线索任务是否被看见、强化或回收，不能只按文风选稿。",
+            "如果候选稿需要修补，优先输出局部锚点补丁建议，不把优化阶段导向默认整章重写。",
+        ]
+
+        if longform_context:
+            optimizer_payload = longform_context.to_optimizer_payload(max_prompt_chars=3200)
+            review_mission["longform_review_context"] = {
+                "chapter_number": optimizer_payload.get("chapter_number"),
+                "prompt_digest": optimizer_payload.get("prompt_digest"),
+                "cast_plan": optimizer_payload.get("cast_plan"),
+                "foreshadowing_task": optimizer_payload.get("foreshadowing_task"),
+                "memory_digest": optimizer_payload.get("memory_digest"),
+                "timeline_digest": optimizer_payload.get("timeline_digest"),
+            }
+        return review_mission
 
     async def _run_ai_review(
         self,

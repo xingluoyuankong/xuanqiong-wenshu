@@ -155,6 +155,15 @@ def _review_context_text(value: Any, *, limit: int = 360) -> str:
     return f"{text[:limit].rstrip()}..."
 
 
+def _review_content_text(value: Any, *, limit: int = 50000) -> str:
+    if value is None:
+        return ""
+    text = str(value).replace("\r", "\n").strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit].rstrip()}..."
+
+
 def _review_context_real_summary(value: Any) -> str:
     text = _review_context_text(value, limit=420)
     if not text:
@@ -212,6 +221,192 @@ def _build_completed_chapter_review_context(
             }
         )
     return result
+
+
+def _review_context_list(value: Any, *, limit: int = 8) -> List[Any]:
+    if not value:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        items = list(value)
+    else:
+        items = [value]
+    normalized: List[Any] = []
+    for item in items[:limit]:
+        if isinstance(item, dict):
+            normalized.append(item)
+        else:
+            normalized.append(_review_context_text(item, limit=220))
+    return [item for item in normalized if item]
+
+
+def _review_context_dict(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if hasattr(value, "model_dump"):
+        try:
+            dumped = value.model_dump()
+            return dict(dumped) if isinstance(dumped, dict) else {}
+        except Exception:  # noqa: BLE001 - review context should degrade quietly.
+            return {}
+    if hasattr(value, "dict"):
+        try:
+            dumped = value.dict()
+            return dict(dumped) if isinstance(dumped, dict) else {}
+        except Exception:  # noqa: BLE001 - review context should degrade quietly.
+            return {}
+    return {}
+
+
+def _build_outline_review_payload(outline: Any) -> Dict[str, Any]:
+    metadata = _review_context_dict(_review_context_value(outline, "metadata", {}) or {})
+
+    def pick(key: str, default: Any = None) -> Any:
+        value = _review_context_value(outline, key, None)
+        if value not in (None, "", [], {}):
+            return value
+        return metadata.get(key, default)
+
+    return {
+        "chapter_number": int(_review_context_value(outline, "chapter_number", 0) or 0),
+        "title": _review_context_text(_review_context_value(outline, "title"), limit=100),
+        "summary": _review_context_text(_review_context_value(outline, "summary"), limit=520),
+        "chapter_role": _review_context_text(pick("chapter_role"), limit=260),
+        "suspense_hook": _review_context_text(pick("suspense_hook"), limit=220),
+        "emotional_progression": _review_context_text(pick("emotional_progression"), limit=220),
+        "character_focus": _review_context_list(pick("character_focus"), limit=8),
+        "cast_delta": _review_context_dict(pick("cast_delta", {})),
+        "conflict_escalation": _review_context_list(pick("conflict_escalation"), limit=8),
+        "continuity_notes": _review_context_list(pick("continuity_notes"), limit=8),
+        "foreshadowing_tasks": _review_context_dict(pick("foreshadowing_tasks", {})),
+        "payoff_window": _review_context_text(pick("payoff_window"), limit=180),
+    }
+
+
+def _build_blueprint_review_context(
+    project_schema: NovelProjectSchema,
+    current_chapter_number: int,
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    blueprint = getattr(project_schema, "blueprint", None)
+    if not blueprint:
+        return {
+            "title": "",
+            "genre": "",
+            "style": "",
+            "tone": "",
+            "world_setting": {},
+            "characters": [],
+            "nearby_outlines": [],
+        }, None
+
+    characters: List[Dict[str, Any]] = []
+    for raw in list(getattr(blueprint, "characters", []) or [])[:24]:
+        if not isinstance(raw, dict):
+            continue
+        characters.append(
+            {
+                "name": _review_context_text(raw.get("name"), limit=80),
+                "role": _review_context_text(raw.get("role") or raw.get("identity"), limit=120),
+                "personality": _review_context_text(raw.get("personality"), limit=220),
+                "motivation": _review_context_text(raw.get("motivation") or raw.get("goal"), limit=220),
+                "background": _review_context_text(raw.get("background"), limit=260),
+                "faction": _review_context_text(raw.get("faction") or raw.get("affiliation"), limit=120),
+            }
+        )
+
+    current_outline: Optional[Dict[str, Any]] = None
+    nearby_outlines: List[Dict[str, Any]] = []
+    for outline in list(getattr(blueprint, "chapter_outline", []) or []):
+        try:
+            number = int(_review_context_value(outline, "chapter_number", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        payload = _build_outline_review_payload(outline)
+        if number == current_chapter_number:
+            current_outline = payload
+        if current_chapter_number - 2 <= number <= current_chapter_number + 2:
+            nearby_outlines.append(payload)
+
+    context = {
+        "title": _review_context_text(getattr(blueprint, "title", ""), limit=100),
+        "genre": _review_context_text(getattr(blueprint, "genre", ""), limit=100),
+        "style": _review_context_text(getattr(blueprint, "style", ""), limit=160),
+        "tone": _review_context_text(getattr(blueprint, "tone", ""), limit=160),
+        "one_sentence_summary": _review_context_text(getattr(blueprint, "one_sentence_summary", ""), limit=260),
+        "full_synopsis": _review_context_text(getattr(blueprint, "full_synopsis", ""), limit=700),
+        "world_setting": _review_context_dict(getattr(blueprint, "world_setting", {}) or {}),
+        "characters": characters,
+        "nearby_outlines": nearby_outlines,
+        "foreshadowing_system": _review_context_list(getattr(blueprint, "foreshadowing_system", []) or [], limit=12),
+    }
+    return context, current_outline
+
+
+def _build_version_review_content_payload(version: Any, *, long_threshold: int = 5200) -> Dict[str, Any]:
+    content = _review_content_text(_review_context_value(version, "content"), limit=50000)
+    total_chars = len(content)
+    payload: Dict[str, Any] = {
+        "version_id": _review_context_value(version, "id"),
+        "style": _review_context_text(
+            _review_context_value(version, "version_label")
+            or _review_context_value(version, "style")
+            or "draft",
+            limit=100,
+        ),
+        "word_count": int(_review_context_value(version, "word_count", 0) or 0),
+        "total_chars": total_chars,
+        "metadata": _review_context_dict(_review_context_value(version, "metadata", {}) or {}),
+    }
+    if total_chars <= long_threshold:
+        payload["content"] = content
+    else:
+        middle_start = max(total_chars // 2 - 900, 0)
+        head = content[:2200]
+        middle = content[middle_start: middle_start + 1800]
+        tail = content[-1800:]
+        payload["content_excerpt"] = {
+            "head": head,
+            "middle": middle,
+            "tail": tail,
+            "note": "Long chapter excerpt keeps head/middle/tail so the reviewer can judge continuity, density and ending pressure.",
+        }
+        payload["content"] = f"[head]\n{head}\n\n[middle]\n{middle}\n\n[tail]\n{tail}"
+    return payload
+
+
+def _build_single_chapter_evaluation_input(
+    project_schema: NovelProjectSchema,
+    chapter: Chapter,
+    version: ChapterVersion,
+    chapter_number: int,
+) -> str:
+    blueprint_context, current_outline = _build_blueprint_review_context(project_schema, chapter_number)
+    chapter_title = (
+        (current_outline or {}).get("title")
+        or _review_context_text(_review_context_value(chapter, "title"), limit=100)
+        or f"Chapter {chapter_number}"
+    )
+    payload = {
+        "review_mode": "single_version_cross_chapter_quality_review",
+        "review_rules": [
+            "Judge this as a formal candidate chapter, not an isolated prose fragment.",
+            "Use completed_chapters ending anchors, current_outline, character_focus, cast_delta and foreshadowing_tasks to check cross-chapter continuity.",
+            "Prioritize event density, dialogue that changes the situation, visible consequences, character state changes and ending pressure.",
+            "If the chapter needs repair, propose local anchored patches first; do not recommend whole-chapter rewrite unless the user explicitly confirms a structural rewrite.",
+        ],
+        "novel_blueprint": blueprint_context,
+        "completed_chapters": _build_completed_chapter_review_context(
+            list(getattr(project_schema, "chapters", []) or []),
+            chapter_number,
+        ),
+        "current_chapter_outline": current_outline,
+        "content_to_evaluate": {
+            "chapter_number": chapter_number,
+            "chapter_title": chapter_title,
+            "generation_status": str(_review_context_value(chapter, "generation_status", "") or ""),
+            "version": _build_version_review_content_payload(version),
+        },
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 async def _resolve_chapter_version(
@@ -2368,10 +2563,17 @@ async def evaluate_chapter(
             return await _load_project_schema(novel_service, project_id, current_user.id)
 
         with LLMService.daily_limit_scope(f"chapter_review_single:{project_id}:{request.chapter_number}:{current_user.id}"):
+            project_schema = await novel_service._serialize_project(project)
+            eval_input_text = _build_single_chapter_evaluation_input(
+                project_schema,
+                chapter,
+                version_to_evaluate,
+                request.chapter_number,
+            )
             evaluation_result = await call_generation_text(
                 llm_service=llm_service,
                 system_prompt=eval_prompt,
-                conversation_history=[{"role": "user", "content": version_to_evaluate.content}],
+                conversation_history=[{"role": "user", "content": eval_input_text}],
                 temperature=0.3,
                 user_id=current_user.id,
                 timeout=180.0,
@@ -2468,6 +2670,7 @@ async def _evaluate_all_versions(
 
         # 构建多版本评审输入
         project_schema = await novel_service._serialize_project(project)
+        blueprint_review_context, current_outline = _build_blueprint_review_context(project_schema, chapter_number)
 
         # 构建蓝图上下文
         blueprint_context = {
@@ -2501,19 +2704,24 @@ async def _evaluate_all_versions(
                     })
 
         # 构建待评估内容
+        blueprint_context = blueprint_review_context
+        current_outline_title = (current_outline or {}).get("title") or current_outline_title
+
         versions_content = []
         version_indices = []  # 记录有效版本的编号
         for idx, version in valid_versions:
-            content = version.content
+            version_payload = _build_version_review_content_payload(version, long_threshold=3000)
+            content = version_payload["content"]
             # 截断过长的内容
             if len(content) > 3000:
                 content = content[:1800] + "\n...\n" + content[-1200:]
             version_number = idx + 1  # 版本编号从1开始
-            versions_content.append({
+            version_payload.update({
                 "version_index": version_number,
                 "style": version.version_label or f"版本{version_number}",
                 "content": content,
             })
+            versions_content.append(version_payload)
             version_indices.append(version_number)
 
         # 构建评审输入
@@ -2523,6 +2731,7 @@ async def _evaluate_all_versions(
                 list(getattr(project_schema, "chapters", []) or []),
                 chapter_number,
             ),
+            "current_chapter_outline": current_outline,
             "content_to_evaluate": {
                 "chapter_title": current_outline_title or f"第{chapter_number}章",
                 "total_versions": len(versions_content),  # 明确告诉AI有多少个版本
