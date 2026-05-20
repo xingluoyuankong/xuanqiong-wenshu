@@ -3,6 +3,7 @@ import pytest
 from app.services.ai_review_service import AIReviewService, ReviewResult
 from app.services.enrichment_service import ENRICH_CHAPTER_PROMPT, ENRICH_DIALOGUE_PROMPT, ENRICH_SCENE_PROMPT
 from app.services.pipeline_orchestrator import PipelineOrchestrator
+from app.services.self_critique_service import SelfCritiqueService
 
 
 class TestGenerationQualityGuards:
@@ -332,6 +333,37 @@ class TestGenerationQualityGuards:
 
         assert gate["passed"] is True
         assert "scene_fulfillment_weak" not in {item["code"] for item in gate["blockers"]}
+        assert gate["quality_issue_summary"]["passed"] is True
+
+    def test_structural_quality_gate_does_not_block_progression_keyword_miss_when_strong_signals_pass(self):
+        gate = PipelineOrchestrator._build_structural_quality_gate(
+            {
+                "self_critique_after_consistency": {
+                    "final_score": 78.3,
+                    "critical_count": 0,
+                    "major_count": 6,
+                },
+                "consistency_repair": {
+                    "is_consistent": True,
+                    "post_fix_check": {"violations": []},
+                },
+                "story_progression_guard": {
+                    "word_count": 3009,
+                    "dialogue_marker_count": 38,
+                    "mission_hit_count": 0,
+                    "expected_dialogue": True,
+                    "static_description_risk": False,
+                    "dialogue_changes_state": True,
+                    "ending_pressure_passed": True,
+                    "scene_count": 4,
+                    "scene_fulfillment_rate": 0.0,
+                },
+            }
+        )
+
+        blocker_codes = {item["code"] for item in gate["blockers"]}
+        assert "chapter_progression_weak" not in blocker_codes
+        assert gate["quality_issue_summary"]["passed"] is True
 
     def test_structural_quality_gate_recomputes_story_progression_after_enrichment_like_revision(self):
         chapter_mission = {
@@ -683,6 +715,44 @@ def test_specialized_enrichment_prompts_do_not_reopen_description_padding():
     assert "行动、对话、后果驱动" in ENRICH_SCENE_PROMPT
     assert "不能独立成段" in ENRICH_SCENE_PROMPT
     assert "明确后果" in ENRICH_SCENE_PROMPT
+
+
+def test_self_critique_keeps_major_only_revision_local_after_content_changes():
+    service = SelfCritiqueService(db=None, llm_service=None, prompt_service=None)
+
+    should_stagewide = service._should_attempt_stagewide_rewrite(
+        before_counts={"critical": 0, "major": 5, "minor": 2},
+        strategy_issues=[
+            {"severity": "major", "dimension": "scene", "problem": "节奏拖沓"},
+            {"severity": "major", "dimension": "writing", "problem": "表达重复"},
+        ],
+        best_content_changed=True,
+    )
+
+    assert should_stagewide is False
+    assert service._should_attempt_stagewide_rewrite(
+        before_counts={"critical": 0, "major": 8, "minor": 2},
+        strategy_issues=[
+            {"severity": "major", "dimension": "scene", "problem": "节奏拖沓"},
+            {"severity": "major", "dimension": "writing", "problem": "表达重复"},
+        ],
+        best_content_changed=False,
+    ) is False
+
+
+def test_self_critique_allows_stagewide_for_critical_or_residue():
+    service = SelfCritiqueService(db=None, llm_service=None, prompt_service=None)
+
+    assert service._should_attempt_stagewide_rewrite(
+        before_counts={"critical": 1, "major": 0, "minor": 0},
+        strategy_issues=[{"severity": "critical", "dimension": "logic", "problem": "因果断裂"}],
+        best_content_changed=False,
+    ) is True
+    assert service._should_attempt_stagewide_rewrite(
+        before_counts={"critical": 0, "major": 1, "minor": 0},
+        strategy_issues=[{"severity": "major", "dimension": "continuity", "problem": "时间线重复回卷"}],
+        best_content_changed=True,
+    ) is True
 
 
 def test_quality_issue_summary_exposes_frontend_ready_labels():

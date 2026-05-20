@@ -238,14 +238,14 @@ def test_self_critique_structure_rewrite_collapses_to_contiguous_span_for_residu
     issues = [
         {
             "dimension": "continuity",
-            "severity": "major",
+            "severity": "critical",
             "location": "黑皮账册只有自己看得见",
             "problem": "前文已经确认账册异常性质，后文却重新第一次发现。",
             "suggestion": "合并为单一事件链，删除第一次发现的重复版本。",
         },
         {
             "dimension": "logic",
-            "severity": "major",
+            "severity": "critical",
             "location": "港北四巷十七号当成新的发现",
             "problem": "同一线索被多次首次发现，形成明显时间线回卷与双版本拼接。",
             "suggestion": "保留一个正式发现节点，删掉重复发现残留。",
@@ -472,7 +472,7 @@ def test_self_critique_deduplicates_cross_dimension_duplicate_major_issues():
     issues = [
         {
             "dimension": "logic",
-            "severity": "major",
+            "severity": "critical",
             "location": "中段周尧盘问",
             "problem": "同一轮盘问被重复确认，形成双版本推进。",
             "suggestion": "压缩为单一正式问答链。",
@@ -1496,7 +1496,7 @@ async def test_revise_chapter_rejects_stagewide_candidate_when_safety_snapshot_r
     issues = [
         {
             "dimension": "character",
-            "severity": "major",
+            "severity": "critical",
             "location": "中后段对手戏",
             "problem": "人物动机仍偏功能性。",
             "suggestion": "补个人代价与旧伤回声。",
@@ -1598,7 +1598,7 @@ async def test_revise_chapter_retries_stagewide_with_aggregate_feedback(monkeypa
     issues = [
         {
             "dimension": "character",
-            "severity": "major",
+            "severity": "critical",
             "location": "对手戏中段",
             "problem": "人物反应仍然偏功能性。",
             "suggestion": "补人物伤口与关系代价。",
@@ -1669,7 +1669,7 @@ async def test_revise_chapter_marks_stagewide_as_deferred_when_iteration_budget_
     issues = [
         {
             "dimension": "character",
-            "severity": "major",
+            "severity": "critical",
             "location": "对手戏中段",
             "problem": "人物反应仍然偏功能性，需要更大范围重写才能补足。",
             "suggestion": "补人物伤口与关系代价。",
@@ -2699,6 +2699,19 @@ def test_build_chapter_schema_uses_runtime_actual_word_count_and_exposes_version
         },
     )
 
+    version_one = DummyChapter(id=11, content="甲" * 120, version_label="v1", metadata={}, created_at=datetime.now(timezone.utc))
+    version_two = DummyChapter(
+        id=12,
+        content="乙" * 80,
+        version_label="v2",
+        metadata={
+            "quality_metrics": {
+                "scene_fulfillment_rate": 0.75,
+                "dialogue_changes_state": True,
+            }
+        },
+        created_at=datetime.now(timezone.utc),
+    )
     chapter = DummyChapter(
         chapter_number=1,
         status="waiting_for_confirm",
@@ -2713,22 +2726,9 @@ def test_build_chapter_schema_uses_runtime_actual_word_count_and_exposes_version
             },
             ensure_ascii=False,
         ),
-        selected_version=None,
-        versions=[
-            DummyChapter(id=11, content="甲" * 120, version_label="v1", metadata={}, created_at=datetime.now(timezone.utc)),
-            DummyChapter(
-                id=12,
-                content="乙" * 80,
-                version_label="v2",
-                metadata={
-                    "quality_metrics": {
-                        "scene_fulfillment_rate": 0.75,
-                        "dialogue_changes_state": True,
-                    }
-                },
-                created_at=datetime.now(timezone.utc),
-            ),
-        ],
+        selected_version_id=12,
+        selected_version=version_one,
+        versions=[version_one, version_two],
         evaluations=[],
         updated_at=datetime.now(timezone.utc),
         created_at=datetime.now(timezone.utc),
@@ -2740,6 +2740,8 @@ def test_build_chapter_schema_uses_runtime_actual_word_count_and_exposes_version
     result = service._build_chapter_schema(project, 1, include_content=True)
 
     assert result.word_count == 5072
+    assert result.selected_version_id == 12
+    assert result.content == "乙" * 80
     assert result.versions is not None
     assert result.versions[0].word_count == 120
     assert result.versions[1].word_count == 80

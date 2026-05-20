@@ -411,8 +411,10 @@ async def apply_optimization(
     await session.flush()
 
     chapter.selected_version_id = optimized_version.id
+    chapter.selected_version = optimized_version
     chapter.status = "successful"
     chapter.word_count = len(resolved_optimized_content or "")
+    await novel_service._touch_project(resolved_project_id, auto_commit=False)
     await session.commit()
 
     updated_chapter = await novel_service.get_chapter_schema(

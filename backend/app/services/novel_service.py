@@ -2006,6 +2006,7 @@ class NovelService:
             raise HTTPException(status_code=400, detail="选中的版本内容为空，无法确认为最终版")
         
         chapter.selected_version_id = selected.id
+        chapter.selected_version = selected
         chapter.status = ChapterGenerationStatus.SUCCESSFUL.value
         chapter.word_count = len(selected.content or "")
         await self._touch_project(chapter.project_id, auto_commit=False)
@@ -2662,6 +2663,7 @@ class NovelService:
         runtime_payload = _extract_generation_runtime_payload(chapter)
         real_summary = None if runtime_payload else raw_real_summary
         content = None
+        selected_version_id = None
         versions: Optional[List[str]] = None
         evaluation_text: Optional[str] = None
         status_value = ChapterGenerationStatus.NOT_GENERATED.value
@@ -2690,6 +2692,7 @@ class NovelService:
                     ChapterGenerationStatus.SELECTING.value,
                 }:
                     word_count = runtime_actual_word_count
+            selected_version_id = _get_loaded_scalar_value(chapter, "selected_version_id")
             selected_version = _get_loaded_relation_value(chapter, "selected_version")
             chapter_versions = sorted(
                 _get_loaded_relation_items(chapter, "versions"),
@@ -2701,6 +2704,16 @@ class NovelService:
             )
 
             # 只有在 include_content=True 时才包含完整内容
+            if selected_version_id is not None:
+                selected_version = next(
+                    (
+                        version
+                        for version in chapter_versions
+                        if str(getattr(version, "id", "")) == str(selected_version_id)
+                    ),
+                    selected_version,
+                )
+
             if include_content:
                 if selected_version and isinstance(selected_version.content, str) and selected_version.content.strip():
                     content = selected_version.content
@@ -2776,6 +2789,7 @@ class NovelService:
             summary=summary,
             real_summary=real_summary,
             content=content,
+            selected_version_id=selected_version_id,
             versions=versions,
             evaluation=evaluation_text,
             generation_status=ChapterGenerationStatus(status_value),

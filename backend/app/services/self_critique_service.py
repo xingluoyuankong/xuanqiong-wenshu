@@ -921,6 +921,22 @@ class SelfCritiqueService:
             ),
         )
 
+    def _should_attempt_stagewide_rewrite(
+        self,
+        *,
+        before_counts: Dict[str, int],
+        strategy_issues: List[Dict[str, Any]],
+        best_content_changed: bool,
+    ) -> bool:
+        if int(before_counts.get("critical") or 0) > 0:
+            return True
+        if any(self._issue_indicates_structure_residue(issue) for issue in strategy_issues):
+            return True
+        # Major-only feedback should be handled by local windows. If the local pass
+        # cannot produce a safe change, keep the original content instead of
+        # escalating to a continuity-risky whole-chapter candidate.
+        return False
+
     def _split_paragraphs(self, chapter_content: str) -> List[str]:
         paragraphs = [part.strip() for part in re.split(r"\n\s*\n", chapter_content) if part.strip()]
         return paragraphs or [chapter_content]
@@ -1001,11 +1017,17 @@ class SelfCritiqueService:
             str(issue.get(key) or "")
             for key in ("location", "problem")
         )
-        residue_markers = (
-            "重复", "再次", "重新", "首次", "第一次", "两次", "双版本", "拼接", "回卷", "时间线", "认知重置",
-            "来源不一致", "重复发现", "重复开场", "多次呈现为第一次", "前后不一致",
+        hard_residue_markers = (
+            "双版本", "拼接", "回卷", "时间线", "认知重置", "来源不一致",
+            "重复发现", "重复开场", "多次呈现为第一次", "前后不一致",
         )
-        return any(marker in haystack for marker in residue_markers)
+        if any(marker in haystack for marker in hard_residue_markers):
+            return True
+        repeat_markers = ("重复", "再次", "重新", "首次", "第一次", "两次")
+        structural_markers = ("时间", "事件", "发现", "认知", "开场", "版本", "进入", "抵达")
+        return any(marker in haystack for marker in repeat_markers) and any(
+            marker in haystack for marker in structural_markers
+        )
 
     def _resolve_window_indexes(
         self,
@@ -1636,6 +1658,15 @@ class SelfCritiqueService:
             stagewide_safety_before: Optional[Dict[str, int]] = None
             attempts: List[Dict[str, Any]] = []
 
+            if strategy_progress_callback is not None:
+                await strategy_progress_callback(
+                    strategy_key,
+                    {
+                        "phase": "localized_primary",
+                        "issue_count": len(strategy_issues),
+                        "allow_stagewide": allow_stagewide,
+                    },
+                )
             localized_content = await self._revise_chapter_locally(current_content, strategy_issues, context=context, user_id=user_id, strategy_key=strategy_key)
             if localized_content and localized_content != current_content:
                 localized_after = await self._critique_strategy_snapshot(localized_content, strategy_key=strategy_key, context=context, user_id=user_id, focus_issues=strategy_issues)
@@ -1706,10 +1737,10 @@ class SelfCritiqueService:
                     len(strategy_issues),
                     len((current_content or "").strip()),
                 )
-            needs_stagewide = not skip_stagewide and (
-                best_content == current_content
-                or any(self._issue_indicates_structure_residue(issue) for issue in strategy_issues)
-                or before_counts["major"] >= 3
+            needs_stagewide = not skip_stagewide and self._should_attempt_stagewide_rewrite(
+                before_counts=before_counts,
+                strategy_issues=strategy_issues,
+                best_content_changed=best_content != current_content,
             )
             if needs_stagewide:
                 if not allow_stagewide:
@@ -2005,9 +2036,15 @@ class SelfCritiqueService:
                     )
                     changed = current_content != before_content
                     any_stage_changed = any_stage_changed or changed
+                    stagewide_attempted = any(
+                        log.get("stagewide_attempted")
+                        or log.get("stagewide_accepted")
+                        or log.get("stagewide_deferred")
+                        for log in strategy_logs
+                    )
                     stagewide_accepted = any(log.get("stagewide_accepted") for log in strategy_logs)
                     stagewide_deferred = any(log.get("stagewide_deferred") for log in strategy_logs)
-                    if stagewide_accepted and stagewide_budget > 0:
+                    if stagewide_attempted and stagewide_budget > 0:
                         stagewide_budget -= 1
                     if stagewide_deferred and stage_name not in next_deferred_stage_names:
                         next_deferred_stage_names.append(stage_name)

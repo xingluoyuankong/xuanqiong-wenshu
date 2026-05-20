@@ -1657,6 +1657,7 @@ async def select_chapter_version(
         require_content=True,
     )
     chapter.selected_version_id = selected_version.id
+    chapter.selected_version = selected_version
     chapter.status = ChapterGenerationStatus.SUCCESSFUL.value
     chapter.word_count = len(selected_version.content or "")
     await novel_service._touch_project(project_id, auto_commit=False)

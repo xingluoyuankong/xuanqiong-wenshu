@@ -458,19 +458,20 @@ class PipelineOrchestrator:
         for code in reason_codes or []:
             add(str(code or ""))
 
-        guard = story_guard or {}
-        if guard.get("static_description_risk"):
-            add("static_description_risk")
-        if guard.get("expected_dialogue") and int(guard.get("dialogue_marker_count") or 0) < 4 and int(guard.get("word_count") or 0) >= 1500:
-            add("insufficient_dialogue_pressure")
-        if int(guard.get("word_count") or 0) >= 1500 and int(guard.get("mission_hit_count") or 0) < 2:
-            add("chapter_progression_weak")
-        if int(guard.get("scene_count") or 0) > 0 and float(guard.get("scene_fulfillment_rate") or 1.0) < 0.75:
-            add("scene_fulfillment_weak")
-        if guard.get("expected_dialogue") and "dialogue_changes_state" in guard and not guard.get("dialogue_changes_state", True):
-            add("dialogue_does_not_change_state")
-        if int(guard.get("word_count") or 0) >= 1200 and not guard.get("ending_pressure_passed", guard.get("ending_hook_detected", True)):
-            add("ending_pressure_missing")
+        if blockers is None and reason_codes is None:
+            guard = story_guard or {}
+            if guard.get("static_description_risk"):
+                add("static_description_risk")
+            if guard.get("expected_dialogue") and int(guard.get("dialogue_marker_count") or 0) < 4 and int(guard.get("word_count") or 0) >= 1500:
+                add("insufficient_dialogue_pressure")
+            if int(guard.get("word_count") or 0) >= 1500 and int(guard.get("mission_hit_count") or 0) < 2:
+                add("chapter_progression_weak")
+            if int(guard.get("scene_count") or 0) > 0 and float(guard.get("scene_fulfillment_rate") or 1.0) < 0.75:
+                add("scene_fulfillment_weak")
+            if guard.get("expected_dialogue") and "dialogue_changes_state" in guard and not guard.get("dialogue_changes_state", True):
+                add("dialogue_does_not_change_state")
+            if int(guard.get("word_count") or 0) >= 1200 and not guard.get("ending_pressure_passed", guard.get("ending_hook_detected", True)):
+                add("ending_pressure_missing")
 
         tone = "success"
         if len(items) >= 2 or any(item["code"] in {"static_description_risk", "critical_consistency_unresolved"} for item in items):
@@ -555,7 +556,17 @@ class PipelineOrchestrator:
                     "code": "insufficient_dialogue_pressure",
                     "message": "导演脚本要求存在对话/攻防，但正文里的有效对白痕迹过少，局势博弈不足。",
                 })
-            if story_word_count >= 1500 and story_mission_hits < 2:
+            progression_soft_pass = (
+                story_dialogue_markers >= 8
+                and not story_guard.get("static_description_risk")
+                and story_guard.get("dialogue_changes_state", False)
+                and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", False))
+                and critique_critical == 0
+                and (critique_score is None or critique_score >= 70)
+                and len(critical_consistency) == 0
+                and len(major_consistency) < 2
+            )
+            if story_word_count >= 1500 and story_mission_hits < 2 and not progression_soft_pass:
                 blockers.append({
                     "source": "story_progression_guard",
                     "code": "chapter_progression_weak",
@@ -4529,7 +4540,8 @@ class PipelineOrchestrator:
             phase = str(metadata.get("phase") or "strategy_start")
             phase_message_map = {
                 "strategy_start": f"{base_message}（进入策略子阶段）",
-                "stagewide_primary": f"{base_message}（执行整段/整章重写）",
+                "localized_primary": f"{base_message}（优先局部连续窗口修补）",
+                "stagewide_primary": f"{base_message}（例外路径：连续性整合候选）",
                 "aggregate_retry": f"{base_message}（根据聚合反馈重试）",
             }
             await self._update_generation_runtime(
