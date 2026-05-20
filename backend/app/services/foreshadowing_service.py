@@ -170,6 +170,177 @@ class ForeshadowingService:
 
         return {"created": created, "candidates": len(candidates)}
 
+    @staticmethod
+    def _extract_match_keywords(foreshadowing: Foreshadowing) -> List[str]:
+        keywords: List[str] = []
+        for value in foreshadowing.keywords or []:
+            text = str(value or "").strip()
+            if len(text) >= 2:
+                keywords.append(text)
+        for value in (foreshadowing.name, foreshadowing.content):
+            text = str(value or "").strip()
+            if len(text) >= 2:
+                keywords.append(text[:24])
+        for value in foreshadowing.related_characters or []:
+            text = str(value or "").strip()
+            if len(text) >= 2:
+                keywords.append(text)
+        seen: set[str] = set()
+        result: List[str] = []
+        for keyword in keywords:
+            if keyword in seen:
+                continue
+            seen.add(keyword)
+            result.append(keyword)
+            if len(result) >= 8:
+                break
+        return result
+
+    @staticmethod
+    def _extract_resolution_excerpt(text: str, keywords: List[str], *, limit: int = 220) -> str:
+        if not text:
+            return ""
+        hit_index = -1
+        for keyword in keywords:
+            hit_index = text.find(keyword)
+            if hit_index >= 0:
+                break
+        if hit_index < 0:
+            return text[:limit]
+        start = max(0, hit_index - limit // 2)
+        end = min(len(text), hit_index + limit // 2)
+        return text[start:end].strip()
+
+    async def auto_resolve_from_chapter(
+        self,
+        project_id: str,
+        chapter_id: int,
+        chapter_number: int,
+        chapter_content: str,
+        max_items: int = 8,
+    ) -> Dict[str, Any]:
+        """
+        Heuristically close due foreshadowings after a chapter is finalized.
+
+        The method is intentionally conservative: it only creates a resolution
+        when a due/overdue hook is visibly mentioned and the chapter contains
+        payoff-style language. Ambiguous items are returned as reinforced, not
+        silently marked resolved.
+        """
+        resolution_signals = (
+            "真相",
+            "原来",
+            "终于",
+            "证实",
+            "揭开",
+            "揭露",
+            "答案",
+            "回收",
+            "兑现",
+            "说明",
+            "意识到",
+            "明白",
+        )
+        content = chapter_content or ""
+        result = {
+            "resolved": 0,
+            "reinforced": 0,
+            "reminders_created": 0,
+            "resolution_ids": [],
+            "reinforced_ids": [],
+            "unresolved_due_ids": [],
+        }
+
+        query = (
+            select(Foreshadowing)
+            .where(
+                and_(
+                    Foreshadowing.project_id == project_id,
+                    Foreshadowing.status.in_(ACTIVE_FORESHADOWING_STATUSES),
+                    Foreshadowing.chapter_number < chapter_number,
+                )
+            )
+            .order_by(Foreshadowing.chapter_number.asc(), Foreshadowing.id.asc())
+            .limit(80)
+        )
+        rows = await self.session.execute(query)
+        candidates = list(rows.scalars().all())
+        processed = 0
+
+        for foreshadowing in candidates:
+            if processed >= max_items:
+                break
+            keywords = self._extract_match_keywords(foreshadowing)
+            keyword_hits = [keyword for keyword in keywords if keyword and keyword in content]
+            if not keyword_hits:
+                due = (
+                    foreshadowing.target_reveal_chapter is not None
+                    and int(foreshadowing.target_reveal_chapter) <= chapter_number
+                )
+                if due:
+                    result["unresolved_due_ids"].append(foreshadowing.id)
+                continue
+
+            processed += 1
+            target_due = (
+                foreshadowing.target_reveal_chapter is not None
+                and int(foreshadowing.target_reveal_chapter) <= chapter_number
+            )
+            distance = chapter_number - int(foreshadowing.chapter_number or chapter_number)
+            payoff_signal = any(signal in content for signal in resolution_signals)
+            strong_keyword_match = len(keyword_hits) >= 2 or bool(foreshadowing.name and foreshadowing.name in content)
+
+            if (target_due and payoff_signal) or (distance >= 6 and payoff_signal and strong_keyword_match):
+                resolution = await self.resolve_foreshadowing(
+                    foreshadowing_id=foreshadowing.id,
+                    resolved_chapter_id=chapter_id,
+                    resolved_chapter_number=chapter_number,
+                    resolution_text=self._extract_resolution_excerpt(content, keyword_hits),
+                    resolution_type="auto_detected",
+                    quality_score=min(9, 6 + len(keyword_hits)),
+                )
+                result["resolved"] += 1
+                result["resolution_ids"].append(resolution.id)
+                continue
+
+            foreshadowing.status = "developing"
+            note = "auto:reinforced_in_chapter"
+            if note not in str(foreshadowing.author_note or ""):
+                foreshadowing.author_note = f"{foreshadowing.author_note or ''}\n{note}:{chapter_number}".strip()
+            result["reinforced"] += 1
+            result["reinforced_ids"].append(foreshadowing.id)
+
+        for foreshadowing_id in result["unresolved_due_ids"][:max_items]:
+            existing_query = select(ForeshadowingReminder).where(
+                and_(
+                    ForeshadowingReminder.foreshadowing_id == foreshadowing_id,
+                    ForeshadowingReminder.status == "active",
+                )
+            )
+            existing = await self.session.scalar(existing_query)
+            if existing:
+                continue
+            await self.create_reminder(
+                project_id=project_id,
+                foreshadowing_id=foreshadowing_id,
+                reminder_type="due_but_not_resolved",
+                message=f"第 {chapter_number} 章写后检测到到期伏笔仍未可见回收，请在后续章节局部补强或安排明确回收。",
+                suggested_chapter_range={"start": chapter_number + 1, "end": chapter_number + 3},
+            )
+            result["reminders_created"] += 1
+
+        if result["resolved"] or result["reinforced"] or result["reminders_created"]:
+            await self.session.flush()
+            logger.info(
+                "伏笔写后闭环完成: project=%s chapter=%s resolved=%s reinforced=%s reminders=%s",
+                project_id,
+                chapter_number,
+                result["resolved"],
+                result["reinforced"],
+                result["reminders_created"],
+            )
+        return result
+
     async def get_foreshadowings(
         self,
         project_id: str,

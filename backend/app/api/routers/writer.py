@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -65,6 +65,8 @@ from ...services.ai_review_service import AIReviewService
 from ...services.cache_service import CacheService
 from ...services.finalize_service import FinalizeService
 from ...services.foreshadowing_service import ForeshadowingService
+from ...services.clue_tracker_service import ClueTrackerService
+from ...services.knowledge_graph_service import KnowledgeGraphService
 from ...services.generation_call_service import GenerationCallPolicy, GenerationJSONDecodeError, call_generation_json
 from ...services.enrichment_service import EnrichmentService
 from ...services.memory_layer_service import MemoryLayerService
@@ -662,11 +664,15 @@ def _validate_outline_item_executability(
     emotional_progression = str(item.get("emotional_progression") or "").strip()
     narrative_phase = str(item.get("narrative_phase") or "").strip()
     character_focus = _normalize_outline_string_list(item.get("character_focus"), limit=4)
+    cast_delta = item.get("cast_delta") if isinstance(item.get("cast_delta"), dict) else {}
     conflict_escalation = _normalize_outline_string_list(item.get("conflict_escalation"), limit=5)
     continuity_notes = _normalize_outline_string_list(item.get("continuity_notes"), limit=5)
 
     raw_foreshadowing = item.get("foreshadowing")
     foreshadowing = raw_foreshadowing if isinstance(raw_foreshadowing, dict) else {}
+    raw_foreshadowing_tasks = item.get("foreshadowing_tasks")
+    foreshadowing_tasks = raw_foreshadowing_tasks if isinstance(raw_foreshadowing_tasks, dict) else {}
+    payoff_window = str(item.get("payoff_window") or "").strip()
 
     goal_markers = ("想", "要", "必须", "决定", "试图", "寻找", "确认", "逼问", "救", "夺", "查", "进入")
     conflict_markers = ("却", "但", "阻", "拒绝", "威胁", "反制", "冲突", "误会", "压迫", "遭到", "敌")
@@ -709,9 +715,12 @@ def _validate_outline_item_executability(
         "suspense_hook": suspense_hook or None,
         "emotional_progression": emotional_progression or None,
         "character_focus": character_focus,
+        "cast_delta": cast_delta,
         "conflict_escalation": conflict_escalation,
         "continuity_notes": continuity_notes,
         "foreshadowing": foreshadowing,
+        "foreshadowing_tasks": foreshadowing_tasks,
+        "payoff_window": payoff_window or None,
     }
     return not reasons, reasons, normalized
 
@@ -999,6 +1008,66 @@ async def _run_finalize_pipeline(
             exc,
         )
         result["memory_layer"] = {
+            "success": False,
+            "error": str(exc)[:200],
+        }
+
+    try:
+        foreshadowing_service = ForeshadowingService(session)
+        foreshadowing_result = await foreshadowing_service.auto_resolve_from_chapter(
+            project_id=project_id,
+            chapter_id=selected_version.chapter_id,
+            chapter_number=chapter_number,
+            chapter_content=selected_version.content,
+        )
+        auto_collect_result = await foreshadowing_service.auto_collect_from_chapter(
+            project_id=project_id,
+            chapter_id=selected_version.chapter_id,
+            chapter_number=chapter_number,
+            chapter_content=selected_version.content,
+            max_items=6,
+        )
+        total_chapters = await session.scalar(
+            select(func.count(ChapterOutline.id)).where(ChapterOutline.project_id == project_id)
+        )
+        reminders = await foreshadowing_service.check_and_create_reminders(
+            project_id=project_id,
+            current_chapter_number=chapter_number,
+            total_chapters=max(int(total_chapters or chapter_number), chapter_number),
+        )
+        await session.commit()
+        result["foreshadowing_closure"] = {
+            **foreshadowing_result,
+            "auto_collected": auto_collect_result,
+            "active_reminders_checked": len(reminders),
+        }
+    except Exception as exc:
+        await session.rollback()
+        logger.warning(
+            "章节 %s 伏笔写后闭环失败，已保留定稿结果: %s",
+            chapter_number,
+            exc,
+        )
+        result["foreshadowing_closure"] = {
+            "success": False,
+            "error": str(exc)[:200],
+        }
+
+    try:
+        clue_result = await ClueTrackerService(session).sync_from_foreshadowings(project_id)
+        graph_result = await KnowledgeGraphService(session).sync_from_story_memory(project_id)
+        result["ledger_sync"] = {
+            "clues": clue_result,
+            "knowledge_graph": graph_result,
+        }
+    except Exception as exc:
+        await session.rollback()
+        logger.warning(
+            "章节 %s 线索/知识图谱同步失败，已保留定稿结果: %s",
+            chapter_number,
+            exc,
+        )
+        result["ledger_sync"] = {
             "success": False,
             "error": str(exc)[:200],
         }
@@ -2365,7 +2434,7 @@ async def generate_chapters_outline(
 {retry_hint}
 
 [硬性要求]
-1. 只输出 JSON 对象：{{"chapters":[{{"chapter_number":数字,"title":"标题","summary":"摘要","narrative_phase":"阶段","chapter_role":"职责","suspense_hook":"钩子","emotional_progression":"情绪变化","character_focus":["角色"],"conflict_escalation":["升级点"],"continuity_notes":["承接/递进说明"],"foreshadowing":{{"plant":["伏笔"],"payoff":["回收" ]}}}}]}}
+1. 只输出 JSON 对象：{{"chapters":[{{"chapter_number":数字,"title":"标题","summary":"摘要","narrative_phase":"阶段","chapter_role":"职责","suspense_hook":"钩子","emotional_progression":"情绪变化","character_focus":["角色"],"cast_delta":{{"new":[],"returning":[],"exit_or_absent":[],"faction_roles":[]}},"conflict_escalation":["升级点"],"continuity_notes":["承接/递进说明"],"foreshadowing":{{"plant":["伏笔"],"payoff":["回收"]}},"foreshadowing_tasks":{{"plant":[],"reinforce":[],"payoff":[],"avoid_forgetting":[]}},"payoff_window":"回收窗口"}}]}}
 2. chapter_number 必须只来自本次要求的章节号，不得跳号、重号、缺号。
 3. 每章 summary 必须具体可写，不得空泛，长度控制在 {summary_min_chars}-{summary_max_chars} 字之间。
 4. 每章 summary 必须包含：本章核心冲突、人物目标/阻碍、关键转折、章尾钩子。
@@ -2373,7 +2442,9 @@ async def generate_chapters_outline(
 6. 每章必须有人物焦点与情绪推进，禁止只有事件流水账。
 7. {ending_constraint}
 8. 与已有章节保持连续，避免剧情断层。
-9. 代码会拒绝缺少 chapter_role / suspense_hook / conflict_escalation / continuity_notes 的空泛章节；请一次生成可直接进入正文写作的执行型大纲。
+9. cast_delta 必须说明本章新增/回归/退出角色如何落入角色池、势力或功能性路人规则；不能凭空出现又消失。
+10. foreshadowing_tasks 必须说明本章回收、强化、禁忘和可新增伏笔，不能只写“埋伏笔”。
+11. 代码会拒绝缺少 chapter_role / suspense_hook / conflict_escalation / continuity_notes 的空泛章节；请一次生成可直接进入正文写作的执行型大纲。
 """
 
                 response = await _call_llm_with_stage_retries(
@@ -2491,9 +2562,12 @@ async def generate_chapters_outline(
                 "suspense_hook": item.get("suspense_hook"),
                 "emotional_progression": item.get("emotional_progression"),
                 "character_focus": item.get("character_focus") or [],
+                "cast_delta": item.get("cast_delta") or {},
                 "conflict_escalation": item.get("conflict_escalation") or [],
                 "continuity_notes": item.get("continuity_notes") or [],
                 "foreshadowing": item.get("foreshadowing") or {},
+                "foreshadowing_tasks": item.get("foreshadowing_tasks") or {},
+                "payoff_window": item.get("payoff_window"),
                 "outline_quality": {
                     "accepted_by_executability_gate": True,
                     "rejection_reasons": [],

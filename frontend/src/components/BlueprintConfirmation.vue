@@ -292,6 +292,9 @@ const resolveProgressFromMessage = (message: string, status: BlueprintGeneration
   if (status === 'cancelled' || status === 'failed') return progress.value
   if (!text) return status === 'polishing' ? 72 : 24
   if (text.includes('整理灵感访谈')) return 16
+  if (text.includes('锁定设定')) return 24
+  if (text.includes('设定锁定包')) return 32
+  if (text.includes('角色生命周期') || text.includes('伏笔回收窗口')) return 60
   if (text.includes('世界体系') || text.includes('世界骨架')) return 28
   if (text.includes('总大纲（阶段骨架首轮）')) return 42
   if (text.includes('解析小说总大纲骨架')) return 50
@@ -747,6 +750,5 @@ onUnmounted(() => {
   }
 }
 </style>
-
 
 

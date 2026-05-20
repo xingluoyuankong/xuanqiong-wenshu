@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
@@ -298,8 +299,12 @@ def _character_importance_label(index: int, total_target: int) -> str:
         return "protagonist"
     if index < min(4, max(2, total_target)):
         return "core"
-    if index < max(6, total_target):
+    if index < min(10, max(6, total_target)):
         return "secondary"
+    if index < min(18, max(10, total_target)):
+        return "stage_support"
+    if index < min(30, max(18, total_target)):
+        return "faction_member"
     return "support"
 
 
@@ -312,25 +317,93 @@ def _estimate_highlight_chapter(index: int, total_chapters: int) -> int:
 
 
 def _target_character_count(total_chapters: int) -> int:
+    if total_chapters >= 200:
+        return 42
+    if total_chapters >= 120:
+        return 32
+    if total_chapters >= 80:
+        return 26
+    if total_chapters >= 50:
+        return 20
     if total_chapters >= 36:
-        return 10
+        return 16
     if total_chapters >= 24:
-        return 8
+        return 12
     if total_chapters >= 12:
-        return 6
-    return 4
+        return 8
+    return 5
 
 
 def _target_relationship_count(character_count: int, total_chapters: int) -> int:
-    if total_chapters >= 36:
-        base_target = 20
+    if total_chapters >= 200:
+        base_target = 90
+    elif total_chapters >= 120:
+        base_target = 70
+    elif total_chapters >= 80:
+        base_target = 56
+    elif total_chapters >= 50:
+        base_target = 44
+    elif total_chapters >= 36:
+        base_target = 32
     elif total_chapters >= 24:
-        base_target = 16
+        base_target = 24
     elif total_chapters >= 12:
-        base_target = 12
+        base_target = 16
     else:
-        base_target = 4
+        base_target = 8
     return max(character_count * 2, base_target)
+
+
+def _item_get(item: Any, key: str, default: Any = None) -> Any:
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
+def _parse_chapter_range_end(value: Any) -> Optional[int]:
+    text = _safe_str(value).strip()
+    if not text:
+        return None
+    numbers = [int(match) for match in re.findall(r"\d+", text)]
+    if not numbers:
+        return None
+    return max(numbers)
+
+
+def _infer_total_chapters_for_cast(
+    *,
+    chapter_outline: Any = None,
+    novel_outline: Any = None,
+    volume_plan: Any = None,
+    fallback: int = 0,
+) -> int:
+    total = max(0, int(fallback or 0))
+    chapter_items = _to_plain_data(chapter_outline or [])
+    if isinstance(chapter_items, list):
+        total = max(total, len(chapter_items))
+        for item in chapter_items:
+            chapter_number = _item_get(item, "chapter_number")
+            try:
+                total = max(total, int(chapter_number))
+            except (TypeError, ValueError):
+                continue
+
+    outline_items = _to_plain_data(novel_outline or [])
+    if isinstance(outline_items, list):
+        for item in outline_items:
+            for key in ("expected_chapter_range", "chapter_range", "chapters", "range"):
+                end = _parse_chapter_range_end(_item_get(item, key))
+                if end:
+                    total = max(total, end)
+
+    volume_items = _to_plain_data(volume_plan or [])
+    if isinstance(volume_items, list):
+        for item in volume_items:
+            for key in ("expected_chapter_range", "chapter_range", "chapters", "range"):
+                end = _parse_chapter_range_end(_item_get(item, key))
+                if end:
+                    total = max(total, end)
+    return total
 
 
 def _default_relationship_hooks(name: str, identity: str, goals: str, genre: str) -> List[str]:
@@ -367,10 +440,31 @@ def _normalize_character_record(
     relationship_to_protagonist = _safe_str(data.get("relationship_to_protagonist")).strip()
     extra = _merge_character_extra(data)
 
-    total_target = max(total_chapters, len(data))
-    extra.setdefault("importance", _character_importance_label(index, total_target))
-    extra.setdefault("role_rank", "protagonist" if index == 0 else ("core" if index < 4 else "support"))
+    total_target = max(_target_character_count(total_chapters), 1)
+    importance_label = _character_importance_label(index, total_target)
+    extra.setdefault("importance", importance_label)
+    extra.setdefault("role_rank", "protagonist" if index == 0 else ("core" if index < 4 else importance_label))
+    extra.setdefault("cast_tier", importance_label)
     extra.setdefault("first_highlight_chapter", _estimate_highlight_chapter(index, max(1, total_chapters)))
+    extra.setdefault("first_appearance_chapter", extra.get("first_highlight_chapter"))
+    extra.setdefault(
+        "exit_or_return_plan",
+        "主角/核心角色持续推进；阶段配角在完成阶段职责后要么退出、牺牲、转阵营，要么在后续伏笔回收时回归。"
+        if index < 10
+        else "服务当前阶段或势力线，离场前必须留下可追踪去向或影响。",
+    )
+    extra.setdefault(
+        "faction_role",
+        _safe_str(extra.get("faction_role") or extra.get("affiliation") or "").strip(),
+    )
+    extra.setdefault(
+        "knowledge_boundary",
+        _safe_str(extra.get("knowledge_boundary") or "只知道其身份、经历和登场章节合理可知的信息，不得提前知道核心秘密。").strip(),
+    )
+    extra.setdefault(
+        "dynamic_role_policy",
+        "可随剧情新增同层级角色，但必须绑定目标、所属势力/关系、首次登场章节和后续去向。",
+    )
     extra.setdefault(
         "relationship_hooks",
         _default_relationship_hooks(name, identity, goals, genre or blueprint_title),
@@ -591,10 +685,13 @@ def _augment_character_profile(
 
     total_target = max(_target_character_count(total_chapters), 1)
     role_rank = extra.get("role_rank") or ("protagonist" if index == 0 else ("core" if index < 4 else "support"))
+    importance_label = _character_importance_label(index, total_target)
 
-    extra.setdefault("importance", _character_importance_label(index, total_target))
+    extra.setdefault("importance", importance_label)
     extra.setdefault("role_rank", role_rank)
+    extra.setdefault("cast_tier", extra.get("importance") or importance_label)
     extra.setdefault("first_highlight_chapter", _estimate_highlight_chapter(index, max(1, total_chapters)))
+    extra.setdefault("first_appearance_chapter", extra.get("first_highlight_chapter"))
     extra.setdefault("relationship_hooks", hooks)
     extra.setdefault("role", role or role_rank)
     extra.setdefault("core_motivation", core_motivation or f"{normalized.get('name', '角色')}围绕主线目标展开行动")
@@ -612,6 +709,27 @@ def _augment_character_profile(
     )
     extra.setdefault("is_supplemental", supplemental)
     extra.setdefault("hidden_info", _safe_str(extra.get("hidden_info")).strip())
+    extra.setdefault(
+        "exit_or_return_plan",
+        _safe_str(extra.get("exit_or_return_plan")).strip()
+        or (
+            "完成阶段职责后要留下清晰去向，并在对应伏笔/势力线需要时回归。"
+            if index >= 4
+            else "随主线长期推进，关键状态变化必须进入记忆层。"
+        ),
+    )
+    extra.setdefault(
+        "faction_role",
+        _safe_str(extra.get("faction_role") or extra.get("affiliation") or "").strip(),
+    )
+    extra.setdefault(
+        "knowledge_boundary",
+        _safe_str(extra.get("knowledge_boundary") or "只能掌握其经历与登场位置合理可知的信息，不能提前知道未揭示秘密。").strip(),
+    )
+    extra.setdefault(
+        "dynamic_role_policy",
+        _safe_str(extra.get("dynamic_role_policy") or "新增角色必须绑定角色池、势力/关系、首次登场章节和后续去向。").strip(),
+    )
 
     normalized.update(
         {
@@ -622,8 +740,13 @@ def _augment_character_profile(
             "hidden_secret": extra["hidden_secret"],
             "growth_arc": extra["growth_arc"],
             "first_highlight_chapter": extra["first_highlight_chapter"],
+            "first_appearance_chapter": extra["first_appearance_chapter"],
             "relationship_hook": extra["relationship_hook"],
             "importance": extra["importance"],
+            "cast_tier": extra["cast_tier"],
+            "exit_or_return_plan": extra["exit_or_return_plan"],
+            "faction_role": extra["faction_role"],
+            "knowledge_boundary": extra["knowledge_boundary"],
             "extra": extra,
         }
     )
@@ -1581,7 +1704,12 @@ class NovelService:
             "foreshadowing_system": _to_plain_data(blueprint.foreshadowing_system or []),
         }
 
-        total_chapters = len(blueprint.chapter_outline or [])
+        total_chapters = _infer_total_chapters_for_cast(
+            chapter_outline=blueprint.chapter_outline or [],
+            novel_outline=blueprint.novel_outline or [],
+            volume_plan=blueprint.volume_plan or [],
+            fallback=len(blueprint.chapter_outline or []),
+        )
         normalized_characters = _normalize_blueprint_characters_for_storage(
             blueprint.characters or [],
             total_chapters=total_chapters,
@@ -1675,7 +1803,12 @@ class NovelService:
             foreshadowing_system=[],
             chapter_outline=[],
         )
-        total_chapters = len(current_blueprint.chapter_outline or [])
+        total_chapters = _infer_total_chapters_for_cast(
+            chapter_outline=current_blueprint.chapter_outline or [],
+            novel_outline=current_blueprint.novel_outline or [],
+            volume_plan=current_blueprint.volume_plan or [],
+            fallback=len(current_blueprint.chapter_outline or []),
+        )
 
         if "one_sentence_summary" in patch:
             blueprint.one_sentence_summary = patch["one_sentence_summary"]
@@ -2250,9 +2383,12 @@ class NovelService:
                         suspense_hook=(getattr(outline, "metadata", None) or {}).get("suspense_hook"),
                         emotional_progression=(getattr(outline, "metadata", None) or {}).get("emotional_progression"),
                         character_focus=list((getattr(outline, "metadata", None) or {}).get("character_focus") or []),
+                        cast_delta=dict((getattr(outline, "metadata", None) or {}).get("cast_delta") or {}),
                         conflict_escalation=list((getattr(outline, "metadata", None) or {}).get("conflict_escalation") or []),
                         continuity_notes=list((getattr(outline, "metadata", None) or {}).get("continuity_notes") or []),
                         foreshadowing=dict((getattr(outline, "metadata", None) or {}).get("foreshadowing") or {}),
+                        foreshadowing_tasks=dict((getattr(outline, "metadata", None) or {}).get("foreshadowing_tasks") or {}),
+                        payoff_window=(getattr(outline, "metadata", None) or {}).get("payoff_window"),
                         metadata=dict(getattr(outline, "metadata", None) or {}),
                     )
                     for outline in sorted(project.outlines, key=lambda o: o.chapter_number)
@@ -2659,6 +2795,7 @@ class NovelService:
 
         title = outline.title if outline else f"第{chapter_number}章"
         summary = outline.summary if outline else ""
+        outline_metadata = dict(getattr(outline, "metadata", None) or {}) if outline else {}
         raw_real_summary = _get_loaded_scalar_value(chapter, "real_summary") if chapter else None
         runtime_payload = _extract_generation_runtime_payload(chapter)
         real_summary = None if runtime_payload else raw_real_summary
@@ -2787,6 +2924,18 @@ class NovelService:
             chapter_number=chapter_number,
             title=title,
             summary=summary,
+            narrative_phase=outline_metadata.get("narrative_phase"),
+            chapter_role=outline_metadata.get("chapter_role"),
+            suspense_hook=outline_metadata.get("suspense_hook"),
+            emotional_progression=outline_metadata.get("emotional_progression"),
+            character_focus=list(outline_metadata.get("character_focus") or []),
+            cast_delta=dict(outline_metadata.get("cast_delta") or {}),
+            conflict_escalation=list(outline_metadata.get("conflict_escalation") or []),
+            continuity_notes=list(outline_metadata.get("continuity_notes") or []),
+            foreshadowing=dict(outline_metadata.get("foreshadowing") or {}),
+            foreshadowing_tasks=dict(outline_metadata.get("foreshadowing_tasks") or {}),
+            payoff_window=outline_metadata.get("payoff_window"),
+            metadata=outline_metadata,
             real_summary=real_summary,
             content=content,
             selected_version_id=selected_version_id,
