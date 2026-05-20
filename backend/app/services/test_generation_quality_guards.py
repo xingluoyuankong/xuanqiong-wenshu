@@ -1194,6 +1194,47 @@ def test_enrichment_guard_accepts_anchored_dramatic_supplement():
     ) is None
 
 
+def test_fragment_enrichment_guard_rejects_unanchored_local_rewrite():
+    service = EnrichmentService(db=None, llm_service=None)
+    original = "\n\n".join(
+        [
+            "Lin Qi pressed the tide ledger on the table and forced the clerk to answer why the seal was missing.",
+            "The clerk refused twice, but his hand paused when Lin Qi named the south pier archive.",
+            "A knock landed outside the door, so Lin Qi had to take the ledger before the patrol arrived.",
+        ]
+    )
+    unanchored = (
+        "Rain rolled across the distant hills while the hero thought about fate. "
+        "The room felt quiet, poetic, and unchanged. "
+    ) * 8
+    anchored = "\n\n".join(
+        [
+            original.split("\n\n")[0] + " He pressed harder until the answer changed the leverage.",
+            original.split("\n\n")[1] + " The refusal became a bargain instead of a dead end.",
+            original.split("\n\n")[2] + " The next choice now carried a visible cost.",
+        ]
+    )
+
+    assert service._fragment_enrichment_guard_failure(original, unanchored) == "fragment_lost_front_and_back_anchors"
+    assert service._fragment_enrichment_guard_failure(original, anchored) is None
+
+
+def test_guardrail_rewrite_guard_rejects_partial_chapter_replacement():
+    original = "\n\n".join(
+        [
+            "Opening anchor: Lin Qi blocks the archive door and keeps the ledger in sight.",
+            "The clerk tries to bargain, the patrol knocks twice, and the seal clue changes hands.",
+            "Lin Qi realizes the missing seal points toward the south pier, but the patrol forces him to move.",
+            "Ending anchor: he hides the ledger under his coat as the door breaks inward.",
+        ]
+    )
+    bad_rewrite = "A short corrected fragment removes the forbidden name but loses the chapter."
+    good_rewrite = original.replace("patrol", "guards")
+
+    assert PipelineOrchestrator._guardrail_rewrite_guard_failure(original * 8, bad_rewrite) == "rewrite_shrank_too_much"
+    assert PipelineOrchestrator._guardrail_rewrite_guard_failure(original, good_rewrite) is None
+
+
 def test_self_critique_keeps_major_only_revision_local_after_content_changes():
     service = SelfCritiqueService(db=None, llm_service=None, prompt_service=None)
 
@@ -1217,7 +1258,7 @@ def test_self_critique_keeps_major_only_revision_local_after_content_changes():
     ) is False
 
 
-def test_self_critique_allows_stagewide_for_critical_or_residue():
+def test_self_critique_flags_stagewide_need_but_requires_manual_confirmation():
     service = SelfCritiqueService(db=None, llm_service=None, prompt_service=None)
 
     assert service._should_attempt_stagewide_rewrite(
@@ -1230,6 +1271,9 @@ def test_self_critique_allows_stagewide_for_critical_or_residue():
         strategy_issues=[{"severity": "major", "dimension": "continuity", "problem": "时间线重复回卷"}],
         best_content_changed=True,
     ) is True
+    assert service._stagewide_rewrite_explicitly_confirmed(None) is False
+    assert service._stagewide_rewrite_explicitly_confirmed({"manual_stagewide_rewrite": True}) is True
+    assert service._stagewide_rewrite_explicitly_confirmed({"manual_stagewide_rewrite": {"confirmed": True}}) is True
 
 
 def test_quality_issue_summary_exposes_frontend_ready_labels():

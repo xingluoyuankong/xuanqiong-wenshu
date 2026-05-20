@@ -218,4 +218,48 @@ describe('ChapterGenerating', () => {
     expect(wrapper.text()).toContain('回收伏笔数：1')
     expect(wrapper.text()).not.toContain('正文候选完成')
   })
+
+  it('shows local patch guidance when a stagewide candidate requires manual confirmation', () => {
+    const wrapper = shallowMount(ChapterGenerating, {
+      props: {
+        chapterNumber: 9,
+        generationRuntime: {
+          progress_stage: 'optimize_structural',
+          progress_message: 'Optimization guard is protecting continuity',
+          events: [
+            {
+              at: '2026-04-21T08:00:00Z',
+              stage: 'optimize_structural',
+              kind: 'review',
+              level: 'warning',
+              title: 'Stagewide candidate deferred',
+              summary: 'Whole-chapter candidate was not applied automatically',
+              metadata: {
+                manual_stagewide_confirmation_required: true,
+                stagewide_deferred_count: 1,
+                manual_patch_suggestions: [
+                  {
+                    stage: 'structural',
+                    strategy: 'structure_guardrail',
+                    location: 'mid-chapter turn',
+                    problem: 'Need a stronger confrontation before reveal',
+                    suggestion: 'Add a negotiation beat that changes the leverage.',
+                    execution_requirement: 'Patch only the negotiation window and keep both anchors',
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        progressStage: 'optimize_structural',
+        progressMessage: 'Optimization guard is protecting continuity',
+        allowedActions: ['refresh_status'],
+      },
+    })
+
+    expect(wrapper.find('.cg-log-item__notice').exists()).toBe(true)
+    expect(wrapper.find('.cg-log-item__patches').text()).toContain('Need a stronger confrontation before reveal')
+    expect(wrapper.find('.cg-log-item__patches').text()).toContain('Add a negotiation beat that changes the leverage.')
+    expect(wrapper.find('.cg-log-item__patches').text()).toContain('Patch only the negotiation window and keep both anchors')
+  })
 })
