@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -6,7 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.db.base import Base
 from app.models.clue_tracker import StoryClue
 from app.models.foreshadowing import Foreshadowing
-from app.models.memory_layer import CharacterState, TimelineEvent
+from app.models.memory_layer import CausalChain, CharacterState, TimelineEvent
 from app.models.knowledge_graph import CharacterNode, EventEdge
 from app.models.novel import BlueprintCharacter, BlueprintRelationship, Chapter, ChapterOutline, NovelBlueprint, NovelProject
 from app.models.project_memory import ProjectMemory
@@ -14,6 +16,7 @@ from app.models.user import User
 from app.services.foreshadowing_service import ForeshadowingService
 from app.services.knowledge_graph_service import KnowledgeGraphService
 from app.services.longform_context_service import LongformContextService
+from app.services.memory_layer_service import MemoryLayerService
 from app.services.novel_service import (
     _infer_total_chapters_for_cast,
     _normalize_blueprint_characters_for_storage,
@@ -260,6 +263,114 @@ async def test_foreshadowing_auto_resolve_accepts_due_paraphrased_payoff(tmp_pat
             assert result["resolved"] == 1
             assert updated.status == "resolved"
             assert updated.resolved_chapter_number == 6
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_memory_update_writes_causal_chains_into_longform_context(tmp_path):
+    class FakeMemoryLLM:
+        def __init__(self):
+            self.responses = [
+                {
+                    "character_states": [
+                        {
+                            "character_name": "Lin Qi",
+                            "location": "archive cellar",
+                            "emotion": "alert",
+                            "emotion_intensity": 8,
+                            "health_status": "healthy",
+                            "new_knowledge": ["the ledger code is traceable"],
+                            "goal_progress": [{"goal": "hide the code", "progress": "temporarily escaped"}],
+                        }
+                    ]
+                },
+                {
+                    "events": [
+                        {
+                            "event_title": "Ledger code stolen",
+                            "event_description": "Lin Qi copies the code before the archive closes.",
+                            "event_type": "major",
+                            "story_time": "night",
+                            "involved_characters": ["Lin Qi"],
+                            "location": "archive cellar",
+                            "importance": 8,
+                            "is_turning_point": True,
+                        }
+                    ]
+                },
+                {
+                    "causal_chains": [
+                        {
+                            "cause_description": "Lin Qi steals the ledger code from the archive.",
+                            "cause_chapter": 4,
+                            "effect_description": "The archivist can trace the missing code and pressure Lin Qi next chapter.",
+                            "effect_chapter": None,
+                            "cause_type": "action",
+                            "effect_type": "plot_pressure",
+                            "involved_characters": ["Lin Qi", "Archivist"],
+                            "importance": 9,
+                            "status": "pending",
+                            "resolution_description": None,
+                        }
+                    ]
+                },
+            ]
+
+        async def get_llm_response(self, **kwargs):
+            return json.dumps(self.responses.pop(0), ensure_ascii=False)
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'memory-causal.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        async with session_factory() as session:
+            session.add(User(id=1, username="tester", email="tester@example.com", hashed_password="hash"))
+            session.add(NovelProject(id="p-causal", user_id=1, title="Causal", initial_prompt="test", status="draft"))
+            session.add(NovelBlueprint(project_id="p-causal", title="Causal", world_setting={"novel_outline": []}))
+            session.add(ChapterOutline(project_id="p-causal", chapter_number=5, title="Pressure", summary="The archive reacts."))
+            await session.commit()
+
+        async with session_factory() as session:
+            service = MemoryLayerService(session, FakeMemoryLLM(), object())
+            result = await service.update_memory_after_chapter(
+                project_id="p-causal",
+                chapter_number=4,
+                chapter_content="Lin Qi copies the ledger code. The archivist notices the missing trace.",
+                character_names=[],
+                user_id=1,
+            )
+            assert result["character_states_updated"] == 1
+            assert result["timeline_events_added"] == 1
+            assert result["causal_chains_added"] == 1
+
+            chain = (await session.execute(select(CausalChain).where(CausalChain.project_id == "p-causal"))).scalar_one()
+            assert chain.status == "pending"
+            assert "ledger code" in chain.cause_description
+
+            loaded = await session.execute(
+                select(NovelProject)
+                .options(
+                    selectinload(NovelProject.blueprint),
+                    selectinload(NovelProject.outlines),
+                    selectinload(NovelProject.chapters),
+                )
+                .where(NovelProject.id == "p-causal")
+            )
+            project = loaded.scalar_one()
+            outline = next(item for item in project.outlines if item.chapter_number == 5)
+            package = await LongformContextService(session).build_context_package(
+                project=project,
+                outline=outline,
+                chapter_number=5,
+            )
+
+            assert package.timeline_digest["causal_chains"]
+            assert "trace the missing code" in package.timeline_digest["causal_chains"][0]["effect"]
+            assert "trace the missing code" in package.prompt_text
     finally:
         await engine.dispose()
 

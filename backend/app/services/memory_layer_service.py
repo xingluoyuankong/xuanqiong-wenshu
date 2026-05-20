@@ -26,6 +26,33 @@ from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwra
 logger = logging.getLogger(__name__)
 
 
+CAUSAL_CHAIN_EXTRACTION_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "required": ["causal_chains"],
+    "properties": {
+        "causal_chains": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["cause_description", "effect_description"],
+                "properties": {
+                    "cause_description": {"type": "string"},
+                    "cause_chapter": {"type": "integer"},
+                    "effect_description": {"type": "string"},
+                    "effect_chapter": {"type": ["integer", "null"]},
+                    "cause_type": {"type": "string"},
+                    "effect_type": {"type": "string"},
+                    "involved_characters": {"type": "array", "items": {"type": "string"}},
+                    "importance": {"type": "integer"},
+                    "status": {"type": "string"},
+                    "resolution_description": {"type": ["string", "null"]},
+                },
+            },
+        }
+    },
+}
+
+
 class MemoryLayerService:
     """记忆层服务"""
 
@@ -396,10 +423,17 @@ class MemoryLayerService:
         effect_type: str = "event",
         involved_characters: Optional[List[str]] = None,
         importance: int = 5,
+        effect_chapter: Optional[int] = None,
+        status: Optional[str] = None,
+        resolution_description: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
         *,
         auto_commit: bool = True,
     ) -> CausalChain:
         """添加因果链"""
+        normalized_status = (status or ("resolved" if effect_chapter else "pending")).strip().lower()
+        if normalized_status not in {"pending", "resolved", "abandoned"}:
+            normalized_status = "pending"
         chain = CausalChain(
             project_id=project_id,
             cause_type=cause_type,
@@ -407,9 +441,12 @@ class MemoryLayerService:
             cause_chapter=cause_chapter,
             effect_type=effect_type,
             effect_description=effect_description,
+            effect_chapter=effect_chapter,
             involved_characters=involved_characters,
             importance=importance,
-            status="pending"
+            status=normalized_status,
+            resolution_description=resolution_description,
+            extra=extra,
         )
         self.db.add(chain)
         if auto_commit:
@@ -418,6 +455,194 @@ class MemoryLayerService:
         else:
             await self.db.flush()
         return chain
+
+    @staticmethod
+    def _coerce_int(
+        value: Any,
+        default: Optional[int] = None,
+        *,
+        min_value: Optional[int] = None,
+        max_value: Optional[int] = None,
+    ) -> Optional[int]:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return default
+        if min_value is not None:
+            parsed = max(min_value, parsed)
+        if max_value is not None:
+            parsed = min(max_value, parsed)
+        return parsed
+
+    @staticmethod
+    def _clean_chain_text(value: Any, *, limit: int = 360) -> str:
+        text = " ".join(str(value or "").split())
+        return text[:limit].strip()
+
+    def _normalize_causal_chain_payload(
+        self,
+        raw: Dict[str, Any],
+        *,
+        chapter_number: int,
+    ) -> Optional[Dict[str, Any]]:
+        cause = self._clean_chain_text(raw.get("cause_description"))
+        effect = self._clean_chain_text(raw.get("effect_description"))
+        if len(cause) < 6 or len(effect) < 6:
+            return None
+
+        cause_chapter = self._coerce_int(
+            raw.get("cause_chapter"),
+            chapter_number,
+            min_value=1,
+            max_value=max(1, chapter_number),
+        )
+        effect_chapter = self._coerce_int(
+            raw.get("effect_chapter"),
+            None,
+            min_value=1,
+        )
+        importance = self._coerce_int(raw.get("importance"), 5, min_value=1, max_value=10) or 5
+
+        involved_characters: List[str] = []
+        for item in raw.get("involved_characters") or []:
+            name = self._clean_chain_text(item, limit=80)
+            if name and name not in involved_characters:
+                involved_characters.append(name)
+            if len(involved_characters) >= 8:
+                break
+
+        status = str(raw.get("status") or "").strip().lower()
+        if status not in {"pending", "resolved", "abandoned"}:
+            status = "resolved" if effect_chapter and effect_chapter <= chapter_number else "pending"
+
+        return {
+            "cause_description": cause,
+            "cause_chapter": cause_chapter or chapter_number,
+            "effect_description": effect,
+            "effect_chapter": effect_chapter,
+            "cause_type": self._clean_chain_text(raw.get("cause_type") or "event", limit=64) or "event",
+            "effect_type": self._clean_chain_text(raw.get("effect_type") or "event", limit=64) or "event",
+            "involved_characters": involved_characters,
+            "importance": importance,
+            "status": status,
+            "resolution_description": self._clean_chain_text(raw.get("resolution_description"), limit=360) or None,
+            "extra": {"source": "memory_layer_extraction", "chapter_number": chapter_number},
+        }
+
+    async def _causal_chain_exists(
+        self,
+        *,
+        project_id: str,
+        cause_chapter: int,
+        cause_description: str,
+        effect_description: str,
+    ) -> bool:
+        query = (
+            select(CausalChain.id)
+            .where(
+                and_(
+                    CausalChain.project_id == project_id,
+                    CausalChain.cause_chapter == cause_chapter,
+                    CausalChain.cause_description == cause_description,
+                    CausalChain.effect_description == effect_description,
+                )
+            )
+            .limit(1)
+        )
+        return bool(await self.db.scalar(query))
+
+    async def extract_causal_chains_from_chapter(
+        self,
+        project_id: str,
+        chapter_number: int,
+        chapter_content: str,
+        user_id: int,
+    ) -> List[Dict[str, Any]]:
+        """Extract cause/effect ledger updates from finalized chapter text."""
+        pending_digest: List[Dict[str, Any]] = []
+        try:
+            pending = await self.get_pending_causal_chains(project_id)
+            for chain in pending[:10]:
+                pending_digest.append(
+                    {
+                        "cause_chapter": chain.cause_chapter,
+                        "cause": self._clean_chain_text(chain.cause_description, limit=180),
+                        "expected_effect": self._clean_chain_text(chain.effect_description, limit=180),
+                        "characters": chain.involved_characters or [],
+                    }
+                )
+        except Exception as exc:  # pragma: no cover - defensive fallback for lightweight tests/adapters.
+            logger.debug("Skip pending causal chain digest during extraction: %s", exc)
+
+        prompt = f"""请从已定稿章节中抽取“会影响后续章节连续性”的因果链。
+
+要求：
+1. 只记录会跨段落、跨章节或影响角色/伏笔/冲突走向的因果，不记录普通动作流水账。
+2. 如果本章兑现了之前的待处理因果，请把 status 设为 resolved，并写 effect_chapter。
+3. 如果本章制造了后续压力、误会、债务、秘密、关系变化或任务，请把 status 设为 pending。
+4. 每条因果必须能帮助下一章生成时避免断裂：原因清楚、后果清楚、相关角色清楚。
+5. 最多输出 6 条，宁缺毋滥。
+
+[当前章节]
+第 {chapter_number} 章
+
+[正文]
+{chapter_content[:9000]}
+
+[已有待处理因果链]
+{json.dumps(pending_digest, ensure_ascii=False)}
+
+请只输出 JSON：
+{{
+  "causal_chains": [
+    {{
+      "cause_description": "导致后续变化的动作/决定/发现",
+      "cause_chapter": {chapter_number},
+      "effect_description": "已经发生或后续必须承接的结果",
+      "effect_chapter": null,
+      "cause_type": "event/action/decision/discovery",
+      "effect_type": "event/state_change/relationship_change/plot_pressure",
+      "involved_characters": ["角色名"],
+      "importance": 1-10,
+      "status": "pending/resolved",
+      "resolution_description": null
+    }}
+  ]
+}}"""
+
+        try:
+            result = await call_generation_json(
+                llm_service=self.llm_service,
+                system_prompt="你是长篇小说连续性审校，负责把定稿章节转成可追踪的因果账本。只输出 JSON。",
+                conversation_history=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                user_id=user_id,
+                timeout=120.0,
+                policy=GenerationCallPolicy(
+                    stage_label="记忆回写-因果链抽取",
+                    progress_stage="memory_extract_causal_chains",
+                    retry_attempts=2,
+                    json_repair_attempts=1,
+                    json_schema=CAUSAL_CHAIN_EXTRACTION_SCHEMA,
+                    json_schema_name="causal_chain_extraction",
+                    max_tokens=1800,
+                ),
+            )
+            chains = result.data.get("causal_chains", [])
+            if not isinstance(chains, list):
+                return []
+            normalized: List[Dict[str, Any]] = []
+            for raw in chains[:8]:
+                if not isinstance(raw, dict):
+                    continue
+                item = self._normalize_causal_chain_payload(raw, chapter_number=chapter_number)
+                if item:
+                    normalized.append(item)
+            return normalized[:6]
+        except Exception as e:
+            logger.warning(f"鎻愬彇鍥犳灉閾惧け璐? {e}")
+
+        return []
 
     async def resolve_causal_chain(
         self,
@@ -587,9 +812,30 @@ class MemoryLayerService:
                 await self.add_timeline_event(
                     project_id=project_id,
                     chapter_number=chapter_number,
+                    auto_commit=False,
                     **event_data
                 )
                 results["timeline_events_added"] += 1
+
+            # 3. Extract causal chains that future chapters must carry forward.
+            causal_chains = await self.extract_causal_chains_from_chapter(
+                project_id, chapter_number, chapter_content, user_id
+            )
+            for chain_data in causal_chains:
+                exists = await self._causal_chain_exists(
+                    project_id=project_id,
+                    cause_chapter=chain_data["cause_chapter"],
+                    cause_description=chain_data["cause_description"],
+                    effect_description=chain_data["effect_description"],
+                )
+                if exists:
+                    continue
+                await self.add_causal_chain(
+                    project_id=project_id,
+                    auto_commit=False,
+                    **chain_data,
+                )
+                results["causal_chains_added"] += 1
 
             await self.db.commit()
 
@@ -597,6 +843,13 @@ class MemoryLayerService:
                 f"项目 {project_id} 第 {chapter_number} 章记忆层更新完成: "
                 f"角色状态 {results['character_states_updated']}, "
                 f"时间线事件 {results['timeline_events_added']}"
+            )
+
+            logger.info(
+                "Memory ledger causal chains updated: project=%s chapter=%s causal_chains=%s",
+                project_id,
+                chapter_number,
+                results["causal_chains_added"],
             )
 
             return results

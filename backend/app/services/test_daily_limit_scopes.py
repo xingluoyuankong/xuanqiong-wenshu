@@ -319,6 +319,25 @@ async def test_memory_update_scope_reuses_outer_logical_run(monkeypatch):
                 },
                 ensure_ascii=False,
             ),
+            json.dumps(
+                {
+                    "causal_chains": [
+                        {
+                            "cause_description": "鏋椾竷鎶笅缂栧彿",
+                            "cause_chapter": 5,
+                            "effect_description": "缂栧彿浼氬湪涓嬩竴绔犲紩鏉ュ鎶楁柟杩借釜",
+                            "effect_chapter": None,
+                            "cause_type": "action",
+                            "effect_type": "plot_pressure",
+                            "involved_characters": ["鏋椾竷"],
+                            "importance": 8,
+                            "status": "pending",
+                            "resolution_description": None,
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
         ]
     )
     service = MemoryLayerService(db=CommitOnlyDB(), llm_service=llm, prompt_service=object())
@@ -329,8 +348,16 @@ async def test_memory_update_scope_reuses_outer_logical_run(monkeypatch):
     async def fake_add_timeline_event(*args, **kwargs):
         return None
 
+    async def fake_causal_chain_exists(*args, **kwargs):
+        return False
+
+    async def fake_add_causal_chain(*args, **kwargs):
+        return None
+
     monkeypatch.setattr(service, "update_character_state", fake_update_character_state)
     monkeypatch.setattr(service, "add_timeline_event", fake_add_timeline_event)
+    monkeypatch.setattr(service, "_causal_chain_exists", fake_causal_chain_exists)
+    monkeypatch.setattr(service, "add_causal_chain", fake_add_causal_chain)
 
     with LLMService.daily_limit_scope("outer-memory") as outer_scope:
         outer_scope_id = id(outer_scope)
@@ -344,7 +371,8 @@ async def test_memory_update_scope_reuses_outer_logical_run(monkeypatch):
 
     assert result["character_states_updated"] == 1
     assert result["timeline_events_added"] == 1
-    assert len(llm.scope_ids) == 2
+    assert result["causal_chains_added"] == 1
+    assert len(llm.scope_ids) == 3
     assert all(scope_id == outer_scope_id for scope_id in llm.scope_ids)
 
 
