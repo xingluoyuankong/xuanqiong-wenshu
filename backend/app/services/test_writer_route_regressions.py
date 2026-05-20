@@ -301,6 +301,30 @@ def test_single_chapter_evaluation_input_uses_cross_chapter_quality_context():
     assert payload["content_to_evaluate"]["version"]["metadata"]["quality_gate"]["event_density"] == "ok"
 
 
+def test_outline_generation_goal_allows_short_story_targets():
+    effective_chapters, chapter_target = writer._resolve_outline_generation_goal(
+        start_chapter=1,
+        num_chapters=2,
+        target_total_chapters=2,
+        target_total_words=1800,
+        chapter_word_target=None,
+    )
+
+    assert effective_chapters == 2
+    assert chapter_target == 900
+
+    with pytest.raises(writer.HTTPException) as exc_info:
+        writer._resolve_outline_generation_goal(
+            start_chapter=1,
+            num_chapters=1,
+            target_total_chapters=1,
+            target_total_words=999,
+            chapter_word_target=None,
+        )
+    assert exc_info.value.status_code == 400
+    assert "1000" in str(exc_info.value.detail)
+
+
 def test_failed_runtime_can_keep_confirm_actions_for_blocked_candidates():
     chapter = types.SimpleNamespace(
         real_summary=json.dumps({"generation_runtime": {"run_id": "run-1", "events": []}}, ensure_ascii=False),
