@@ -223,6 +223,84 @@ def test_completed_chapter_review_context_keeps_previous_anchors_and_ledgers():
     assert all("generation_runtime" not in item["real_summary"] for item in context)
 
 
+def test_single_chapter_evaluation_input_uses_cross_chapter_quality_context():
+    class DumpableWorld:
+        def model_dump(self):
+            return {"city": "Qingdu", "rule": "salt marks track debt"}
+
+    project_schema = types.SimpleNamespace(
+        blueprint=types.SimpleNamespace(
+            title="Salt Archive",
+            genre="mystery fantasy",
+            style="dense scene-driven prose",
+            tone="tense",
+            one_sentence_summary="A clerk follows salt marks through a rigged archive.",
+            full_synopsis="The story tracks a widening conspiracy across the archive city.",
+            world_setting=DumpableWorld(),
+            characters=[
+                {
+                    "name": "Lin Qi",
+                    "role": "protagonist",
+                    "personality": "careful but stubborn",
+                    "motivation": "prove the ledger was swapped",
+                    "faction": "Archive Office",
+                },
+                {"name": "Rival", "role": "pressure actor"},
+            ],
+            foreshadowing_system=[{"setup": "salt mark", "payoff_window": "chapter 4"}],
+            chapter_outline=[
+                types.SimpleNamespace(
+                    chapter_number=2,
+                    title="Door Handle",
+                    summary="A visitor arrives before the call ends.",
+                    chapter_role="force the protagonist to act before ready",
+                    conflict_escalation=["visitor blocks escape", "ledger changes hands"],
+                    character_focus=["Lin Qi", "Archivist"],
+                    cast_delta={"returning": ["Lin Qi"], "new": ["Archivist"]},
+                    continuity_notes=["inherit the door handle from chapter 1"],
+                    foreshadowing_tasks={"payoff": ["door handle"], "avoid_forgetting": ["salt mark"]},
+                    payoff_window="now",
+                )
+            ],
+        ),
+        chapters=[
+            types.SimpleNamespace(
+                chapter_number=1,
+                title="Salt Mark",
+                summary="Lin Qi finds the first mark.",
+                real_summary="The rival only knows half the ledger secret.",
+                content="opening\n" + "archive pressure " * 30 + "\nending door handle turns",
+                word_count=1600,
+                generation_status="successful",
+                character_focus=["Lin Qi", "Rival"],
+                cast_delta={"new": ["Lin Qi", "Rival"]},
+                continuity_notes=["door handle must continue"],
+                foreshadowing_tasks={"plant": ["salt mark"]},
+            ),
+            types.SimpleNamespace(chapter_number=2, title="Door Handle"),
+        ],
+    )
+    chapter = types.SimpleNamespace(chapter_number=2, title="Door Handle", generation_status="waiting_for_confirm")
+    version = types.SimpleNamespace(
+        id=17,
+        version_label="candidate-a",
+        word_count=5200,
+        content="Lin Qi kept one hand on the ledger.\n" + "He argues, acts, pays a price. " * 220,
+        metadata={"quality_gate": {"event_density": "ok"}},
+    )
+
+    payload = json.loads(writer._build_single_chapter_evaluation_input(project_schema, chapter, version, 2))
+
+    assert payload["review_mode"] == "single_version_cross_chapter_quality_review"
+    assert "completed_chapters" in payload
+    assert "ending door handle turns" in payload["completed_chapters"][0]["ending_anchor"]
+    assert payload["current_chapter_outline"]["foreshadowing_tasks"]["payoff"] == ["door handle"]
+    assert payload["novel_blueprint"]["world_setting"]["rule"] == "salt marks track debt"
+    assert payload["novel_blueprint"]["characters"][0]["name"] == "Lin Qi"
+    assert any("local anchored patches" in rule for rule in payload["review_rules"])
+    assert payload["content_to_evaluate"]["version"]["metadata"]["quality_gate"]["event_density"] == "ok"
+
+
 def test_failed_runtime_can_keep_confirm_actions_for_blocked_candidates():
     chapter = types.SimpleNamespace(
         real_summary=json.dumps({"generation_runtime": {"run_id": "run-1", "events": []}}, ensure_ascii=False),
