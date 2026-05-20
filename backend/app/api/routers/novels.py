@@ -30,7 +30,7 @@ from ...schemas.user import User as UserSchema, UserInDB
 from ...models import BlueprintGenerationJob, NovelProject
 from ...services.export_service import ExportService
 from ...services.import_service import ImportService
-from ...services.generation_call_service import GenerationCallPolicy, call_generation_text, is_retryable_http_exception
+from ...services.generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text, is_retryable_http_exception
 from ...services.llm_service import LLMService
 from ...services.novel_service import NovelService
 from ...services.prompt_service import PromptService
@@ -1273,18 +1273,24 @@ async def _repair_blueprint_character_names(
 {json.dumps(blueprint_data, ensure_ascii=False, indent=2)}
 """.strip()
 
-    repaired_raw = await llm_service.get_llm_response(
+    repaired_result = await call_generation_json(
+        llm_service=llm_service,
         system_prompt="你是小说蓝图修复器。你只负责修复角色命名与相关引用一致性，不重写故事方向。输出必须是合法 JSON 对象。",
         conversation_history=[{"role": "user", "content": repair_prompt}],
         temperature=0.2,
         user_id=user_id,
         timeout=180.0,
-        response_format="json_object",
-        max_tokens=5000,
+        policy=GenerationCallPolicy(
+            stage_label="蓝图角色命名修复",
+            progress_stage="polishing",
+            retry_attempts=3,
+            response_format="json_object",
+            max_tokens=5000,
+            allow_truncated_response=True,
+            json_repair_attempts=1,
+        ),
     )
-    repaired_normalized = unwrap_markdown_json(remove_think_tags(repaired_raw))
-    repaired_sanitized = sanitize_json_like_text(repaired_normalized)
-    repaired_data = json.loads(repaired_sanitized)
+    repaired_data = repaired_result.data
     if not isinstance(repaired_data, dict):
         raise HTTPException(status_code=500, detail="蓝图角色命名修复失败，系统未返回有效结构")
     if not _blueprint_has_valid_character_names(repaired_data):
@@ -1403,6 +1409,7 @@ async def _generate_novel_outline(
 """
 
     if progress_callback is not None:
+        await progress_callback("generating", "正在锁定设定与长篇目标（世界规则 / 角色规模 / 伏笔回收）")
         await progress_callback("generating", "正在生成小说总大纲（阶段骨架首轮）")
 
     outline_raw = await _call_llm_with_stage_retries(
@@ -1447,6 +1454,8 @@ async def _generate_novel_outline(
     if checkpoint_callback is not None:
         await checkpoint_callback(blueprint_data, "generating", "已保存小说总大纲骨架")
     if not world_bible_prepared:
+        if progress_callback is not None:
+            await progress_callback("generating", "正在补全设定锁定包（世界运行 / 势力 / 生存生活逻辑）")
         blueprint_data = await _generate_novel_world_bible(
             llm_service=llm_service,
             blueprint_data=blueprint_data,
@@ -1454,6 +1463,8 @@ async def _generate_novel_outline(
             progress_callback=progress_callback,
             checkpoint_callback=checkpoint_callback,
         )
+    if progress_callback is not None:
+        await progress_callback("polishing", "正在细化角色生命周期、伏笔回收窗口和阶段任务")
     blueprint_data["novel_outline"] = await _enrich_novel_outline_in_chunks(
         llm_service=llm_service,
         blueprint_data=blueprint_data,
@@ -1509,11 +1520,13 @@ async def _generate_executable_chapter_outline(
 
 [输出要求]
 1. 本次只输出第 {start_chapter} 到第 {end_chapter} 章，chapter_number 必须连续递增。
-2. 每章只输出三个字段：chapter_number、title、summary。
-3. summary 控制在 90-180 字，必须写清本章推进点、使用了总纲中的哪一层背景/冲突/人物关系/世界规则、以及章末钩子。
-4. 首卷节奏必须严格服从当前项目的总纲与世界骨架，自行判断这几章优先承担哪些职责，例如：建立故事入口、挂载核心关系、显影关键规则、引爆首轮矛盾、埋设长线钩子。不要套任何固定题材模板。
-5. 必须严格服从小说总大纲中的阶段背景、外部格局变化、人物推进与体系升级，不能脱离总纲另起炉灶。
-6. 标题和摘要必须具体，不要模板腔，不要空泛口号。
+2. 每章必须输出：chapter_number、title、summary、character_focus、cast_delta、continuity_notes、foreshadowing_tasks、payoff_window。
+3. summary 控制在 120-220 字，必须写清本章推进点、使用了总纲中的哪一层背景/冲突/人物关系/世界规则、以及章末钩子。
+4. cast_delta 要说明本章新增/回归/退出的角色位，必须落入角色池、势力或功能性路人规则；不能凭空出现又消失。
+5. foreshadowing_tasks 要区分 plant / reinforce / payoff / avoid_forgetting，不能只写“埋伏笔”。
+6. 首卷节奏必须严格服从当前项目的总纲与世界骨架，自行判断这几章优先承担哪些职责，例如：建立故事入口、挂载核心关系、显影关键规则、引爆首轮矛盾、埋设长线钩子。不要套任何固定题材模板。
+7. 必须严格服从小说总大纲中的阶段背景、外部格局变化、人物推进与体系升级，不能脱离总纲另起炉灶。
+8. 标题和摘要必须具体，不要模板腔，不要空泛口号。
 
 [输出格式]
 只输出 JSON：
@@ -1522,7 +1535,12 @@ async def _generate_executable_chapter_outline(
     {{
       "chapter_number": {start_chapter},
       "title": "标题",
-      "summary": "摘要"
+      "summary": "摘要",
+      "character_focus": ["本章角色焦点"],
+      "cast_delta": {{"new": [], "returning": [], "exit_or_absent": [], "faction_roles": []}},
+      "continuity_notes": ["承接点", "递给后文的压力"],
+      "foreshadowing_tasks": {{"plant": [], "reinforce": [], "payoff": [], "avoid_forgetting": []}},
+      "payoff_window": "计划回收窗口，如第8-12章"
     }}
   ]
 }}
@@ -1575,6 +1593,11 @@ async def _generate_executable_chapter_outline(
                     "chapter_number": chapter_number,
                     "title": title_value,
                     "summary": summary_value,
+                    "character_focus": item.get("character_focus") if isinstance(item.get("character_focus"), list) else [],
+                    "cast_delta": item.get("cast_delta") if isinstance(item.get("cast_delta"), dict) else {},
+                    "continuity_notes": item.get("continuity_notes") if isinstance(item.get("continuity_notes"), list) else [],
+                    "foreshadowing_tasks": item.get("foreshadowing_tasks") if isinstance(item.get("foreshadowing_tasks"), dict) else {},
+                    "payoff_window": str(item.get("payoff_window") or "").strip(),
                 }
             )
 
@@ -1690,8 +1713,9 @@ async def _polish_chapter_outline_quality(
 2. 每章 summary 必须有明确冲突、人物目标/阻碍、关键转折、章末钩子。
 3. summary 长度控制在 180-360 字，避免空泛描述。
 4. 补全每章承担的长线职责，保证前承后接，不允许只写“发生了什么”，还要写“推进了什么”。
-5. 强制输出以下字段：narrative_phase、chapter_role、suspense_hook、emotional_progression、character_focus、conflict_escalation、continuity_notes、foreshadowing。
-6. 语言要具体、可直接落地写作，避免模板腔。
+5. 强制输出以下字段：narrative_phase、chapter_role、suspense_hook、emotional_progression、character_focus、cast_delta、conflict_escalation、continuity_notes、foreshadowing、foreshadowing_tasks、payoff_window。
+6. cast_delta 必须说明新增/回归/退出角色与势力位置；foreshadowing_tasks 必须说明本章回收、强化、禁忘和可新增伏笔。
+7. 语言要具体、可直接落地写作，避免模板腔。
 
 [输出格式]
 只输出 JSON：
@@ -1706,12 +1730,15 @@ async def _polish_chapter_outline_quality(
       "suspense_hook": "章末钩子",
       "emotional_progression": "情绪如何变化",
       "character_focus": ["角色A", "角色B"],
+      "cast_delta": {{"new": [], "returning": [], "exit_or_absent": [], "faction_roles": []}},
       "conflict_escalation": ["升级点1", "升级点2"],
       "continuity_notes": ["承接上一章的点", "为下一章预埋的点"],
       "foreshadowing": {{
         "plant": ["埋下的伏笔"],
         "payoff": ["本章回收的伏笔"]
-      }}
+      }},
+      "foreshadowing_tasks": {{"plant": [], "reinforce": [], "payoff": [], "avoid_forgetting": []}},
+      "payoff_window": "计划回收窗口"
     }}
   ]
 }}
@@ -2782,6 +2809,12 @@ async def _generate_blueprint_impl(
                 "must_not_output_chapter_outline_yet": True,
                 "must_assign_concrete_protagonist_name": True,
                 "must_assign_concrete_core_character_names": True,
+                "must_output_longform_cast_plan": True,
+                "must_write_cast_plan_into_world_setting": "world_setting.cast_plan",
+                "must_plan_cast_tiers": ["主角", "核心角色", "重要配角", "阶段配角", "势力成员", "功能性路人"],
+                "must_plan_character_lifecycle": "每个重要角色都要有首次登场、退出/回归、所属势力、目标、秘密、知识边界和状态变化职责。",
+                "must_plan_foreshadowing_payoff_windows": True,
+                "must_not_keep_cast_tiny_for_longform": "长篇不能只有少数角色反复承担所有剧情功能。",
                 "must_match_name_with_genre_style_tone": True,
                 "must_keep_same_culture_name_system_within_same_faction": True,
                 "must_avoid_overly_modern_or_out_of_setting_names": True,

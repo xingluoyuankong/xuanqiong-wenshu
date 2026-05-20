@@ -11,7 +11,7 @@ import hashlib
 import time
 from copy import deepcopy
 from datetime import datetime, timezone
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -36,11 +36,13 @@ from ..services.chapter_guardrails import ChapterGuardrails
 from ..services.consistency_service import ConsistencyService, ViolationSeverity
 from ..services.enhanced_writing_flow import EnhancedWritingFlow
 from ..services.enrichment_service import EnrichmentService
+from ..services.generation_call_service import GenerationCallPolicy, call_generation_text
 from ..services.llm_config_service import LLMConfigService
 from ..services.llm_service import LLMService
 from ..services.knowledge_retrieval_service import KnowledgeRetrievalService, FilteredContext
 from ..services.memory_layer_service import MemoryLayerService
 from ..services.novel_service import NovelService
+from ..services.longform_context_service import LongformContextPackage, LongformContextService
 from ..services.preview_generation_service import PreviewGenerationService
 from ..services.prompt_service import PromptService
 from ..services.reader_simulator_service import ReaderSimulatorService, ReaderType
@@ -105,6 +107,7 @@ class PipelineOrchestrator:
         self.llm_service = LLMService(session)
         self.prompt_service = PromptService(session)
         self.novel_service = NovelService(session)
+        self.longform_context_service = LongformContextService(session)
         self.context_builder = WriterContextBuilder()
         self.guardrails = ChapterGuardrails()
         self.cache_service = CacheService(getattr(settings, "redis_url", "redis://localhost:6379/0"))
@@ -993,14 +996,19 @@ class PipelineOrchestrator:
     def _infer_stage_progress_percent(stage: str) -> int:
         stage_progress = {
             "queued": 4,
-            "generate_mission": 18,
-            "prepare_context": 28,
+            "prepare_context": 8,
+            "audit_context": 11,
+            "cast_plan": 14,
+            "foreshadowing_plan": 17,
+            "generate_mission": 22,
+            "longform_context": 26,
             "generate_variants": 62,
             "review": 72,
             "ai_review": 72,
             "self_critique": 84,
             "reader_simulator": 86,
             "consistency": 90,
+            "continuity_gate": 91,
             "persist_versions": 97,
             "waiting_for_confirm": 100,
             "failed": 100,
@@ -1275,6 +1283,78 @@ class PipelineOrchestrator:
             len(forbidden_characters),
         )
 
+        longform_context: Optional[LongformContextPackage] = None
+        longform_context_started_at = time.perf_counter()
+        try:
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="audit_context",
+                message="正在审计长期记忆、章节快照、时间线与知识图谱",
+                progress_percent=11,
+                extra={
+                    "context_stage": "audit_context",
+                    "context_stage_label": "长期上下文审计",
+                },
+            )
+            await self._assert_generation_active(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="audit_context",
+            )
+            longform_context = await self.longform_context_service.build_context_package(
+                project=project,
+                outline=outline,
+                chapter_number=chapter_number,
+                writing_notes=writing_notes,
+                chapter_mission=chapter_mission,
+                allowed_new_characters=allowed_new_characters,
+            )
+            runtime_metadata["longform_context"] = longform_context.to_metadata()
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="cast_plan",
+                message="正在装配角色规模、登场层级、势力归属和动态角色规则",
+                progress_percent=14,
+                extra={
+                    "target_character_count": longform_context.cast_plan.target_character_count,
+                    "planned_character_count": longform_context.cast_plan.planned_character_count,
+                    "chapter_focus_names": longform_context.cast_plan.chapter_focus_names,
+                },
+            )
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="foreshadowing_plan",
+                message="正在规划本章伏笔回收、强化、禁忘和可新增线索",
+                progress_percent=17,
+                extra={
+                    "must_resolve_count": len(longform_context.foreshadowing_task.must_resolve),
+                    "should_reinforce_count": len(longform_context.foreshadowing_task.should_reinforce),
+                    "avoid_forgetting_count": len(longform_context.foreshadowing_task.avoid_forgetting),
+                    "active_clue_count": len(longform_context.foreshadowing_task.active_clues),
+                },
+            )
+            await mark_stage("longform_context", longform_context_started_at, detail="长篇上下文包装配完成")
+        except Exception as exc:  # noqa: BLE001 - longform context should improve generation, not take the writer down.
+            runtime_metadata["degraded_stages"].append({"stage": "longform_context", "reason": str(exc)})
+            if isinstance(exc, SQLAlchemyError):
+                await self._safe_session_rollback("longform_context")
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="audit_context",
+                message="长篇上下文装配已降级跳过，继续使用基础上下文生成",
+                progress_percent=17,
+                level="warning",
+                extra={
+                    "degraded_stage": "longform_context",
+                    "degraded_reason": self._truncate_runtime_text(exc),
+                },
+            )
+            logger.warning("长篇上下文装配已降级：project=%s chapter=%s error=%s", project_id, chapter_number, exc)
+
         enhanced_flow = None
         enhanced_context = None
         if config.enable_constitution or config.enable_persona or config.enable_foreshadowing or config.enable_faction:
@@ -1347,6 +1427,7 @@ class PipelineOrchestrator:
             previous_tail=history_context["previous_tail"],
             chapter_mission=chapter_mission,
             macro_continuity_context=macro_continuity_context,
+            longform_context_text=longform_context.prompt_text if longform_context else None,
             rag_context=rag_context,
             knowledge_context=knowledge_context,
             outline_title=outline_title,
@@ -2186,6 +2267,34 @@ class PipelineOrchestrator:
                 chapter_mission=chapter_mission,
             )
             review_summaries["final_quality_metrics"] = final_quality_guard.get("quality_metric_snapshot", final_quality_guard)
+            continuity_gate_started_at = time.perf_counter()
+            longform_continuity_gate = self.longform_context_service.evaluate_continuity_quality(
+                content=best_content,
+                package=longform_context,
+                chapter_mission=chapter_mission,
+            )
+            longform_continuity_payload = asdict(longform_continuity_gate)
+            review_summaries["longform_continuity_gate"] = longform_continuity_payload
+            runtime_metadata["quality_gates"]["longform_continuity_gate"] = longform_continuity_payload
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="continuity_gate",
+                message=(
+                    "长篇连续性检查完成"
+                    if longform_continuity_gate.passed
+                    else "长篇连续性检查发现需要局部补丁的问题，已写入候选版本报告"
+                ),
+                progress_percent=91,
+                level="info" if longform_continuity_gate.passed else "warning",
+                extra={
+                    "longform_gate_passed": longform_continuity_gate.passed,
+                    "longform_gate_blockers": longform_continuity_gate.blockers,
+                    "longform_gate_warnings": longform_continuity_gate.warnings,
+                    "longform_gate_metrics": longform_continuity_gate.metrics,
+                },
+            )
+            await mark_stage("continuity_gate", continuity_gate_started_at, detail="长篇连续性质量门完成")
             runtime_metadata["actual_word_count"] = final_word_count
             runtime_metadata["word_requirement_met"] = final_word_count >= active_config.min_word_count
             if runtime_metadata["word_requirement_met"]:
@@ -2236,6 +2345,8 @@ class PipelineOrchestrator:
             best_version_metadata["review_summaries"] = review_summaries
             best_version_metadata["story_progression_guard"] = final_quality_guard
             best_version_metadata["quality_metrics"] = final_quality_guard.get("quality_metric_snapshot", final_quality_guard)
+            if longform_context:
+                best_version_metadata["longform_context"] = longform_context.to_metadata()
             if review_summaries.get("self_critique"):
                 self_critique_payload = review_summaries.get("self_critique") or {}
                 best_version_metadata["chapter_overview"] = self_critique_payload.get("overview_bundle")
@@ -3303,6 +3414,7 @@ class PipelineOrchestrator:
             "[当前章节目标]": 0,
             "[章节导演脚本](JSON)": 1,
             "[长线连续性摘要](安全压缩)": 2,
+            "[长篇上下文包](角色/伏笔/时间线)": 2.5,
             "[上一章摘要]": 3,
             "[上一章结尾]": 4,
             "[连续性硬性约束]": 5,
@@ -3366,6 +3478,7 @@ class PipelineOrchestrator:
         style_context: Optional[str],
         target_word_count: int,
         min_word_count: int,
+        longform_context_text: Optional[str] = None,
     ) -> List[Tuple[str, str]]:
         blueprint_text = json.dumps(writer_blueprint, ensure_ascii=False, indent=2)
         scene_execution_ledger = PipelineOrchestrator._build_scene_execution_ledger(
@@ -3405,6 +3518,8 @@ class PipelineOrchestrator:
         ]
         if macro_continuity_context:
             sections.append(("[长线连续性摘要](安全压缩)", macro_continuity_context))
+        if longform_context_text:
+            sections.append(("[长篇上下文包](角色/伏笔/时间线)", longform_context_text))
         if scene_execution_ledger:
             sections.append(("[SCENE_EXECUTION_LEDGER]", scene_execution_ledger))
         sections.extend(
@@ -3585,16 +3700,24 @@ class PipelineOrchestrator:
 
                 generation_started_at = time.perf_counter()
                 try:
-                    response = await self.llm_service.get_llm_response(
+                    text_result = await call_generation_text(
+                        llm_service=self.llm_service,
                         system_prompt=writer_prompt,
                         conversation_history=[{"role": "user", "content": final_prompt_input}],
                         temperature=temperature,
                         user_id=user_id,
                         timeout=self._resolve_chapter_generation_timeout(config.target_word_count),
-                        max_tokens=self._resolve_chapter_generation_max_tokens(config.target_word_count),
-                        response_format=None,
-                        allow_truncated_response=config.allow_truncated_response,
+                        policy=GenerationCallPolicy(
+                            stage_label=f"章节正文候选 {index + 1}",
+                            progress_stage="generate_variants",
+                            retry_attempts=2,
+                            response_format=None,
+                            max_tokens=self._resolve_chapter_generation_max_tokens(config.target_word_count),
+                            allow_truncated_response=config.allow_truncated_response,
+                            retry_same_model_once=True,
+                        ),
                     )
+                    response = text_result.text
                 except HTTPException:
                     raise
                 except (httpx.HTTPError, APIConnectionError, APITimeoutError, APIError) as exc:

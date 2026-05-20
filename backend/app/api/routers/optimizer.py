@@ -19,6 +19,7 @@ from ...schemas.novel import Chapter as ChapterSchema
 from ...schemas.user import UserInDB
 from ...services.llm_service import LLMService
 from ...services.generation_call_service import GenerationCallPolicy, GenerationJSONDecodeError, call_generation_json
+from ...services.longform_context_service import LongformContextService
 from ...services.novel_service import NovelService
 from ...services.prompt_service import PromptService
 
@@ -150,7 +151,7 @@ def _build_nearby_chapter_state(project: Any, chapter_number: int, *, radius: in
 
 def _build_continuity_contract(project: Any, request: OptimizeRequest, original_content: str) -> Dict[str, Any]:
     return {
-        "mode": "continuity_preserving_full_chapter_optimization",
+        "mode": "local_window_with_anchors_return_full_chapter",
         "chapter_number": request.chapter_number,
         "dimension": request.dimension,
         "nearby_outlines": _build_nearby_outline_context(project, request.chapter_number),
@@ -158,10 +159,11 @@ def _build_continuity_contract(project: Any, request: OptimizeRequest, original_
         "original_opening_sample": original_content[:700],
         "original_ending_sample": original_content[-700:],
         "hard_rules": [
-            "必须返回完整章节正文，不要只返回被修改片段。",
+            "优先只修改问题片段，用前后锚点把局部改动缝回原文；最后必须返回完整章节正文，便于系统保存。",
             "保留原章节的事件顺序、因果链、角色目标、章尾钩子和上下章承接点。",
             "只在当前优化维度上改写表达，不新增无法在相邻章节承接的新支线。",
             "可以润色句段和补强细节，但不能把连续场景切碎成互不相连的短块。",
+            "除非原文存在严重结构断裂，不要重写整章；扩展修补范围必须让连续性更清楚。",
         ],
     }
 
@@ -209,29 +211,29 @@ async def optimize_chapter(
     # 确定要优化的内容来源
     original_content = None
 
-    # ?? A: ??????? ID / ??????
+    # 路径 A：使用指定版本 ID 或版本序号
     if request.version_id is not None or request.version_index is not None:
         versions = sorted(list(chapter.versions or []), key=lambda v: (v.created_at, v.id))
         if not versions:
-            raise HTTPException(status_code=400, detail="????????????")
+            raise HTTPException(status_code=400, detail="该章节没有可优化的候选版本")
         selected_version = None
         if request.version_id is not None:
             selected_version = next((version for version in versions if version.id == request.version_id), None)
             if selected_version is None:
-                raise HTTPException(status_code=400, detail="????????????????????")
+                raise HTTPException(status_code=400, detail="未找到指定的章节版本，无法优化")
         else:
             if request.version_index is None or request.version_index < 0 or request.version_index >= len(versions):
-                raise HTTPException(status_code=400, detail=f"???? {request.version_index} ??")
+                raise HTTPException(status_code=400, detail=f"版本序号 {request.version_index} 无效")
             selected_version = versions[request.version_index]
         if not selected_version.content:
-            raise HTTPException(status_code=400, detail="?????????")
+            raise HTTPException(status_code=400, detail="所选版本内容为空，无法优化")
         original_content = selected_version.content
 
-    # ?? B: ??????
+    # 路径 B：使用已选定稿版本
     if not original_content and chapter.selected_version and chapter.selected_version.content:
         original_content = chapter.selected_version.content
 
-    # ?? C: ??????
+    # 路径 C：没有可用内容
     if not original_content:
         raise HTTPException(status_code=400, detail="章节尚未生成内容，无法进行优化")
     
@@ -270,6 +272,25 @@ async def optimize_chapter(
         "additional_notes": request.additional_notes or "无额外指令",
         "continuity_contract": _build_continuity_contract(project, request, original_content),
     }
+    try:
+        outline = next((item for item in getattr(project, "outlines", []) or [] if item.chapter_number == request.chapter_number), None)
+        longform_package = await LongformContextService(session).build_context_package(
+            project=project,
+            outline=outline,
+            chapter_number=request.chapter_number,
+            writing_notes=request.additional_notes,
+            chapter_mission=None,
+            allowed_new_characters=[],
+        )
+        optimize_input["longform_continuity_package"] = longform_package.to_optimizer_payload()
+    except Exception as exc:  # noqa: BLE001 - optimization should keep working with nearby anchors.
+        logger.warning(
+            "章节优化长篇上下文包装配失败，继续使用相邻章节锚点: project=%s chapter=%s error=%s",
+            request.project_id,
+            request.chapter_number,
+            exc,
+        )
+        optimize_input["longform_continuity_package_error"] = str(exc)[:200]
     
     # 如果是心理活动优化，添加角色DNA信息
     if character_dna:

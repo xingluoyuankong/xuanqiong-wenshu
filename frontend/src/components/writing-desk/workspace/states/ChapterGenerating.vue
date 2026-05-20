@@ -224,6 +224,10 @@ const stage = computed(() =>
 const stageDescriptionMap: Record<string, string> = {
   queued: '任务已经进入后台队列，正在等待分配执行槽位。',
   prepare_context: '系统正在整理蓝图、历史章节、角色约束和上下文材料。',
+  audit_context: '系统正在审计长期记忆、章节快照、时间线和知识图谱。',
+  cast_plan: '系统正在装配角色规模、登场层级、势力归属和动态角色规则。',
+  foreshadowing_plan: '系统正在规划本章伏笔回收、强化、禁忘和可新增线索。',
+  longform_context: '系统正在把长篇上下文压成写前约束包。',
   generate_mission: '系统正在构建本章写作任务、约束和生成计划。',
   generate_variants: '系统正在正式生成正文草稿，这通常是最耗时的阶段。',
   review: '正文草稿已产出，系统正在做首轮评审、筛选和增强准备。',
@@ -238,6 +242,7 @@ const stageDescriptionMap: Record<string, string> = {
   optimize_character: '正在处理人物层问题：角色、关系、情绪、对话。',
   optimize_delivery: '正在处理表现层问题：节奏、场景、悬念、文风。',
   consistency: '系统正在校验剧情设定、前后文和伏笔一致性。',
+  continuity_gate: '系统正在检查跨章节、伏笔、角色状态和知识边界。',
   optimizer: '系统正在做定向优化，强化最重要的问题维度。',
   enrichment: '系统正在补字数、强化细节和做最终质量增强。',
   persist_versions: '系统正在写入候选版本并整理确认结果。',

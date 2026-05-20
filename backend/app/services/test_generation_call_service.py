@@ -99,6 +99,7 @@ def test_continuity_contract_includes_neighboring_outlines_and_hard_rules():
 
     contract = _build_continuity_contract(project, request, "开头" + "正文" * 200 + "结尾")
 
-    assert contract["mode"] == "continuity_preserving_full_chapter_optimization"
+    assert contract["mode"] == "local_window_with_anchors_return_full_chapter"
     assert [item["chapter_number"] for item in contract["nearby_outlines"]] == [1, 2, 3]
+    assert any("局部改动" in rule for rule in contract["hard_rules"])
     assert any("完整章节正文" in rule for rule in contract["hard_rules"])

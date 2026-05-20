@@ -4,7 +4,7 @@ import json
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -43,7 +43,7 @@ from app.api.routers.novels import (
 )
 from app.db.base import Base
 from app.models import BlueprintGenerationJob, NovelProject, User
-from app.models.novel import ChapterOutline, NovelBlueprint
+from app.models.novel import BlueprintCharacter, ChapterOutline, NovelBlueprint
 from app.schemas.novel import Blueprint
 from app.services import llm_service as llm_service_module
 from app.services import novel_service as novel_service_module
@@ -3182,9 +3182,11 @@ async def test_generate_novel_outline_builds_total_outline_when_missing():
         ("polishing", "正在补全世界体系（历史背景 / 世界结构 / 地理秩序）（1/3）"),
         ("polishing", "正在补全世界体系（力量体系 / 生存生活逻辑）（2/3）"),
         ("polishing", "正在补全世界体系（文化文明 / 经济社会 / 信仰秩序）（3/3）"),
+        ("generating", "正在锁定设定与长篇目标（世界规则 / 角色规模 / 伏笔回收）"),
         ("generating", "正在生成小说总大纲（阶段骨架首轮）"),
         ("generating", "正在解析小说总大纲骨架"),
         ("generating", "正在校验小说总大纲骨架连续性"),
+        ("polishing", "正在细化角色生命周期、伏笔回收窗口和阶段任务"),
         ("polishing", "正在细化小说总大纲（第 1/2 段）"),
         ("polishing", "正在细化小说总大纲（第 2/2 段）"),
     ]
@@ -3464,9 +3466,18 @@ async def test_replace_blueprint_serializes_nested_pydantic_models(tmp_path):
                 "key_locations": [{"name": "旧档案馆地库"}],
             },
             story_arcs=[{"title": "黑潮账册线", "conflict": "证据不断消失"}],
-            novel_outline=[{"title": "第一阶段", "main_conflict": "抢在记忆抹除前留下证据"}],
+            novel_outline=[{"title": "第一阶段", "main_conflict": "抢在记忆抹除前留下证据", "expected_chapter_range": "1-260章"}],
             foreshadowing_system=[{"plant": "盐渍编号", "payoff": "渡雾码头旧仓库"}],
-            chapter_outline=[{"chapter_number": 1, "title": "雾夜来客", "summary": "林七第一次摸到被篡改的残页。"}],
+            chapter_outline=[
+                {
+                    "chapter_number": 1,
+                    "title": "雾夜来客",
+                    "summary": "林七第一次摸到被篡改的残页。",
+                    "cast_delta": {"new": ["林七"], "returning": [], "exit_or_absent": [], "faction_roles": []},
+                    "foreshadowing_tasks": {"plant": ["盐渍编号"], "reinforce": [], "payoff": [], "avoid_forgetting": []},
+                    "payoff_window": "第8-12章",
+                }
+            ],
         )
 
         async with session_factory() as session:
@@ -3490,6 +3501,20 @@ async def test_replace_blueprint_serializes_nested_pydantic_models(tmp_path):
             outline = outline_result.scalars().first()
             assert outline is not None
             assert outline.title == "雾夜来客"
+            assert outline.metadata["cast_delta"]["new"] == ["林七"]
+            assert outline.metadata["foreshadowing_tasks"]["plant"] == ["盐渍编号"]
+            assert outline.metadata["payoff_window"] == "第8-12章"
+
+            character_count = await session.scalar(
+                select(func.count(BlueprintCharacter.id)).where(BlueprintCharacter.project_id == "project-blueprint-1")
+            )
+            assert character_count >= 40
+
+            schema = await NovelService(session).get_project_schema("project-blueprint-1", 1)
+            chapter_schema = next(item for item in schema.chapters if item.chapter_number == 1)
+            assert chapter_schema.cast_delta["new"] == ["林七"]
+            assert chapter_schema.foreshadowing_tasks["plant"] == ["盐渍编号"]
+            assert chapter_schema.payoff_window == "第8-12章"
     finally:
         await engine.dispose()
 

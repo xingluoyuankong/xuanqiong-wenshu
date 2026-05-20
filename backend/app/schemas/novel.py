@@ -58,9 +58,12 @@ class ChapterOutline(BaseModel):
     suspense_hook: Optional[str] = None
     emotional_progression: Optional[str] = None
     character_focus: List[str] = Field(default_factory=list)
+    cast_delta: Dict[str, Any] = Field(default_factory=dict)
     conflict_escalation: List[str] = Field(default_factory=list)
     continuity_notes: List[str] = Field(default_factory=list)
     foreshadowing: Dict[str, List[str]] = Field(default_factory=dict)
+    foreshadowing_tasks: Dict[str, List[str]] = Field(default_factory=dict)
+    payoff_window: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
