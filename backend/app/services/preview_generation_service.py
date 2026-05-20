@@ -25,6 +25,24 @@ class PreviewGenerationService:
         self.llm_service = llm_service
         self.prompt_service = prompt_service
 
+    @staticmethod
+    def _count_content_chars(text: str) -> int:
+        return len("".join(str(text or "").split()))
+
+    @classmethod
+    def _expanded_chapter_failure_reason(cls, text: str, target_word_count: int) -> str:
+        if not str(text or "").strip():
+            return "empty_expanded_chapter"
+        actual = cls._count_content_chars(text)
+        target = max(500, int(target_word_count or 0))
+        floor = max(320, int(target * 0.72))
+        if actual < floor:
+            return "expanded_chapter_under_target_floor"
+        paragraphs = [part.strip() for part in str(text or "").splitlines() if part.strip()]
+        if target >= 3000 and len(paragraphs) < 4:
+            return "expanded_chapter_too_fragmented"
+        return ""
+
     async def generate_preview(
         self,
         project_id: str,
@@ -405,8 +423,15 @@ class PreviewGenerationService:
                     user_id=user_id
                 )
 
-                result["full_chapter"] = full_chapter
-                result["status"] = "success" if full_chapter else "failed"
+                failure_reason = self._expanded_chapter_failure_reason(full_chapter, target_word_count)
+                if failure_reason:
+                    result["status"] = "expanded_quality_rejected"
+                    result["failure_reason"] = failure_reason
+                    result["rejected_full_chapter_preview"] = str(full_chapter or "")[:800]
+                    result["full_chapter"] = ""
+                else:
+                    result["full_chapter"] = full_chapter
+                    result["status"] = "success"
             else:
                 result["status"] = "preview_failed"
 
