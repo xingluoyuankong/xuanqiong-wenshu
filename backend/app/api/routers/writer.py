@@ -129,6 +129,91 @@ def _build_busy_progress_stage(status_value: str) -> str:
     return "generating"
 
 
+def _review_context_value(item: Any, key: str, default: Any = None) -> Any:
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
+def _review_context_text(value: Any, *, limit: int = 360) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        text = value
+    elif isinstance(value, (list, tuple, set)):
+        text = "；".join(_review_context_text(item, limit=120) for item in value if item)
+    elif isinstance(value, dict):
+        try:
+            text = json.dumps(value, ensure_ascii=False)
+        except TypeError:
+            text = str(value)
+    else:
+        text = str(value)
+    text = " ".join(text.replace("\r", "\n").split())
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit].rstrip()}..."
+
+
+def _review_context_real_summary(value: Any) -> str:
+    text = _review_context_text(value, limit=420)
+    if not text:
+        return ""
+    if text.startswith("{") and "generation_runtime" in text[:120]:
+        return ""
+    return text
+
+
+def _build_completed_chapter_review_context(
+    chapters: List[Any],
+    current_chapter_number: int,
+    *,
+    limit: int = 8,
+) -> List[Dict[str, Any]]:
+    """Build a compact previous-chapter package for multi-version review.
+
+    The reviewer needs cross-chapter anchors, but not the full manuscript. Keep the
+    latest previous chapters with summaries and ending anchors so it can judge
+    continuity without bloating the review prompt.
+    """
+    previous: List[Any] = []
+    for chapter in chapters or []:
+        try:
+            chapter_number = int(_review_context_value(chapter, "chapter_number", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if chapter_number <= 0 or chapter_number >= current_chapter_number:
+            continue
+        previous.append(chapter)
+
+    result: List[Dict[str, Any]] = []
+    for chapter in sorted(previous, key=lambda item: int(_review_context_value(item, "chapter_number", 0) or 0))[-limit:]:
+        raw_content = _review_context_text(_review_context_value(chapter, "content"), limit=20000)
+        ending_anchor = _review_context_text(raw_content[-360:] if raw_content else "", limit=360)
+        summary = _review_context_text(_review_context_value(chapter, "summary"), limit=360)
+        real_summary = _review_context_real_summary(_review_context_value(chapter, "real_summary"))
+        continuity_notes = _review_context_value(chapter, "continuity_notes", []) or []
+        foreshadowing_tasks = _review_context_value(chapter, "foreshadowing_tasks", {}) or {}
+        cast_delta = _review_context_value(chapter, "cast_delta", {}) or {}
+        character_focus = _review_context_value(chapter, "character_focus", []) or []
+        result.append(
+            {
+                "chapter_number": int(_review_context_value(chapter, "chapter_number", 0) or 0),
+                "title": _review_context_text(_review_context_value(chapter, "title"), limit=80),
+                "summary": summary,
+                "real_summary": real_summary,
+                "ending_anchor": ending_anchor,
+                "word_count": int(_review_context_value(chapter, "word_count", 0) or 0),
+                "generation_status": str(_review_context_value(chapter, "generation_status", "") or ""),
+                "character_focus": character_focus,
+                "cast_delta": cast_delta,
+                "continuity_notes": continuity_notes,
+                "foreshadowing_tasks": foreshadowing_tasks,
+            }
+        )
+    return result
+
+
 async def _resolve_chapter_version(
     session: AsyncSession,
     chapter: Chapter,
@@ -2434,7 +2519,10 @@ async def _evaluate_all_versions(
         # 构建评审输入
         eval_input = {
             "novel_blueprint": blueprint_context,
-            "completed_chapters": [],  # TODO: 可以添加前序章节摘要
+            "completed_chapters": _build_completed_chapter_review_context(
+                list(getattr(project_schema, "chapters", []) or []),
+                chapter_number,
+            ),
             "content_to_evaluate": {
                 "chapter_title": current_outline_title or f"第{chapter_number}章",
                 "total_versions": len(versions_content),  # 明确告诉AI有多少个版本
