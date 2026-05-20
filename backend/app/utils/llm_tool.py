@@ -72,6 +72,7 @@ class LLMClient:
             payload["top_p"] = top_p
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
+        payload = {key: value for key, value in payload.items() if value is not None}
 
         stream = await self._client.chat.completions.create(**payload)
         async for chunk in stream:
@@ -131,6 +132,7 @@ class LLMClient:
             payload["top_p"] = top_p
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
+        payload = {key: value for key, value in payload.items() if value is not None}
 
         completion = await self._client.chat.completions.create(**payload)
         if not completion.choices:

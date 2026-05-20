@@ -800,7 +800,31 @@ async def test_run_self_critique_preserves_rejected_candidate_diagnostics(monkey
             "final_critique": candidate_critique,
             "status": "optimized",
             "improvement": 1.8,
-            "optimization_logs": [{"strategy": "delivery_polish", "accepted": True}],
+            "optimization_logs": [
+                {
+                    "stage": "structural",
+                    "strategy_logs": [
+                        {
+                            "strategy": "structure_guardrail",
+                            "attempts": [
+                                {
+                                    "mode": "stagewide",
+                                    "manual_confirmation_required": True,
+                                    "patch_suggestions": [
+                                        {
+                                            "dimension": "logic",
+                                            "severity": "major",
+                                            "location": "章末",
+                                            "problem": "承接仍有断裂",
+                                            "suggestion": "补一条可观察因果链",
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
         }
 
     monkeypatch.setattr(SelfCritiqueService, "critique_and_revise_loop", fake_loop)
@@ -819,6 +843,10 @@ async def test_run_self_critique_preserves_rejected_candidate_diagnostics(monkey
     assert summary["acceptance_reason"] == "critical_issues_increased"
     assert summary["final_critique"]["critical_count"] == 0
     assert summary["rejected_candidate_critique"] == candidate_critique
+    assert summary["manual_stagewide_confirmation_required"] is True
+    assert summary["stagewide_deferred_count"] == 1
+    assert summary["manual_patch_suggestions"][0]["stage"] == "structural"
+    assert summary["manual_patch_suggestions"][0]["strategy"] == "structure_guardrail"
     assert summary["rejected_candidate_content_fingerprint"] == orchestrator._content_fingerprint(candidate_content)
     assert summary["before_revision_stats"] == {
         "score": 78.0,
@@ -1442,7 +1470,64 @@ async def test_critique_and_revise_loop_runs_multiple_iterations_when_issues_rem
 
 
 @pytest.mark.anyio
-async def test_revise_chapter_uses_stagewide_fallback_when_localized_fix_does_not_change_text(monkeypatch):
+async def test_revise_chapter_defers_stagewide_fallback_without_manual_confirmation(monkeypatch):
+    service = SelfCritiqueService(DummyAsyncSession(), FakeLLMService(""), DummyPromptService())
+    issues = [
+        {
+            "dimension": "logic",
+            "severity": "major",
+            "location": "中段盘问",
+            "problem": "同一轮盘问出现双版本推进。",
+            "suggestion": "合并为一次正式盘问。",
+            "example": "周尧先否认再改口出现两次。",
+        }
+    ]
+
+    async def fake_local(content, issues, context=None, user_id=0, strategy_key="delivery_polish"):
+        return content
+
+    async def fake_stagewide(*args, **kwargs):
+        raise AssertionError("stagewide rewrite requires explicit manual confirmation")
+
+    async def fake_snapshot(content, *, strategy_key, context=None, user_id=0, focus_issues=None):
+        if content.endswith("\n\n修正后的正式版本。"):
+            return {"critical": 0, "major": 0, "minor": 0, "total": 0, "weighted": 0}
+        return {"critical": 0, "major": 1, "minor": 0, "total": 1, "weighted": 10}
+
+    async def fake_report(content, *, strategy_key, context=None, user_id=0, focus_issues=None):
+        if content.endswith("\n\n修正后的正式版本。"):
+            return {"issues": []}
+        return {
+            "issues": [
+                {"dimension": "logic", "severity": "major", "location": "中段对话", "problem": "同一轮问答出现双版本推进。", "suggestion": "合并为一个正式问答链。", "example": "韩峤先确认，再改口处理。"}
+            ]
+        }
+
+    monkeypatch.setattr(service, "_revise_chapter_locally", fake_local)
+    monkeypatch.setattr(service, "_revise_chapter_stagewide", fake_stagewide)
+    monkeypatch.setattr(service, "_critique_strategy_snapshot", fake_snapshot)
+    monkeypatch.setattr(service, "_critique_strategy_report", fake_report)
+
+    revised, logs = await service.revise_chapter(
+        "原始正文",
+        issues,
+        return_diagnostics=True,
+        allow_stagewide=True,
+    )
+
+    assert revised == "原始正文"
+    assert logs[0]["accepted"] is False
+    assert logs[0]["stagewide_allowed"] is False
+    assert logs[0]["stagewide_requested"] is True
+    assert logs[0]["manual_stagewide_confirmation_required"] is True
+    deferred = next(item for item in logs[0]["attempts"] if item["mode"] == "stagewide")
+    assert deferred["reason"] == "stagewide_deferred"
+    assert deferred["manual_confirmation_required"] is True
+    assert deferred["patch_suggestions"]
+
+
+@pytest.mark.anyio
+async def test_revise_chapter_uses_stagewide_fallback_only_with_manual_confirmation(monkeypatch):
     service = SelfCritiqueService(DummyAsyncSession(), FakeLLMService(""), DummyPromptService())
     issues = [
         {
@@ -1480,10 +1565,17 @@ async def test_revise_chapter_uses_stagewide_fallback_when_localized_fix_does_no
     monkeypatch.setattr(service, "_critique_strategy_snapshot", fake_snapshot)
     monkeypatch.setattr(service, "_critique_strategy_report", fake_report)
 
-    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True, allow_stagewide=True)
+    revised, logs = await service.revise_chapter(
+        "原始正文",
+        issues,
+        context={"manual_stagewide_rewrite": {"confirmed": True}},
+        return_diagnostics=True,
+        allow_stagewide=True,
+    )
 
     assert revised.endswith("修正后的正式版本。")
     assert logs[0]["accepted"] is True
+    assert logs[0]["stagewide_allowed"] is True
     assert any(item["mode"] == "stagewide" and item["accepted"] is True for item in logs[0]["attempts"])
 
 
@@ -1514,7 +1606,13 @@ async def test_revise_chapter_rejects_stagewide_candidate_when_targeted_major_is
     monkeypatch.setattr(service, "_revise_chapter_stagewide", fake_stagewide)
     monkeypatch.setattr(service, "_critique_strategy_snapshot", fake_snapshot)
 
-    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True, allow_stagewide=True)
+    revised, logs = await service.revise_chapter(
+        "原始正文",
+        issues,
+        context={"manual_stagewide_rewrite": {"confirmed": True}},
+        return_diagnostics=True,
+        allow_stagewide=True,
+    )
 
     assert revised == "原始正文"
     assert logs[0]["accepted"] is False
@@ -1566,7 +1664,13 @@ async def test_revise_chapter_rejects_stagewide_candidate_when_safety_snapshot_r
     monkeypatch.setattr(service, "_critique_strategy_report", fake_report)
     monkeypatch.setattr(service, "_critique_stagewide_safety_snapshot", fake_stagewide_safety)
 
-    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True, allow_stagewide=True)
+    revised, logs = await service.revise_chapter(
+        "原始正文",
+        issues,
+        context={"manual_stagewide_rewrite": {"confirmed": True}},
+        return_diagnostics=True,
+        allow_stagewide=True,
+    )
 
     assert revised == "原始正文"
     assert logs[0]["accepted"] is False
@@ -1681,7 +1785,13 @@ async def test_revise_chapter_retries_stagewide_with_aggregate_feedback(monkeypa
     monkeypatch.setattr(service, "_critique_strategy_report", fake_report)
     monkeypatch.setattr(service, "_critique_stagewide_safety_snapshot", fake_stagewide_safety)
 
-    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True, allow_stagewide=True)
+    revised, logs = await service.revise_chapter(
+        "原始正文",
+        issues,
+        context={"manual_stagewide_rewrite": {"confirmed": True}},
+        return_diagnostics=True,
+        allow_stagewide=True,
+    )
 
     assert revised.endswith("第二次候选。")
     assert logs[0]["accepted"] is True
@@ -1760,7 +1870,8 @@ async def test_revise_chapter_skips_stagewide_for_long_form_delivery_polish_with
     revised, logs = await service.revise_chapter(long_content, issues, return_diagnostics=True, allow_stagewide=True)
 
     assert revised == long_content
-    assert logs[0]["stagewide_allowed"] is True
+    assert logs[0]["stagewide_allowed"] is False
+    assert logs[0]["stagewide_requested"] is True
     assert logs[0]["stagewide_attempted"] is False
     assert logs[0]["stagewide_accepted"] is False
 
@@ -2161,6 +2272,44 @@ def test_should_reject_self_critique_revision_when_score_improves_but_critical_i
     assert reason == "critical_issues_increased"
     assert before_stats["critical"] == 0
     assert after_stats["critical"] == 3
+
+
+def test_consistency_fallback_fix_guard_rejects_partial_or_collapsed_repair():
+    service = ConsistencyService(db=None, llm_service=None)
+    original = "\n\n".join(
+        [
+            "第一段保留前锚点，主角带着旧卷宗进入听潮祠。"*2,
+            "第二段说明上一章留下的缉印令压力仍在。"*2,
+            "第三段对话推进冲突，对手要求他交出证据。"*2,
+            "第四段主角发现账页编号和旧案编号重合。"*2,
+            "第五段他决定暂时隐瞒发现，把风险压给下一步行动。"*2,
+            "第六段保留后锚点，门外水路封锁的锣声逼近。"*2,
+        ]
+    )
+    partial = "只修复中段冲突，但丢掉章首章尾和多数原有段落。"*80
+
+    assert service._fix_continuity_guard_failure(original, partial).startswith(
+        "fixed_content_collapsed_paragraphs"
+    )
+
+
+def test_consistency_fallback_fix_guard_accepts_anchored_full_chapter_repair():
+    service = ConsistencyService(db=None, llm_service=None)
+    original_parts = [
+        "第一段保留前锚点，主角带着旧卷宗进入听潮祠。",
+        "第二段说明上一章留下的缉印令压力仍在。",
+        "第三段对话推进冲突，对手要求他交出证据。",
+        "第四段主角发现账页编号和旧案编号重合。",
+        "第五段他决定暂时隐瞒发现，把风险压给下一步行动。",
+        "第六段保留后锚点，门外水路封锁的锣声逼近。",
+    ]
+    fixed_parts = list(original_parts)
+    fixed_parts[2] = "第三段对话推进冲突，对手先要求交证据，主角再用编号反制，冲突链只保留一个正式版本。"
+
+    assert service._fix_continuity_guard_failure(
+        "\n\n".join(original_parts),
+        "\n\n".join(fixed_parts),
+    ) is None
 
 
 

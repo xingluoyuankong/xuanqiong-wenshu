@@ -471,11 +471,55 @@ class ConsistencyService:
                         retry_same_model_once=True,
                     ),
                 )
-                cleaned = remove_think_tags(text_result.text) if text_result.text else ""
-                return cleaned.strip() if cleaned else None
+                cleaned = remove_think_tags(text_result.text).strip() if text_result.text else ""
+                if not cleaned:
+                    return None
+                guard_failure = self._fix_continuity_guard_failure(chapter_text, cleaned)
+                if guard_failure:
+                    logger.warning(
+                        "Consistency fallback fix rejected by continuity guard: project=%s reason=%s",
+                        project_id,
+                        guard_failure,
+                    )
+                    return None
+                return cleaned
             except Exception as exc:
                 logger.error("自动修复失败: %s", exc)
                 return None
+
+    def _fix_continuity_guard_failure(self, original: str, fixed: str) -> Optional[str]:
+        original_clean = str(original or "").strip()
+        fixed_clean = str(fixed or "").strip()
+        if not fixed_clean:
+            return "empty_fixed_content"
+        if fixed_clean.startswith("{") and "fixed" in fixed_clean[:240].lower():
+            return "raw_json_returned"
+        original_len = len(re.sub(r"\s+", "", original_clean))
+        fixed_len = len(re.sub(r"\s+", "", fixed_clean))
+        if original_len >= 1200 and fixed_len < int(original_len * 0.72):
+            return f"fixed_content_shrank_too_much:{fixed_len}/{original_len}"
+        if original_len >= 400 and fixed_len < int(original_len * 0.58):
+            return f"fixed_content_lost_too_much:{fixed_len}/{original_len}"
+
+        original_paragraphs = self._split_paragraphs(original_clean)
+        fixed_paragraphs = self._split_paragraphs(fixed_clean)
+        if len(original_paragraphs) >= 6 and len(fixed_paragraphs) < max(3, len(original_paragraphs) // 3):
+            return f"fixed_content_collapsed_paragraphs:{len(fixed_paragraphs)}/{len(original_paragraphs)}"
+
+        anchors: List[str] = []
+        if original_paragraphs:
+            first = re.sub(r"\s+", "", original_paragraphs[0])
+            last = re.sub(r"\s+", "", original_paragraphs[-1])
+            if len(first) >= 16:
+                anchors.append(first[:24])
+            if len(last) >= 16:
+                anchors.append(last[-24:])
+        if len(anchors) >= 2:
+            compact_fixed = re.sub(r"\s+", "", fixed_clean)
+            missing = [anchor for anchor in anchors if anchor and anchor not in compact_fixed]
+            if len(missing) == len(anchors):
+                return "lost_front_and_back_anchors"
+        return None
 
     async def check_and_fix(
         self,

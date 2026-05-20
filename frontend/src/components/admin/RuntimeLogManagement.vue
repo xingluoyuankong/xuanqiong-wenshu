@@ -4,7 +4,7 @@
       <div class="runtime-card__header">
         <div>
           <span class="runtime-card__title">运行日志</span>
-          <p class="runtime-card__subtitle">左边简略日志显示全部关键阶段，并补充每步用时；右边直接显示后台流水。</p>
+          <p class="runtime-card__subtitle">左边用短句和小图案看关键阶段；右边直接看生成状态、草稿片段、质量门和修补建议。</p>
         </div>
         <n-space>
           <n-button tertiary size="small" @click="refreshNow" :loading="loading">刷新</n-button>
@@ -49,7 +49,7 @@
                 <div class="brief-panel__header">
                   <div>
                     <div class="section-title">简略日志</div>
-                    <p class="brief-panel__tip">显示全部关键阶段节点，并补充“本步用时 / 累计用时”。</p>
+                    <p class="brief-panel__tip">显示关键阶段节点，并补充“本步用时 / 累计用时”，快速判断任务卡在哪一步。</p>
                   </div>
                   <n-button text type="primary" @click="briefExpanded = !briefExpanded">
                     {{ briefExpanded ? '收起列表' : `显示全部（${briefLogs.length} 条）` }}
@@ -59,12 +59,14 @@
                 <ul v-if="visibleBriefLogs.length" class="brief-log-list">
                   <li v-for="(item, index) in visibleBriefLogs" :key="`${item.at || 'brief'}-${index}`" class="brief-log-item">
                     <div class="brief-log-item__top">
-                      <span class="brief-log-item__time">{{ formatDateTime(item.at) }}</span>
+                      <span class="brief-log-item__time"><span class="brief-log-item__icon">{{ briefIcon(item) }}</span>{{ formatDateTime(item.at) }}</span>
                       <span v-if="item.stateLabel" class="brief-log-item__badge" :class="item.stateClass">{{ item.stateLabel }}</span>
                     </div>
-                    <strong>{{ item.message }}</strong>
+                    <strong>{{ item.title || item.message }}</strong>
+                    <p v-if="item.summary && item.summary !== item.message" class="brief-log-item__summary">{{ item.summary }}</p>
                     <div class="brief-log-item__meta">
                       <small v-if="item.stage">{{ item.stage }}</small>
+                      <small v-if="item.kind">{{ kindLabel(item.kind) }}</small>
                       <small v-if="item.stepDurationLabel">本步用时：{{ item.stepDurationLabel }}</small>
                       <small v-if="item.totalDurationLabel">累计：{{ item.totalDurationLabel }}</small>
                     </div>
@@ -81,23 +83,56 @@
               </aside>
 
               <section class="backend-panel">
-                <div class="section-title">详细后台运行日志</div>
-                <p class="backend-panel__tip">这里直接按后台流水显示：时间、阶段、级别、消息、metadata、runtime snapshot。</p>
+                <div class="section-title">详细生成状态日志</div>
+                <p class="backend-panel__tip">这里优先显示小说生成本身：当前阶段、草稿预览、质量门、局部补丁和保存结果；原始 metadata 收进开发者详情。</p>
                 <div ref="backendConsoleRef" class="backend-console">
                   <div v-for="(line, index) in backendLines" :key="`${line.at || 'line'}-${index}`" class="backend-line">
                     <div class="backend-line__meta">
+                      <span class="backend-line__kind">{{ kindIcon(line) }} {{ kindLabel(line.kind) }}</span>
                       <span>{{ formatDateTime(line.at) }}</span>
                       <span>[{{ formatLevelCode(line.level) }}]</span>
                       <span v-if="line.stage">[{{ line.stage }}]</span>
                       <span v-if="line.stateLabel" class="backend-line__badge" :class="line.stateClass">{{ line.stateLabel }}</span>
                     </div>
-                    <div class="backend-line__message">{{ line.message || '后台状态更新' }}</div>
-                    <pre v-if="line.metadata && Object.keys(line.metadata).length" class="backend-line__extra">{{ formatJson(line.metadata) }}</pre>
+                    <div class="backend-line__message">{{ line.title || line.message || '生成状态更新' }}</div>
+                    <p v-if="line.summary && line.summary !== line.message && line.summary !== line.title" class="backend-line__summary">{{ line.summary }}</p>
+
+                    <div v-if="line.metrics.length" class="metric-chips">
+                      <span v-for="metric in line.metrics" :key="metric.label" class="metric-chip">
+                        <strong>{{ metric.label }}</strong>{{ metric.value }}
+                      </span>
+                    </div>
+
+                    <div v-if="line.contentPreview" class="content-preview">
+                      <span>生成内容预览</span>
+                      <p>{{ line.contentPreview }}</p>
+                    </div>
+
+                    <div v-if="patchSuggestions(line).length" class="patch-suggestions">
+                      <span>局部补丁建议</span>
+                      <ul>
+                        <li v-for="(patch, patchIndex) in patchSuggestions(line)" :key="`${line.at || 'patch'}-${patchIndex}`">
+                          {{ patch }}
+                        </li>
+                      </ul>
+                    </div>
+
+                    <div v-if="artifactRefs(line).length" class="artifact-refs">
+                      <span>产物引用</span>
+                      <code v-for="(artifact, artifactIndex) in artifactRefs(line)" :key="`${line.at || 'artifact'}-${artifactIndex}`">{{ artifact }}</code>
+                    </div>
+
+                    <details v-if="line.metadata && Object.keys(line.metadata).length" class="developer-details">
+                      <summary>开发者详情：metadata</summary>
+                      <pre>{{ formatJson(line.metadata) }}</pre>
+                    </details>
                   </div>
 
                   <div v-if="runtimeSnapshotText" class="backend-snapshot">
-                    <div class="backend-snapshot__title">runtime snapshot</div>
-                    <pre>{{ runtimeSnapshotText }}</pre>
+                    <details>
+                      <summary class="backend-snapshot__title">开发者详情：runtime snapshot</summary>
+                      <pre>{{ runtimeSnapshotText }}</pre>
+                    </details>
                   </div>
                 </div>
               </section>
@@ -119,6 +154,12 @@ type RuntimeLine = {
   at?: string | null
   stage?: string
   level?: string
+  kind: string
+  title: string
+  summary: string
+  contentPreview: string
+  metrics: Array<{ label: string; value: string }>
+  artifactRefs: string[]
   message: string
   metadata: Record<string, any>
   stateLabel?: string
@@ -171,6 +212,46 @@ const runtimeSnapshotText = computed(() => {
   return Object.keys(snapshot).length ? formatJson(snapshot) : ''
 })
 
+const METRIC_LABELS: Record<string, string> = {
+  target_word_count: '目标字数',
+  min_word_count: '最低字数',
+  actual_word_count: '实际字数',
+  word_count: '字数',
+  version_count: '候选数',
+  quality_score: '质量分',
+  event_density_score: '事件密度',
+  event_density_per_1000: '每千字推进',
+  progression_unit_count: '推进单元',
+  blocker_count: '阻断项',
+  warning_count: '警告项',
+  stagewide_deferred_count: '延后整章候选',
+  manual_stagewide_confirmation_required: '需人工确认',
+  word_requirement_met: '字数达标',
+  review_status: '评审状态',
+  optimization_strategy: '优化策略',
+  optimization_strategy_phase: '策略阶段',
+}
+
+const PREVIEW_KEYS = [
+  'content_preview',
+  'draft_preview',
+  'draft_excerpt',
+  'content_excerpt',
+  'tail_excerpt',
+  'preview',
+  'sample',
+  'text_excerpt',
+]
+
+const PATCH_KEYS = [
+  'manual_patch_suggestions',
+  'patch_suggestions',
+  'patches',
+  'suggestions',
+  'blockers',
+  'warnings',
+]
+
 function shouldShowAsBriefLog(message: string, stage: string, stateLabel?: string) {
   const text = `${stage} ${message} ${stateLabel || ''}`
   return /候选版本|阶段完成|等待确认|正在调用模型|正在写入|开始|完成|失败|评估|优化|补字数|落库|一致性|诊断/i.test(text)
@@ -188,6 +269,128 @@ function normalizeStageLabel(stage: string) {
   return map[stage] || stage || '未知阶段'
 }
 
+function normalizeText(value: unknown, maxLength = 420): string {
+  if (value === null || typeof value === 'undefined') return ''
+  if (Array.isArray(value)) {
+    return value.map(item => normalizeText(item, Math.max(80, Math.floor(maxLength / 2)))).filter(Boolean).join('；').slice(0, maxLength)
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    const priority = ['title', 'summary', 'message', 'problem', 'suggestion', 'reason', 'description', 'content', 'text']
+    const picked = priority.map(key => normalizeText(record[key], maxLength)).find(Boolean)
+    if (picked) return picked
+    try {
+      return JSON.stringify(value).slice(0, maxLength)
+    } catch {
+      return String(value).slice(0, maxLength)
+    }
+  }
+  const text = String(value).replace(/\s+/g, ' ').trim()
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
+}
+
+function firstText(record: Record<string, any>, keys: string[], maxLength = 420): string {
+  for (const key of keys) {
+    const text = normalizeText(record[key], maxLength)
+    if (text) return text
+  }
+  return ''
+}
+
+function inferKind(stage: string, level: string, message: string, metadata: Record<string, any>) {
+  const text = `${stage} ${level} ${message} ${JSON.stringify(metadata).slice(0, 500)}`.toLowerCase()
+  if (level === 'error' || /失败|error|failed/.test(text)) return 'error'
+  if (/草稿|正文|片段|content|draft|preview/.test(text)) return 'content'
+  if (/评审|质量|quality|review|blocker|warning/.test(text)) return 'review'
+  if (/连续|一致|伏笔|线索|角色状态|continuity|foreshadow|clue/.test(text)) return 'continuity'
+  if (/补丁|局部|优化|patch|optimiz/.test(text)) return 'patch'
+  if (/保存|落库|候选|version|persist|final/.test(text)) return 'save'
+  return 'status'
+}
+
+function kindLabel(kind?: string) {
+  const map: Record<string, string> = {
+    status: '状态',
+    content: '正文片段',
+    review: '质量检查',
+    continuity: '连续性',
+    patch: '局部修补',
+    save: '保存产物',
+    error: '异常',
+  }
+  return map[String(kind || '')] || String(kind || '状态')
+}
+
+function kindIcon(line: Pick<RuntimeLine, 'kind' | 'level'> | string) {
+  const kind = typeof line === 'string' ? line : line.kind
+  const level = typeof line === 'string' ? '' : line.level
+  if (level === 'error' || kind === 'error') return '⚠'
+  const map: Record<string, string> = {
+    status: '✦',
+    content: '✎',
+    review: '◇',
+    continuity: '♢',
+    patch: '✚',
+    save: '✓',
+  }
+  return map[String(kind || '')] || '•'
+}
+
+function briefIcon(line: RuntimeLine) {
+  if (line.stateClass === 'state-degraded') return '!'
+  if (line.stateClass === 'state-skip') return '↷'
+  return kindIcon(line)
+}
+
+function buildMetrics(event: Record<string, any>, metadata: Record<string, any>) {
+  const source: Record<string, unknown> = {}
+  if (event.metrics && typeof event.metrics === 'object') Object.assign(source, event.metrics)
+  Object.keys(METRIC_LABELS).forEach(key => {
+    if (Object.prototype.hasOwnProperty.call(metadata, key)) source[key] = metadata[key]
+    if (Object.prototype.hasOwnProperty.call(event, key)) source[key] = event[key]
+  })
+  return Object.entries(source)
+    .map(([key, value]) => ({ label: METRIC_LABELS[key] || key, value: normalizeText(value, 120) }))
+    .filter(item => item.value)
+    .slice(0, 8)
+}
+
+function normalizeArtifactRefs(value: unknown): string[] {
+  if (!value) return []
+  const items = Array.isArray(value) ? value : [value]
+  return items.map(item => normalizeText(item, 160)).filter(Boolean).slice(0, 6)
+}
+
+function enrichRuntimeLine(raw: RuntimeLine): RuntimeLine {
+  const metadata = raw.metadata && typeof raw.metadata === 'object' ? raw.metadata : {}
+  const kind = String(raw.kind || metadata.kind || inferKind(String(raw.stage || ''), String(raw.level || ''), raw.message, metadata))
+  const title = firstText(
+    { ...metadata, title: raw.title, message: raw.message },
+    ['title', 'display_title', 'message'],
+    180,
+  ) || '生成状态更新'
+  const summary = firstText(
+    { ...metadata, summary: raw.summary },
+    ['summary', 'reason', 'decision', 'progress_message', 'message'],
+    320,
+  )
+  const contentPreview = raw.contentPreview || firstText(
+    { ...metadata },
+    PREVIEW_KEYS,
+    900,
+  )
+  const artifactSource = raw.artifactRefs?.length ? raw.artifactRefs : normalizeArtifactRefs(raw.metadata?.artifact_refs || raw.metadata?.artifacts)
+  return {
+    ...raw,
+    kind,
+    title,
+    summary,
+    contentPreview,
+    metrics: raw.metrics?.length ? raw.metrics : buildMetrics({ ...raw }, metadata),
+    artifactRefs: artifactSource,
+  }
+}
+
 function buildSyntheticBackendLines(chapter: ChapterRuntimeLogItem) {
   const runtime = chapter.runtime_snapshot || {}
   const lines: RuntimeLine[] = []
@@ -198,6 +401,12 @@ function buildSyntheticBackendLines(chapter: ChapterRuntimeLogItem) {
       at: timestamp,
       stage: 'review',
       level: 'warning',
+      kind: 'review',
+      title: 'AI 评审已跳过',
+      summary: '当前只有 1 个候选版本，无法执行版本对比评审。',
+      contentPreview: '',
+      metrics: [],
+      artifactRefs: [],
       message: 'AI 评审已跳过：当前只有 1 个候选版本，无法执行版本对比评审。',
       metadata: {
         review_status: runtime.review_status,
@@ -215,6 +424,12 @@ function buildSyntheticBackendLines(chapter: ChapterRuntimeLogItem) {
       at: timestamp,
       stage,
       level: 'warning',
+      kind: 'error',
+      title: `${normalizeStageLabel(stage)}降级失败`,
+      summary: '本步骤未正常完成，系统跳过后继续执行后续流程。',
+      contentPreview: '',
+      metrics: [],
+      artifactRefs: [],
       message: `${normalizeStageLabel(stage)}已降级失败：本步骤未正常完成，系统跳过后继续执行后续流程。`,
       metadata: {
         degraded_stage: stage,
@@ -235,6 +450,12 @@ function normalizeEvents(events: Array<Record<string, any>>): RuntimeLine[] {
       at: event.at,
       stage: event.stage,
       level: event.level || 'info',
+      kind: String(event.kind || ''),
+      title: String(event.title || ''),
+      summary: String(event.summary || ''),
+      contentPreview: String(event.content_preview || ''),
+      metrics: [],
+      artifactRefs: normalizeArtifactRefs(event.artifact_refs),
       message: String(event.message || ''),
       metadata: event.metadata && typeof event.metadata === 'object' ? event.metadata : {},
       stateLabel: event.level === 'warning' && /降级|跳过/i.test(String(event.message || ''))
@@ -257,12 +478,29 @@ function normalizeEvents(events: Array<Record<string, any>>): RuntimeLine[] {
     const stepDurationMs = previousAt !== null && validCurrentAt !== null ? Math.max(0, validCurrentAt - previousAt) : null
     const totalDurationMs = firstAt !== null && validCurrentAt !== null ? Math.max(0, validCurrentAt - firstAt) : null
     if (validCurrentAt !== null) previousAt = validCurrentAt
-    return {
+    return enrichRuntimeLine({
       ...event,
       stepDurationMs,
       totalDurationMs,
-    }
+    })
   })
+}
+
+function patchSuggestions(line: RuntimeLine): string[] {
+  const metadata = line.metadata || {}
+  const values = PATCH_KEYS.flatMap(key => {
+    const value = metadata[key]
+    if (!value) return []
+    return Array.isArray(value) ? value : [value]
+  })
+  return values
+    .map(value => normalizeText(value, 260))
+    .filter(Boolean)
+    .slice(0, 5)
+}
+
+function artifactRefs(line: RuntimeLine): string[] {
+  return line.artifactRefs?.length ? line.artifactRefs : normalizeArtifactRefs(line.metadata?.artifact_refs || line.metadata?.artifacts)
 }
 
 function syncSelection() {
@@ -412,11 +650,13 @@ onBeforeUnmount(stopAutoRefresh)
 .brief-log-list { list-style:none; margin:0; padding:0; display:grid; gap:10px; max-height:740px; overflow:auto; }
 .brief-log-item { display:grid; gap:6px; padding:12px; border-radius:14px; background:#f8fafc; border:1px solid #e2e8f0; }
 .brief-log-item__top, .brief-log-item__meta { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
-.brief-log-item__time { color:#64748b; font-size:.75rem; }
+.brief-log-item__time { display:inline-flex; align-items:center; gap:6px; color:#64748b; font-size:.75rem; }
+.brief-log-item__icon { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:999px; background:#e0f2fe; color:#0369a1; font-weight:900; }
 .brief-log-item__badge, .backend-line__badge { display:inline-flex; align-items:center; min-height:22px; padding:0 8px; border-radius:999px; font-size:.72rem; font-weight:800; }
 .state-skip { background:rgba(14, 165, 233, .16); color:#1d4ed8; }
 .state-degraded { background:rgba(239, 68, 68, .16); color:#b91c1c; }
 .brief-log-item strong { color:#0f172a; line-height:1.55; }
+.brief-log-item__summary { margin:0; color:#475569; line-height:1.55; font-size:.82rem; }
 .brief-log-item small { color:#475569; }
 .brief-summary { margin-top:14px; padding-top:14px; border-top:1px solid #e2e8f0; }
 .summary-grid { display:grid; grid-template-columns:88px minmax(0,1fr); gap:8px 12px; margin:0; }
@@ -427,9 +667,21 @@ onBeforeUnmount(stopAutoRefresh)
 .backend-console { max-height:720px; overflow:auto; border-radius:16px; background:#020617; padding:14px; display:grid; gap:10px; }
 .backend-line { padding:10px 12px; border-radius:12px; border:1px solid #1e293b; background:#0f172a; }
 .backend-line__meta { display:flex; gap:8px; flex-wrap:wrap; color:#94a3b8; font-size:.78rem; margin-bottom:6px; }
+.backend-line__kind { color:#fde68a; font-weight:800; }
 .backend-line__message { color:#e2e8f0; line-height:1.6; white-space:pre-wrap; }
-.backend-line__extra, .backend-snapshot pre { margin:8px 0 0; padding:10px 12px; border-radius:12px; background:#000814; color:#bae6fd; white-space:pre-wrap; word-break:break-word; font-size:.78rem; }
+.backend-line__summary { margin:4px 0 0; color:#cbd5e1; line-height:1.65; font-size:.86rem; }
+.metric-chips, .artifact-refs { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+.metric-chip { display:inline-flex; align-items:center; gap:6px; min-height:26px; padding:0 9px; border-radius:999px; background:#172554; color:#dbeafe; font-size:.76rem; }
+.metric-chip strong { color:#bfdbfe; }
+.content-preview, .patch-suggestions, .artifact-refs { margin-top:10px; border:1px solid #1e293b; border-radius:12px; background:#08111f; padding:10px 12px; }
+.content-preview span, .patch-suggestions span, .artifact-refs > span { display:block; margin-bottom:6px; color:#a7f3d0; font-size:.76rem; font-weight:800; }
+.content-preview p { margin:0; color:#e0f2fe; line-height:1.7; white-space:pre-wrap; }
+.patch-suggestions ul { margin:0; padding-left:18px; color:#fee2e2; display:grid; gap:6px; line-height:1.65; }
+.artifact-refs code { display:inline-flex; max-width:100%; padding:4px 7px; border-radius:8px; background:#020617; color:#bae6fd; word-break:break-all; }
+.developer-details { margin-top:10px; }
+.developer-details summary, .backend-snapshot summary { cursor:pointer; color:#93c5fd; font-size:.78rem; font-weight:800; }
+.developer-details pre, .backend-snapshot pre { margin:8px 0 0; padding:10px 12px; border-radius:12px; background:#000814; color:#bae6fd; white-space:pre-wrap; word-break:break-word; font-size:.78rem; }
 .backend-snapshot { margin-top:8px; padding-top:8px; border-top:1px solid #1e293b; }
-.backend-snapshot__title { color:#f8fafc; font-size:.82rem; font-weight:800; text-transform:uppercase; letter-spacing:.08em; }
+.backend-snapshot__title { color:#93c5fd; font-size:.82rem; font-weight:800; }
 @media (max-width: 1120px) { .runtime-layout, .runtime-content { grid-template-columns:1fr; } }
 </style>

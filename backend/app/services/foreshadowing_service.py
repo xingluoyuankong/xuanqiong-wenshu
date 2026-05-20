@@ -37,6 +37,58 @@ AUTO_FORESHADOWING_HINT_KEYWORDS = (
     "终将",
 )
 
+PAYOFF_SIGNAL_KEYWORDS = (
+    "真相",
+    "原来",
+    "终于",
+    "证实",
+    "揭开",
+    "揭露",
+    "答案",
+    "回收",
+    "兑现",
+    "说明",
+    "意识到",
+    "明白",
+    "就是",
+    "正是",
+    "来源",
+    "身份",
+    "钥匙",
+    "原因",
+    "解释",
+    "指向",
+    "revealed",
+    "turns out",
+    "turned out",
+    "proved",
+    "confirmed",
+    "the answer",
+    "was the key",
+)
+
+KEYWORD_VARIANT_STOPWORDS = {
+    "这个",
+    "那个",
+    "一种",
+    "一个",
+    "他们",
+    "她们",
+    "我们",
+    "你们",
+    "自己",
+    "已经",
+    "只是",
+    "因为",
+    "所以",
+    "但是",
+    "不能",
+    "没有",
+    "chapter",
+    "secret",
+    "truth",
+}
+
 
 class ForeshadowingService:
     """伏笔管理服务"""
@@ -171,7 +223,31 @@ class ForeshadowingService:
         return {"created": created, "candidates": len(candidates)}
 
     @staticmethod
-    def _extract_match_keywords(foreshadowing: Foreshadowing) -> List[str]:
+    def _keyword_variants(value: str) -> List[str]:
+        text = re.sub(r"\s+", "", str(value or "")).strip("，。！？；：,.!?;:（）()[]【】《》\"'")
+        if not text:
+            return []
+        variants = {text}
+        if re.search(r"[\u4e00-\u9fff]", text):
+            for size in (2, 3, 4, 5, 6):
+                if len(text) >= size:
+                    variants.add(text[:size])
+                    variants.add(text[-size:])
+            for match in re.finditer(r"[\u4e00-\u9fff]{2,8}", text):
+                variants.add(match.group(0))
+        else:
+            for part in re.split(r"[^A-Za-z0-9_-]+", str(value or "")):
+                normalized = part.strip().lower()
+                if len(normalized) >= 4:
+                    variants.add(normalized)
+        return [
+            item
+            for item in sorted(variants, key=lambda raw: (-len(raw), raw))
+            if len(item) >= 2 and item.lower() not in KEYWORD_VARIANT_STOPWORDS
+        ]
+
+    @classmethod
+    def _extract_match_keywords(cls, foreshadowing: Foreshadowing) -> List[str]:
         keywords: List[str] = []
         for value in foreshadowing.keywords or []:
             text = str(value or "").strip()
@@ -188,11 +264,14 @@ class ForeshadowingService:
         seen: set[str] = set()
         result: List[str] = []
         for keyword in keywords:
-            if keyword in seen:
-                continue
-            seen.add(keyword)
-            result.append(keyword)
-            if len(result) >= 8:
+            for variant in cls._keyword_variants(keyword):
+                if variant in seen:
+                    continue
+                seen.add(variant)
+                result.append(variant)
+                if len(result) >= 14:
+                    break
+            if len(result) >= 14:
                 break
         return result
 
@@ -210,6 +289,11 @@ class ForeshadowingService:
         start = max(0, hit_index - limit // 2)
         end = min(len(text), hit_index + limit // 2)
         return text[start:end].strip()
+
+    @staticmethod
+    def _has_payoff_signal(text: str) -> bool:
+        source = str(text or "").lower()
+        return any(signal.lower() in source for signal in PAYOFF_SIGNAL_KEYWORDS)
 
     async def auto_resolve_from_chapter(
         self,
@@ -287,17 +371,24 @@ class ForeshadowingService:
                 and int(foreshadowing.target_reveal_chapter) <= chapter_number
             )
             distance = chapter_number - int(foreshadowing.chapter_number or chapter_number)
-            payoff_signal = any(signal in content for signal in resolution_signals)
-            strong_keyword_match = len(keyword_hits) >= 2 or bool(foreshadowing.name and foreshadowing.name in content)
+            resolution_excerpt = self._extract_resolution_excerpt(content, keyword_hits)
+            payoff_signal = self._has_payoff_signal(resolution_excerpt) or (
+                target_due and self._has_payoff_signal(content)
+            )
+            strong_keyword_match = (
+                len(keyword_hits) >= 2
+                or any(len(hit) >= 4 for hit in keyword_hits)
+                or bool(foreshadowing.name and foreshadowing.name in content)
+            )
 
             if (target_due and payoff_signal) or (distance >= 6 and payoff_signal and strong_keyword_match):
                 resolution = await self.resolve_foreshadowing(
                     foreshadowing_id=foreshadowing.id,
                     resolved_chapter_id=chapter_id,
                     resolved_chapter_number=chapter_number,
-                    resolution_text=self._extract_resolution_excerpt(content, keyword_hits),
+                    resolution_text=resolution_excerpt,
                     resolution_type="auto_detected",
-                    quality_score=min(9, 6 + len(keyword_hits)),
+                    quality_score=min(9, 6 + min(3, len(keyword_hits)) + (1 if target_due else 0)),
                 )
                 result["resolved"] += 1
                 result["resolution_ids"].append(resolution.id)

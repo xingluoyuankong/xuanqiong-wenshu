@@ -167,7 +167,21 @@
               {{ eventSummary(event) }}
               <span v-if="eventDurationLabel(event)" class="cg-log-item__duration">（{{ eventDurationLabel(event) }}）</span>
             </p>
+            <div v-if="eventContinuityNotice(event)" class="cg-log-item__notice">
+              {{ eventContinuityNotice(event) }}
+            </div>
             <pre v-if="event.content_preview" class="cg-log-item__preview">{{ event.content_preview }}</pre>
+            <div v-if="eventPatchSuggestions(event).length" class="cg-log-item__patches">
+              <p class="cg-log-item__patch-title">局部补丁建议</p>
+              <ul>
+                <li v-for="(patch, patchIndex) in eventPatchSuggestions(event)" :key="`${patch.problem}-${patchIndex}`">
+                  <span v-if="patch.scope" class="cg-log-item__patch-scope">{{ patch.scope }}</span>
+                  <strong>{{ patch.problem }}</strong>
+                  <span v-if="patch.suggestion">{{ patch.suggestion }}</span>
+                  <small v-if="patch.requirement">执行要求：{{ patch.requirement }}</small>
+                </li>
+              </ul>
+            </div>
             <details v-if="event.metrics && Object.keys(event.metrics).length" class="cg-log-item__meta">
               <summary>生成指标</summary>
               <pre>{{ formatEventMetadata(event.metrics) }}</pre>
@@ -507,6 +521,70 @@ const eventSummary = (event: Record<string, any>) => {
   return '已记录状态更新'
 }
 
+const eventContinuityNotice = (event: Record<string, any>) => {
+  const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata as Record<string, any> : {}
+  if (metadata.manual_stagewide_confirmation_required) {
+    return '整章候选没有自动套用：当前流程优先保留原文顺序和前后锚点，只给出局部补丁；确需整章候选时必须人工确认。'
+  }
+  if (metadata.stagewide_deferred || metadata.stagewide_deferred_count) {
+    return '已延后整章候选，继续按局部窗口修补，避免破坏章节连续性。'
+  }
+  return ''
+}
+
+type PatchSuggestionView = {
+  scope: string
+  problem: string
+  suggestion: string
+  requirement: string
+}
+
+const stringifyPatchField = (value: unknown): string => {
+  if (value === null || typeof value === 'undefined') return ''
+  if (Array.isArray(value)) return value.map((item: unknown) => stringifyPatchField(item)).filter(Boolean).join('、')
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value).trim()
+}
+
+const normalizePatchSuggestion = (item: unknown): PatchSuggestionView | null => {
+  if (!item || typeof item !== 'object') {
+    const text = stringifyPatchField(item)
+    return text ? { scope: '', problem: text, suggestion: '', requirement: '' } : null
+  }
+  const record = item as Record<string, unknown>
+  const scopeParts = [
+    stringifyPatchField(record.stage),
+    stringifyPatchField(record.strategy),
+    stringifyPatchField(record.dimension),
+    stringifyPatchField(record.location),
+  ].filter(Boolean)
+  const problem = stringifyPatchField(record.problem || record.description || record.issue || record.reason)
+  const suggestion = stringifyPatchField(record.suggestion || record.suggested_fix || record.patch || record.action)
+  const requirement = stringifyPatchField(record.execution_requirement || record.requirement)
+  if (!problem && !suggestion && !requirement) return null
+  return {
+    scope: scopeParts.join(' · '),
+    problem: problem || suggestion || requirement,
+    suggestion: problem ? suggestion : '',
+    requirement,
+  }
+}
+
+const eventPatchSuggestions = (event: Record<string, any>) => {
+  const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata as Record<string, unknown> : {}
+  const candidates = [
+    event?.manual_patch_suggestions,
+    event?.patch_suggestions,
+    metadata.manual_patch_suggestions,
+    metadata.patch_suggestions,
+  ]
+  return candidates
+    .flatMap((value) => Array.isArray(value) ? value : value ? [value] : [])
+    .map((item) => normalizePatchSuggestion(item))
+    .filter((item): item is PatchSuggestionView => Boolean(item))
+    .slice(0, 5)
+}
+
 const STAGE_LABEL_FALLBACK: Record<string, string> = {
   prepare_context: '上下文准备',
   cast_plan: '角色规划',
@@ -567,6 +645,17 @@ const metadataLabelMap: Record<string, string> = {
   optimization_stage_label: '优化阶段',
   optimization_issue_count: '优化问题数',
   optimization_dimensions: '当前维度',
+  optimization_strategy: '优化策略',
+  optimization_strategy_phase: '策略阶段',
+  optimization_aggregate_issue_count: '聚合问题数',
+  optimization_retry_reason: '重试原因',
+  stagewide_requested: '请求整章候选',
+  stagewide_allowed: '允许整章候选',
+  stagewide_deferred_count: '延后整章候选数',
+  manual_stagewide_confirmation_required: '整章候选需人工确认',
+  manual_patch_suggestions: '局部补丁建议',
+  patch_suggestions: '局部补丁建议',
+  execution_requirement: '执行要求',
   event_density_passed: '事件密度达标',
   long_chapter_density_passed: '长章密度达标',
   state_change_interval_passed: '状态变化间隔达标',
@@ -703,6 +792,62 @@ onUnmounted(() => {
   margin: 0;
   color: #0f172a;
   line-height: 1.6;
+}
+
+.cg-log-item__notice {
+  margin-top: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(14, 165, 233, 0.18);
+  background: rgba(240, 249, 255, 0.9);
+  color: #075985;
+  font-size: 0.86rem;
+  line-height: 1.6;
+  padding: 8px 10px;
+}
+
+.cg-log-item__patches {
+  margin-top: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: #ffffff;
+  padding: 10px 12px;
+}
+
+.cg-log-item__patch-title {
+  margin: 0 0 8px;
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.cg-log-item__patches ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cg-log-item__patches li {
+  display: grid;
+  gap: 3px;
+  color: #0f172a;
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.cg-log-item__patches strong {
+  font-weight: 800;
+}
+
+.cg-log-item__patches small {
+  color: #475569;
+}
+
+.cg-log-item__patch-scope {
+  color: #2563eb;
+  font-size: 0.76rem;
+  font-weight: 800;
 }
 
 .cg-log-item__meta {

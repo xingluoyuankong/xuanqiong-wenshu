@@ -231,6 +231,15 @@ class LLMService:
         )
 
     @staticmethod
+    def _should_retry_without_prompt_cache_key(detail: str) -> bool:
+        lowered = (detail or "").lower()
+        return (
+            "prompt_cache_key" in lowered
+            or "prompt cache key" in lowered
+            or ("cache" in lowered and "unsupported" in lowered)
+        )
+
+    @staticmethod
     def _get_llm_env_value(key: str) -> Optional[str]:
         alias_map = {
             "llm.api_key": ("OPENAI_API_KEY",),
@@ -264,6 +273,7 @@ class LLMService:
         response_format: Optional[Any] = "json_object",
         max_tokens: Optional[int] = None,
         top_p: Optional[float] = None,
+        prompt_cache_key: Optional[str] = None,
         allow_truncated_response: bool = False,
         retry_same_model_once: bool = True,
     ) -> str:
@@ -279,6 +289,7 @@ class LLMService:
                     response_format=response_format,
                     max_tokens=max_tokens,
                     top_p=top_p,
+                    prompt_cache_key=prompt_cache_key,
                     allow_truncated_response=allow_truncated_response,
                     retry_same_model_once=retry_same_model_once,
                 ),
@@ -313,6 +324,7 @@ class LLMService:
         max_tokens: Optional[int] = None,
         response_format: Optional[Any] = None,
         top_p: Optional[float] = None,
+        prompt_cache_key: Optional[str] = None,
         allow_truncated_response: bool = False,
     ) -> str:
         """兼容旧版接口的文本生成入口，统一走 get_llm_response。"""
@@ -325,6 +337,7 @@ class LLMService:
             response_format=response_format,
             max_tokens=max_tokens,
             top_p=top_p,
+            prompt_cache_key=prompt_cache_key,
             allow_truncated_response=allow_truncated_response,
         )
 
@@ -432,6 +445,7 @@ class LLMService:
         response_format: Optional[Any] = None,
         max_tokens: Optional[int] = None,
         top_p: Optional[float] = None,
+        prompt_cache_key: Optional[str] = None,
         allow_truncated_response: bool = False,
         retry_same_model_once: bool = True,
     ) -> str:
@@ -475,6 +489,7 @@ class LLMService:
                     response_format=response_format,
                     max_tokens=max_tokens,
                     top_p=top_p,
+                    prompt_cache_key=prompt_cache_key,
                     retry_same_model_once=retry_same_model_once,
                 )
         except HTTPException as exc:
@@ -544,14 +559,16 @@ class LLMService:
         response_format: Optional[Any] = None,
         max_tokens: Optional[int] = None,
         top_p: Optional[float] = None,
+        prompt_cache_key: Optional[str] = None,
         retry_same_model_once: bool = True,
     ) -> tuple[str, Optional[str]]:
         stream_response_format = response_format
+        stream_prompt_cache_key = prompt_cache_key
         full_response = ""
         finish_reason = None
         network_retry_used = False
 
-        max_attempts = 2 if retry_same_model_once else 1
+        max_attempts = (2 if retry_same_model_once else 1) + int(bool(response_format)) + int(bool(prompt_cache_key))
         for attempt_index in range(max_attempts):
             full_response = ""
             finish_reason = None
@@ -565,6 +582,7 @@ class LLMService:
                     response_format=stream_response_format,
                     max_tokens=max_tokens,
                     top_p=top_p,
+                    prompt_cache_key=stream_prompt_cache_key,
                 ):
                     if part.get("content"):
                         full_response += part["content"]
@@ -609,6 +627,15 @@ class LLMService:
                         detail,
                     )
                     stream_response_format = None
+                    continue
+                if stream_prompt_cache_key and self._should_retry_without_prompt_cache_key(detail):
+                    logger.warning(
+                        "LLM provider rejected prompt_cache_key, retrying without it: model=%s user_id=%s detail=%s",
+                        model_name,
+                        user_id,
+                        detail,
+                    )
+                    stream_prompt_cache_key = None
                     continue
                 logger.warning(
                     "LLM stream rejected: model=%s user_id=%s status=400 detail=%s",
@@ -679,6 +706,7 @@ class LLMService:
                     response_format=stream_response_format,
                     max_tokens=max_tokens,
                     top_p=top_p,
+                    prompt_cache_key=stream_prompt_cache_key,
                     user_id=user_id,
                     trigger=detail,
                 )
@@ -725,6 +753,7 @@ class LLMService:
                         response_format=stream_response_format,
                         max_tokens=max_tokens,
                         top_p=top_p,
+                        prompt_cache_key=stream_prompt_cache_key,
                         user_id=user_id,
                         trigger=detail,
                     )
@@ -810,6 +839,7 @@ class LLMService:
                     response_format=stream_response_format,
                     max_tokens=max_tokens,
                     top_p=top_p,
+                    prompt_cache_key=stream_prompt_cache_key,
                     user_id=user_id,
                     trigger=detail,
                 )
@@ -852,6 +882,7 @@ class LLMService:
                     response_format=stream_response_format,
                     max_tokens=max_tokens,
                     top_p=top_p,
+                    prompt_cache_key=stream_prompt_cache_key,
                     user_id=user_id,
                     trigger=detail,
                 )
@@ -880,6 +911,7 @@ class LLMService:
         response_format: Optional[Any],
         max_tokens: Optional[int],
         top_p: Optional[float],
+        prompt_cache_key: Optional[str],
         user_id: Optional[int],
         trigger: str,
     ) -> Optional[tuple[str, Optional[str]]]:
@@ -898,6 +930,7 @@ class LLMService:
                 response_format=response_format,
                 max_tokens=max_tokens,
                 top_p=top_p,
+                prompt_cache_key=prompt_cache_key,
             )
             content = (result.get("content") or "").strip()
             if not content:

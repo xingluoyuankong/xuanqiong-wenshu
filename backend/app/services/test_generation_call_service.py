@@ -160,6 +160,28 @@ def test_build_response_format_payload_prefers_json_schema():
 
 
 @pytest.mark.anyio
+async def test_call_generation_text_passes_prompt_cache_key_when_configured():
+    llm = _FakeLLMService(["ok"])
+
+    result = await call_generation_text(
+        llm_service=llm,
+        system_prompt="stable story bible prefix",
+        conversation_history=[{"role": "user", "content": "chapter task"}],
+        temperature=0.3,
+        user_id=1,
+        timeout=30.0,
+        policy=GenerationCallPolicy(
+            stage_label="chapter draft",
+            response_format=None,
+            prompt_cache_key="project:p1:writer",
+        ),
+    )
+
+    assert result.text == "ok"
+    assert llm.calls[0]["prompt_cache_key"] == "project:p1:writer"
+
+
+@pytest.mark.anyio
 async def test_call_generation_json_uses_schema_and_repairs_local_schema_failure():
     llm = _FakeLLMService(
         [
