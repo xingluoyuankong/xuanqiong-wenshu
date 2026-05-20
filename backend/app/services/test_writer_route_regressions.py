@@ -169,6 +169,60 @@ def test_outline_json_schemas_require_execution_fields():
     assert "chapter_number" in batch_schema["properties"]["chapters"]["items"]["required"]
 
 
+def test_completed_chapter_review_context_keeps_previous_anchors_and_ledgers():
+    chapters = [
+        types.SimpleNamespace(
+            chapter_number=1,
+            title="Chapter 1",
+            summary="The protagonist finds the first clue.",
+            real_summary='{"generation_runtime":{"progress_stage":"waiting_for_confirm"}}',
+            content="opening one\n" + "middle one " * 20 + "\nending anchor one",
+            word_count=1200,
+            generation_status="successful",
+            character_focus=["Lin Qi"],
+            cast_delta={"new": ["Lin Qi"]},
+            continuity_notes=["the clue is still hidden"],
+            foreshadowing_tasks={"plant": ["salt mark"]},
+        ),
+        types.SimpleNamespace(
+            chapter_number=2,
+            title="Chapter 2",
+            summary="The clue is contested by a rival.",
+            real_summary="The rival learns only half of the truth.",
+            content="opening two\n" + "middle two " * 20 + "\nending anchor two",
+            word_count=1800,
+            generation_status="successful",
+            character_focus=["Lin Qi", "Rival"],
+            cast_delta={"returning": ["Lin Qi"], "new": ["Rival"]},
+            continuity_notes=["the rival has partial knowledge"],
+            foreshadowing_tasks={"reinforce": ["salt mark"], "payoff": []},
+        ),
+        types.SimpleNamespace(
+            chapter_number=3,
+            title="Chapter 3",
+            summary="The door handle turns before the call ends.",
+            real_summary="The incoming visitor must be handled next.",
+            content="opening three\n" + "middle three " * 20 + "\nending anchor three",
+            word_count=2100,
+            generation_status="waiting_for_confirm",
+            character_focus=["Lin Qi", "Archivist"],
+            cast_delta={"returning": ["Lin Qi"], "new": ["Archivist"]},
+            continuity_notes=["the door handle is the next scene handoff"],
+            foreshadowing_tasks={"payoff": ["door handle"], "avoid_forgetting": ["salt mark"]},
+        ),
+        types.SimpleNamespace(chapter_number=4, title="Current", summary="Current chapter"),
+    ]
+
+    context = writer._build_completed_chapter_review_context(chapters, 4, limit=2)
+
+    assert [item["chapter_number"] for item in context] == [2, 3]
+    assert context[0]["real_summary"] == "The rival learns only half of the truth."
+    assert "ending anchor three" in context[1]["ending_anchor"]
+    assert context[1]["foreshadowing_tasks"]["payoff"] == ["door handle"]
+    assert context[1]["cast_delta"]["new"] == ["Archivist"]
+    assert all("generation_runtime" not in item["real_summary"] for item in context)
+
+
 def test_failed_runtime_can_keep_confirm_actions_for_blocked_candidates():
     chapter = types.SimpleNamespace(
         real_summary=json.dumps({"generation_runtime": {"run_id": "run-1", "events": []}}, ensure_ascii=False),
