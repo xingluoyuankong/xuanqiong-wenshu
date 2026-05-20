@@ -4859,7 +4859,7 @@ class PipelineOrchestrator:
                 ),
             )
             cleaned = remove_think_tags(text_result.text)
-            guard_failure = self._guardrail_rewrite_guard_failure(original_text, cleaned)
+            guard_failure = self._guardrail_rewrite_guard_failure(original_text, cleaned, chapter_mission=chapter_mission)
             if guard_failure:
                 logger.warning("Chapter guardrail rewrite rejected by continuity guard: reason=%s", guard_failure)
                 return original_text
@@ -4869,7 +4869,11 @@ class PipelineOrchestrator:
             return original_text
 
     @staticmethod
-    def _guardrail_rewrite_guard_failure(original_text: str, rewritten_text: str) -> Optional[str]:
+    def _guardrail_rewrite_guard_failure(
+        original_text: str,
+        rewritten_text: str,
+        chapter_mission: Optional[dict] = None,
+    ) -> Optional[str]:
         original = str(original_text or "").strip()
         rewritten = str(rewritten_text or "").strip()
         if not rewritten:
@@ -4899,6 +4903,25 @@ class PipelineOrchestrator:
                 anchors.append(last[-24:])
         if len(anchors) >= 2 and all(anchor not in rewritten_compact for anchor in anchors):
             return "rewrite_lost_front_and_back_anchors"
+        if isinstance(chapter_mission, dict):
+            mission_keywords = PipelineOrchestrator._collect_fallback_mission_keywords(chapter_mission)
+            if mission_keywords:
+                original_lower = original.lower()
+                rewritten_lower = rewritten.lower()
+                required: List[str] = []
+                for keyword in mission_keywords:
+                    for token in PipelineOrchestrator._extract_quality_tokens(keyword):
+                        normalized = str(token or "").strip().lower()
+                        if len(normalized) < 3:
+                            continue
+                        if normalized in original_lower and normalized not in required:
+                            required.append(normalized)
+                    if len(required) >= 12:
+                        break
+                if len(required) >= 2:
+                    kept = [token for token in required if token in rewritten_lower]
+                    if len(kept) < max(1, len(required) // 2):
+                        return "rewrite_lost_mission_continuity_terms"
         return None
 
     @staticmethod

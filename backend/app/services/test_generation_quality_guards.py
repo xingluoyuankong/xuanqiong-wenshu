@@ -1267,6 +1267,36 @@ def test_guardrail_rewrite_guard_rejects_partial_chapter_replacement():
     assert PipelineOrchestrator._guardrail_rewrite_guard_failure(original, good_rewrite) is None
 
 
+def test_guardrail_rewrite_guard_rejects_lost_mission_continuity_terms():
+    original = "\n\n".join(
+        [
+            "Opening anchor: Lin Qi waits near the archive gate while rain gathers.",
+            "The clerk says the ledger code points to the south pier, and Shen Fang is being traced.",
+            "Ending anchor: Lin Qi keeps walking into the rain with the next pressure still unresolved.",
+        ]
+    )
+    bad_rewrite = "\n\n".join(
+        [
+            "Opening anchor: Lin Qi waits near the archive gate while rain gathers.",
+            "The clerk says the situation is dangerous and asks him to leave soon.",
+            "Ending anchor: Lin Qi keeps walking into the rain with the next pressure still unresolved.",
+        ]
+    )
+    good_rewrite = original.replace("clerk", "archivist")
+    mission = {
+        "continuity_anchor": {
+            "inherit_from_previous": ["ledger code", "south pier"],
+            "deliver_to_next": ["Shen Fang is being traced"],
+        }
+    }
+
+    assert (
+        PipelineOrchestrator._guardrail_rewrite_guard_failure(original, bad_rewrite, chapter_mission=mission)
+        == "rewrite_lost_mission_continuity_terms"
+    )
+    assert PipelineOrchestrator._guardrail_rewrite_guard_failure(original, good_rewrite, chapter_mission=mission) is None
+
+
 def test_self_critique_keeps_major_only_revision_local_after_content_changes():
     service = SelfCritiqueService(db=None, llm_service=None, prompt_service=None)
 
