@@ -409,6 +409,33 @@ def _build_single_chapter_evaluation_input(
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
+def _resolve_outline_generation_goal(
+    *,
+    start_chapter: int,
+    num_chapters: int,
+    target_total_chapters: Optional[int],
+    target_total_words: Optional[int],
+    chapter_word_target: Optional[int],
+) -> Tuple[int, Optional[int]]:
+    if target_total_chapters is not None and target_total_chapters < start_chapter:
+        raise HTTPException(status_code=400, detail="target_total_chapters 不能小于 start_chapter")
+    if target_total_words is not None and target_total_words < 1000:
+        raise HTTPException(status_code=400, detail="target_total_words 不能小于 1000")
+    if chapter_word_target is not None and chapter_word_target < 500:
+        raise HTTPException(status_code=400, detail="chapter_word_target 不能小于 500")
+
+    effective_target_total_chapters = (
+        target_total_chapters
+        if target_total_chapters is not None
+        else max(start_chapter + num_chapters + 30, 60)
+    )
+
+    if chapter_word_target is None and target_total_words:
+        chapter_word_target = max(500, math.ceil(target_total_words / max(1, effective_target_total_chapters)))
+
+    return effective_target_total_chapters, chapter_word_target
+
+
 async def _resolve_chapter_version(
     session: AsyncSession,
     chapter: Chapter,
@@ -3038,21 +3065,13 @@ async def generate_chapters_outline(
     target_total_words = request.target_total_words
     chapter_word_target = request.chapter_word_target
 
-    if target_total_chapters is not None and target_total_chapters < request.start_chapter:
-        raise HTTPException(status_code=400, detail="target_total_chapters 不能小于 start_chapter")
-    if target_total_words is not None and target_total_words < 10000:
-        raise HTTPException(status_code=400, detail="target_total_words 不能小于 10000")
-    if chapter_word_target is not None and chapter_word_target < 500:
-        raise HTTPException(status_code=400, detail="chapter_word_target 不能小于 500")
-
-    effective_target_total_chapters = (
-        target_total_chapters
-        if target_total_chapters is not None
-        else max(request.start_chapter + request.num_chapters + 30, 60)
+    effective_target_total_chapters, chapter_word_target = _resolve_outline_generation_goal(
+        start_chapter=request.start_chapter,
+        num_chapters=request.num_chapters,
+        target_total_chapters=target_total_chapters,
+        target_total_words=target_total_words,
+        chapter_word_target=chapter_word_target,
     )
-
-    if chapter_word_target is None and target_total_words:
-        chapter_word_target = max(500, math.ceil(target_total_words / max(1, effective_target_total_chapters)))
 
     summary_min_chars = 140
     summary_max_chars = 260
