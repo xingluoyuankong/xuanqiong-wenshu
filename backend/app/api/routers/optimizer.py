@@ -132,6 +132,25 @@ def _anchor_overlap_count(original_sample: str, optimized_content: str, *, chunk
     return hits
 
 
+CONTINUITY_MOTIF_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("old_south_canal", ("\u65e7\u5357\u6e20", "\u5357\u6e20")),
+    ("medicine_trace", ("\u836f\u6e23", "\u836f\u5473", "\u836f\u8017", "\u836f\u65b9", "\u836f\u884c")),
+    ("death_risk", ("\u6b7b\u4eba", "\u4eba\u547d", "\u4f1a\u6b7b", "\u771f\u4f1a\u6b7b")),
+    ("jingzhe_gap", ("\u60ca\u86f0",)),
+    ("ledger_evidence", ("\u8d26\u518c", "\u8d26\u672c", "\u8d26\u9875", "\u7a7a\u8d26")),
+)
+
+
+def _extract_required_motif_groups(text: str) -> list[Dict[str, Any]]:
+    source = str(text or "")
+    required: list[Dict[str, Any]] = []
+    for label, markers in CONTINUITY_MOTIF_GROUPS:
+        present_markers = [marker for marker in markers if marker in source]
+        if present_markers:
+            required.append({"label": label, "markers": list(markers), "present_markers": present_markers})
+    return required
+
+
 def _build_nearby_outline_context(project: Any, chapter_number: int, *, radius: int = 2) -> list[Dict[str, Any]]:
     outlines = sorted(getattr(project, "outlines", []) or [], key=lambda item: item.chapter_number)
     payload: list[Dict[str, Any]] = []
@@ -178,6 +197,7 @@ def _build_continuity_contract(project: Any, request: OptimizeRequest, original_
         "nearby_chapter_state": _build_nearby_chapter_state(project, request.chapter_number),
         "original_opening_sample": original_content[:700],
         "original_ending_sample": original_content[-700:],
+        "required_motif_groups": _extract_required_motif_groups(original_content),
         "hard_rules": [
             "优先只修改问题片段，用前后锚点把局部改动缝回原文；最后必须返回完整章节正文，便于系统保存。",
             "保留原章节的事件顺序、因果链、角色目标、章尾钩子和上下章承接点。",
@@ -205,6 +225,13 @@ def _continuity_guard_failure(original_content: str, optimized_content: str) -> 
         ending_hits = _anchor_overlap_count(original_content[-360:], optimized_content)
         if opening_hits == 0 and ending_hits == 0:
             return "optimized content lost both opening and ending continuity anchors"
+    missing_motif_groups = []
+    for group in _extract_required_motif_groups(original_content):
+        markers = group.get("markers") or []
+        if not any(str(marker) in optimized_content for marker in markers):
+            missing_motif_groups.append(str(group.get("label") or "unknown"))
+    if missing_motif_groups:
+        return "optimized content lost critical continuity motifs: " + ", ".join(missing_motif_groups[:6])
     return None
 
 

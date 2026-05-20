@@ -3,7 +3,7 @@ import asyncio
 import json
 import logging
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -110,6 +110,23 @@ def resolve_retry_delay_seconds(exc: HTTPException, attempt: int, policy: Genera
     return min(cap, exponential + jitter)
 
 
+def _looks_like_output_token_limit_error(exc: HTTPException) -> bool:
+    if exc.status_code != 400:
+        return False
+    detail = exc.detail
+    text = json.dumps(detail, ensure_ascii=False).lower() if isinstance(detail, (dict, list)) else str(detail).lower()
+    markers = (
+        "max_tokens",
+        "max output",
+        "output token",
+        "context length",
+        "maximum context",
+        "too many tokens",
+        "token limit",
+    )
+    return any(marker in text for marker in markers)
+
+
 def normalize_llm_json_text(raw_text: str) -> str:
     return sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(raw_text or ""))).strip()
 
@@ -190,6 +207,7 @@ async def call_generation_text(
     progress_callback: ProgressCallback | None = None,
 ) -> GenerationTextResult:
     attempts = max(1, policy.retry_attempts)
+    active_policy = policy
     last_http_exc: HTTPException | None = None
     for attempt in range(1, attempts + 1):
         try:
@@ -199,34 +217,56 @@ async def call_generation_text(
                 temperature=temperature,
                 user_id=user_id,
                 timeout=timeout,
-                response_format=policy.response_format,
-                max_tokens=policy.max_tokens,
-                top_p=policy.top_p,
-                allow_truncated_response=policy.allow_truncated_response,
-                retry_same_model_once=policy.retry_same_model_once,
+                response_format=active_policy.response_format,
+                max_tokens=active_policy.max_tokens,
+                top_p=active_policy.top_p,
+                allow_truncated_response=active_policy.allow_truncated_response,
+                retry_same_model_once=active_policy.retry_same_model_once,
             )
             return GenerationTextResult(text=text, attempts=attempt)
         except HTTPException as exc:
             last_http_exc = exc
+            if (
+                active_policy.max_tokens
+                and active_policy.max_tokens > 12000
+                and _looks_like_output_token_limit_error(exc)
+                and attempt < attempts
+            ):
+                reduced_max_tokens = max(12000, int(active_policy.max_tokens * 0.72))
+                logger.warning(
+                    "Retrying generation stage with reduced max_tokens after provider token-limit rejection: stage=%s max_tokens=%s reduced=%s detail=%s",
+                    active_policy.stage_label,
+                    active_policy.max_tokens,
+                    reduced_max_tokens,
+                    exc.detail,
+                )
+                active_policy = replace(active_policy, max_tokens=reduced_max_tokens)
+                if progress_callback is not None:
+                    await progress_callback(
+                        active_policy.progress_stage,
+                        f"{active_policy.stage_label} 上游模型拒绝当前输出上限，已降低 max_tokens 后重试",
+                    )
+                await asyncio.sleep(resolve_retry_delay_seconds(exc, attempt, active_policy))
+                continue
             if attempt >= attempts or not is_retryable_http_exception(exc):
                 raise
             if progress_callback is not None:
                 await progress_callback(
-                    policy.progress_stage,
-                    f"{policy.stage_label}遇到上游抖动，正在进行第 {attempt}/{attempts - 1} 次重试",
+                    active_policy.progress_stage,
+                    f"{active_policy.stage_label}遇到上游抖动，正在进行第 {attempt}/{attempts - 1} 次重试",
                 )
             logger.warning(
                 "Retrying generation stage after provider jitter: stage=%s attempt=%s/%s status=%s detail=%s",
-                policy.stage_label,
+                active_policy.stage_label,
                 attempt,
                 attempts,
                 exc.status_code,
                 exc.detail,
             )
-            await asyncio.sleep(resolve_retry_delay_seconds(exc, attempt, policy))
+            await asyncio.sleep(resolve_retry_delay_seconds(exc, attempt, active_policy))
     if last_http_exc is not None:
         raise last_http_exc
-    raise HTTPException(status_code=500, detail=f"{policy.stage_label}失败，重试流程异常退出")
+    raise HTTPException(status_code=500, detail=f"{active_policy.stage_label}失败，重试流程异常退出")
 
 
 async def call_generation_json(

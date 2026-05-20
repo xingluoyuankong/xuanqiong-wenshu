@@ -403,6 +403,8 @@ async def _bounded_task_slot(semaphore: asyncio.Semaphore):
 def _resolve_quality_candidate_version_count(*, preset: str, target_word_count: int) -> int:
     normalized_preset = str(preset or "basic").strip() or "basic"
     target = max(500, int(target_word_count or 0))
+    if target >= 10000:
+        return 4
     if target >= 6500:
         return 3
     if normalized_preset in {"ultimate", "longform", "enhanced"} and target >= 4500:
@@ -421,6 +423,7 @@ def _compose_generation_writing_notes(
         "本章必须至少完成一个清晰的局势升级或局部反转，并通过至少两轮有效对话攻防或同等级动作博弈推动局势。",
         "正文要尽量一开始就进入本章目标与阻碍，不能把大半篇幅耗在纯氛围、纯感受、纯回忆上。",
         "如果字数较长，优先把篇幅写在场景执行、动作过程、对话压力、因果后果和章末传压上，不要靠描述性补字数。",
+        "单章字数契约：短章可以紧凑，但 4500 字以上必须有多场景推进；7000 字以上必须用场景组承载事件密度，10000 字以上要保持整章融合感，不能写成松散片段合集。",
         "结尾必须留下与当前主线直接相关的压力、误会、危险、悬念或回收后的新问题，不能平着收束。",
     ]
     if writing_notes and writing_notes.strip():
@@ -472,6 +475,7 @@ def _build_advanced_background_flow_config(request: AdvancedGenerateRequest) -> 
     )
     if min_word_count > target_word_count:
         min_word_count = target_word_count
+    draft_contract = PipelineOrchestrator._resolve_chapter_draft_contract(target_word_count, min_word_count)
 
     preset = str(raw_config.get("preset") or "basic").strip() or "basic"
     default_versions = _resolve_quality_candidate_version_count(
@@ -488,6 +492,8 @@ def _build_advanced_background_flow_config(request: AdvancedGenerateRequest) -> 
         "versions": versions,
         "target_word_count": target_word_count,
         "min_word_count": min_word_count,
+        "chapter_draft_contract": draft_contract,
+        "generation_strategy": draft_contract["generation_strategy"],
         "enforce_min_word_count": True,
         "advanced_background_mode": True,
         "async_finalize": False,
@@ -516,7 +522,7 @@ def _build_advanced_background_flow_config(request: AdvancedGenerateRequest) -> 
     if raw_config.get("rag_mode"):
         config["rag_mode"] = raw_config.get("rag_mode")
     if raw_config.get("max_enrich_iterations") is not None:
-        config["max_enrich_iterations"] = min(6, max(1, _coerce_positive_int(raw_config.get("max_enrich_iterations"), 1)))
+        config["max_enrich_iterations"] = min(8, max(1, _coerce_positive_int(raw_config.get("max_enrich_iterations"), 1)))
 
     return config
 
@@ -544,7 +550,7 @@ def _build_compat_generate_flow_config(request: GenerateChapterRequest) -> Dict[
     requires_word_enforcement = explicit_target or explicit_min
     requested_target = max(target_word_count, min_word_count)
     if requested_target >= 6500:
-        enrich_iterations = 6
+        enrich_iterations = 8 if requested_target >= 10000 else 6
     elif requested_target >= 4500:
         enrich_iterations = 5
     elif requested_target >= 1200 and requires_word_enforcement:
@@ -562,6 +568,7 @@ def _build_compat_generate_flow_config(request: GenerateChapterRequest) -> Dict[
         preset=preset,
         target_word_count=requested_target,
     )
+    draft_contract = PipelineOrchestrator._resolve_chapter_draft_contract(target_word_count, min_word_count)
 
     config: Dict[str, Any] = {
         "preset": preset,
@@ -569,6 +576,8 @@ def _build_compat_generate_flow_config(request: GenerateChapterRequest) -> Dict[
         "allow_truncated_response": False,
         "target_word_count": target_word_count,
         "min_word_count": min_word_count,
+        "chapter_draft_contract": draft_contract,
+        "generation_strategy": draft_contract["generation_strategy"],
         "max_enrich_iterations": enrich_iterations,
         "enforce_min_word_count": True,
         "compat_short_chapter_mode": is_short_chapter,
@@ -1483,6 +1492,8 @@ async def advanced_generate_chapter(
             "version_count": flow_config["versions"],
             "target_word_count": flow_config["target_word_count"],
             "min_word_count": flow_config["min_word_count"],
+            "chapter_draft_contract": flow_config.get("chapter_draft_contract"),
+            "generation_strategy": flow_config.get("generation_strategy"),
             "timeout_seconds": _calculate_generation_timeout_seconds(flow_config),
             "status": "queued",
             "advanced_background_mode": True,
@@ -1710,6 +1721,8 @@ async def generate_chapter(
             "version_count": flow_config["versions"],
             "target_word_count": flow_config["target_word_count"],
             "min_word_count": flow_config["min_word_count"],
+            "chapter_draft_contract": flow_config.get("chapter_draft_contract"),
+            "generation_strategy": flow_config.get("generation_strategy"),
             "timeout_seconds": _calculate_generation_timeout_seconds(flow_config),
             "status": "queued",
         },

@@ -362,23 +362,52 @@ def _extract_requested_chapter_count(text: str) -> Optional[int]:
     return matches[-1]
 
 
-def _make_length_contract(target_chapter_count: int, *, source: str) -> Dict[str, Any]:
-    if target_chapter_count <= 16:
+def _resolve_length_contract_defaults(target_chapter_count: int) -> Dict[str, int]:
+    if target_chapter_count <= 10:
+        stage_min, stage_max = 3, min(5, target_chapter_count)
+    elif target_chapter_count <= 16:
         stage_min, stage_max = 4, min(6, target_chapter_count)
     elif target_chapter_count <= 36:
         stage_min, stage_max = 5, 8
-    elif target_chapter_count <= 120:
-        stage_min, stage_max = 6, 10
+    elif target_chapter_count <= 80:
+        stage_min, stage_max = 7, 12
+    elif target_chapter_count <= 160:
+        stage_min, stage_max = 9, 16
+    elif target_chapter_count <= 320:
+        stage_min, stage_max = 12, 24
+    elif target_chapter_count <= 600:
+        stage_min, stage_max = 16, 32
     else:
-        stage_min, stage_max = 8, 12
+        stage_min, stage_max = 20, 40
+
+    if target_chapter_count <= 60:
+        seed_count = target_chapter_count
+    elif target_chapter_count <= 120:
+        seed_count = 60
+    elif target_chapter_count <= 300:
+        seed_count = 80
+    elif target_chapter_count <= 600:
+        seed_count = 100
+    else:
+        seed_count = 120
+
+    return {
+        "stage_count_min": stage_min,
+        "stage_count_max": stage_max,
+        "chapter_outline_seed_count": seed_count,
+    }
+
+
+def _make_length_contract(target_chapter_count: int, *, source: str) -> Dict[str, Any]:
+    defaults = _resolve_length_contract_defaults(target_chapter_count)
 
     return {
         "target_chapter_count": target_chapter_count,
-        "stage_count_min": stage_min,
-        "stage_count_max": stage_max,
-        "chapter_outline_seed_count": target_chapter_count if target_chapter_count <= 24 else 12,
+        "stage_count_min": defaults["stage_count_min"],
+        "stage_count_max": defaults["stage_count_max"],
+        "chapter_outline_seed_count": defaults["chapter_outline_seed_count"],
         "source": source,
-        "policy": "respect_explicit_length_for_all_story_sizes",
+        "policy": "respect_explicit_length_without_compressing_longform_to_twelve",
     }
 
 
@@ -393,13 +422,20 @@ def _normalize_length_contract_candidate(candidate: Any, *, source: str) -> Dict
         return {}
 
     normalized = _make_length_contract(target_chapter_count, source=source)
+    defaults = _resolve_length_contract_defaults(target_chapter_count)
     for key in ("stage_count_min", "stage_count_max", "chapter_outline_seed_count"):
         try:
             value = int(candidate.get(key))
         except (TypeError, ValueError):
             continue
         if value > 0:
-            normalized[key] = value
+            normalized[key] = max(value, defaults[key])
+    if normalized["stage_count_min"] > normalized["stage_count_max"]:
+        normalized["stage_count_max"] = normalized["stage_count_min"]
+    normalized["chapter_outline_seed_count"] = min(
+        target_chapter_count,
+        max(defaults["chapter_outline_seed_count"], int(normalized["chapter_outline_seed_count"])),
+    )
     normalized["source"] = source
     return normalized
 
@@ -498,9 +534,7 @@ def _resolve_blueprint_length_contract(blueprint_data: Dict[str, Any]) -> Dict[s
             except (TypeError, ValueError):
                 continue
             if 1 <= target_int <= 1000:
-                resolved = dict(candidate)
-                resolved["target_chapter_count"] = target_int
-                return resolved
+                return _normalize_length_contract_candidate(candidate, source=str(candidate.get("source") or "blueprint_length_contract"))
     return {}
 
 
@@ -510,11 +544,12 @@ def _format_length_contract_instruction(length_contract: Dict[str, Any]) -> str:
     target = int(length_contract["target_chapter_count"])
     stage_min = int(length_contract.get("stage_count_min") or 4)
     stage_max = int(length_contract.get("stage_count_max") or 12)
-    seed_count = int(length_contract.get("chapter_outline_seed_count") or min(target, 12))
+    seed_count = int(length_contract.get("chapter_outline_seed_count") or _resolve_length_contract_defaults(target)["chapter_outline_seed_count"])
     return (
         f"用户/项目已明确篇幅目标：约 {target} 章。小说总纲阶段数应控制在 {stage_min}-{stage_max} 个，"
         f"expected_chapter_range 必须连续覆盖第 1-{target} 章，不得扩写到 {target} 章之外；"
-        f"章节大纲首轮生成 {seed_count} 章。长篇连续性仍要启用，但不能把明确短中篇目标强行放大。"
+        f"章节大纲首轮生成 {seed_count} 章。短篇不会被强行扩成长篇，长篇也不会被压缩成 12 章骨架；"
+        "超过首轮数量的章节后续按批次继续生成，不能让总纲只覆盖一个很薄的开头。"
     )
 
 
@@ -565,11 +600,23 @@ def _resolve_blueprint_chapter_outline_count(blueprint_data: Dict[str, Any]) -> 
     length_contract = _resolve_blueprint_length_contract(blueprint_data)
     if length_contract:
         try:
-            seed_count = int(length_contract.get("chapter_outline_seed_count") or 12)
+            target = int(length_contract.get("target_chapter_count") or 0)
+            default_seed = _resolve_length_contract_defaults(target)["chapter_outline_seed_count"] if target > 0 else 24
+            seed_count = int(length_contract.get("chapter_outline_seed_count") or default_seed)
         except (TypeError, ValueError):
-            seed_count = 12
-        return max(1, min(24, seed_count))
-    return 12
+            seed_count = 24
+        return max(1, min(120, seed_count))
+    return 24
+
+
+def _resolve_novel_outline_min_stage_count(blueprint_data: Dict[str, Any]) -> int:
+    length_contract = _resolve_blueprint_length_contract(blueprint_data)
+    if not length_contract:
+        return 4
+    try:
+        return max(1, int(length_contract.get("stage_count_min") or 4))
+    except (TypeError, ValueError):
+        return 4
 
 
 def _build_chapter_batches(total_chapters: int, *, batch_size: int = 4) -> List[tuple[int, int]]:
@@ -615,7 +662,9 @@ def _is_recoverable_for_requested_blueprint_stage(
     stage = str(requested_stage or "").strip().lower()
     if stage == "chapter_outline":
         chapter_outline = getattr(blueprint, "chapter_outline", None)
-        return isinstance(chapter_outline, list) and _has_complete_chapter_outline(chapter_outline)
+        blueprint_data = blueprint.model_dump(exclude_none=True) if hasattr(blueprint, "model_dump") else {}
+        expected_count = _resolve_blueprint_chapter_outline_count(blueprint_data) if isinstance(blueprint_data, dict) else None
+        return isinstance(chapter_outline, list) and _has_complete_chapter_outline(chapter_outline, expected_count)
     if stage == "novel_outline":
         novel_outline = getattr(blueprint, "novel_outline", None)
         return isinstance(novel_outline, list) and len(novel_outline) > 0
@@ -1150,16 +1199,44 @@ def _outline_stage_has_depth(item: Dict[str, Any]) -> bool:
 
 def _is_chapter_outline_batch_complete(chapters: List[Dict[str, Any]], start_chapter: int, end_chapter: int) -> bool:
     expected = list(range(start_chapter, end_chapter + 1))
-    actual = [
-        int(item.get("chapter_number") or 0)
-        for item in chapters
-        if isinstance(item, dict) and start_chapter <= int(item.get("chapter_number") or 0) <= end_chapter
-    ]
+    actual: List[int] = []
+    for item in chapters:
+        if not isinstance(item, dict):
+            continue
+        try:
+            chapter_number = int(item.get("chapter_number") or 0)
+        except (TypeError, ValueError):
+            continue
+        if start_chapter <= chapter_number <= end_chapter:
+            actual.append(chapter_number)
+    actual.sort()
     return actual == expected
 
 
-def _has_complete_chapter_outline(chapters: List[Dict[str, Any]]) -> bool:
-    return _is_chapter_outline_batch_complete(chapters, 1, 12)
+def _has_complete_chapter_outline(chapters: List[Dict[str, Any]], expected_count: Optional[int] = None) -> bool:
+    valid_numbers: List[int] = []
+    for item in chapters:
+        if not isinstance(item, dict):
+            continue
+        try:
+            chapter_number = int(item.get("chapter_number") or 0)
+        except (TypeError, ValueError):
+            continue
+        if chapter_number > 0:
+            valid_numbers.append(chapter_number)
+    valid_numbers = sorted(set(valid_numbers))
+    if not valid_numbers:
+        return False
+    if expected_count is not None:
+        try:
+            target = max(1, int(expected_count))
+        except (TypeError, ValueError):
+            target = len(valid_numbers)
+        if len(valid_numbers) < target:
+            return False
+    else:
+        target = len(valid_numbers)
+    return _is_chapter_outline_batch_complete(chapters, 1, target)
 
 
 def _build_blueprint_checkpoint_patch(blueprint_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -1216,10 +1293,11 @@ def _parse_expected_chapter_range(value: Any) -> tuple[int, int] | None:
     return start, end
 
 
-def _validate_novel_outline_coherence(outline: List[Dict[str, Any]]) -> None:
-    if len(outline) < 4:
+def _validate_novel_outline_coherence(outline: List[Dict[str, Any]], *, min_stage_count: int = 4) -> None:
+    min_stage_count = max(1, int(min_stage_count or 4))
+    if len(outline) < min_stage_count:
         raise HTTPException(status_code=500, detail=f"小说总大纲生成失败，有效阶段数不足：{len(outline)}")
-    if len(outline) > 12:
+    if len(outline) > 40:
         raise HTTPException(status_code=500, detail=f"小说总大纲生成失败，阶段数超出上限：{len(outline)}")
 
     previous_stage = 0
@@ -1586,7 +1664,10 @@ async def _enrich_novel_outline_in_chunks(
                 f"已保存总纲细化结果（第 {chunk_index}/{total_chunks} 段）",
             )
     enriched_outline.sort(key=lambda item: int(item.get("stage") or 0))
-    _validate_novel_outline_coherence(enriched_outline)
+    _validate_novel_outline_coherence(
+        enriched_outline,
+        min_stage_count=_resolve_novel_outline_min_stage_count(blueprint_data),
+    )
     _validate_novel_outline_depth(enriched_outline)
     return enriched_outline
 
@@ -1680,7 +1761,10 @@ async def _generate_novel_outline(
             if length_contract and _outline_exceeds_length_contract(existing_items, length_contract):
                 existing_items = _remap_outline_ranges_to_length_contract(existing_items, length_contract)
                 blueprint_data["novel_outline"] = existing_items
-            _validate_novel_outline_coherence(existing_items)
+            _validate_novel_outline_coherence(
+                existing_items,
+                min_stage_count=_resolve_novel_outline_min_stage_count(blueprint_data),
+            )
             _validate_novel_outline_depth(existing_items)
             return blueprint_data
         except HTTPException:
@@ -1832,7 +1916,10 @@ async def _generate_novel_outline(
         normalized_outline = _remap_outline_ranges_to_length_contract(normalized_outline, length_contract)
     if progress_callback is not None:
         await progress_callback("blueprint_foreshadowing", "正在校验小说总大纲骨架连续性")
-    _validate_novel_outline_coherence(normalized_outline)
+    _validate_novel_outline_coherence(
+        normalized_outline,
+        min_stage_count=_resolve_novel_outline_min_stage_count(blueprint_data),
+    )
 
     blueprint_data["novel_outline"] = normalized_outline
     if checkpoint_callback is not None:
@@ -2013,7 +2100,7 @@ async def _generate_executable_chapter_outline(
     if len(normalized_outline) < target_chapter_outline_count:
         raise HTTPException(status_code=500, detail=f"章节大纲生成失败，返回的有效章节数不足：{len(normalized_outline)}")
     if chapter_numbers[:target_chapter_outline_count] != list(range(1, target_chapter_outline_count + 1)):
-        raise HTTPException(status_code=500, detail="章节大纲生成失败，前 12 章的章节号不连续或存在缺失")
+        raise HTTPException(status_code=500, detail=f"章节大纲生成失败，前 {target_chapter_outline_count} 章的章节号不连续或存在缺失")
     blueprint_data["chapter_outline"] = normalized_outline[:target_chapter_outline_count]
     return blueprint_data
 
@@ -2033,7 +2120,21 @@ async def _polish_chapter_outline_quality(
     normalized_chapter_outline = [item for item in chapter_outline if isinstance(item, dict)]
     if not normalized_chapter_outline:
         return blueprint_data
-    target_chapter_outline_count = _resolve_blueprint_chapter_outline_count(blueprint_data)
+    resolved_outline_target = _resolve_blueprint_chapter_outline_count(blueprint_data)
+    existing_numbers: List[int] = []
+    for item in normalized_chapter_outline:
+        try:
+            chapter_number = int(item.get("chapter_number") or 0)
+        except (TypeError, ValueError):
+            continue
+        if chapter_number > 0:
+            existing_numbers.append(chapter_number)
+    target_chapter_outline_count = min(
+        resolved_outline_target,
+        max(existing_numbers) if existing_numbers else len(normalized_chapter_outline),
+    )
+    if target_chapter_outline_count <= 0:
+        return blueprint_data
 
     one_sentence_summary = str(blueprint_data.get("one_sentence_summary") or "").strip()
     full_synopsis = str(blueprint_data.get("full_synopsis") or "").strip()
@@ -3094,7 +3195,8 @@ async def _generate_blueprint_impl(
         logger.warning("Failed to load existing blueprint before generation: project=%s error=%s", project_id, exc)
 
     history_records = await novel_service.list_conversations(project_id)
-    if not history_records and existing_blueprint is None:
+    initial_prompt_text = str(project.initial_prompt or "").strip()
+    if not history_records and existing_blueprint is None and not initial_prompt_text:
         logger.warning("项目 %s 缺少对话历史，无法生成蓝图", project_id)
         raise HTTPException(status_code=400, detail="缺少对话历史，请先完成概念对话后再生成蓝图")
 
@@ -3131,6 +3233,14 @@ async def _generate_blueprint_impl(
                 })
         except (json.JSONDecodeError, AttributeError):
             continue
+
+    if not formatted_history and initial_prompt_text:
+        formatted_history.append({"role": "user", "content": initial_prompt_text})
+        structured_dialogue.append({
+            "role": "user",
+            "value": initial_prompt_text,
+            "raw": {"source": "initial_prompt", "value": initial_prompt_text},
+        })
 
     if not formatted_history and existing_blueprint is None:
         logger.warning("项目 %s 对话历史格式异常，无法提取有效内容", project_id)
@@ -3174,8 +3284,13 @@ async def _generate_blueprint_impl(
         existing_chapter_outline = []
     elif force_stage == "chapter_outline":
         existing_chapter_outline = []
-    elif existing_chapter_outline and not _has_complete_chapter_outline(existing_chapter_outline):
-        existing_chapter_outline = []
+    elif existing_chapter_outline:
+        existing_blueprint_data = existing_blueprint.model_dump(exclude_none=True) if existing_blueprint else {}
+        expected_outline_count = _resolve_blueprint_chapter_outline_count(
+            _attach_length_contract_to_blueprint(existing_blueprint_data, length_contract)
+        )
+        if not _has_complete_chapter_outline(existing_chapter_outline, expected_outline_count):
+            existing_chapter_outline = []
     generated_stage = "chapter_outline"
 
     if existing_blueprint:
