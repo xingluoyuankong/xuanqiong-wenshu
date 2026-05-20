@@ -600,13 +600,45 @@ const parseAssistantPayload = (content: string) => {
   }
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+const readPositiveInt = (value: unknown): number | null => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null
+}
+
+const resolveChapterOutlineExpectedCount = (blueprint: Blueprint | null | undefined) => {
+  if (!blueprint) return 0
+  const worldSetting = isRecord(blueprint.world_setting) ? blueprint.world_setting : {}
+  const systemBlueprint = isRecord(worldSetting.system_blueprint) ? worldSetting.system_blueprint : {}
+  const candidates = [
+    isRecord((blueprint as Record<string, unknown>).length_contract)
+      ? (blueprint as Record<string, unknown>).length_contract
+      : null,
+    isRecord(worldSetting.length_contract) ? worldSetting.length_contract : null,
+    isRecord(systemBlueprint.length_contract) ? systemBlueprint.length_contract : null,
+  ].filter(isRecord)
+
+  for (const candidate of candidates) {
+    const seedCount = readPositiveInt(candidate.chapter_outline_seed_count)
+    const targetCount = readPositiveInt(candidate.target_chapter_count)
+    if (seedCount && targetCount) return Math.min(seedCount, targetCount)
+    if (seedCount) return seedCount
+    if (targetCount && targetCount <= 60) return targetCount
+  }
+
+  return Array.isArray(blueprint.chapter_outline) ? blueprint.chapter_outline.length : 0
+}
 
 const hasNovelOutline = (blueprint: Blueprint | null | undefined) => {
   return Boolean(blueprint && Array.isArray(blueprint.novel_outline) && blueprint.novel_outline.length > 0)
 }
 
 const hasCompleteChapterOutline = (blueprint: Blueprint | null | undefined) => {
-  if (!blueprint || !Array.isArray(blueprint.chapter_outline) || blueprint.chapter_outline.length < 12) {
+  const expectedCount = resolveChapterOutlineExpectedCount(blueprint)
+  if (!blueprint || !Array.isArray(blueprint.chapter_outline) || expectedCount <= 0 || blueprint.chapter_outline.length < expectedCount) {
     return false
   }
 
@@ -614,7 +646,8 @@ const hasCompleteChapterOutline = (blueprint: Blueprint | null | undefined) => {
     .map((chapter, index) => Number((chapter as { chapter_number?: unknown }).chapter_number) || index + 1)
     .sort((left, right) => left - right)
 
-  return chapterNumbers.length >= 12 && chapterNumbers.slice(0, 12).every((chapterNumber, index) => chapterNumber === index + 1)
+  return chapterNumbers.length >= expectedCount
+    && chapterNumbers.slice(0, expectedCount).every((chapterNumber, index) => chapterNumber === index + 1)
 }
 
 const hasUsableBlueprint = (blueprint: Blueprint | null | undefined) => {

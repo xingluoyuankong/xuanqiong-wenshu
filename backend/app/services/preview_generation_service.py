@@ -262,6 +262,7 @@ class PreviewGenerationService:
 
 [目标字数]
 **必须达到 {target_word_count} 字左右**（这是硬性要求，请务必写够字数！）
+支持范围说明：短章可以紧凑推进；3000-7000 字应以 3-5 个完整场景承载；7000 字以上必须使用真实场景组、对话攻防、行动回合、因果后果和章末压力承载篇幅，不能靠景物描写、总结、同义心理独白凑字数。
 
 请严格按照预览中的情节点顺序，扩写成完整的章节正文。
 
@@ -276,15 +277,24 @@ class PreviewGenerationService:
 直接输出章节正文，不要输出 JSON 或其他格式。"""
 
         try:
-            # 根据目标字数计算 max_tokens（中文约 1.5 字/token，留出余量）
-            max_tokens = max(4000, int(target_word_count * 1.8))
+            # Keep enough output room for long Chinese chapters. The preview path
+            # is a full draft path, not a short teaser expansion.
+            max_tokens = max(4000, min(32000, int(target_word_count * 2.35)))
+            if target_word_count >= 10000:
+                timeout = 2400.0
+            elif target_word_count >= 7000:
+                timeout = 1800.0
+            elif target_word_count >= 4500:
+                timeout = 900.0
+            else:
+                timeout = 420.0
             text_result = await call_generation_text(
                 llm_service=self.llm_service,
                 system_prompt="你是一位资深网文作者，文笔流畅，擅长写出让读者欲罢不能的章节。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.8,
                 user_id=user_id,
-                timeout=180.0,
+                timeout=timeout,
                 policy=GenerationCallPolicy(
                     stage_label="预演扩写完整章节",
                     progress_stage="generate_variants",

@@ -1660,7 +1660,7 @@ class SelfCritiqueService:
         user_id: int = 0,
         *,
         return_diagnostics: bool = False,
-        allow_stagewide: bool = True,
+        allow_stagewide: bool = False,
         strategy_progress_callback: Optional[Callable[[str, Dict[str, Any]], Awaitable[None]]] = None,
     ) -> Any:
         if not issues:

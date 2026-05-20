@@ -270,6 +270,57 @@ describe('InspirationMode', () => {
     expect(localStorageState.xuanqiong_wenshu_active_inspiration_project_id).toBeUndefined()
   })
 
+  it('uses blueprint length contract instead of a fixed 12 chapter completion rule', async () => {
+    novelStoreMock.currentProject = { id: 'proj-1', blueprint: null, conversation_history: [] }
+    const wrapper = await mountView()
+
+    ;(wrapper.vm as any).handleBlueprintGenerated({
+      blueprint: {
+        title: 'Blueprint',
+        world_setting: {
+          system_blueprint: {
+            length_contract: {
+              target_chapter_count: 80,
+              chapter_outline_seed_count: 24,
+            },
+          },
+        },
+        chapter_outline: Array.from({ length: 24 }, (_, index) => ({ chapter_number: index + 1, title: `第${index + 1}章`, summary: '摘要' })),
+      },
+      ai_message: 'blueprint generated',
+    })
+    await (wrapper.vm as any).handleConfirmBlueprint()
+
+    expect(novelStoreMock.saveBlueprint).not.toHaveBeenCalled()
+    expect(pushMock).toHaveBeenCalledWith('/novel/proj-1')
+  })
+
+  it('keeps chapter outline generation pending when length contract expects more chapters', async () => {
+    novelStoreMock.currentProject = { id: 'proj-1', blueprint: null, conversation_history: [] }
+    const wrapper = await mountView()
+
+    ;(wrapper.vm as any).handleBlueprintGenerated({
+      blueprint: {
+        title: 'Blueprint',
+        world_setting: {
+          system_blueprint: {
+            length_contract: {
+              target_chapter_count: 80,
+              chapter_outline_seed_count: 24,
+            },
+          },
+        },
+        chapter_outline: Array.from({ length: 12 }, (_, index) => ({ chapter_number: index + 1, title: `第${index + 1}章`, summary: '摘要' })),
+      },
+      ai_message: 'blueprint generated',
+    })
+    await (wrapper.vm as any).handleConfirmBlueprint()
+    await flushPromises()
+
+    expect((wrapper.vm as any).pendingBlueprintForceStage).toBe('chapter_outline')
+    expect(pushMock).not.toHaveBeenCalled()
+  })
+
   it('novel outline only blueprint switches to forced chapter outline confirmation view', async () => {
     novelStoreMock.currentProject = { id: 'proj-1', blueprint: null, conversation_history: [] }
     const wrapper = await mountView()

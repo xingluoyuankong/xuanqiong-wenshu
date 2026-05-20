@@ -35,6 +35,7 @@ from app.api.routers.novels import (
     _repair_blueprint_character_names,
     _remap_outline_ranges_to_length_contract,
     _resolve_blueprint_chapter_outline_count,
+    _resolve_novel_outline_min_stage_count,
     _resolve_novel_outline_timeout_seconds,
     _resolve_outline_chunk_timeout_seconds,
     _resolve_world_bible_timeout_seconds,
@@ -1453,7 +1454,7 @@ async def test_revise_chapter_uses_stagewide_fallback_when_localized_fix_does_no
     monkeypatch.setattr(service, "_critique_strategy_snapshot", fake_snapshot)
     monkeypatch.setattr(service, "_critique_strategy_report", fake_report)
 
-    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True)
+    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True, allow_stagewide=True)
 
     assert revised.endswith("修正后的正式版本。")
     assert logs[0]["accepted"] is True
@@ -1487,7 +1488,7 @@ async def test_revise_chapter_rejects_stagewide_candidate_when_targeted_major_is
     monkeypatch.setattr(service, "_revise_chapter_stagewide", fake_stagewide)
     monkeypatch.setattr(service, "_critique_strategy_snapshot", fake_snapshot)
 
-    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True)
+    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True, allow_stagewide=True)
 
     assert revised == "原始正文"
     assert logs[0]["accepted"] is False
@@ -1539,7 +1540,7 @@ async def test_revise_chapter_rejects_stagewide_candidate_when_safety_snapshot_r
     monkeypatch.setattr(service, "_critique_strategy_report", fake_report)
     monkeypatch.setattr(service, "_critique_stagewide_safety_snapshot", fake_stagewide_safety)
 
-    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True)
+    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True, allow_stagewide=True)
 
     assert revised == "原始正文"
     assert logs[0]["accepted"] is False
@@ -1585,7 +1586,7 @@ async def test_revise_chapter_rejects_candidate_when_aggregate_strategy_snapshot
     monkeypatch.setattr(service, "_critique_strategy_snapshot", fake_snapshot)
     monkeypatch.setattr(service, "_critique_strategy_report", fake_report)
 
-    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True, allow_stagewide=False)
+    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True)
 
     assert revised == "原始正文"
     assert logs[0]["accepted"] is False
@@ -1654,7 +1655,7 @@ async def test_revise_chapter_retries_stagewide_with_aggregate_feedback(monkeypa
     monkeypatch.setattr(service, "_critique_strategy_report", fake_report)
     monkeypatch.setattr(service, "_critique_stagewide_safety_snapshot", fake_stagewide_safety)
 
-    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True)
+    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True, allow_stagewide=True)
 
     assert revised.endswith("第二次候选。")
     assert logs[0]["accepted"] is True
@@ -1690,7 +1691,7 @@ async def test_revise_chapter_marks_stagewide_as_deferred_when_iteration_budget_
     monkeypatch.setattr(service, "_revise_chapter_locally", fake_local)
     monkeypatch.setattr(service, "_revise_chapter_stagewide", fail_if_called)
 
-    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True, allow_stagewide=False)
+    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True)
 
     assert revised == "原始正文"
     assert logs[0]["stagewide_allowed"] is False
@@ -2907,6 +2908,66 @@ def test_length_contract_keeps_short_projects_from_becoming_forced_longform():
     ) == 12
 
 
+def test_length_contract_allows_three_act_outline_for_very_short_projects():
+    contract = _build_length_contract(
+        formatted_history=[
+            {"role": "user", "content": "写一部8章左右的东方玄幻短篇，章节要连续推进。"},
+        ],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=None,
+    )
+
+    assert contract["target_chapter_count"] == 8
+    assert contract["stage_count_min"] == 3
+    assert contract["stage_count_max"] <= 5
+    assert _resolve_novel_outline_min_stage_count(
+        {"world_setting": {"system_blueprint": {"length_contract": contract}}}
+    ) == 3
+    _validate_novel_outline_coherence(
+        [
+            {"stage": 1, "core_theme": "开端", "expected_chapter_range": "1-2章"},
+            {"stage": 2, "core_theme": "对抗", "expected_chapter_range": "3-5章"},
+            {"stage": 3, "core_theme": "收束", "expected_chapter_range": "6-8章"},
+        ],
+        min_stage_count=contract["stage_count_min"],
+    )
+
+
+def test_length_contract_does_not_compress_long_projects_to_twelve_chapters():
+    contract_120 = _build_length_contract(
+        formatted_history=[
+            {"role": "user", "content": "写一部120章左右的东方玄幻长篇，章节之间要连续推进。"},
+        ],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=None,
+    )
+    contract_300 = _build_length_contract(
+        formatted_history=[
+            {"role": "user", "content": "写一部300章左右的群像长篇，不要压缩成短纲。"},
+        ],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=None,
+    )
+
+    assert contract_120["target_chapter_count"] == 120
+    assert contract_120["chapter_outline_seed_count"] == 60
+    assert contract_120["stage_count_max"] >= 12
+    assert _resolve_blueprint_chapter_outline_count(
+        {"world_setting": {"system_blueprint": {"length_contract": contract_120}}}
+    ) == 60
+    assert "不会被压缩成 12 章骨架" in _format_length_contract_instruction(contract_120)
+
+    assert contract_300["target_chapter_count"] == 300
+    assert contract_300["chapter_outline_seed_count"] == 80
+    assert contract_300["stage_count_max"] >= 16
+    assert _resolve_blueprint_chapter_outline_count(
+        {"world_setting": {"system_blueprint": {"length_contract": contract_300}}}
+    ) == 80
+
+
 def test_length_contract_prefers_user_request_over_existing_outline_ranges():
     existing_blueprint = Blueprint(
         title="旧蓝图",
@@ -3364,14 +3425,15 @@ async def test_generate_novel_outline_builds_total_outline_when_missing():
     assert "世界系统总表" in llm.calls[4]["conversation_history"][0]["content"]
 
 
-def test_has_complete_chapter_outline_requires_contiguous_twelve_chapters():
+def test_has_complete_chapter_outline_uses_expected_count_when_available():
     complete = [{"chapter_number": index, "title": f"第{index}章", "summary": "摘要"} for index in range(1, 13)]
     partial = complete[:4]
     broken = complete[:11] + [{"chapter_number": 13, "title": "第13章", "summary": "摘要"}]
 
-    assert _has_complete_chapter_outline(complete) is True
-    assert _has_complete_chapter_outline(partial) is False
-    assert _has_complete_chapter_outline(broken) is False
+    assert _has_complete_chapter_outline(complete, expected_count=12) is True
+    assert _has_complete_chapter_outline(partial, expected_count=12) is False
+    assert _has_complete_chapter_outline(broken, expected_count=12) is False
+    assert _has_complete_chapter_outline(partial, expected_count=4) is True
 
 
 @pytest.mark.anyio
@@ -3411,7 +3473,17 @@ async def test_generate_executable_chapter_outline_builds_outline_when_missing()
             "title": "异海开拓史",
             "one_sentence_summary": "从孤岛生存开始的异海长篇",
             "full_synopsis": "长篇慢热海洋文明故事",
-            "world_setting": {"core": "海洋文明 + 修炼反馈生态"},
+            "world_setting": {
+                "core": "海洋文明 + 修炼反馈生态",
+                "system_blueprint": {
+                    "length_contract": {
+                        "target_chapter_count": 12,
+                        "stage_count_min": 4,
+                        "stage_count_max": 6,
+                        "chapter_outline_seed_count": 12,
+                    }
+                },
+            },
             "characters": [{"name": "主角"}],
             "relationships": [],
             "story_arcs": [],

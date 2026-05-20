@@ -335,6 +335,88 @@ class TestGenerationQualityGuards:
         assert "scene_fulfillment_weak" not in {item["code"] for item in gate["blockers"]}
         assert gate["quality_issue_summary"]["passed"] is True
 
+    def test_structural_quality_gate_allows_live_run_scene_false_negative_when_story_signals_are_strong(self):
+        gate = PipelineOrchestrator._build_structural_quality_gate(
+            {
+                "self_critique_after_consistency": {
+                    "final_score": 75.0,
+                    "critical_count": 0,
+                    "major_count": 6,
+                },
+                "consistency_repair": {
+                    "is_consistent": True,
+                    "post_fix_check": {"violations": []},
+                },
+                "story_progression_guard": {
+                    "word_count": 3534,
+                    "dialogue_marker_count": 92,
+                    "mission_hit_count": 3,
+                    "expected_dialogue": True,
+                    "static_description_risk": False,
+                    "scene_count": 3,
+                    "scene_fulfillment_rate": 0.3333,
+                    "dialogue_changes_state": True,
+                    "ending_pressure_passed": True,
+                },
+            }
+        )
+
+        assert gate["passed"] is True
+        assert "scene_fulfillment_weak" not in {item["code"] for item in gate["blockers"]}
+
+    def test_structural_quality_gate_uses_positive_ai_review_as_cross_check_for_scene_keyword_miss(self):
+        gate = PipelineOrchestrator._build_structural_quality_gate(
+            {
+                "ai_review": {
+                    "evaluation": "这是完成度较高的正式候选稿，基本兑现了导演脚本；对话改变局势，结尾把危险压给下一章，能直接上正稿。",
+                    "status": "single_version_reviewed",
+                },
+                "self_critique_after_consistency": {
+                    "final_score": 79.5,
+                    "critical_count": 0,
+                    "major_count": 6,
+                },
+                "consistency_repair": {
+                    "is_consistent": True,
+                    "post_fix_check": {"violations": []},
+                },
+                "story_progression_guard": {
+                    "word_count": 3459,
+                    "dialogue_marker_count": 118,
+                    "guardrail_violation_count": 1,
+                    "mission_hit_count": 2,
+                    "expected_dialogue": True,
+                    "ending_hook_detected": True,
+                    "static_description_risk": False,
+                    "scene_fulfillment_rate": 0.3333,
+                    "fulfilled_scene_count": 1,
+                    "scene_count": 3,
+                    "dialogue_changes_state": True,
+                    "dialogue_state_change_markers": 12,
+                    "ending_pressure_passed": True,
+                },
+            }
+        )
+
+        assert gate["passed"] is True
+        assert "scene_fulfillment_weak" not in {item["code"] for item in gate["blockers"]}
+
+    def test_ending_pressure_recognizes_specific_chinese_cliffhanger_markers(self):
+        content = ("沈砚把账页重新压平，逼问账册真相，旧案的线索被一点点推到桌面上。" * 80)
+        content += "顾栖川看着他，只说了一句：有些账，见了地，才真会死人。"
+
+        guard = PipelineOrchestrator._score_story_quality_candidate(
+            content=content,
+            violations=[],
+            chapter_mission={
+                "continuity_anchor": {"deliver_to_next": ["旧南渠"]},
+                "scene_list": [{"goal": "逼问账册真相", "conflict": "地方试图遮掩", "turn": "转去旧南渠"}],
+            },
+        )
+
+        assert guard["ending_pressure_passed"] is True
+        assert any(hit in {"死人", "见了地", "真会死"} for hit in guard["ending_pressure"]["ending_pressure_hits"])
+
     def test_structural_quality_gate_does_not_block_progression_keyword_miss_when_strong_signals_pass(self):
         gate = PipelineOrchestrator._build_structural_quality_gate(
             {
