@@ -112,6 +112,36 @@ def _compact_list(values: Any, *, limit: int = 8, item_limit: int = 140) -> List
     return result
 
 
+def _signal_terms_from_text(value: Any, *, limit: int = 8) -> List[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    terms: List[str] = []
+    seen: set[str] = set()
+
+    def add(term: str) -> None:
+        cleaned = term.strip().lower()
+        if len(cleaned) < 2 or cleaned in seen:
+            return
+        seen.add(cleaned)
+        terms.append(cleaned)
+
+    for match in re.finditer(r"[\u4e00-\u9fff]{2,12}", text):
+        token = match.group(0)
+        add(token[:8])
+        add(token[-8:])
+    for part in re.split(r"[^A-Za-z0-9_-]+", text):
+        word = part.strip().lower()
+        if len(word) >= 4 and word not in {"chapter", "pressure", "effect", "cause", "pending"}:
+            add(word)
+    return terms[:limit]
+
+
+def _content_has_any_signal(content: str, signals: Iterable[str]) -> bool:
+    lowered = (content or "").lower()
+    return any(signal and signal.lower() in lowered for signal in signals)
+
+
 def _safe_extra(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -385,6 +415,7 @@ class LongformContextService:
                     "effect_chapter": chain.effect_chapter,
                     "effect": _truncate_text(chain.effect_description, 150),
                     "status": chain.status,
+                    "importance": chain.importance,
                     "characters": _compact_list(chain.involved_characters, limit=5),
                 }
                 for chain in chains
@@ -793,12 +824,59 @@ class LongformContextService:
                 }
             )
 
+        pending_causal_gaps: List[Dict[str, Any]] = []
+        for chain in (package.timeline_digest.get("causal_chains") or [])[:12]:
+            if not isinstance(chain, dict):
+                continue
+            status = str(chain.get("status") or "pending").lower()
+            if status in {"resolved", "abandoned"}:
+                continue
+            try:
+                importance = int(chain.get("importance") or 5)
+            except (TypeError, ValueError):
+                importance = 5
+            cause_chapter = int(chain.get("cause_chapter") or package.chapter_number)
+            if importance < 7 and package.chapter_number - cause_chapter > 4:
+                continue
+            signal_terms: List[str] = []
+            for value in (chain.get("cause"), chain.get("effect")):
+                signal_terms.extend(_signal_terms_from_text(value, limit=5))
+            if _content_has_any_signal(text, signal_terms):
+                continue
+            pending_causal_gaps.append(chain)
+
+        if pending_causal_gaps:
+            warnings.append(
+                {
+                    "code": "pending_causal_chain_not_carried",
+                    "message": "Pending causal pressure from prior chapters is not visibly carried into this draft.",
+                    "chains": [
+                        {
+                            "cause_chapter": item.get("cause_chapter"),
+                            "cause": item.get("cause"),
+                            "effect": item.get("effect"),
+                            "importance": item.get("importance"),
+                        }
+                        for item in pending_causal_gaps[:5]
+                    ],
+                }
+            )
+            for item in pending_causal_gaps[:3]:
+                patch_suggestions.append(
+                    {
+                        "code": "carry_causal_chain_patch",
+                        "target": item.get("effect") or item.get("cause"),
+                        "suggestion": "Keep the chapter structure and add 1-2 anchored paragraphs near the relevant scene so the prior cause creates concrete pressure, choice, cost, or danger in this chapter.",
+                    }
+                )
+
         metrics = {
             "chapter_number": package.chapter_number,
             "focus_character_count": len(package.cast_plan.chapter_focus_names),
             "missing_focus_count": len(missing_focus),
             "must_resolve_count": len(package.foreshadowing_task.must_resolve),
             "unresolved_due_count": len(unresolved_due),
+            "pending_causal_gap_count": len(pending_causal_gaps),
             "active_clue_count": len(package.foreshadowing_task.active_clues),
             "planned_character_count": package.cast_plan.planned_character_count,
             "target_character_count": package.cast_plan.target_character_count,
