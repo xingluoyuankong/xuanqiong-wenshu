@@ -949,6 +949,65 @@ class SelfCritiqueService:
         # escalating to a continuity-risky whole-chapter candidate.
         return False
 
+    @staticmethod
+    def _stagewide_rewrite_explicitly_confirmed(context: Optional[Dict[str, Any]]) -> bool:
+        """Only a manual, explicit caller opt-in may unlock whole-chapter rewrite.
+
+        The automatic optimization path is deliberately local-patch first. Even
+        when a caller passes allow_stagewide=True, that is treated as a request,
+        not permission, unless the context carries a manual confirmation flag.
+        """
+
+        if not isinstance(context, dict):
+            return False
+        for key in (
+            "manual_stagewide_rewrite",
+            "manual_whole_chapter_rewrite",
+            "stagewide_rewrite_confirmed",
+        ):
+            value = context.get(key)
+            if isinstance(value, dict):
+                if value.get("confirmed") or value.get("allow") or value.get("enabled"):
+                    return True
+            elif value is True:
+                return True
+        return False
+
+    def _build_stagewide_deferred_patch_suggestions(
+        self,
+        issues: List[Dict[str, Any]],
+        *,
+        strategy_key: str,
+        limit: int = 6,
+    ) -> List[Dict[str, Any]]:
+        suggestions: List[Dict[str, Any]] = []
+        requirements = self._build_issue_execution_requirements(
+            issues,
+            strategy_key=strategy_key,
+            limit=limit,
+        )
+        for index, issue in enumerate(issues[:limit]):
+            suggestions.append({
+                "mode": "local_patch_or_manual_confirm",
+                "dimension": issue.get("dimension"),
+                "severity": issue.get("severity"),
+                "location": issue.get("location") or "unspecified",
+                "problem": issue.get("problem") or issue.get("description") or "",
+                "suggestion": issue.get("suggestion") or issue.get("suggested_fix") or "",
+                "execution_requirement": requirements[index] if index < len(requirements) else None,
+            })
+        if not suggestions and requirements:
+            suggestions.append({
+                "mode": "local_patch_or_manual_confirm",
+                "dimension": strategy_key,
+                "severity": "major",
+                "location": "unspecified",
+                "problem": "broad stage issue needs explicit human confirmation before whole-chapter rewrite",
+                "suggestion": requirements[0],
+                "execution_requirement": requirements[0],
+            })
+        return suggestions
+
     def _split_paragraphs(self, chapter_content: str) -> List[str]:
         paragraphs = [part.strip() for part in re.split(r"\n\s*\n", chapter_content) if part.strip()]
         return paragraphs or [chapter_content]
@@ -1666,6 +1725,7 @@ class SelfCritiqueService:
         if not issues:
             return (chapter_content, []) if return_diagnostics else chapter_content
         current_content = chapter_content
+        stagewide_confirmed = bool(allow_stagewide and self._stagewide_rewrite_explicitly_confirmed(context))
         strategy_logs: List[Dict[str, Any]] = []
         for strategy_key, strategy_issues in self._cluster_issues_by_strategy(issues):
             if strategy_progress_callback is not None:
@@ -1692,7 +1752,8 @@ class SelfCritiqueService:
                     {
                         "phase": "localized_primary",
                         "issue_count": len(strategy_issues),
-                        "allow_stagewide": allow_stagewide,
+                        "allow_stagewide": stagewide_confirmed,
+                        "stagewide_requested": allow_stagewide,
                     },
                 )
             localized_content = await self._revise_chapter_locally(current_content, strategy_issues, context=context, user_id=user_id, strategy_key=strategy_key)
@@ -1771,12 +1832,18 @@ class SelfCritiqueService:
                 best_content_changed=best_content != current_content,
             )
             if needs_stagewide:
-                if not allow_stagewide:
+                if not stagewide_confirmed:
                     attempts.append({
                         "mode": "stagewide",
                         "changed": False,
                         "accepted": False,
                         "reason": "stagewide_deferred",
+                        "manual_confirmation_required": True,
+                        "stagewide_requested": allow_stagewide,
+                        "patch_suggestions": self._build_stagewide_deferred_patch_suggestions(
+                            strategy_issues,
+                            strategy_key=strategy_key,
+                        ),
                         "before": before_counts,
                         "after": best_after_counts or before_counts,
                         "content_fingerprint": self._content_fingerprint(best_content),
@@ -1788,7 +1855,8 @@ class SelfCritiqueService:
                             {
                                 "phase": "stagewide_primary",
                                 "issue_count": len(strategy_issues),
-                                "allow_stagewide": allow_stagewide,
+                                "allow_stagewide": stagewide_confirmed,
+                                "stagewide_requested": allow_stagewide,
                             },
                         )
                     stagewide_content = await self._revise_chapter_stagewide(current_content, strategy_issues, context=context, user_id=user_id, strategy_key=strategy_key)
@@ -1969,7 +2037,11 @@ class SelfCritiqueService:
                 "selected_after": best_after_counts or before_counts,
                 "content_changed": before_fingerprint != self._content_fingerprint(best_content),
                 "accepted": best_after_counts is not None,
-                "stagewide_allowed": allow_stagewide,
+                "stagewide_allowed": stagewide_confirmed,
+                "stagewide_requested": allow_stagewide,
+                "manual_stagewide_confirmation_required": any(
+                    item.get("manual_confirmation_required") for item in stagewide_attempts
+                ),
                 "stagewide_attempted": bool(stagewide_attempts),
                 "stagewide_accepted": any(item.get("accepted") for item in stagewide_attempts),
                 "stagewide_deferred": any(item.get("reason") == "stagewide_deferred" for item in stagewide_attempts),

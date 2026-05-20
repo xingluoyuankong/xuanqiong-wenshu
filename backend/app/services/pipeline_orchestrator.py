@@ -4496,6 +4496,7 @@ class PipelineOrchestrator:
                             retry_attempts=2,
                             response_format=None,
                             max_tokens=self._resolve_chapter_generation_max_tokens(config.target_word_count),
+                            prompt_cache_key=f"xq:{project_id}:{chapter_number}:draft",
                             allow_truncated_response=config.allow_truncated_response,
                             retry_same_model_once=True,
                         ),
@@ -4610,6 +4611,7 @@ class PipelineOrchestrator:
                             retry_attempts=2,
                             response_format=None,
                             max_tokens=self._resolve_chapter_generation_max_tokens(config.target_word_count),
+                            prompt_cache_key=f"xq:{project_id}:{chapter_number}:draft",
                             allow_truncated_response=config.allow_truncated_response,
                             retry_same_model_once=True,
                         ),
@@ -4853,10 +4855,47 @@ class PipelineOrchestrator:
                 ),
             )
             cleaned = remove_think_tags(text_result.text)
+            guard_failure = self._guardrail_rewrite_guard_failure(original_text, cleaned)
+            if guard_failure:
+                logger.warning("Chapter guardrail rewrite rejected by continuity guard: reason=%s", guard_failure)
+                return original_text
             return cleaned
         except Exception as exc:
             logger.warning("自动修复失败，返回原文: %s", exc)
             return original_text
+
+    @staticmethod
+    def _guardrail_rewrite_guard_failure(original_text: str, rewritten_text: str) -> Optional[str]:
+        original = str(original_text or "").strip()
+        rewritten = str(rewritten_text or "").strip()
+        if not rewritten:
+            return "empty_rewrite"
+        if rewritten.startswith("{") and "content" in rewritten[:240].lower():
+            return "raw_json_returned"
+
+        original_compact = re.sub(r"\s+", "", original)
+        rewritten_compact = re.sub(r"\s+", "", rewritten)
+        if len(original_compact) >= 1200 and len(rewritten_compact) < int(len(original_compact) * 0.72):
+            return "rewrite_shrank_too_much"
+        if len(original_compact) >= 400 and len(rewritten_compact) < int(len(original_compact) * 0.58):
+            return "rewrite_lost_too_much"
+
+        original_paragraphs = [part.strip() for part in re.split(r"\n\s*\n", original) if part.strip()]
+        rewritten_paragraphs = [part.strip() for part in re.split(r"\n\s*\n", rewritten) if part.strip()]
+        if len(original_paragraphs) >= 6 and len(rewritten_paragraphs) < max(3, len(original_paragraphs) // 3):
+            return "rewrite_collapsed_paragraph_structure"
+
+        anchors: List[str] = []
+        if original_paragraphs:
+            first = re.sub(r"\s+", "", original_paragraphs[0])
+            last = re.sub(r"\s+", "", original_paragraphs[-1])
+            if len(first) >= 16:
+                anchors.append(first[:24])
+            if len(last) >= 16:
+                anchors.append(last[-24:])
+        if len(anchors) >= 2 and all(anchor not in rewritten_compact for anchor in anchors):
+            return "rewrite_lost_front_and_back_anchors"
+        return None
 
     @staticmethod
     def _extract_text(value: object) -> Optional[str]:
@@ -5768,6 +5807,21 @@ class PipelineOrchestrator:
         if final_content == chapter_content and critique.get("final_content", chapter_content) != chapter_content and not accepted_revision:
             summary_status = "reverted_to_original"
             summary_improvement = 0
+        manual_patch_suggestions: List[Dict[str, Any]] = []
+        stagewide_deferred_count = 0
+        for optimization_log in critique.get("optimization_logs", []) or []:
+            for strategy_log in optimization_log.get("strategy_logs", []) or []:
+                for attempt in strategy_log.get("attempts", []) or []:
+                    if attempt.get("mode") != "stagewide" or not attempt.get("manual_confirmation_required"):
+                        continue
+                    stagewide_deferred_count += 1
+                    for suggestion in attempt.get("patch_suggestions") or []:
+                        if isinstance(suggestion, dict):
+                            manual_patch_suggestions.append({
+                                **suggestion,
+                                "stage": optimization_log.get("stage"),
+                                "strategy": strategy_log.get("strategy"),
+                            })
         return final_content, {
             "iterations": len(critique.get("iterations", [])),
             "final_score": final_critique.get("weighted_score", critique.get("final_score", 0)),
@@ -5779,6 +5833,9 @@ class PipelineOrchestrator:
             "priority_fixes": final_critique.get("priority_fixes", []),
             "final_critique": final_critique,
             "optimization_logs": critique.get("optimization_logs", []),
+            "manual_stagewide_confirmation_required": stagewide_deferred_count > 0,
+            "stagewide_deferred_count": stagewide_deferred_count,
+            "manual_patch_suggestions": manual_patch_suggestions[:12],
             "accepted_revision": accepted_revision,
             "acceptance_reason": acceptance_reason,
             "before_revision_stats": before_stats,

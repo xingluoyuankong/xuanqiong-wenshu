@@ -343,6 +343,7 @@ async def call_generation_text(
                 response_format=response_format_payload,
                 max_tokens=active_policy.max_tokens,
                 top_p=active_policy.top_p,
+                prompt_cache_key=active_policy.prompt_cache_key,
                 allow_truncated_response=active_policy.allow_truncated_response,
                 retry_same_model_once=active_policy.retry_same_model_once,
             )

@@ -207,6 +207,63 @@ async def test_foreshadowing_auto_resolve_records_resolution(tmp_path):
         await engine.dispose()
 
 
+@pytest.mark.anyio
+async def test_foreshadowing_auto_resolve_accepts_due_paraphrased_payoff(tmp_path):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'foreshadowing_paraphrase.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        async with session_factory() as session:
+            session.add(User(id=1, username="tester", email="tester@example.com", hashed_password="hash"))
+            session.add(NovelProject(id="p-payoff", user_id=1, title="Payoff", initial_prompt="test", status="draft"))
+            session.add(Chapter(project_id="p-payoff", chapter_number=2, status="successful", word_count=100))
+            session.add(Chapter(project_id="p-payoff", chapter_number=6, status="successful", word_count=100))
+            await session.flush()
+            chapters = (await session.execute(select(Chapter).where(Chapter.project_id == "p-payoff"))).scalars().all()
+            second = next(ch for ch in chapters if ch.chapter_number == 2)
+            sixth = next(ch for ch in chapters if ch.chapter_number == 6)
+            session.add(
+                Foreshadowing(
+                    project_id="p-payoff",
+                    chapter_id=second.id,
+                    chapter_number=2,
+                    content="The half-seal hidden in the ledger will matter later",
+                    type="setup",
+                    status="planted",
+                    keywords=["half-seal ledger"],
+                    name="half-seal",
+                    target_reveal_chapter=6,
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            service = ForeshadowingService(session)
+            sixth = (await session.execute(
+                select(Chapter).where(Chapter.project_id == "p-payoff", Chapter.chapter_number == 6)
+            )).scalar_one()
+            result = await service.auto_resolve_from_chapter(
+                project_id="p-payoff",
+                chapter_id=sixth.id,
+                chapter_number=6,
+                chapter_content=(
+                    "Lin Qi found the ledger mark again. The half-seal was the key: "
+                    "it proved the archive door had been opened from inside."
+                ),
+            )
+            await session.commit()
+
+            updated = (await session.execute(select(Foreshadowing).where(Foreshadowing.project_id == "p-payoff"))).scalar_one()
+            assert result["resolved"] == 1
+            assert updated.status == "resolved"
+            assert updated.resolved_chapter_number == 6
+    finally:
+        await engine.dispose()
+
+
 def test_longform_character_targets_scale_for_million_word_projects():
     assert _target_character_count(12) == 8
     assert _target_character_count(80) >= 26

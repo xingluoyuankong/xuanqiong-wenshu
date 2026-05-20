@@ -365,7 +365,14 @@ class EnrichmentService:
                 ),
             )
             cleaned = remove_think_tags(text_result.text) if text_result.text else ""
-            return cleaned.strip() if cleaned else None
+            normalized = cleaned.strip() if cleaned else ""
+            if not normalized:
+                return None
+            guard_failure = self._fragment_enrichment_guard_failure(dialogue_text, normalized)
+            if guard_failure:
+                logger.warning("Dialogue enrichment rejected by fragment continuity guard: reason=%s", guard_failure)
+                return None
+            return normalized
         except Exception as e:
             logger.error(f"对话扩写失败: {e}")
             return None
@@ -408,7 +415,14 @@ class EnrichmentService:
                 ),
             )
             cleaned = remove_think_tags(text_result.text) if text_result.text else ""
-            return cleaned.strip() if cleaned else None
+            normalized = cleaned.strip() if cleaned else ""
+            if not normalized:
+                return None
+            guard_failure = self._fragment_enrichment_guard_failure(scene_text, normalized)
+            if guard_failure:
+                logger.warning("Scene enrichment rejected by fragment continuity guard: reason=%s", guard_failure)
+                return None
+            return normalized
         except Exception as e:
             logger.error(f"场景扩写失败: {e}")
             return None
@@ -575,6 +589,45 @@ class EnrichmentService:
         enriched_density = enriched_progression / max(1.0, self._count_words(enriched_clean) / 1000)
         if self._count_words(enriched_clean) >= 1800 and enriched_density < 0.85:
             return "enriched_event_density_too_low"
+        return None
+
+    def _fragment_enrichment_guard_failure(self, original: str, enriched: str) -> Optional[str]:
+        """Reject local fragment expansion that loses the original anchor window."""
+
+        original_clean = (original or "").strip()
+        enriched_clean = (enriched or "").strip()
+        if not original_clean or not enriched_clean:
+            return "empty_fragment"
+        if enriched_clean.startswith("{") and "content" in enriched_clean[:240].lower():
+            return "raw_json_returned"
+
+        original_count = self._count_words(original_clean)
+        enriched_count = self._count_words(enriched_clean)
+        if original_count >= 40 and enriched_count < max(1, int(original_count * 0.88)):
+            return "fragment_shrinks_original"
+        if original_count >= 80 and enriched_count <= original_count + 8:
+            return "fragment_has_no_effective_growth"
+
+        original_paragraphs = [part.strip() for part in re.split(r"\n\s*\n", original_clean) if part.strip()]
+        compact_enriched = re.sub(r"\s+", "", enriched_clean)
+        anchors: List[str] = []
+        if original_paragraphs:
+            first = re.sub(r"\s+", "", original_paragraphs[0])
+            last = re.sub(r"\s+", "", original_paragraphs[-1])
+            if len(first) >= 12:
+                anchors.append(first[:18])
+            if len(last) >= 12:
+                anchors.append(last[-18:])
+        if len(anchors) >= 2 and all(anchor not in compact_enriched for anchor in anchors):
+            return "fragment_lost_front_and_back_anchors"
+
+        anchor_failure = self._anchor_sequence_guard_failure(original_paragraphs, enriched_clean)
+        if anchor_failure:
+            return anchor_failure
+
+        missing_motifs = self._missing_required_motifs(original_clean, enriched_clean)
+        if missing_motifs:
+            return "fragment_lost_required_motifs:" + ",".join(missing_motifs[:4])
         return None
 
     @staticmethod
