@@ -14,7 +14,7 @@ from sqlalchemy import select, and_, or_, delete
 
 from ..models.knowledge_graph import CharacterNode, EventEdge, KnowledgeGraphMetadata
 from ..models.novel import BlueprintCharacter, BlueprintRelationship
-from ..models.memory_layer import CharacterState, TimelineEvent
+from ..models.memory_layer import CausalChain, CharacterState, TimelineEvent
 
 logger = logging.getLogger(__name__)
 
@@ -277,6 +277,56 @@ class KnowledgeGraphService:
                         importance=event.importance,
                         emotional_impact="turning" if event.is_turning_point else "ongoing",
                         plot_advancement="major" if event.event_type == "major" else "normal",
+                    )
+                    self.db.add(edge)
+                    edge_keys.add(key)
+                    created_edges += 1
+
+        chain_result = await self.db.execute(
+            select(CausalChain)
+            .where(CausalChain.project_id == project_id)
+            .order_by(CausalChain.cause_chapter.asc(), CausalChain.id.asc())
+        )
+        for chain in chain_result.scalars():
+            names = [str(name or "").strip() for name in (chain.involved_characters or []) if str(name or "").strip()]
+            if len(names) < 2:
+                continue
+            description = f"{(chain.cause_description or '').strip()} -> {(chain.effect_description or '').strip()}".strip()
+            if not description or description == "->":
+                continue
+            chapter_number = chain.effect_chapter or chain.cause_chapter
+            try:
+                importance = max(1, min(10, int(chain.importance or 5)))
+            except (TypeError, ValueError):
+                importance = 5
+            for index, source_name in enumerate(names):
+                for target_name in names[index + 1:]:
+                    source_node = node_map.get(source_name)
+                    target_node = node_map.get(target_name)
+                    if not source_node or not target_node:
+                        continue
+                    key = (source_node.id, target_node.id, chapter_number or 0, "causality", description[:120])
+                    if key in edge_keys:
+                        continue
+                    edge = EventEdge(
+                        project_id=project_id,
+                        source_node_id=source_node.id,
+                        target_node_id=target_node.id,
+                        event_type="causality",
+                        description=description,
+                        chapter_number=chapter_number,
+                        importance=importance,
+                        emotional_impact=str(chain.status or "pending")[:64],
+                        plot_advancement=str(chain.effect_type or "causal_pressure")[:64],
+                        causality=chain.cause_description,
+                        extra={
+                            "source": "causal_chain",
+                            "causal_chain_id": chain.id,
+                            "cause_chapter": chain.cause_chapter,
+                            "effect_chapter": chain.effect_chapter,
+                            "status": chain.status,
+                            "effect": chain.effect_description,
+                        },
                     )
                     self.db.add(edge)
                     edge_keys.add(key)
