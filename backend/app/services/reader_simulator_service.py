@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .generation_call_service import GenerationCallPolicy, call_generation_json
 from .llm_service import LLMService
 from .prompt_service import PromptService
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
@@ -240,14 +241,24 @@ class ReaderSimulatorService:
 }}
 """
         try:
-            response = await self.llm_service.get_llm_response(
+            json_result = await call_generation_json(
+                llm_service=self.llm_service,
                 system_prompt="你是网络小说爽点分析编辑，只输出 JSON。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 user_id=user_id,
                 timeout=120.0,
+                policy=GenerationCallPolicy(
+                    stage_label="读者爽点识别",
+                    progress_stage="review",
+                    retry_attempts=2,
+                    response_format="json_object",
+                    max_tokens=1800,
+                    retry_same_model_once=True,
+                    json_repair_attempts=1,
+                ),
             )
-            data = self._safe_json_object(response)
+            data = json_result.data
             thrill_points = data.get("thrill_points", []) if data else []
             return thrill_points if isinstance(thrill_points, list) else []
         except Exception as exc:
@@ -295,14 +306,24 @@ class ReaderSimulatorService:
 }}
 """
         try:
-            response = await self.llm_service.get_llm_response(
+            json_result = await call_generation_json(
+                llm_service=self.llm_service,
                 system_prompt=f"你是一个真实的{profile['name']}，请只输出 JSON。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.7,
                 user_id=user_id,
                 timeout=120.0,
+                policy=GenerationCallPolicy(
+                    stage_label=f"{profile['name']}读者模拟",
+                    progress_stage="review",
+                    retry_attempts=2,
+                    response_format="json_object",
+                    max_tokens=1800,
+                    retry_same_model_once=True,
+                    json_repair_attempts=1,
+                ),
             )
-            data = self._safe_json_object(response)
+            data = json_result.data
             return self._normalize_single_feedback(reader_type, data, thrill_score)
         except Exception as exc:
             logger.warning("模拟 %s 失败: %s", profile["name"], exc)
@@ -358,14 +379,24 @@ class ReaderSimulatorService:
 }}
 """
         try:
-            response = await self.llm_service.get_llm_response(
+            json_result = await call_generation_json(
+                llm_service=self.llm_service,
                 system_prompt="你是网文钩子编辑，只输出 JSON。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 user_id=user_id,
                 timeout=60.0,
+                policy=GenerationCallPolicy(
+                    stage_label="章末钩子评估",
+                    progress_stage="review",
+                    retry_attempts=2,
+                    response_format="json_object",
+                    max_tokens=900,
+                    retry_same_model_once=True,
+                    json_repair_attempts=1,
+                ),
             )
-            return self._safe_json_object(response) or {
+            return json_result.data or {
                 "hook_strength": 5,
                 "hook_type": "未知",
                 "hook_description": "",

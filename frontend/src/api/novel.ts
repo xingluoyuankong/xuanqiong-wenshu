@@ -393,6 +393,13 @@ export interface GenerationRuntimeEvent {
   at?: string
   stage?: string
   level?: 'info' | 'warning' | 'error' | string
+  kind?: 'status' | 'content' | 'review' | 'continuity' | 'save' | 'error' | string
+  title?: string
+  summary?: string
+  content_preview?: string
+  progress_percent?: number
+  metrics?: Record<string, any>
+  artifact_refs?: Record<string, any> | Array<Record<string, any>>
   message?: string
   metadata?: Record<string, any>
 }

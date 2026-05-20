@@ -125,7 +125,7 @@ describe('ChapterGenerating', () => {
 
     const metaBlocks = wrapper.findAll('.cg-log-item__meta')
     expect(metaBlocks.length).toBeGreaterThan(0)
-    expect(metaBlocks[0].text()).toContain('查看附加信息')
+    expect(metaBlocks[0].text()).toContain('开发者详情')
     expect(metaBlocks[0].text()).toContain('是否切换稳定模式：是')
     expect(metaBlocks[0].text()).toContain('生成模式：stable')
   })

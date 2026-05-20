@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from .generation_call_service import GenerationCallPolicy, call_generation_text
 from .llm_service import LLMService
 from ..utils.json_utils import remove_think_tags
 
@@ -345,13 +346,23 @@ class EnrichmentService:
         )
         
         try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
+                system_prompt="你是一位擅长对话攻防扩写的小说编辑，只扩写当前片段，不改变剧情事实。",
+                conversation_history=[{"role": "user", "content": prompt}],
+                temperature=0.6,
                 user_id=user_id,
-                max_tokens=4000,
-                temperature=0.6
+                timeout=150.0,
+                policy=GenerationCallPolicy(
+                    stage_label="对话局部扩写",
+                    progress_stage="enrichment",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=4000,
+                    retry_same_model_once=True,
+                ),
             )
-            cleaned = remove_think_tags(response) if response else ""
+            cleaned = remove_think_tags(text_result.text) if text_result.text else ""
             return cleaned.strip() if cleaned else None
         except Exception as e:
             logger.error(f"对话扩写失败: {e}")
@@ -378,13 +389,23 @@ class EnrichmentService:
         )
         
         try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
+                system_prompt="你是一位擅长场景细节补强的小说编辑，只做局部补写，不改变人物状态和事件顺序。",
+                conversation_history=[{"role": "user", "content": prompt}],
+                temperature=0.6,
                 user_id=user_id,
-                max_tokens=3000,
-                temperature=0.6
+                timeout=150.0,
+                policy=GenerationCallPolicy(
+                    stage_label="场景局部扩写",
+                    progress_stage="enrichment",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=3000,
+                    retry_same_model_once=True,
+                ),
             )
-            cleaned = remove_think_tags(response) if response else ""
+            cleaned = remove_think_tags(text_result.text) if text_result.text else ""
             return cleaned.strip() if cleaned else None
         except Exception as e:
             logger.error(f"场景扩写失败: {e}")
@@ -423,16 +444,29 @@ class EnrichmentService:
             elif gap >= 1200:
                 enrichment_timeout = 300.0
 
-            response = await self.llm_service.generate(
-                prompt=prompt,
-                user_id=user_id,
-                max_tokens=enrichment_max_tokens,
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
+                system_prompt="你是一位长篇小说补写编辑。保持整章事件链、前后锚点和角色状态，只把缺的回合补进正文。",
+                conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.55,
+                user_id=user_id,
                 timeout=enrichment_timeout,
-                allow_truncated_response=False
+                policy=GenerationCallPolicy(
+                    stage_label="章节连续性扩写",
+                    progress_stage="enrichment",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=enrichment_max_tokens,
+                    allow_truncated_response=False,
+                    retry_same_model_once=True,
+                ),
             )
-            normalized = remove_think_tags(response) if response else ""
+            normalized = remove_think_tags(text_result.text) if text_result.text else ""
             if not normalized:
+                return None
+            guard_failure = self._enrichment_continuity_guard_failure(chapter_text, normalized)
+            if guard_failure:
+                logger.warning("扩写结果未通过连续性保护，已放弃本次扩写: %s", guard_failure)
                 return None
             if self._count_words(normalized) <= current_word_count:
                 logger.warning("扩写结果未明显增长（%s -> %s）", current_word_count, self._count_words(normalized))
@@ -505,6 +539,27 @@ class EnrichmentService:
             "expansion_plan": expansion_plan,
             "focus_guidance": "\n".join(focus_items),
         }
+
+    def _enrichment_continuity_guard_failure(self, original: str, enriched: str) -> Optional[str]:
+        """Reject expansions that look like a fresh rewrite instead of anchored supplementation."""
+        original_clean = (original or "").strip()
+        enriched_clean = (enriched or "").strip()
+        if not original_clean or not enriched_clean:
+            return "empty_content"
+        if self._count_words(enriched_clean) < max(1, int(self._count_words(original_clean) * 0.9)):
+            return "shrinks_original"
+        original_paragraphs = [part.strip() for part in re.split(r"\n\s*\n", original_clean) if part.strip()]
+        enriched_paragraphs = [part.strip() for part in re.split(r"\n\s*\n", enriched_clean) if part.strip()]
+        if len(original_paragraphs) >= 3 and len(enriched_paragraphs) < max(2, len(original_paragraphs) // 2):
+            return "collapses_paragraph_structure"
+        anchors = []
+        if original_paragraphs:
+            anchors.append(original_paragraphs[0][:36])
+            anchors.append(original_paragraphs[-1][-36:])
+        missing = [anchor for anchor in anchors if anchor and anchor not in enriched_clean]
+        if len(missing) == len(anchors) and len(anchors) >= 2:
+            return "lost_front_and_back_anchors"
+        return None
     
     def _count_words(self, text: str) -> int:
         """计算中文字数"""

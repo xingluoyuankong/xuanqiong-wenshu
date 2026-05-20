@@ -24,6 +24,7 @@ from ..models.outline_alternative import (
     OutlineEvolutionHistory,
     EvolutionStatus,
 )
+from .generation_call_service import GenerationCallPolicy, call_generation_text
 from .llm_service import LLMService
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
 
@@ -174,15 +175,25 @@ class OutlineEvolutionService:
             )
 
             try:
-                response = await self.llm_service.generate(
-                    prompt=prompt,
-                    user_id=user_id,
-                    max_tokens=4000,
+                text_result = await call_generation_text(
+                    llm_service=self.llm_service,
+                    system_prompt="你是一位长篇故事架构专家。请只输出 JSON 数组，不要解释。",
+                    conversation_history=[{"role": "user", "content": prompt}],
                     temperature=0.8,
+                    user_id=user_id,
+                    timeout=180.0,
+                    policy=GenerationCallPolicy(
+                        stage_label="大纲演进分支生成",
+                        progress_stage="outline_evolution",
+                        retry_attempts=2,
+                        response_format=None,
+                        max_tokens=4000,
+                        retry_same_model_once=True,
+                    ),
                 )
 
-                if response:
-                    options_data = self._parse_json_response(response)
+                if text_result.text:
+                    options_data = self._parse_json_response(text_result.text)
                     if options_data and isinstance(options_data, list):
                         batch_id = str(uuid.uuid4())
 

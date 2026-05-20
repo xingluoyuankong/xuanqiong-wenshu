@@ -15,8 +15,10 @@ from app.api.routers.novels import (
     _build_character_naming_profile,
     _build_chapter_outline_source_context,
     _build_compact_blueprint_context,
+    _build_length_contract,
     _build_outline_source_context,
     _build_story_constraint_profile,
+    _format_length_contract_instruction,
     _call_llm_with_stage_retries,
     _db_blueprint_job_to_payload,
     _fail_orphaned_blueprint_job,
@@ -31,6 +33,8 @@ from app.api.routers.novels import (
     _recover_stale_blueprint_job,
     _is_recoverable_blueprint_schema,
     _repair_blueprint_character_names,
+    _remap_outline_ranges_to_length_contract,
+    _resolve_blueprint_chapter_outline_count,
     _resolve_novel_outline_timeout_seconds,
     _resolve_outline_chunk_timeout_seconds,
     _resolve_world_bible_timeout_seconds,
@@ -1816,13 +1820,13 @@ async def test_critique_and_revise_loop_frontloads_deferred_stage_on_next_iterat
 
     result = await service.critique_and_revise_loop("原始正文", max_iterations=2)
 
-    assert call_sequence[:4] == [
-        ("logic", True),
-        ("character", False),
-        ("character", True),
+    assert call_sequence == [
         ("logic", False),
+        ("character", False),
     ]
-    assert result["final_score"] == 83.0
+    assert len(result["iterations"]) == 1
+    assert result["final_score"] == 72.0
+    assert all(log["stagewide_deferred"] is True for log in result["optimization_logs"])
 
 
 @pytest.mark.anyio
@@ -1920,16 +1924,13 @@ async def test_critique_and_revise_loop_adds_one_extra_iteration_to_drain_deferr
 
     result = await service.critique_and_revise_loop("原始正文", max_iterations=2)
 
-    assert len(result["iterations"]) == 3
-    assert call_sequence[:5] == [
-        ("logic", True),
-        ("character", False),
-        ("character", True),
+    assert len(result["iterations"]) == 1
+    assert call_sequence == [
         ("logic", False),
-        ("logic", True),
+        ("character", False),
     ]
-    assert result["iterations"][1]["deferred_stage_replay_extension"]["granted"] is True
-    assert result["final_score"] == 84.0
+    assert "deferred_stage_replay_extension" not in result["iterations"][0]
+    assert result["final_score"] == 72.0
 
 
 def test_failed_generation_runtime_state_preserves_debug_payload_for_quality_gate_failures():
@@ -2876,6 +2877,153 @@ def test_build_story_constraint_profile_and_gap_scan_capture_missing_longform_sl
     assert gaps["coverage_summary"]["world_slots_missing_count"] >= 10
 
 
+def test_length_contract_keeps_short_projects_from_becoming_forced_longform():
+    contract = _build_length_contract(
+        formatted_history=[
+            {"role": "user", "content": "写一部12章左右的东方玄幻冒险小说，章节要连续推进。"},
+        ],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=None,
+    )
+
+    assert contract["target_chapter_count"] == 12
+    assert contract["stage_count_min"] == 4
+    assert contract["stage_count_max"] <= 6
+    assert contract["chapter_outline_seed_count"] == 12
+    assert "约 12 章" in _format_length_contract_instruction(contract)
+
+    oversized_outline = [
+        {"stage": 1, "title": "起", "core_theme": "起", "expected_chapter_range": "1-35章"},
+        {"stage": 2, "title": "承", "core_theme": "承", "expected_chapter_range": "36-70章"},
+        {"stage": 3, "title": "转", "core_theme": "转", "expected_chapter_range": "71-105章"},
+        {"stage": 4, "title": "合", "core_theme": "合", "expected_chapter_range": "106-140章"},
+    ]
+    remapped = _remap_outline_ranges_to_length_contract(oversized_outline, contract)
+
+    assert [item["expected_chapter_range"] for item in remapped] == ["1-3章", "4-6章", "7-9章", "10-12章"]
+    assert _resolve_blueprint_chapter_outline_count(
+        {"world_setting": {"system_blueprint": {"length_contract": contract}}}
+    ) == 12
+
+
+def test_length_contract_prefers_user_request_over_existing_outline_ranges():
+    existing_blueprint = Blueprint(
+        title="旧蓝图",
+        one_sentence_summary="旧版已经被错误扩成长篇。",
+        world_setting={
+            "system_blueprint": {
+                "length_contract": {
+                    "target_chapter_count": 390,
+                    "stage_count_min": 8,
+                    "stage_count_max": 12,
+                    "chapter_outline_seed_count": 12,
+                }
+            }
+        },
+        novel_outline=[
+            {
+                "stage": 1,
+                "title": "旧阶段",
+                "core_theme": "旧扩容",
+                "expected_chapter_range": "346-390章",
+            }
+        ],
+    )
+
+    contract = _build_length_contract(
+        formatted_history=[
+            {"role": "user", "content": "写一部12章左右的东方玄幻冒险小说，章节要连续推进。"},
+        ],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=existing_blueprint,
+    )
+
+    assert contract["target_chapter_count"] == 12
+    assert contract["source"] == "explicit_user_or_project_length"
+
+
+def test_length_contract_understands_hyphenated_english_chapter_count():
+    existing_blueprint = Blueprint(
+        title="旧蓝图",
+        one_sentence_summary="旧版已经被错误扩成长篇。",
+        world_setting={
+            "system_blueprint": {
+                "length_contract": {
+                    "target_chapter_count": 390,
+                    "chapter_outline_seed_count": 12,
+                }
+            }
+        },
+    )
+
+    contract = _build_length_contract(
+        formatted_history=[
+            {
+                "role": "user",
+                "content": '{"value": "A 12-chapter eastern fantasy adventure with continuous chapter progression."}',
+            },
+        ],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=existing_blueprint,
+    )
+
+    assert contract["target_chapter_count"] == 12
+    assert contract["source"] == "explicit_user_or_project_length"
+
+
+def test_length_contract_does_not_infer_from_existing_generated_ranges():
+    existing_blueprint = Blueprint(
+        title="旧蓝图",
+        one_sentence_summary="旧版总纲残留。",
+        novel_outline=[
+            {
+                "stage": 1,
+                "title": "旧阶段",
+                "core_theme": "旧扩容",
+                "expected_chapter_range": "346-390章",
+            }
+        ],
+    )
+
+    contract = _build_length_contract(
+        formatted_history=[],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=existing_blueprint,
+    )
+
+    assert contract == {}
+
+
+def test_length_contract_reuses_stored_contract_when_user_does_not_restates_length():
+    existing_blueprint = Blueprint(
+        title="旧蓝图",
+        one_sentence_summary="已保存明确篇幅。",
+        world_setting={
+            "system_blueprint": {
+                "length_contract": {
+                    "target_chapter_count": 20,
+                    "chapter_outline_seed_count": 20,
+                }
+            }
+        },
+    )
+
+    contract = _build_length_contract(
+        formatted_history=[{"role": "user", "content": "继续完善这个故事。"}],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=existing_blueprint,
+    )
+
+    assert contract["target_chapter_count"] == 20
+    assert contract["chapter_outline_seed_count"] == 20
+    assert contract["source"] == "stored_blueprint_length_contract"
+
+
 def test_gap_scan_treats_whitespace_world_slots_as_missing_and_scales_world_timeout():
     blueprint_data = {
         "title": "断界新秩序",
@@ -3179,16 +3327,16 @@ async def test_generate_novel_outline_builds_total_outline_when_missing():
     )
 
     assert stages == [
-        ("polishing", "正在补全世界体系（历史背景 / 世界结构 / 地理秩序）（1/3）"),
-        ("polishing", "正在补全世界体系（力量体系 / 生存生活逻辑）（2/3）"),
-        ("polishing", "正在补全世界体系（文化文明 / 经济社会 / 信仰秩序）（3/3）"),
-        ("generating", "正在锁定设定与长篇目标（世界规则 / 角色规模 / 伏笔回收）"),
-        ("generating", "正在生成小说总大纲（阶段骨架首轮）"),
-        ("generating", "正在解析小说总大纲骨架"),
-        ("generating", "正在校验小说总大纲骨架连续性"),
-        ("polishing", "正在细化角色生命周期、伏笔回收窗口和阶段任务"),
-        ("polishing", "正在细化小说总大纲（第 1/2 段）"),
-        ("polishing", "正在细化小说总大纲（第 2/2 段）"),
+        ("blueprint_setting_lock", "正在补全世界体系（历史背景 / 世界结构 / 地理秩序）（1/3）"),
+        ("blueprint_setting_lock", "正在补全世界体系（力量体系 / 生存生活逻辑）（2/3）"),
+        ("blueprint_setting_lock", "正在补全世界体系（文化文明 / 经济社会 / 信仰秩序）（3/3）"),
+        ("blueprint_setting_lock", "正在锁定设定与长篇目标（世界规则 / 角色规模 / 伏笔回收）"),
+        ("blueprint_plot_threads", "正在生成小说总大纲（阶段骨架首轮）"),
+        ("blueprint_plot_threads", "正在解析小说总大纲骨架"),
+        ("blueprint_foreshadowing", "正在校验小说总大纲骨架连续性"),
+        ("blueprint_foreshadowing", "正在细化角色生命周期、伏笔回收窗口和阶段任务"),
+        ("blueprint_plot_threads", "正在细化小说总大纲（第 1/2 段）"),
+        ("blueprint_plot_threads", "正在细化小说总大纲（第 2/2 段）"),
     ]
     assert len(result["novel_outline"]) == 4
     assert result["novel_outline"][0]["title"] == "孤岛立足"
@@ -3276,12 +3424,12 @@ async def test_generate_executable_chapter_outline_builds_outline_when_missing()
     )
 
     assert stages == [
-        ("generating", "正在生成可执行章节大纲（第 1/3 批，第 1-4 章）"),
-        ("generating", "正在解析章节大纲批次（第 1-4 章）"),
-        ("generating", "正在生成可执行章节大纲（第 2/3 批，第 5-8 章）"),
-        ("generating", "正在解析章节大纲批次（第 5-8 章）"),
-        ("generating", "正在生成可执行章节大纲（第 3/3 批，第 9-12 章）"),
-        ("generating", "正在解析章节大纲批次（第 9-12 章）"),
+        ("blueprint_chapter_plan", "正在生成可执行章节大纲（第 1/3 批，第 1-4 章）"),
+        ("blueprint_chapter_plan", "正在解析章节大纲批次（第 1-4 章）"),
+        ("blueprint_chapter_plan", "正在生成可执行章节大纲（第 2/3 批，第 5-8 章）"),
+        ("blueprint_chapter_plan", "正在解析章节大纲批次（第 5-8 章）"),
+        ("blueprint_chapter_plan", "正在生成可执行章节大纲（第 3/3 批，第 9-12 章）"),
+        ("blueprint_chapter_plan", "正在解析章节大纲批次（第 9-12 章）"),
     ]
     assert len(result["chapter_outline"]) == 12
     assert result["chapter_outline"][0]["title"] == "第1章标题"
@@ -3332,12 +3480,12 @@ async def test_polish_outline_reports_polishing_progress_and_sanitizes_json():
     )
 
     assert stages == [
-        ("polishing", "正在润色章节大纲（第 1/3 批，第 1-4 章）"),
-        ("polishing", "正在解析润色结果（第 1-4 章）"),
-        ("polishing", "正在润色章节大纲（第 2/3 批，第 5-8 章）"),
-        ("polishing", "正在解析润色结果（第 5-8 章）"),
-        ("polishing", "正在润色章节大纲（第 3/3 批，第 9-12 章）"),
-        ("polishing", "正在解析润色结果（第 9-12 章）"),
+        ("blueprint_chapter_plan", "正在润色章节大纲（第 1/3 批，第 1-4 章）"),
+        ("blueprint_chapter_plan", "正在解析润色结果（第 1-4 章）"),
+        ("blueprint_chapter_plan", "正在润色章节大纲（第 2/3 批，第 5-8 章）"),
+        ("blueprint_chapter_plan", "正在解析润色结果（第 5-8 章）"),
+        ("blueprint_chapter_plan", "正在润色章节大纲（第 3/3 批，第 9-12 章）"),
+        ("blueprint_chapter_plan", "正在解析润色结果（第 9-12 章）"),
     ]
     assert result["chapter_outline"][0]["title"] == "新标题"
     assert result["chapter_outline"][0]["summary"] == long_summary

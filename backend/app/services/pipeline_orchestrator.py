@@ -36,7 +36,7 @@ from ..services.chapter_guardrails import ChapterGuardrails
 from ..services.consistency_service import ConsistencyService, ViolationSeverity
 from ..services.enhanced_writing_flow import EnhancedWritingFlow
 from ..services.enrichment_service import EnrichmentService
-from ..services.generation_call_service import GenerationCallPolicy, call_generation_text
+from ..services.generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text
 from ..services.llm_config_service import LLMConfigService
 from ..services.llm_service import LLMService
 from ..services.knowledge_retrieval_service import KnowledgeRetrievalService, FilteredContext
@@ -881,6 +881,16 @@ class PipelineOrchestrator:
             "level": event.get("level", "info"),
             "message": cls._truncate_runtime_text(event.get("message"), 360),
         }
+        for key in ("kind", "title", "summary", "content_preview"):
+            value = event.get(key)
+            if value:
+                compact_event[key] = cls._truncate_runtime_text(value, 520 if key == "content_preview" else 220)
+        if event.get("progress_percent") is not None:
+            compact_event["progress_percent"] = event.get("progress_percent")
+        for key in ("metrics", "artifact_refs"):
+            value = event.get(key)
+            if isinstance(value, (dict, list)) and value:
+                compact_event[key] = cls._compact_runtime_value(value)
         metadata = event.get("metadata")
         if isinstance(metadata, dict) and metadata:
             compact_event["metadata"] = cls._compact_runtime_value(metadata)
@@ -1025,6 +1035,12 @@ class PipelineOrchestrator:
         progress_percent: int,
         level: str = "info",
         extra: Optional[Dict[str, Any]] = None,
+        event_kind: Optional[str] = None,
+        title: Optional[str] = None,
+        summary: Optional[str] = None,
+        content_preview: Optional[str] = None,
+        metrics: Optional[Dict[str, Any]] = None,
+        artifact_refs: Optional[Dict[str, Any]] = None,
     ) -> None:
         if not generation_run_id:
             return
@@ -1044,6 +1060,18 @@ class PipelineOrchestrator:
             "message": message,
             "progress_percent": max(0, min(100, int(progress_percent))),
         }
+        if event_kind:
+            event["kind"] = event_kind
+        if title:
+            event["title"] = title
+        if summary:
+            event["summary"] = summary
+        if content_preview:
+            event["content_preview"] = content_preview
+        if metrics:
+            event["metrics"] = self._compact_runtime_value(metrics)
+        if artifact_refs:
+            event["artifact_refs"] = self._compact_runtime_value(artifact_refs)
         if extra:
             compact_extra = {key: value for key, value in extra.items() if value is not None}
             if compact_extra:
@@ -1151,6 +1179,9 @@ class PipelineOrchestrator:
                 stage=stage_name,
                 message=runtime_detail,
                 progress_percent=self._infer_stage_progress_percent(stage_name),
+                event_kind="progress",
+                title=f"{stage_name} 完成",
+                summary=runtime_detail,
                 extra={
                     "stage_duration_ms": duration_ms,
                     "stage_duration_seconds": round(duration_ms / 1000, 2),
@@ -1594,6 +1625,18 @@ class PipelineOrchestrator:
                     stage="review",
                     message="候选草稿已生成，正在执行 AI 评审与最佳版本筛选",
                     progress_percent=62,
+                    event_kind="content",
+                    title="候选草稿已生成",
+                    summary=f"本轮生成 {len(attempt_versions)} 个候选版本，开始评审筛选。",
+                    content_preview=self._truncate_runtime_text(
+                        (attempt_versions[0].get("content") or "") if attempt_versions else "",
+                        420,
+                    ),
+                    metrics={
+                        "generated_version_count": len(attempt_versions),
+                        "failed_versions": len(attempt_errors),
+                        "target_word_count": config.target_word_count,
+                    },
                     extra={
                         "generated_version_count": len(attempt_versions),
                         "stable_retry_used": runtime_metadata["stable_retry_used"],
@@ -1700,6 +1743,14 @@ class PipelineOrchestrator:
             stage="review",
             message="AI 评审完成，正在整理增强处理结果",
             progress_percent=72,
+            event_kind="review",
+            title="AI 评审完成",
+            summary=f"最佳候选：第 {best_version_index + 1} 版；状态：{runtime_metadata['review_status']}",
+            metrics={
+                "best_version_index": best_version_index,
+                "candidate_count": len(versions),
+                "review_status": runtime_metadata["review_status"],
+            },
             extra={
                 "best_version_index": best_version_index,
                 "review_status": runtime_metadata["review_status"],
@@ -2287,6 +2338,14 @@ class PipelineOrchestrator:
                 ),
                 progress_percent=91,
                 level="info" if longform_continuity_gate.passed else "warning",
+                event_kind="continuity",
+                title="连续性质量门完成",
+                summary=(
+                    "跨章节角色、时间线、伏笔和线索检查通过"
+                    if longform_continuity_gate.passed
+                    else "发现需要局部补丁处理的连续性风险"
+                ),
+                metrics=longform_continuity_gate.metrics,
                 extra={
                     "longform_gate_passed": longform_continuity_gate.passed,
                     "longform_gate_blockers": longform_continuity_gate.blockers,
@@ -2363,6 +2422,14 @@ class PipelineOrchestrator:
             stage="persist_versions",
             message="正在写入候选版本并准备进入确认阶段",
             progress_percent=92,
+            event_kind="save",
+            title="正在保存候选版本",
+            summary="正文、评审结果和连续性检查结果正在一起落库。",
+            content_preview=self._truncate_runtime_text(best_content, 420),
+            metrics={
+                "actual_word_count": runtime_metadata["actual_word_count"],
+                "candidate_count": len(versions),
+            },
             extra={
                 "actual_word_count": runtime_metadata["actual_word_count"],
                 "word_requirement_met": runtime_metadata["word_requirement_met"],
@@ -2419,6 +2486,27 @@ class PipelineOrchestrator:
             stage="waiting_for_confirm",
             message="候选版本已准备完成，等待确认最终版本",
             progress_percent=97,
+            event_kind="content",
+            title="候选版本可确认",
+            summary=f"已生成 {len(variants)} 个候选版本，推荐第 {best_version_index + 1} 版。",
+            content_preview=self._truncate_runtime_text(
+                (variants[best_version_index].get("content") or "") if 0 <= best_version_index < len(variants) else best_content,
+                520,
+            ),
+            metrics={
+                "actual_word_count": runtime_metadata["actual_word_count"],
+                "generated_version_count": len(variants),
+                "best_version_index": best_version_index,
+                "pipeline_total_duration_ms": runtime_metadata["pipeline_total_duration_ms"],
+            },
+            artifact_refs={
+                "version_ids": [item.get("version_id") for item in variants if item.get("version_id")],
+                "best_version_id": (
+                    variants[best_version_index].get("version_id")
+                    if 0 <= best_version_index < len(variants)
+                    else None
+                ),
+            },
             extra={
                 "actual_word_count": runtime_metadata["actual_word_count"],
                 "word_requirement_met": runtime_metadata["word_requirement_met"],
@@ -3011,17 +3099,24 @@ class PipelineOrchestrator:
 """
 
         try:
-            response = await self.llm_service.get_llm_response(
+            json_result = await call_generation_json(
+                llm_service=self.llm_service,
                 system_prompt=plan_prompt,
                 conversation_history=[{"role": "user", "content": plan_input}],
                 temperature=0.3,
                 user_id=user_id,
                 timeout=self._resolve_chapter_mission_timeout(target_word_count),
-                response_format=None,
+                policy=GenerationCallPolicy(
+                    stage_label="章节导演脚本",
+                    progress_stage="generate_mission",
+                    retry_attempts=2,
+                    response_format="json_object",
+                    max_tokens=2400,
+                    retry_same_model_once=True,
+                    json_repair_attempts=1,
+                ),
             )
-            cleaned = remove_think_tags(response)
-            normalized = unwrap_markdown_json(cleaned)
-            mission = json.loads(normalized)
+            mission = json_result.data
             await self._cache_set(cache_key, mission, expire=600)
             logger.info("章节导演脚本生成完成: macro_beat=%s", mission.get("macro_beat"))
             return mission
@@ -3812,16 +3907,24 @@ class PipelineOrchestrator:
 
                 generation_started_at = time.perf_counter()
                 try:
-                    response = await self.llm_service.get_llm_response(
+                    text_result = await call_generation_text(
+                        llm_service=self.llm_service,
                         system_prompt=writer_prompt,
                         conversation_history=[{"role": "user", "content": final_prompt_input}],
                         temperature=0.9,
                         user_id=user_id,
                         timeout=self._resolve_chapter_generation_timeout(config.target_word_count),
-                        max_tokens=self._resolve_chapter_generation_max_tokens(config.target_word_count),
-                        response_format=None,
-                        allow_truncated_response=config.allow_truncated_response,
+                        policy=GenerationCallPolicy(
+                            stage_label=f"章节正文候选 {index + 1} 兜底生成",
+                            progress_stage="generate_variants",
+                            retry_attempts=2,
+                            response_format=None,
+                            max_tokens=self._resolve_chapter_generation_max_tokens(config.target_word_count),
+                            allow_truncated_response=config.allow_truncated_response,
+                            retry_same_model_once=True,
+                        ),
                     )
+                    response = text_result.text
                 except HTTPException:
                     raise
                 except (httpx.HTTPError, APIConnectionError, APITimeoutError, APIError) as exc:
@@ -4031,15 +4134,23 @@ class PipelineOrchestrator:
 """
 
         try:
-            response = await self.llm_service.get_llm_response(
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
                 system_prompt=rewrite_prompt,
                 conversation_history=[{"role": "user", "content": rewrite_input}],
                 temperature=0.3,
                 user_id=user_id,
                 timeout=120.0,
-                response_format=None,
+                policy=GenerationCallPolicy(
+                    stage_label="章节护栏局部修复",
+                    progress_stage="consistency",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=8000,
+                    retry_same_model_once=True,
+                ),
             )
-            cleaned = remove_think_tags(response)
+            cleaned = remove_think_tags(text_result.text)
             return cleaned
         except Exception as exc:
             logger.warning("自动修复失败，返回原文: %s", exc)
@@ -5025,14 +5136,24 @@ class PipelineOrchestrator:
                     ),
                 }
                 try:
-                    response = await self.llm_service.get_llm_response(
+                    text_result = await call_generation_text(
+                        llm_service=self.llm_service,
                         system_prompt=prompt,
                         conversation_history=[{"role": "user", "content": json.dumps(optimize_input, ensure_ascii=False)}],
                         temperature=0.55,
                         user_id=user_id,
                         timeout=600.0,
+                        policy=GenerationCallPolicy(
+                            stage_label=f"局部优化维度 {dimension}",
+                            progress_stage="optimize_content",
+                            retry_attempts=2,
+                            response_format="json_object",
+                            max_tokens=8000,
+                            retry_same_model_once=True,
+                            json_repair_attempts=0,
+                        ),
                     )
-                    cleaned = remove_think_tags(response)
+                    cleaned = remove_think_tags(text_result.text)
                     normalized = unwrap_markdown_json(cleaned)
                     try:
                         parsed = json.loads(normalized)

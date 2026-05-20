@@ -2,7 +2,10 @@
 import asyncio
 import json
 import logging
+import random
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from fastapi import HTTPException
@@ -27,6 +30,8 @@ class GenerationCallPolicy:
     allow_truncated_response: bool = False
     retry_same_model_once: bool = True
     json_repair_attempts: int = 1
+    backoff_base_seconds: float = 1.0
+    backoff_max_seconds: float = 12.0
 
 
 @dataclass(frozen=True)
@@ -59,20 +64,111 @@ def is_retryable_http_exception(exc: HTTPException) -> bool:
     return False
 
 
+def _coerce_retry_after_seconds(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        if not isinstance(value, str):
+            return None
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        parsed = (retry_at - datetime.now(timezone.utc)).total_seconds()
+    if parsed < 0:
+        return None
+    return parsed
+
+
+def _resolve_retry_after_seconds(exc: HTTPException) -> Optional[float]:
+    detail = exc.detail
+    if isinstance(detail, dict):
+        for key in ("retry_after", "retry_after_seconds", "retryAfter", "retryAfterSeconds"):
+            parsed = _coerce_retry_after_seconds(detail.get(key))
+            if parsed is not None:
+                return parsed
+    headers = getattr(exc, "headers", None) or {}
+    if isinstance(headers, dict):
+        return _coerce_retry_after_seconds(headers.get("Retry-After") or headers.get("retry-after"))
+    return None
+
+
+def resolve_retry_delay_seconds(exc: HTTPException, attempt: int, policy: GenerationCallPolicy) -> float:
+    """Bounded exponential backoff for transient provider failures."""
+
+    retry_after = _resolve_retry_after_seconds(exc)
+    if retry_after is not None:
+        return min(float(policy.backoff_max_seconds), retry_after)
+    base = max(0.1, float(policy.backoff_base_seconds or 1.0))
+    cap = max(base, float(policy.backoff_max_seconds or 12.0))
+    exponential = min(cap, base * (2 ** max(0, attempt - 1)))
+    jitter = random.uniform(0, min(exponential * 0.25, 1.0))
+    return min(cap, exponential + jitter)
+
+
 def normalize_llm_json_text(raw_text: str) -> str:
     return sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(raw_text or ""))).strip()
 
 
-def parse_llm_json_object(raw_text: str) -> tuple[Dict[str, Any], str]:
+def parse_llm_json_value(raw_text: str) -> tuple[Any, str]:
     normalized = normalize_llm_json_text(raw_text)
     try:
-        data = json.loads(normalized)
+        return json.loads(normalized), normalized
     except Exception as exc:  # noqa: BLE001 - caller needs the original model text for repair.
+        object_start = normalized.find("{")
+        array_start = normalized.find("[")
+        candidates: List[tuple[int, str]] = []
+        if object_start >= 0:
+            candidates.append((object_start, "}"))
+        if array_start >= 0:
+            candidates.append((array_start, "]"))
+        candidates.sort(key=lambda item: item[0])
+        for json_start, closing in candidates:
+            json_end = normalized.rfind(closing) + 1
+            if json_end <= json_start:
+                continue
+            candidate = normalized[json_start:json_end]
+            try:
+                return json.loads(candidate), candidate
+            except Exception:
+                continue
         raise GenerationJSONDecodeError(
             f"LLM response is not valid JSON: {exc}",
             raw_text=raw_text,
             normalized_text=normalized,
         ) from exc
+
+
+def parse_llm_json_object(raw_text: str) -> tuple[Dict[str, Any], str]:
+    try:
+        data, normalized = parse_llm_json_value(raw_text)
+    except GenerationJSONDecodeError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - caller needs the original model text for repair.
+        normalized = normalize_llm_json_text(raw_text)
+        json_start = normalized.find("{")
+        json_end = normalized.rfind("}") + 1
+        if json_start >= 0 and json_end > json_start:
+            candidate = normalized[json_start:json_end]
+            try:
+                data = json.loads(candidate)
+                normalized = candidate
+            except Exception as nested_exc:  # noqa: BLE001 - keep original model text for repair.
+                raise GenerationJSONDecodeError(
+                    f"LLM response is not valid JSON: {nested_exc}",
+                    raw_text=raw_text,
+                    normalized_text=normalized,
+                ) from nested_exc
+        else:
+            raise GenerationJSONDecodeError(
+                f"LLM response is not valid JSON: {exc}",
+                raw_text=raw_text,
+                normalized_text=normalized,
+            ) from exc
     if not isinstance(data, dict):
         raise GenerationJSONDecodeError(
             "LLM response JSON root must be an object",
@@ -127,7 +223,7 @@ async def call_generation_text(
                 exc.status_code,
                 exc.detail,
             )
-            await asyncio.sleep(min(8.0, 1.5 * attempt))
+            await asyncio.sleep(resolve_retry_delay_seconds(exc, attempt, policy))
     if last_http_exc is not None:
         raise last_http_exc
     raise HTTPException(status_code=500, detail=f"{policy.stage_label}失败，重试流程异常退出")
@@ -197,4 +293,58 @@ async def call_generation_json(
         "LLM response JSON repair loop exited unexpectedly",
         raw_text="",
         normalized_text="",
+    )
+
+
+async def call_generation_prompt_text(
+    *,
+    llm_service: LLMService,
+    prompt: str,
+    system_prompt: str,
+    temperature: float,
+    user_id: int,
+    timeout: float,
+    policy: GenerationCallPolicy,
+    progress_callback: ProgressCallback | None = None,
+) -> GenerationTextResult:
+    """Convenience wrapper for single-prompt text generation.
+
+    This keeps business services in charge of their own flow while routing the
+    fragile network/provider work through the shared reliability toolbox.
+    """
+
+    return await call_generation_text(
+        llm_service=llm_service,
+        system_prompt=system_prompt,
+        conversation_history=[{"role": "user", "content": prompt}],
+        temperature=temperature,
+        user_id=user_id,
+        timeout=timeout,
+        policy=policy,
+        progress_callback=progress_callback,
+    )
+
+
+async def call_generation_prompt_json(
+    *,
+    llm_service: LLMService,
+    prompt: str,
+    system_prompt: str,
+    temperature: float,
+    user_id: int,
+    timeout: float,
+    policy: GenerationCallPolicy,
+    progress_callback: ProgressCallback | None = None,
+) -> GenerationJsonResult:
+    """Convenience wrapper for single-prompt JSON generation."""
+
+    return await call_generation_json(
+        llm_service=llm_service,
+        system_prompt=system_prompt,
+        conversation_history=[{"role": "user", "content": prompt}],
+        temperature=temperature,
+        user_id=user_id,
+        timeout=timeout,
+        policy=policy,
+        progress_callback=progress_callback,
     )

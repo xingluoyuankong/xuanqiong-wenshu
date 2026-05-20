@@ -27,6 +27,19 @@ const RUNTIME_BUSY_STAGES = new Set([
   'already_generating',
   'running',
   'in_progress',
+  'outline_context_audit',
+  'outline_setting_lock',
+  'outline_cast_plan',
+  'outline_plot_threads',
+  'outline_foreshadowing_plan',
+  'outline_chapter_skeleton',
+  'outline_quality_gate',
+  'blueprint_concept',
+  'blueprint_setting_lock',
+  'blueprint_cast_plan',
+  'blueprint_plot_threads',
+  'blueprint_foreshadowing',
+  'blueprint_chapter_plan',
   'prepare_context',
   'audit_context',
   'cast_plan',
@@ -54,6 +67,19 @@ const RUNTIME_BUSY_STAGES = new Set([
 
 const STAGE_LABEL_MAP: Record<string, string> = {
   queued: '排队中',
+  outline_context_audit: '大纲上下文审计',
+  outline_setting_lock: '大纲设定锁定',
+  outline_cast_plan: '大纲角色规模',
+  outline_plot_threads: '大纲主支线',
+  outline_foreshadowing_plan: '大纲伏笔规划',
+  outline_chapter_skeleton: '大纲章节骨架',
+  outline_quality_gate: '大纲质量门',
+  blueprint_concept: '蓝图概念整理',
+  blueprint_setting_lock: '蓝图设定锁定',
+  blueprint_cast_plan: '蓝图角色规划',
+  blueprint_plot_threads: '蓝图主支线',
+  blueprint_foreshadowing: '蓝图伏笔系统',
+  blueprint_chapter_plan: '蓝图章节规划',
   prepare_context: '准备上下文',
   audit_context: '审计长篇上下文',
   cast_plan: '角色规划',
@@ -91,14 +117,27 @@ type BackendStageDefinition = {
 }
 
 const BACKEND_STAGE_DEFINITIONS: BackendStageDefinition[] = [
-  { key: 'queued', label: '排队中', milestone: 4, aliases: ['already_generating', 'running', 'in_progress'] },
+  { key: 'queued', label: '排队中', milestone: 4 },
+  { key: 'outline_context_audit', label: '大纲上下文审计', milestone: 6 },
+  { key: 'outline_setting_lock', label: '大纲设定锁定', milestone: 9 },
+  { key: 'outline_cast_plan', label: '大纲角色规模', milestone: 12 },
+  { key: 'outline_plot_threads', label: '大纲主支线', milestone: 15 },
+  { key: 'outline_foreshadowing_plan', label: '大纲伏笔规划', milestone: 18 },
+  { key: 'outline_chapter_skeleton', label: '大纲章节骨架', milestone: 22 },
+  { key: 'outline_quality_gate', label: '大纲质量门', milestone: 28 },
+  { key: 'blueprint_concept', label: '蓝图概念整理', milestone: 6 },
+  { key: 'blueprint_setting_lock', label: '蓝图设定锁定', milestone: 10 },
+  { key: 'blueprint_cast_plan', label: '蓝图角色规划', milestone: 14 },
+  { key: 'blueprint_plot_threads', label: '蓝图主支线', milestone: 18 },
+  { key: 'blueprint_foreshadowing', label: '蓝图伏笔系统', milestone: 22 },
+  { key: 'blueprint_chapter_plan', label: '蓝图章节规划', milestone: 28 },
   { key: 'prepare_context', label: '准备上下文', milestone: 8 },
   { key: 'audit_context', label: '审计长篇上下文', milestone: 11 },
   { key: 'cast_plan', label: '角色规划', milestone: 14 },
   { key: 'foreshadowing_plan', label: '伏笔规划', milestone: 17 },
   { key: 'longform_context', label: '长篇上下文包', milestone: 20 },
   { key: 'generate_mission', label: '生成任务', milestone: 22 },
-  { key: 'generate_variants', label: '生成候选版本', milestone: 34, aliases: ['generating'] },
+  { key: 'generate_variants', label: '生成候选版本', milestone: 34, aliases: ['generating', 'already_generating', 'running', 'in_progress'] },
   { key: 'review', label: 'AI 评审', milestone: 62, aliases: ['ai_review'] },
   { key: 'diagnose_once', label: '问题诊断', milestone: 70 },
   { key: 'diagnose_previous_chapter', label: '检查上一章', milestone: 72 },
@@ -144,6 +183,29 @@ const DEFAULT_PIPELINE_SEQUENCE = [
   'waiting_for_confirm',
 ] as const
 
+const OUTLINE_PIPELINE_SEQUENCE = [
+  'queued',
+  'outline_context_audit',
+  'outline_setting_lock',
+  'outline_cast_plan',
+  'outline_plot_threads',
+  'outline_foreshadowing_plan',
+  'outline_chapter_skeleton',
+  'outline_quality_gate',
+  'successful',
+] as const
+
+const BLUEPRINT_PIPELINE_SEQUENCE = [
+  'queued',
+  'blueprint_concept',
+  'blueprint_setting_lock',
+  'blueprint_cast_plan',
+  'blueprint_plot_threads',
+  'blueprint_foreshadowing',
+  'blueprint_chapter_plan',
+  'successful',
+] as const
+
 const STAGE_META_MAP = new Map<string, BackendStageDefinition>()
 for (const definition of BACKEND_STAGE_DEFINITIONS) {
   STAGE_META_MAP.set(definition.key, definition)
@@ -152,6 +214,19 @@ for (const definition of BACKEND_STAGE_DEFINITIONS) {
 
 const STAGE_STALL_THRESHOLDS: Record<string, number> = {
   queued: 2 * 60_000,
+  outline_context_audit: 3 * 60_000,
+  outline_setting_lock: 4 * 60_000,
+  outline_cast_plan: 4 * 60_000,
+  outline_plot_threads: 5 * 60_000,
+  outline_foreshadowing_plan: 4 * 60_000,
+  outline_chapter_skeleton: 8 * 60_000,
+  outline_quality_gate: 4 * 60_000,
+  blueprint_concept: 4 * 60_000,
+  blueprint_setting_lock: 4 * 60_000,
+  blueprint_cast_plan: 5 * 60_000,
+  blueprint_plot_threads: 6 * 60_000,
+  blueprint_foreshadowing: 5 * 60_000,
+  blueprint_chapter_plan: 8 * 60_000,
   prepare_context: 3 * 60_000,
   audit_context: 3 * 60_000,
   cast_plan: 3 * 60_000,
@@ -179,9 +254,6 @@ const STAGE_STALL_THRESHOLDS: Record<string, number> = {
 export const normalizeRuntimeStage = (rawStage: unknown): string => {
   const stage = String(rawStage || '').trim().toLowerCase()
   if (!stage) return 'queued'
-  if (['already_generating', 'running', 'in_progress', 'generate_variants'].includes(stage)) return 'generating'
-  if (stage === 'review' || stage.startsWith('diagnose_') || stage.startsWith('optimize_')) return 'evaluating'
-  if (stage === 'persist_versions') return 'selecting'
   return STAGE_META_MAP.get(stage)?.key || stage
 }
 
@@ -323,8 +395,15 @@ const getStageDisplayLabel = (runtimeRecord: Record<string, any>, stage: string)
   return STAGE_LABEL_MAP[stage] || getStageDefinition(stage)?.label || '未知阶段'
 }
 
+const getPipelineSequence = (currentStage: string) => {
+  if (currentStage.startsWith('outline_')) return OUTLINE_PIPELINE_SEQUENCE
+  if (currentStage.startsWith('blueprint_')) return BLUEPRINT_PIPELINE_SEQUENCE
+  return DEFAULT_PIPELINE_SEQUENCE
+}
+
 const inferCurrentStepIndex = (currentStage: string) => {
-  const index = DEFAULT_PIPELINE_SEQUENCE.indexOf(currentStage as any)
+  const sequence = getPipelineSequence(currentStage)
+  const index = sequence.indexOf(currentStage as any)
   return index >= 0 ? index : 0
 }
 
@@ -332,8 +411,9 @@ const inferStageProgress = (runtimeRecord: Record<string, any>, currentStage: st
   if (['ready', 'successful', 'failed', 'evaluation_failed', 'waiting_for_confirm'].includes(currentStage)) return 100
 
   const currentMilestone = getStageMilestone(currentStage)
-  const currentIndex = DEFAULT_PIPELINE_SEQUENCE.indexOf(currentStage as any)
-  const previousStage = currentIndex > 0 ? DEFAULT_PIPELINE_SEQUENCE[currentIndex - 1] : null
+  const sequence = getPipelineSequence(currentStage)
+  const currentIndex = sequence.indexOf(currentStage as any)
+  const previousStage = currentIndex > 0 ? sequence[currentIndex - 1] : null
   const previousMilestone = previousStage ? getStageMilestone(previousStage) : 0
   const totalProgress = clampPercent(Number(runtimeRecord.progress_percent || currentMilestone || 0) || 0)
 
@@ -452,7 +532,8 @@ export const buildChapterTaskUiModel = (
   const totalProgress = ['ready', 'successful'].includes(stage)
     ? 100
     : clampPercent(Number(runtimeRecord.progress_percent || getStageMilestone(stage) || 0) || 0)
-  const totalSteps = DEFAULT_PIPELINE_SEQUENCE.length
+  const sequence = getPipelineSequence(stage)
+  const totalSteps = sequence.length
   const currentStepIndex = ['ready', 'successful', 'failed', 'evaluation_failed'].includes(stage)
     ? totalSteps - 1
     : inferCurrentStepIndex(stage)

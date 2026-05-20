@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Chapter
 from ..schemas.novel import Blueprint
+from ..services.generation_call_service import GenerationCallPolicy, call_generation_json
 from ..services.llm_service import LLMService
 from ..services.novel_service import NovelService
 from ..services.prompt_service import PromptService
@@ -337,8 +338,8 @@ class ImportService:
         2. 在高光片段中有明确的对话、动作或被他人提及。
         
         输出要求：
-        仅返回一个 JSON 字符串列表，包含所有确认的角色名。
-        例如：["张三", "李四", "王五"]
+        仅返回一个 JSON 对象，包含所有确认的角色名。
+        例如：{"characters": ["张三", "李四", "王五"]}
         不要输出任何其他解释或字段。
         """
         
@@ -352,18 +353,21 @@ class ImportService:
         messages = [{"role": "user", "content": user_content}]
         
         try:
-            response = await self.llm_service.get_llm_response(
+            result = await call_generation_json(
+                llm_service=self.llm_service,
                 system_prompt=system_prompt,
                 conversation_history=messages,
                 temperature=0.1, # 极低温度，追求稳定
                 user_id=user_id,
                 timeout=60.0,
-                response_format="json_object"
+                policy=GenerationCallPolicy(
+                    stage_label="导入分析-角色名单鉴别",
+                    progress_stage="import_character_verify",
+                    retry_attempts=2,
+                    json_repair_attempts=1,
+                ),
             )
-            
-            response = remove_think_tags(response)
-            normalized = unwrap_markdown_json(response)
-            data = json.loads(normalized)
+            data = result.data
             
             # 尝试多种可能的 JSON 结构
             if isinstance(data, list):
@@ -446,18 +450,21 @@ class ImportService:
         messages = [{"role": "user", "content": user_content}]
         
         try:
-            response = await self.llm_service.get_llm_response(
+            result = await call_generation_json(
+                llm_service=self.llm_service,
                 system_prompt=system_prompt,
                 conversation_history=messages,
                 temperature=0.3,
                 user_id=user_id,
-                timeout=120.0
+                timeout=120.0,
+                policy=GenerationCallPolicy(
+                    stage_label="导入分析-故事蓝图抽取",
+                    progress_stage="import_blueprint_extract",
+                    retry_attempts=2,
+                    json_repair_attempts=1,
+                ),
             )
-            
-            response = remove_think_tags(response)
-            normalized = unwrap_markdown_json(response)
-            sanitized = sanitize_json_like_text(normalized)
-            data = json.loads(sanitized)
+            data = result.data
             
             # --- 数据标准化处理 (Robustness Fixes) ---
             if "world_setting" in data:

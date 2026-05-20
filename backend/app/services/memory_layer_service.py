@@ -20,6 +20,7 @@ from ..models.memory_layer import (
 from ..models.novel import BlueprintCharacter
 from .llm_service import LLMService
 from .prompt_service import PromptService
+from .generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
 
 logger = logging.getLogger(__name__)
@@ -213,7 +214,7 @@ class MemoryLayerService:
 [章节内容]
 {chapter_content[:8000]}
 
-[需要追踪的角色]
+[已登记角色（不是上限，正文出现的新角色也要识别）]
 {json.dumps(character_names, ensure_ascii=False)}
 
 请以 JSON 格式输出每个角色的状态变化：
@@ -237,24 +238,24 @@ class MemoryLayerService:
 }}
 ```
 
-只输出在本章中有变化或出场的角色。"""
+只输出在本章中有变化、出场或首次登场的角色。若发现未在名单中的新角色，请正常输出其状态，系统会把它补入角色池。"""
 
         try:
-            response = await self.llm_service.get_llm_response(
+            result = await call_generation_json(
+                llm_service=self.llm_service,
                 system_prompt="你是一个专业的小说分析助手，负责追踪角色状态变化。请严格按照 JSON 格式输出。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.2,
                 user_id=user_id,
-                timeout=120.0
+                timeout=120.0,
+                policy=GenerationCallPolicy(
+                    stage_label="记忆回写-角色状态抽取",
+                    progress_stage="memory_extract_character_states",
+                    retry_attempts=2,
+                    json_repair_attempts=1,
+                ),
             )
-            
-            # 解析 JSON
-            content = sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(response)))
-            json_start = content.find("{")
-            json_end = content.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                result = json.loads(content[json_start:json_end])
-                return result.get("character_states", [])
+            return result.data.get("character_states", [])
         except Exception as e:
             logger.warning(f"提取角色状态失败: {e}")
         
@@ -351,20 +352,21 @@ class MemoryLayerService:
 只提取重要事件，不要列出琐碎细节。"""
 
         try:
-            response = await self.llm_service.get_llm_response(
+            result = await call_generation_json(
+                llm_service=self.llm_service,
                 system_prompt="你是一个专业的小说分析助手，负责提取关键事件。请严格按照 JSON 格式输出。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.2,
                 user_id=user_id,
-                timeout=120.0
+                timeout=120.0,
+                policy=GenerationCallPolicy(
+                    stage_label="记忆回写-时间线抽取",
+                    progress_stage="memory_extract_timeline",
+                    retry_attempts=2,
+                    json_repair_attempts=1,
+                ),
             )
-            
-            content = sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(response)))
-            json_start = content.find("{")
-            json_end = content.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                result = json.loads(content[json_start:json_end])
-                return result.get("events", [])
+            return result.data.get("events", [])
         except Exception as e:
             logger.warning(f"提取时间线事件失败: {e}")
         
@@ -643,19 +645,21 @@ class MemoryLayerService:
 ```"""
 
         try:
-            response = await self.llm_service.get_llm_response(
+            result = await call_generation_json(
+                llm_service=self.llm_service,
                 system_prompt="你是一个专业的小说一致性检查助手。请严格按照 JSON 格式输出。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.2,
                 user_id=user_id,
-                timeout=120.0
+                timeout=120.0,
+                policy=GenerationCallPolicy(
+                    stage_label="记忆层-连续性检查",
+                    progress_stage="memory_continuity_check",
+                    retry_attempts=2,
+                    json_repair_attempts=1,
+                ),
             )
-            
-            content = sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(response)))
-            json_start = content.find("{")
-            json_end = content.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                return json.loads(content[json_start:json_end])
+            return result.data
         except Exception as e:
             logger.warning(f"一致性检查失败: {e}")
 
@@ -801,13 +805,22 @@ class MemoryLayerService:
 压缩后的摘要："""
 
         try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
-                user_id=user_id,
-                max_tokens=1000,
-                temperature=0.3
+            result = await call_generation_text(
+                llm_service=self.llm_service,
+                system_prompt="你是长篇小说记忆层摘要压缩助手，请保留事实、因果、伏笔和角色状态。",
+                conversation_history=[{"role": "user", "content": prompt}],
+                user_id=user_id or 0,
+                temperature=0.3,
+                timeout=90.0,
+                policy=GenerationCallPolicy(
+                    stage_label="记忆层-摘要压缩",
+                    progress_stage="memory_compress_summary",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=1000,
+                ),
             )
-            cleaned = remove_think_tags(response) if response else ""
+            cleaned = remove_think_tags(result.text) if result.text else ""
             return cleaned.strip() if cleaned else summary[:max_length]
         except Exception as e:
             logger.warning(f"摘要压缩失败: {e}")

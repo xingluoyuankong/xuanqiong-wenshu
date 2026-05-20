@@ -24,6 +24,7 @@ from .reader_simulator_service import ReaderSimulatorService, ReaderType
 from .preview_generation_service import PreviewGenerationService
 from .self_critique_service import SelfCritiqueService, CritiqueDimension
 from .chapter_review_service import ChapterReviewService
+from .generation_call_service import GenerationCallPolicy, call_generation_text
 from ..utils.json_utils import remove_think_tags
 
 logger = logging.getLogger(__name__)
@@ -333,15 +334,23 @@ class UltimateWritingFlow:
         try:
             # 根据目标字数计算 max_tokens（中文约 1.5 字/token，留出余量）
             max_tokens = max(4000, int(target_word_count * 1.8))
-            response = await self.llm_service.get_llm_response(
+            result = await call_generation_text(
+                llm_service=self.llm_service,
                 system_prompt="你是一位资深网文作者，文笔流畅，擅长写出让读者欲罢不能的章节。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.8,
                 user_id=user_id,
                 timeout=180.0,
-                max_tokens=max_tokens
+                policy=GenerationCallPolicy(
+                    stage_label="终极写作流程-整章直写",
+                    progress_stage="ultimate_direct_generate",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=max_tokens,
+                    allow_truncated_response=True,
+                ),
             )
-            cleaned = remove_think_tags(response) if response else ""
+            cleaned = remove_think_tags(result.text) if result.text else ""
             return cleaned.strip()
         except Exception as e:
             logger.error(f"直接生成章节失败: {e}")

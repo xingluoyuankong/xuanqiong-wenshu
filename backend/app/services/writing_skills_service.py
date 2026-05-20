@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models.writing_skill import SkillExecution, WritingSkill
 from ..repositories.novel_repository import NovelRepository
 from .llm_service import LLMService
+from .generation_call_service import GenerationCallPolicy, call_generation_text
 
 
 SKILL_DEFINITIONS: list[dict[str, Any]] = [
@@ -558,18 +559,25 @@ class WritingSkillsService:
                 "请直接输出：1）问题判断；2）3条具体修改建议；3）如有必要给出一小段示例改写。"
             )
 
-            suggestion = await self.llm_service.generate(
-                composed_prompt,
+            result = await call_generation_text(
+                llm_service=self.llm_service,
                 system_prompt="你是一名严谨的小说编辑与写作教练。输出必须具体、可执行、贴合上下文。",
+                conversation_history=[{"role": "user", "content": composed_prompt}],
                 temperature=0.5,
-                user_id=user_id,
-                response_format=None,
-                max_tokens=1200,
+                user_id=user_id or 0,
+                timeout=90.0,
+                policy=GenerationCallPolicy(
+                    stage_label=f"写作技能-{skill.name}",
+                    progress_stage="writing_skill_execute",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=1200,
+                ),
             )
 
             result = {
                 "summary": f"已执行技能：{skill.name}",
-                "suggestion": suggestion,
+                "suggestion": result.text,
                 "mode": "llm",
             }
 
