@@ -29,6 +29,14 @@ class ChatMessage:
 class LLMClient:
     """异步流式调用封装，兼容 OpenAI SDK。"""
 
+    @staticmethod
+    def _build_response_format_payload(response_format: Optional[Any]) -> Optional[Dict[str, Any]]:
+        if not response_format:
+            return None
+        if isinstance(response_format, dict):
+            return response_format
+        return {"type": str(response_format)}
+
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
         key = (api_key or "").strip() or _read_env_value("OPENAI_API_KEY")
         if not key:
@@ -41,7 +49,7 @@ class LLMClient:
         self,
         messages: List[ChatMessage],
         model: Optional[str] = None,
-        response_format: Optional[str] = None,
+        response_format: Optional[Any] = None,
         temperature: Optional[float] = None,
         top_p: Optional[float] = None,
         max_tokens: Optional[int] = None,
@@ -55,8 +63,9 @@ class LLMClient:
             "timeout": timeout,
             **kwargs,
         }
-        if response_format:
-            payload["response_format"] = {"type": response_format}
+        response_format_payload = self._build_response_format_payload(response_format)
+        if response_format_payload:
+            payload["response_format"] = response_format_payload
         if temperature is not None:
             payload["temperature"] = temperature
         if top_p is not None:
@@ -99,7 +108,7 @@ class LLMClient:
         self,
         messages: List[ChatMessage],
         model: Optional[str] = None,
-        response_format: Optional[str] = None,
+        response_format: Optional[Any] = None,
         temperature: Optional[float] = None,
         top_p: Optional[float] = None,
         max_tokens: Optional[int] = None,
@@ -113,8 +122,9 @@ class LLMClient:
             "timeout": timeout,
             **kwargs,
         }
-        if response_format:
-            payload["response_format"] = {"type": response_format}
+        response_format_payload = self._build_response_format_payload(response_format)
+        if response_format_payload:
+            payload["response_format"] = response_format_payload
         if temperature is not None:
             payload["temperature"] = temperature
         if top_p is not None:

@@ -1,3 +1,4 @@
+import json
 import types
 
 import pytest
@@ -154,3 +155,36 @@ def test_rewritten_outline_metadata_preserves_existing_story_ledgers():
     assert metadata["outline_quality"]["accepted_by_executability_gate"] is True
     assert metadata["outline_quality"]["rewrite_executability_gate_passed"] is True
     assert metadata["last_rewrite"]["direction"] == "加强连续性"
+
+
+def test_outline_json_schemas_require_execution_fields():
+    rewrite_schema = writer._outline_item_json_schema()
+    batch_schema = writer._outline_batch_json_schema()
+
+    assert "chapter_role" in rewrite_schema["required"]
+    assert "continuity_notes" in rewrite_schema["required"]
+    assert "foreshadowing_tasks" in rewrite_schema["required"]
+    assert "cast_delta" in rewrite_schema["required"]
+    assert "chapters" in batch_schema["required"]
+    assert "chapter_number" in batch_schema["properties"]["chapters"]["items"]["required"]
+
+
+def test_failed_runtime_can_keep_confirm_actions_for_blocked_candidates():
+    chapter = types.SimpleNamespace(
+        real_summary=json.dumps({"generation_runtime": {"run_id": "run-1", "events": []}}, ensure_ascii=False),
+        chapter_number=4,
+    )
+
+    payload = json.loads(
+        writer._build_failed_generation_runtime_state(
+            chapter,
+            run_id="run-1",
+            reason="质量门拦截，但候选稿已保存。",
+            allowed_actions=["refresh_status", "confirm_version", "review_versions", "retry_generation", "view_error"],
+        )
+    )
+
+    runtime = payload["generation_runtime"]
+    assert runtime["progress_stage"] == "failed"
+    assert "confirm_version" in runtime["allowed_actions"]
+    assert "review_versions" in runtime["allowed_actions"]

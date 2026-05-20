@@ -112,6 +112,17 @@ def _compact_len(text: str) -> int:
     return len("".join((text or "").split()))
 
 
+def _optimizer_response_schema() -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "required": ["optimized_content", "optimization_notes"],
+        "properties": {
+            "optimized_content": {"type": "string"},
+            "optimization_notes": {"type": "string"},
+        },
+    }
+
+
 def _anchor_overlap_count(original_sample: str, optimized_content: str, *, chunk_size: int = 16) -> int:
     sample = "".join((original_sample or "").split())
     optimized = "".join((optimized_content or "").split())
@@ -373,8 +384,11 @@ async def optimize_chapter(
                     stage_label="章节优化",
                     retry_attempts=3,
                     response_format="json_object",
+                    json_schema=_optimizer_response_schema(),
+                    json_schema_name="chapter_optimization",
+                    json_schema_strict=False,
                     allow_truncated_response=True,
-                    json_repair_attempts=1,
+                    json_repair_attempts=2,
                 ),
             )
         result = json_result.data

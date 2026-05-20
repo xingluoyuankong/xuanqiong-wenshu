@@ -140,13 +140,14 @@ let progressTimer: ReturnType<typeof setInterval> | null = null
 let timeoutTimer: ReturnType<typeof setTimeout> | null = null
 let cancelRequested = false
 const longWaitNotified = ref(false)
+const chapterOutlineBatchLabel = computed(() => '首批可执行章节大纲')
 
 const preflightItems = computed(() => [
   { title: '方向清楚', desc: '核心卖点、主角欲望、冲突压力已经说清楚。' },
   {
     title: isChapterOutlineStage.value ? '继续拆章' : '先看总纲',
     desc: isChapterOutlineStage.value
-      ? '这一轮会基于已确认的小说总大纲，继续细化出可执行的前 12 章章节大纲。'
+      ? `这一轮会基于已确认的小说总大纲，继续细化出${chapterOutlineBatchLabel.value}。`
       : '这一轮先产出全书级小说总大纲，不会直接跳到章节大纲。',
   },
   { title: '允许等待', desc: '该任务已改为后台轮询；等待期间不要关闭服务。' },
@@ -163,7 +164,7 @@ const flowSteps = computed(() => [
   {
     title: '继续细化',
     desc: isChapterOutlineStage.value
-      ? '成功后回到蓝图展示页，你可以直接检查 12 章章节大纲并进入写作台。'
+      ? `成功后回到蓝图展示页，你可以直接检查${chapterOutlineBatchLabel.value}并进入写作台。`
       : '成功后进入蓝图展示页；你确认总纲后，再继续生成章节大纲。',
   },
 ])
@@ -174,7 +175,7 @@ const heroTitle = computed(() => (
 
 const heroDescription = computed(() => (
   isChapterOutlineStage.value
-    ? '系统会基于已确认的世界骨架与小说总大纲，继续拆解前 12 章章节大纲。生成过程仍采用后台任务，可取消、可轮询、可恢复失败态。'
+    ? `系统会基于已确认的世界骨架与小说总大纲，按蓝图长度契约继续拆解${chapterOutlineBatchLabel.value}。生成过程仍采用后台任务，可取消、可轮询、可恢复失败态。`
     : '系统会先基于已确认的蓝图材料生成全书级小说总大纲；章节大纲会在你确认总大纲后再继续生成。生成过程已改为后台任务，可取消、可轮询、可恢复失败态。'
 ))
 
@@ -186,7 +187,7 @@ const nextStepSubtitle = computed(() => (
 ))
 const nextStepDescription = computed(() => (
   isChapterOutlineStage.value
-    ? '你可以直接检查前 12 章章节大纲；确认无误后就进入写作台。'
+    ? `你可以直接检查${chapterOutlineBatchLabel.value}；确认无误后就进入写作台。`
     : '你可以先检查世界观、人物关系和小说总大纲，确认无误后再继续生成章节大纲。'
 ))
 
@@ -750,5 +751,4 @@ onUnmounted(() => {
   }
 }
 </style>
-
 

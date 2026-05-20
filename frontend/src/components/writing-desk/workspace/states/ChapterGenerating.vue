@@ -222,13 +222,14 @@ let timer: number | null = null
 const runtime = computed(() => props.generationRuntime || {})
 const runtimeQueued = computed(() => Boolean(runtime.value.queued))
 const showAllRuntimeEvents = ref(false)
-type RuntimeLogTabKey = 'summary' | 'progress' | 'content' | 'review' | 'diagnostics'
+type RuntimeLogTabKey = 'summary' | 'progress' | 'content' | 'review' | 'ledger' | 'diagnostics'
 const selectedRuntimeLogTab = ref<RuntimeLogTabKey>('summary')
 const runtimeLogTabs: Array<{ key: RuntimeLogTabKey; label: string; icon: string }> = [
   { key: 'summary', label: '简略日志', icon: '✨' },
   { key: 'progress', label: '生成进展', icon: '⏳' },
   { key: 'content', label: '草稿预览', icon: '✍' },
   { key: 'review', label: '评审/修复', icon: '✓' },
+  { key: 'ledger', label: '账本闭环', icon: '☘' },
   { key: 'diagnostics', label: '诊断详情', icon: '⚙' },
 ]
 const allRuntimeEvents = computed(() => {
@@ -248,6 +249,7 @@ const filteredRuntimeEvents = computed(() => {
     if (tab === 'progress') return !kind || kind === 'status' || ['prepare_context', 'cast_plan', 'foreshadowing_plan', 'longform_context', 'generate_mission', 'generate_variants', 'persist_versions'].includes(stageKey)
     if (tab === 'content') return kind === 'content' || kind === 'save' || Boolean(event?.content_preview)
     if (tab === 'review') return ['review', 'continuity', 'error'].includes(kind) || stageKey.includes('review') || stageKey.includes('optimize') || stageKey.includes('diagnose') || stageKey.includes('continuity')
+    if (tab === 'ledger') return kind === 'ledger' || stageKey.includes('ledger') || ['finalize', 'finalized'].includes(stageKey)
     if (tab === 'diagnostics') return Boolean(event?.metadata || event?.metrics || event?.artifact_refs)
     return true
   })
@@ -293,6 +295,11 @@ const stageDescriptionMap: Record<string, string> = {
   optimizer: '系统正在做定向优化，强化最重要的问题维度。',
   enrichment: '系统正在补字数、强化细节和做最终质量增强。',
   persist_versions: '系统正在写入候选版本并整理确认结果。',
+  finalize: '系统正在确认定稿，写入章节摘要和快照。',
+  ledger_memory: '系统正在把正文更新进角色状态、时间线和因果账本。',
+  ledger_foreshadowing: '系统正在判断本章伏笔回收、强化和新埋设情况。',
+  ledger_graph: '系统正在同步线索和知识图谱。',
+  finalized: '定稿闭环已完成，正文和故事账本都已处理。',
   generating: '系统正在写正文草稿，完成后会自动进入评估或确认阶段。',
   evaluating: '正文已生成，系统正在评估候选版本可用性。',
   selecting: '候选版本已就绪，即将切换到版本确认界面。',
@@ -468,6 +475,7 @@ const formatEventKindIcon = (event: Record<string, any>) => {
   if (kind === 'review') return '✓'
   if (kind === 'continuity') return '⌁'
   if (kind === 'save') return '▣'
+  if (kind === 'ledger') return '☘'
   return '✨'
 }
 
@@ -479,6 +487,7 @@ const formatEventKindLabel = (kind: unknown) => {
     review: '评审',
     continuity: '连续性',
     save: '保存',
+    ledger: '账本',
     error: '异常',
   }
   return labels[key] || String(kind || '状态')
@@ -508,6 +517,11 @@ const STAGE_LABEL_FALLBACK: Record<string, string> = {
   review: 'AI 评审',
   continuity_gate: '连续性检查',
   persist_versions: '保存候选版本',
+  finalize: '定稿快照',
+  ledger_memory: '记忆层更新',
+  ledger_foreshadowing: '伏笔闭环',
+  ledger_graph: '线索/图谱同步',
+  finalized: '定稿完成',
 }
 
 const formatDurationMs = (value: unknown) => {
@@ -552,7 +566,24 @@ const metadataLabelMap: Record<string, string> = {
   optimization_stage: '优化阶段键',
   optimization_stage_label: '优化阶段',
   optimization_issue_count: '优化问题数',
-  optimization_dimensions: '当前维度'
+  optimization_dimensions: '当前维度',
+  event_density_passed: '事件密度达标',
+  long_chapter_density_passed: '长章密度达标',
+  state_change_interval_passed: '状态变化间隔达标',
+  progression_unit_count: '推进单元数',
+  event_density_per_1000: '每千字推进密度',
+  scene_structure_rate: '场景结构兑现率',
+  structure_passed_scene_count: '结构通过场景数',
+  resolved: '回收伏笔数',
+  reinforced: '强化伏笔数',
+  unresolved_due_ids: '逾期未回收伏笔',
+  character_states_updated: '更新角色状态数',
+  timeline_events_added: '新增时间线事件数',
+  causal_chains_added: '新增因果链数',
+  selected_version_id: '确认版本ID',
+  memory_success: '记忆层成功',
+  foreshadowing_success: '伏笔闭环成功',
+  ledger_sync_success: '账本同步成功'
 }
 
 const formatEventMetadata = (metadata: unknown) => {

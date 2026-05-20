@@ -4,13 +4,16 @@ from email.utils import format_datetime
 import pytest
 from fastapi import HTTPException
 
-from app.api.routers.optimizer import _build_continuity_contract, _continuity_guard_failure
+from app.api.routers.optimizer import _build_continuity_contract, _continuity_guard_failure, _optimizer_response_schema
 from app.services.generation_call_service import (
     GenerationCallPolicy,
+    build_response_format_payload,
     call_generation_json,
     call_generation_text,
+    classify_provider_error,
     parse_llm_json_value,
     resolve_retry_delay_seconds,
+    validate_json_schema_subset,
 )
 
 
@@ -133,6 +136,134 @@ def test_retry_delay_accepts_http_date_retry_after_header():
     policy = GenerationCallPolicy(stage_label="provider", backoff_max_seconds=8)
 
     assert 0 < resolve_retry_delay_seconds(exc, 1, policy) <= 8
+
+
+def test_build_response_format_payload_prefers_json_schema():
+    schema = {
+        "type": "object",
+        "required": ["title"],
+        "properties": {"title": {"type": "string"}},
+    }
+    policy = GenerationCallPolicy(
+        stage_label="章节任务",
+        response_format="json_object",
+        json_schema=schema,
+        json_schema_name="chapter_mission",
+    )
+
+    payload = build_response_format_payload(policy)
+
+    assert payload["type"] == "json_schema"
+    assert payload["json_schema"]["name"] == "chapter_mission"
+    assert payload["json_schema"]["schema"] == schema
+    assert payload["json_schema"]["strict"] is True
+
+
+@pytest.mark.anyio
+async def test_call_generation_json_uses_schema_and_repairs_local_schema_failure():
+    llm = _FakeLLMService(
+        [
+            '{"summary": "缺标题"}',
+            '{"title": "暗潮入城", "summary": "主角追查线索。"}',
+        ]
+    )
+    schema = {
+        "type": "object",
+        "required": ["title", "summary"],
+        "properties": {
+            "title": {"type": "string"},
+            "summary": {"type": "string"},
+        },
+    }
+
+    result = await call_generation_json(
+        llm_service=llm,
+        system_prompt="system",
+        conversation_history=[{"role": "user", "content": "outline"}],
+        temperature=0.3,
+        user_id=1,
+        timeout=30.0,
+        policy=GenerationCallPolicy(
+            stage_label="章节大纲",
+            json_schema=schema,
+            json_schema_name="chapter_outline",
+            json_repair_attempts=1,
+        ),
+    )
+
+    assert result.data["title"] == "暗潮入城"
+    assert result.schema_validated is True
+    assert llm.calls[0]["response_format"]["type"] == "json_schema"
+    assert "必须满足本地 schema" in llm.calls[1]["conversation_history"][-1]["content"]
+
+
+@pytest.mark.anyio
+async def test_call_generation_text_downgrades_schema_when_provider_rejects_structured_outputs():
+    stages = []
+
+    async def progress_callback(stage: str, message: str):
+        stages.append((stage, message))
+
+    unsupported = HTTPException(
+        status_code=400,
+        detail={"message": "response_format json_schema is not supported by this model"},
+    )
+    llm = _FakeLLMService([unsupported, '{"title": "ok"}'])
+
+    result = await call_generation_text(
+        llm_service=llm,
+        system_prompt="system",
+        conversation_history=[{"role": "user", "content": "outline"}],
+        temperature=0.3,
+        user_id=1,
+        timeout=30.0,
+        policy=GenerationCallPolicy(
+            stage_label="蓝图结构化输出",
+            retry_attempts=2,
+            backoff_base_seconds=0.01,
+            json_schema={
+                "type": "object",
+                "required": ["title"],
+                "properties": {"title": {"type": "string"}},
+            },
+        ),
+        progress_callback=progress_callback,
+    )
+
+    assert result.text == '{"title": "ok"}'
+    assert llm.calls[0]["response_format"]["type"] == "json_schema"
+    assert llm.calls[1]["response_format"] == "json_object"
+    assert stages == [("generating", "蓝图结构化输出 的结构化 schema 被当前 Provider 拒绝，已回退到 JSON 模式重试")]
+
+
+def test_classify_provider_error_for_runtime_logs():
+    assert classify_provider_error(HTTPException(status_code=429, detail={"message": "rate limit"})) == "rate_limit"
+    assert classify_provider_error(HTTPException(status_code=504, detail={"message": "timeout"})) == "timeout"
+    assert classify_provider_error(HTTPException(status_code=400, detail={"message": "max_tokens too high"})) == "output_token_limit"
+
+
+def test_validate_json_schema_subset_rejects_bool_for_numeric_contract_fields():
+    schema = {
+        "type": "object",
+        "required": ["word_budget", "score"],
+        "properties": {
+            "word_budget": {"type": "integer"},
+            "score": {"type": "number"},
+        },
+    }
+
+    errors = validate_json_schema_subset({"word_budget": True, "score": False}, schema)
+
+    assert "$.word_budget must be integer" in errors
+    assert "$.score must be number" in errors
+
+
+def test_optimizer_response_schema_requires_content_and_notes():
+    schema = _optimizer_response_schema()
+
+    assert schema["required"] == ["optimized_content", "optimization_notes"]
+    assert not validate_json_schema_subset({"optimized_content": "正文", "optimization_notes": "局部补丁"}, schema)
+    assert "$.optimization_notes is required" in validate_json_schema_subset({"optimized_content": "正文"}, schema)
 
 
 def test_parse_llm_json_value_extracts_array_payload_from_wrapped_text():

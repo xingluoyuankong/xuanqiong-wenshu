@@ -164,4 +164,58 @@ describe('ChapterGenerating', () => {
     expect(wrapper.text()).toContain('护栏检查耗时：200')
     expect(wrapper.text()).toContain('自动修复耗时：145')
   })
+
+  it('账本闭环分组展示伏笔和记忆层事件', async () => {
+    const wrapper = shallowMount(ChapterGenerating, {
+      props: {
+        chapterNumber: 5,
+        generationRuntime: {
+          progress_stage: 'ledger_foreshadowing',
+          progress_message: '伏笔回收和新伏笔抽取完成',
+          events: [
+            {
+              at: '2026-04-21T08:00:00Z',
+              stage: 'ledger_memory',
+              kind: 'ledger',
+              level: 'info',
+              title: '记忆层更新完成',
+              summary: '已从定稿正文抽取角色状态、时间线和因果信息。',
+              metrics: { character_states_updated: 3, timeline_events_added: 2 },
+            },
+            {
+              at: '2026-04-21T08:00:01Z',
+              stage: 'ledger_foreshadowing',
+              kind: 'ledger',
+              level: 'info',
+              title: '伏笔闭环完成',
+              summary: '回收 1 条，强化 2 条。',
+              metrics: { resolved: 1, reinforced: 2 },
+              artifact_refs: { resolution_ids: [7] },
+            },
+            {
+              at: '2026-04-21T08:00:02Z',
+              stage: 'generate_variants',
+              kind: 'content',
+              level: 'info',
+              summary: '正文候选完成',
+            },
+          ],
+        },
+        progressStage: 'ledger_foreshadowing',
+        progressMessage: '伏笔回收和新伏笔抽取完成',
+        allowedActions: ['refresh_status'],
+      },
+    })
+
+    const tabs = wrapper.findAll('.cg-log-tab')
+    const ledgerTab = tabs.find((tab) => tab.text().includes('账本闭环'))
+    expect(ledgerTab).toBeTruthy()
+    await ledgerTab!.trigger('click')
+
+    expect(wrapper.text()).toContain('记忆层更新完成')
+    expect(wrapper.text()).toContain('伏笔闭环完成')
+    expect(wrapper.text()).toContain('更新角色状态数：3')
+    expect(wrapper.text()).toContain('回收伏笔数：1')
+    expect(wrapper.text()).not.toContain('正文候选完成')
+  })
 })

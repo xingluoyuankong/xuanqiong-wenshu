@@ -25,6 +25,11 @@ class GenerationCallPolicy:
     progress_stage: str = "generating"
     retry_attempts: int = 2
     response_format: Optional[str] = "json_object"
+    json_schema: Optional[Dict[str, Any]] = None
+    json_schema_name: Optional[str] = None
+    json_schema_strict: bool = True
+    prompt_cache_key: Optional[str] = None
+    runtime_event_kind: Optional[str] = None
     max_tokens: Optional[int] = None
     top_p: Optional[float] = None
     allow_truncated_response: bool = False
@@ -38,6 +43,8 @@ class GenerationCallPolicy:
 class GenerationTextResult:
     text: str
     attempts: int
+    response_format_used: Optional[Any] = None
+    provider_error_type: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -46,6 +53,8 @@ class GenerationJsonResult:
     raw_text: str
     normalized_text: str
     attempts: int
+    response_format_used: Optional[Any] = None
+    schema_validated: bool = False
 
 
 class GenerationJSONDecodeError(ValueError):
@@ -127,6 +136,68 @@ def _looks_like_output_token_limit_error(exc: HTTPException) -> bool:
     return any(marker in text for marker in markers)
 
 
+def classify_provider_error(exc: HTTPException) -> str:
+    detail = exc.detail
+    text = json.dumps(detail, ensure_ascii=False).lower() if isinstance(detail, (dict, list)) else str(detail).lower()
+    if exc.status_code == 429 or "rate limit" in text or "too many requests" in text:
+        return "rate_limit"
+    if exc.status_code in {408, 504} or "timeout" in text or "timed out" in text:
+        return "timeout"
+    if exc.status_code in {500, 502, 503} or "overload" in text or "temporarily unavailable" in text:
+        return "provider_jitter"
+    if exc.status_code in {401, 403} or "api key" in text or "auth" in text or "permission" in text:
+        return "provider_auth"
+    if _looks_like_output_token_limit_error(exc):
+        return "output_token_limit"
+    if _looks_like_structured_output_unsupported(exc):
+        return "structured_output_unsupported"
+    if exc.status_code == 400:
+        return "bad_request"
+    return "unknown"
+
+
+def _looks_like_structured_output_unsupported(exc: HTTPException) -> bool:
+    if exc.status_code not in {400, 404, 422}:
+        return False
+    detail = exc.detail
+    text = json.dumps(detail, ensure_ascii=False).lower() if isinstance(detail, (dict, list)) else str(detail).lower()
+    markers = (
+        "json_schema",
+        "structured output",
+        "structured_outputs",
+        "schema is not supported",
+        "response_format",
+        "unsupported response format",
+        "not support response_format",
+        "does not support response_format",
+    )
+    return any(marker in text for marker in markers)
+
+
+def build_response_format_payload(policy: GenerationCallPolicy) -> Optional[Any]:
+    if policy.json_schema:
+        schema_name = (policy.json_schema_name or policy.stage_label or "generation_schema").strip()
+        schema_name = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in schema_name)[:64] or "generation_schema"
+        return {
+            "type": "json_schema",
+            "json_schema": {
+                "name": schema_name,
+                "schema": policy.json_schema,
+                "strict": bool(policy.json_schema_strict),
+            },
+        }
+    return policy.response_format
+
+
+def _downgrade_schema_policy(policy: GenerationCallPolicy) -> GenerationCallPolicy:
+    return replace(
+        policy,
+        json_schema=None,
+        json_schema_name=None,
+        response_format="json_object",
+    )
+
+
 def normalize_llm_json_text(raw_text: str) -> str:
     return sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(raw_text or ""))).strip()
 
@@ -195,6 +266,57 @@ def parse_llm_json_object(raw_text: str) -> tuple[Dict[str, Any], str]:
     return data, normalized
 
 
+def validate_json_schema_subset(data: Dict[str, Any], schema: Optional[Dict[str, Any]]) -> List[str]:
+    """Small local schema guard for providers that fall back from strict JSON schema.
+
+    It intentionally validates only the contract pieces this project depends on:
+    object roots, required fields, object properties, arrays, scalar JSON types,
+    and nested required properties. Full JSON Schema stays the provider's job.
+    """
+
+    if not schema:
+        return []
+
+    errors: List[str] = []
+
+    def check(value: Any, node: Dict[str, Any], path: str) -> None:
+        expected_type = node.get("type")
+        if isinstance(expected_type, list):
+            if "null" in expected_type and value is None:
+                return
+            expected_type = next((item for item in expected_type if item != "null"), None)
+        if expected_type == "object":
+            if not isinstance(value, dict):
+                errors.append(f"{path} must be object")
+                return
+            for key in node.get("required") or []:
+                if key not in value:
+                    errors.append(f"{path}.{key} is required")
+            properties = node.get("properties") if isinstance(node.get("properties"), dict) else {}
+            for key, child in properties.items():
+                if key in value and isinstance(child, dict):
+                    check(value[key], child, f"{path}.{key}")
+        elif expected_type == "array":
+            if not isinstance(value, list):
+                errors.append(f"{path} must be array")
+                return
+            item_schema = node.get("items")
+            if isinstance(item_schema, dict):
+                for index, item in enumerate(value[:40]):
+                    check(item, item_schema, f"{path}[{index}]")
+        elif expected_type == "string" and not isinstance(value, str):
+            errors.append(f"{path} must be string")
+        elif expected_type == "integer" and (not isinstance(value, int) or isinstance(value, bool)):
+            errors.append(f"{path} must be integer")
+        elif expected_type == "number" and (not isinstance(value, (int, float)) or isinstance(value, bool)):
+            errors.append(f"{path} must be number")
+        elif expected_type == "boolean" and not isinstance(value, bool):
+            errors.append(f"{path} must be boolean")
+
+    check(data, schema, "$")
+    return errors
+
+
 async def call_generation_text(
     *,
     llm_service: LLMService,
@@ -210,6 +332,7 @@ async def call_generation_text(
     active_policy = policy
     last_http_exc: HTTPException | None = None
     for attempt in range(1, attempts + 1):
+        response_format_payload = build_response_format_payload(active_policy)
         try:
             text = await llm_service.get_llm_response(
                 system_prompt=system_prompt,
@@ -217,15 +340,34 @@ async def call_generation_text(
                 temperature=temperature,
                 user_id=user_id,
                 timeout=timeout,
-                response_format=active_policy.response_format,
+                response_format=response_format_payload,
                 max_tokens=active_policy.max_tokens,
                 top_p=active_policy.top_p,
                 allow_truncated_response=active_policy.allow_truncated_response,
                 retry_same_model_once=active_policy.retry_same_model_once,
             )
-            return GenerationTextResult(text=text, attempts=attempt)
+            return GenerationTextResult(text=text, attempts=attempt, response_format_used=response_format_payload)
         except HTTPException as exc:
             last_http_exc = exc
+            provider_error_type = classify_provider_error(exc)
+            if (
+                active_policy.json_schema
+                and _looks_like_structured_output_unsupported(exc)
+                and attempt < attempts
+            ):
+                logger.warning(
+                    "Retrying generation stage with JSON mode after structured output rejection: stage=%s detail=%s",
+                    active_policy.stage_label,
+                    exc.detail,
+                )
+                active_policy = _downgrade_schema_policy(active_policy)
+                if progress_callback is not None:
+                    await progress_callback(
+                        active_policy.progress_stage,
+                        f"{active_policy.stage_label} 的结构化 schema 被当前 Provider 拒绝，已回退到 JSON 模式重试",
+                    )
+                await asyncio.sleep(resolve_retry_delay_seconds(exc, attempt, active_policy))
+                continue
             if (
                 active_policy.max_tokens
                 and active_policy.max_tokens > 12000
@@ -256,11 +398,12 @@ async def call_generation_text(
                     f"{active_policy.stage_label}遇到上游抖动，正在进行第 {attempt}/{attempts - 1} 次重试",
                 )
             logger.warning(
-                "Retrying generation stage after provider jitter: stage=%s attempt=%s/%s status=%s detail=%s",
+                "Retrying generation stage after provider jitter: stage=%s attempt=%s/%s status=%s type=%s detail=%s",
                 active_policy.stage_label,
                 attempt,
                 attempts,
                 exc.status_code,
+                provider_error_type,
                 exc.detail,
             )
             await asyncio.sleep(resolve_retry_delay_seconds(exc, attempt, active_policy))
@@ -299,11 +442,20 @@ async def call_generation_json(
         total_text_attempts += text_result.attempts
         try:
             data, normalized = parse_llm_json_object(text_result.text)
+            schema_errors = validate_json_schema_subset(data, policy.json_schema)
+            if schema_errors:
+                raise GenerationJSONDecodeError(
+                    "LLM response JSON failed local schema guard: " + "; ".join(schema_errors[:8]),
+                    raw_text=text_result.text,
+                    normalized_text=normalized,
+                )
             return GenerationJsonResult(
                 data=data,
                 raw_text=text_result.text,
                 normalized_text=normalized,
                 attempts=total_text_attempts,
+                response_format_used=text_result.response_format_used,
+                schema_validated=bool(policy.json_schema),
             )
         except GenerationJSONDecodeError as exc:
             last_decode_error = exc
@@ -320,8 +472,14 @@ async def call_generation_json(
                     {
                         "role": "user",
                         "content": (
-                            "上一条回复不是可解析的 JSON 对象。请只输出一个合法 JSON 对象，"
+                            "上一条回复不是可解析的 JSON 对象，或未通过本地结构验收。请只输出一个合法 JSON 对象，"
                             "不要 Markdown，不要解释，不要省略必要字段。"
+                            + (
+                                "\n必须满足本地 schema 关键约束："
+                                + json.dumps(policy.json_schema, ensure_ascii=False)[:4000]
+                                if policy.json_schema
+                                else ""
+                            )
                         ),
                     },
                 ]
