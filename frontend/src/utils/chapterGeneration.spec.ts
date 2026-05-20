@@ -78,6 +78,32 @@ describe('chapterGeneration utils', () => {
     expect(normalizeRuntimeStage('diagnose_once')).toBe('diagnose_once')
     expect(normalizeRuntimeStage('optimize_delivery')).toBe('optimize_delivery')
     expect(normalizeRuntimeStage('persist_versions')).toBe('persist_versions')
+    expect(normalizeRuntimeStage('ledger_foreshadowing')).toBe('ledger_foreshadowing')
+    expect(normalizeRuntimeStage('finalized')).toBe('finalized')
+  })
+
+  it('展示定稿后账本闭环阶段', () => {
+    expect(
+      buildChapterTaskUiModel({
+        progress_stage: 'ledger_foreshadowing',
+        progress_percent: 99,
+        progress_message: '伏笔回收和新伏笔抽取完成',
+      })
+    ).toMatchObject({
+      stageLabel: '伏笔闭环',
+      progress: 99,
+      displayMessage: '伏笔回收和新伏笔抽取完成',
+    })
+
+    expect(
+      buildChapterTaskUiModel({
+        progress_stage: 'finalized',
+        progress_percent: 100,
+      })
+    ).toMatchObject({
+      stageLabel: '定稿完成',
+      progress: 100,
+    })
   })
 
   it('为分阶段优化生成正确标签与摘要', () => {

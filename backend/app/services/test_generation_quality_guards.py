@@ -1,7 +1,7 @@
 import pytest
 
 from app.services.ai_review_service import AIReviewService, ReviewResult
-from app.services.enrichment_service import ENRICH_CHAPTER_PROMPT, ENRICH_DIALOGUE_PROMPT, ENRICH_SCENE_PROMPT
+from app.services.enrichment_service import ENRICH_CHAPTER_PROMPT, ENRICH_DIALOGUE_PROMPT, ENRICH_SCENE_PROMPT, EnrichmentService
 from app.services.pipeline_orchestrator import PipelineOrchestrator
 from app.services.self_critique_service import SelfCritiqueService
 
@@ -108,6 +108,34 @@ class TestGenerationQualityGuards:
         assert "逼问真相" in ledger
         assert "对话硬要求" in ledger
         assert "短余波限制" in ledger
+
+    def test_chapter_mission_schema_requires_scene_budget_and_payoff_fields(self):
+        schema = PipelineOrchestrator._build_chapter_mission_schema()
+
+        assert "scene_list" in schema["required"]
+        scene_schema = schema["properties"]["scene_list"]["items"]
+        for field in ("goal", "conflict", "turn", "outcome", "payoff", "bridge", "dialogue_value", "word_budget"):
+            assert field in scene_schema["required"]
+        assert "foreshadowing_tasks" in schema["required"]
+
+    def test_normalize_chapter_mission_fills_missing_scene_contract_fields(self):
+        mission = PipelineOrchestrator._normalize_chapter_mission(
+            {
+                "chapter_purpose": "逼问账册真相",
+                "dialogue_strategy": {"purpose": "试探"},
+                "scene_list": [{"goal": "逼问账册真相"}],
+            },
+            target_word_count=5200,
+        )
+
+        scene = mission["scene_list"][0]
+        assert mission["schema_version"] == "chapter_mission.v2"
+        assert mission["dialogue_strategy"]["purpose"] == ["试探"]
+        assert scene["conflict"]
+        assert scene["payoff"]
+        assert scene["bridge"]
+        assert scene["word_budget"] > 0
+        assert mission["chapter_draft_contract"]["target_word_count"] == 5200
 
     def test_first_draft_retry_triggers_for_static_short_dialogue_light_copy(self):
         should_retry, story_guard, reason_codes = PipelineOrchestrator._evaluate_first_draft_retry(
@@ -394,6 +422,47 @@ class TestGenerationQualityGuards:
                     "dialogue_changes_state": True,
                     "dialogue_state_change_markers": 12,
                     "ending_pressure_passed": True,
+                },
+            }
+        )
+
+        assert gate["passed"] is True
+        assert "scene_fulfillment_weak" not in {item["code"] for item in gate["blockers"]}
+
+    def test_structural_quality_gate_allows_semantic_scene_evidence_when_keyword_hits_miss(self):
+        gate = PipelineOrchestrator._build_structural_quality_gate(
+            {
+                "ai_review": {
+                    "evaluation": (
+                        "这版结构兑现度高，四场戏推进清晰：问价、抬价、脱身、手札显字，"
+                        "每一段对话都在改变筹码关系，结尾也把潜入听潮祠的压力递给下一章。"
+                    ),
+                    "status": "single_version_reviewed",
+                },
+                "self_critique_after_consistency": {
+                    "final_score": 75.0,
+                    "critical_count": 0,
+                    "major_count": 6,
+                },
+                "consistency_repair": {
+                    "is_consistent": True,
+                    "post_fix_check": {"violations": []},
+                },
+                "story_progression_guard": {
+                    "word_count": 4213,
+                    "dialogue_marker_count": 138,
+                    "mission_hit_count": 0,
+                    "expected_dialogue": True,
+                    "ending_hook_detected": True,
+                    "static_description_risk": False,
+                    "scene_fulfillment_rate": 0.25,
+                    "fulfilled_scene_count": 1,
+                    "scene_count": 4,
+                    "dialogue_changes_state": True,
+                    "dialogue_state_change_markers": 11,
+                    "ending_pressure_passed": True,
+                    "event_density_passed": True,
+                    "state_change_interval_passed": True,
                 },
             }
         )
@@ -735,6 +804,214 @@ class TestGenerationQualityGuards:
         assert guard["dialogue_changes_state"] is True
         assert guard["ending_pressure_passed"] is True
         assert guard["quality_metric_snapshot"]["scene_count"] == 1
+        assert guard["event_density_passed"] is True
+
+    def test_story_quality_metrics_reject_keyword_padded_low_event_density(self):
+        quiet_padding = "玉玺在北门的旧账旁沉默，赤伞和血契像旧纸上的灰影。" * 180
+        guard = PipelineOrchestrator._score_story_quality_candidate(
+            content="\n\n".join(
+                [
+                    "玉玺、北门、旧账、赤伞、血契都被摆在案上。",
+                    quiet_padding,
+                    quiet_padding,
+                    "玉玺仍在，北门仍在，旧账仍在，赤伞和血契仍在。",
+                ]
+            ),
+            violations=[],
+            chapter_mission={
+                "chapter_purpose": "查明玉玺与北门旧账的关联",
+                "scene_list": [
+                    {
+                        "goal": "玉玺",
+                        "conflict": "北门旧账",
+                        "turn": "赤伞",
+                        "outcome": "血契",
+                        "end_hook": "旧账",
+                    }
+                ],
+            },
+        )
+
+        assert guard["scene_fulfillment_rate"] >= 0.5
+        assert guard["event_density_passed"] is False
+        assert guard["state_change_interval_passed"] is False
+        assert "event_density_weak" in guard["quality_metric_snapshot"]["quality_issue_codes"]
+
+    def test_event_density_allows_dense_progression_despite_local_plain_run(self):
+        plain_run = "潮湿木板压着旧坞的水气，风灯在绳索旁一寸寸发白。" * 8
+        progression_units = []
+        for index in range(16):
+            progression_units.append(
+                f"第{index + 1}轮，沈文朝先逼问聂沧澜，聂沧澜拒绝交底，"
+                "季阿七立刻反制封索，失税旧账暴露新证据，局势转而升级。"
+            )
+        text = "\n".join([progression_units[0], plain_run, *progression_units[1:]])
+
+        density = PipelineOrchestrator._evaluate_event_density(text, word_count=len("".join(text.split())))
+
+        assert density["max_plain_unit_run"] > 5
+        assert density["event_density_passed"] is True
+        assert density["state_change_interval_passed"] is True
+
+    def test_first_draft_retry_triggers_for_long_chapter_low_event_density(self):
+        inert_block = "玉玺在北门旧账旁沉默，赤伞压着血契，灯影沿着纸面缓慢移动。" * 260
+        should_retry, story_guard, reason_codes = PipelineOrchestrator._evaluate_first_draft_retry(
+            content="\n\n".join(
+                [
+                    "玉玺、北门、旧账、赤伞、血契同时出现。",
+                    inert_block,
+                    inert_block,
+                    "北门旧账和赤伞血契还在原处。",
+                ]
+            ),
+            violations=[],
+            chapter_mission={
+                "chapter_purpose": "查明玉玺与北门旧账的关联",
+                "scene_list": [
+                    {
+                        "goal": "核对玉玺",
+                        "conflict": "北门旧账被遮掩",
+                        "turn": "赤伞牵出血契",
+                        "outcome": "血契暴露新风险",
+                        "end_hook": "北门旧账没有结束",
+                    },
+                    {
+                        "goal": "追问赤伞来历",
+                        "conflict": "证人拒绝回答",
+                        "turn": "血契指向新势力",
+                        "outcome": "主角必须改变下一步选择",
+                    },
+                ],
+            },
+            target_word_count=9000,
+            min_word_count=8100,
+        )
+
+        assert should_retry is True
+        assert story_guard["long_chapter_density_passed"] is False
+        assert "event_density_weak" in reason_codes
+        assert "long_chapter_event_density_weak" in reason_codes
+
+    def test_story_quality_metrics_accept_dense_scene_sequel_progression(self):
+        progressive_units = []
+        for index in range(18):
+            progressive_units.append(
+                f"第{index + 1}轮，林七先逼问玉玺来源，对方拒绝回答，他立刻拿出北门旧账反制，"
+                f"证据让赤伞线索暴露，局势转而升级，他必须改变下一步选择。"
+            )
+            progressive_units.append(
+                f"短余波里，他意识到血契会带来代价，决定把风险压给下一章，而不是原地感慨。"
+            )
+        guard = PipelineOrchestrator._score_story_quality_candidate(
+            content="\n\n".join(progressive_units),
+            violations=[],
+            chapter_mission={
+                "chapter_purpose": "查明玉玺与北门旧账的关联",
+                "continuity_anchor": {"deliver_to_next": ["风险压给下一章"]},
+                "dialogue_strategy": {"purpose": ["逼问", "反制"]},
+                "scene_list": [
+                    {
+                        "goal": "逼问玉玺来源",
+                        "conflict": "对方拒绝回答",
+                        "turn": "北门旧账反制",
+                        "outcome": "赤伞线索暴露",
+                        "pressure_shift": "血契会带来代价",
+                        "end_hook": "风险压给下一章",
+                    }
+                ],
+            },
+        )
+
+        assert guard["event_density_passed"] is True
+        assert guard["state_change_interval_passed"] is True
+        assert guard["scene_structure_rate"] >= 1.0
+        assert guard["quality_metric_snapshot"]["event_density_per_1000"] >= 1.0
+
+    def test_structural_gate_accepts_dense_scene_evidence_when_structure_keywords_are_rephrased(self):
+        content = (
+            "封索横在旧坞口，聂沧澜站在绳后。\n"
+            "“跟我回听潮祠。”他说，“你父亲的旧案，我替你查。”\n"
+            "沈文朝没有答应，先逼问：“查案，还是收印？”\n"
+            "聂沧澜以父案为条件压迫他，季阿七立刻挡住刀柄。\n"
+            "船板外有人递进失税旧账残页，盐商会也抛出价码，局势转而升级。\n"
+            "沈文朝发现两边都只说半句，于是决定不跟任何一方走，先反向套话。\n"
+            "雾中潮歌忽然响起，夜影替他们挡开追索，却不露真容。\n"
+            "季阿七拒绝把夜影当成援手，沈文朝也意识到父亲手札警告被动摇。\n"
+            "回到住处后，潮印映亮泡胀手札，旧痕指向听潮祠旧档夹层。\n"
+            "章尾，潮宗缉印令落下，盐商会封锁水路，他只能在天亮前潜入听潮祠。"
+        ) * 5
+        mission = {
+            "chapter_purpose": "把旧坞封锁升级成三方争夺，主角通过手札夹层确认听潮祠旧档目标。",
+            "suspense_hook": "潮宗缉印令与盐商会水路封锁同时落下，逼主角潜入听潮祠。",
+            "continuity_anchor": {"deliver_to_next": ["潜入听潮祠", "缉印令", "水路封锁"]},
+            "dialogue_strategy": {"purpose": ["逼问", "压迫", "反制"]},
+            "scene_list": [
+                {
+                    "goal": "在旧坞封锁下保住自己与潮印",
+                    "conflict": "聂沧澜以父案为条件控制主角",
+                    "turn": "盐商会递进失税旧账残页",
+                    "outcome": "主角不答应任何一方",
+                    "bridge": "雾中潮歌夜影制造撤离窗口",
+                    "end_hook": "潮歌夜影救场但不露真容",
+                },
+                {
+                    "goal": "验证泡胀手札",
+                    "conflict": "手札旧痕残缺且追索收紧",
+                    "turn": "潮印映出听潮祠旧档夹层",
+                    "outcome": "调查目标从沉鳞湾转向听潮祠",
+                    "bridge": "缉印令与水路封锁压到下一章",
+                    "end_hook": "天亮前潜入听潮祠",
+                },
+            ],
+        }
+
+        _, gate = PipelineOrchestrator._evaluate_structural_quality_gate_for_content(
+            review_summaries={
+                "self_critique": {"final_score": 76, "critical_count": 0, "major_count": 6},
+                "consistency": {"violations": []},
+            },
+            content=content,
+            violations=[],
+            chapter_mission=mission,
+        )
+
+        assert gate["passed"] is True
+
+    def test_quality_gate_status_clears_rule_warnings_after_soft_pass(self):
+        guard = {
+            "quality_issue_codes": ["scene_fulfillment_weak"],
+            "quality_issue_labels": ["场景兑现不足"],
+            "quality_issue_summary": {
+                "passed": False,
+                "tone": "danger",
+                "count": 1,
+                "codes": ["scene_fulfillment_weak"],
+                "labels": ["场景兑现不足"],
+                "items": [{"code": "scene_fulfillment_weak"}],
+            },
+            "quality_metric_snapshot": {
+                "quality_issue_codes": ["scene_fulfillment_weak"],
+                "quality_issue_labels": ["场景兑现不足"],
+                "quality_issue_summary": {
+                    "passed": False,
+                    "tone": "danger",
+                    "count": 1,
+                    "codes": ["scene_fulfillment_weak"],
+                    "labels": ["场景兑现不足"],
+                    "items": [{"code": "scene_fulfillment_weak"}],
+                },
+            },
+        }
+
+        normalized = PipelineOrchestrator._attach_quality_gate_status_to_guard(
+            guard,
+            {"passed": True, "quality_issue_codes": [], "quality_issue_labels": [], "blockers": []},
+        )
+
+        assert normalized["quality_gate_passed"] is True
+        assert normalized["quality_issue_summary"]["passed"] is True
+        assert normalized["quality_issue_codes"] == []
+        assert normalized["quality_rule_warnings"]["codes"] == ["scene_fulfillment_weak"]
 
     def test_ending_pressure_recognizes_survival_risk_without_punctuation_hook(self):
         text = (
@@ -748,6 +1025,53 @@ class TestGenerationQualityGuards:
 
         assert result["ending_pressure_passed"] is True
         assert "\u4e0b\u4e00\u8f6e" in result["ending_pressure_hits"]
+
+    def test_story_quality_metrics_match_compacted_named_mission_tokens(self):
+        guard = PipelineOrchestrator._score_story_quality_candidate(
+            content=(
+                "沈文朝把潮印按进袖中，潮宗的缉印令已经贴到渡口。\n"
+                "盐商会的人同时封锁水路，季阿七拒绝冒险硬闯。\n"
+                "沈文朝决定转向听潮祠，旧档夹层或许才是父案入口。\n"
+                "章尾，缉印令和水路封锁同时落下，他只能在天亮前潜入听潮祠。"
+            ),
+            violations=[],
+            chapter_mission={
+                "chapter_purpose": "潮宗正式发缉印令，盐商会封锁常用水路，主角被迫转向听潮祠旧档夹层",
+                "suspense_hook": "缉印令与水路封锁把下一章压力压到潜入听潮祠。",
+                "continuity_anchor": {"deliver_to_next": ["潜入听潮祠"]},
+                "scene_list": [
+                    {
+                        "goal": "确认潮宗正式发缉印令",
+                        "conflict": "盐商会封锁常用水路",
+                        "turn": "沈文朝决定转向听潮祠旧档夹层",
+                        "outcome": "退路被封锁",
+                        "end_hook": "天亮前潜入听潮祠",
+                    }
+                ],
+            },
+        )
+
+        assert guard["mission_hit_count"] >= 2
+        assert guard["scene_fulfillment_rate"] >= 0.5
+        assert guard["ending_pressure_passed"] is True
+
+    def test_ending_pressure_uses_outline_hook_when_deliver_to_next_is_sparse(self):
+        text = (
+            "沈文朝退到窗下时，外头的水路已经被盐商会封锁。"
+            "下一刻，潮宗缉印令沿着街口一张张贴下，"
+            "他终于明白自己没有退路，只能在天亮前潜入听潮祠。"
+        )
+
+        result = PipelineOrchestrator._evaluate_ending_pressure(
+            text,
+            chapter_mission={
+                "suspense_hook": "潮宗缉印令与盐商会水路封锁同时落下，逼主角潜入听潮祠。",
+                "continuity_anchor": {"deliver_to_next": []},
+            },
+        )
+
+        assert result["ending_pressure_passed"] is True
+        assert "缉印令" in result["ending_pressure_hits"] or "封锁" in result["ending_pressure_hits"]
 
     def test_rag_continuity_injection_forces_previous_tail_and_open_hooks(self):
         injected = PipelineOrchestrator._inject_continuity_into_rag(
@@ -797,6 +1121,77 @@ def test_specialized_enrichment_prompts_do_not_reopen_description_padding():
     assert "行动、对话、后果驱动" in ENRICH_SCENE_PROMPT
     assert "不能独立成段" in ENRICH_SCENE_PROMPT
     assert "明确后果" in ENRICH_SCENE_PROMPT
+
+
+def test_enrichment_guard_rejects_lost_motifs_and_sequence_anchors():
+    service = EnrichmentService(db=None, llm_service=None)
+    original = "\n\n".join(
+        [
+            "林七把账册按在桌上，逼问药行为何少了一页。",
+            "掌柜拒绝回答，只说旧南渠昨夜死了人。",
+            "林七发现药渣里有血契粉末，决定改查南渠。",
+            "门外脚步逼近，他必须立刻带走证据。",
+        ]
+    )
+    motif_lost = "\n\n".join(
+        [
+            "林七把账册按在桌上，逼问药行为何少了一页。他在桌边看着风，心里泛起很多旧事，灯影把他的沉默拉得很长。",
+            "掌柜沉默很久，屋内气氛越来越冷，连窗纸上的影子都像要压下来。",
+            "他想起远处的水声，觉得命运正在逼近，却仍然只在原地反复思量。",
+            "门外脚步逼近，他必须立刻带走证据。夜色在背后慢慢合拢。",
+        ]
+    )
+
+    assert service._enrichment_continuity_guard_failure(original, motif_lost).startswith("lost_required_motifs")
+
+    reordered = "\n\n".join(reversed(original.split("\n\n")))
+    assert service._enrichment_continuity_guard_failure(original, reordered) == "original_sequence_reordered"
+
+
+def test_enrichment_guard_extracts_project_specific_motifs_without_sample_keywords():
+    service = EnrichmentService(db=None, llm_service=None)
+    original = "\n\n".join(
+        [
+            "阿岚在星潮核心前按下零号航标，逼问舰长为何隐瞒第七枚晶钥。",
+            "舰长拒绝回答，只说雾环港昨夜已经封锁。",
+            "阿岚发现航标背面的银蓝印记，决定改查雾环港。",
+            "警报逼近，她必须立刻带走零号航标。",
+        ]
+    )
+    motif_lost = "\n\n".join(
+        [
+            "阿岚在控制台前逼问舰长为何隐瞒秘密，舰桥灯光被拉得很长，她再次追问，对方的手指终于停住。",
+            "舰长拒绝回答，只说昨夜已经封锁，随即反问她是否承担后果，局势立刻压紧。",
+            "阿岚发现背面的痕迹，决定改查港口，并抓住对方语气里的破绽夺回主动权。",
+            "警报逼近，她必须立刻离开，把危险压给下一章。",
+        ]
+    )
+
+    missing = service._missing_required_motifs(original, motif_lost)
+
+    assert missing
+    assert any("航标" in item or "晶钥" in item or "雾环港" in item for item in missing)
+
+
+def test_enrichment_guard_accepts_anchored_dramatic_supplement():
+    service = EnrichmentService(db=None, llm_service=None)
+    original_parts = [
+        "林七把账册按在桌上，逼问药行为何少了一页。",
+        "掌柜拒绝回答，只说旧南渠昨夜死了人。",
+        "林七发现药渣里有血契粉末，决定改查南渠。",
+        "门外脚步逼近，他必须立刻带走证据。",
+    ]
+    enriched_parts = [
+        original_parts[0] + "他追问第二遍，指尖压住缺页边缘，掌柜的手终于停住。",
+        original_parts[1] + "林七反制地念出账册数目，对方脸色一变，风险立刻升级。",
+        original_parts[2] + "这条线索暴露后，他意识到继续留在药行只会失去主动权。",
+        original_parts[3] + "他抓起账册转身，决定先保住证据，把危险压给下一章。",
+    ]
+
+    assert service._enrichment_continuity_guard_failure(
+        "\n\n".join(original_parts),
+        "\n\n".join(enriched_parts),
+    ) is None
 
 
 def test_self_critique_keeps_major_only_revision_local_after_content_changes():

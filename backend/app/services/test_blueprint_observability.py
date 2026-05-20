@@ -57,7 +57,7 @@ from app.services.llm_service import LLMService
 from app.services.novel_service import NovelService, _extract_generation_runtime_payload
 from app.services.pipeline_orchestrator import PipelineOrchestrator
 from app.services.self_critique_service import CritiqueDimension, SelfCritiqueService
-from app.api.routers.writer import _build_failed_generation_runtime_state, _run_finalize_pipeline
+from app.api.routers.writer import _append_generation_runtime_event, _build_failed_generation_runtime_state, _run_finalize_pipeline
 
 
 @pytest.fixture
@@ -204,6 +204,32 @@ async def test_run_finalize_pipeline_uses_explicit_chapter_number_without_touchi
 def test_blueprint_character_name_validator_rejects_placeholder_protagonist():
     assert _blueprint_has_valid_character_names({"characters": [{"name": "主角", "role": "主角"}]}) is False
     assert _blueprint_has_valid_character_names({"characters": [{"name": "林渡", "role": "主角"}]}) is True
+
+
+def test_append_generation_runtime_event_records_finalize_ledger_preview():
+    chapter = DummyChapter(
+        chapter_number=3,
+        real_summary=json.dumps({"generation_runtime": {"run_id": "run-1", "events": []}}, ensure_ascii=False),
+    )
+
+    _append_generation_runtime_event(
+        chapter,
+        stage="ledger_foreshadowing",
+        message="伏笔闭环完成",
+        title="伏笔闭环完成",
+        summary="回收 1 条，强化 2 条。",
+        content_preview="正文片段" * 140,
+        metrics={"resolved": 1, "reinforced": 2},
+        artifact_refs={"resolution_ids": [10]},
+    )
+
+    runtime = json.loads(chapter.real_summary)["generation_runtime"]
+    event = runtime["events"][-1]
+    assert runtime["progress_stage"] == "ledger_foreshadowing"
+    assert event["kind"] == "ledger"
+    assert event["content_preview"].endswith("...")
+    assert event["metrics"]["resolved"] == 1
+    assert event["artifact_refs"]["resolution_ids"] == [10]
 
 
 def test_build_character_naming_profile_includes_style_constraints():

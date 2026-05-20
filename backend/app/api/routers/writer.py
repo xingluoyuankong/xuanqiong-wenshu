@@ -232,6 +232,7 @@ def _build_failed_generation_runtime_state(
     reason: str,
     cancel_requested: bool = False,
     level: str = "error",
+    allowed_actions: Optional[List[str]] = None,
 ) -> str:
     payload = _load_generation_runtime_state(chapter)
     runtime = payload.get("generation_runtime") if isinstance(payload.get("generation_runtime"), dict) else {}
@@ -251,7 +252,7 @@ def _build_failed_generation_runtime_state(
         "progress_stage": "failed",
         "progress_message": reason,
         "progress_percent": 100,
-        "allowed_actions": ["refresh_status", "retry_generation"],
+        "allowed_actions": allowed_actions or ["refresh_status", "retry_generation"],
         "started_at": runtime.get("started_at") or now_iso,
         "updated_at": now_iso,
         "heartbeat_at": now_iso,
@@ -260,6 +261,65 @@ def _build_failed_generation_runtime_state(
         "events": [*events[-199:], event],
     }
     return json.dumps({"generation_runtime": normalized_runtime}, ensure_ascii=False)
+
+
+def _truncate_runtime_text(value: Any, limit: int = 420) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "..."
+
+
+def _append_generation_runtime_event(
+    chapter: Optional[Chapter],
+    *,
+    stage: str,
+    message: str,
+    level: str = "info",
+    event_kind: str = "ledger",
+    title: Optional[str] = None,
+    summary: Optional[str] = None,
+    progress_percent: Optional[int] = None,
+    content_preview: Optional[str] = None,
+    metrics: Optional[Dict[str, Any]] = None,
+    artifact_refs: Optional[Dict[str, Any]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    if chapter is None:
+        return
+    payload = _load_generation_runtime_state(chapter)
+    runtime = payload.get("generation_runtime") if isinstance(payload.get("generation_runtime"), dict) else {}
+    now_iso = datetime.now(timezone.utc).isoformat()
+    events = runtime.get("events") if isinstance(runtime.get("events"), list) else []
+    event: Dict[str, Any] = {
+        "at": now_iso,
+        "stage": stage,
+        "level": level,
+        "kind": event_kind,
+        "message": message,
+        "title": title or message,
+        "summary": summary or message,
+    }
+    if content_preview:
+        event["content_preview"] = _truncate_runtime_text(content_preview)
+    if metrics:
+        event["metrics"] = metrics
+    if artifact_refs:
+        event["artifact_refs"] = artifact_refs
+    if metadata:
+        event["metadata"] = metadata
+
+    normalized_runtime: Dict[str, Any] = {
+        **runtime,
+        "progress_stage": stage,
+        "progress_message": message,
+        "progress_percent": progress_percent if progress_percent is not None else runtime.get("progress_percent", 100),
+        "updated_at": now_iso,
+        "heartbeat_at": now_iso,
+        "chapter_number": chapter.chapter_number,
+        "events": [*events[-199:], event],
+    }
+    chapter.real_summary = json.dumps({"generation_runtime": normalized_runtime}, ensure_ascii=False)
 
 
 def _get_generation_run_id(chapter: Optional[Chapter]) -> Optional[str]:
@@ -365,12 +425,30 @@ async def _mark_busy_chapter_evaluation_failed(
             _get_generation_run_id(chapter),
         )
         return
+    version_count = 0
+    try:
+        count_result = await session.execute(
+            select(func.count(ChapterVersion.id)).where(ChapterVersion.chapter_id == chapter.id)
+        )
+        version_count = int(count_result.scalar_one() or 0)
+    except Exception as exc:  # noqa: BLE001 - action hint only
+        logger.warning(
+            "Failed to count blocked candidate versions: project=%s chapter=%s error=%s",
+            chapter.project_id,
+            chapter.chapter_number,
+            exc,
+        )
     chapter.status = ChapterGenerationStatus.EVALUATION_FAILED.value
     chapter.real_summary = _build_failed_generation_runtime_state(
         chapter,
         run_id=run_id or _get_generation_run_id(chapter) or "unknown",
         cancel_requested=_is_generation_cancel_requested(chapter, run_id),
         reason=reason,
+        allowed_actions=(
+            ["refresh_status", "confirm_version", "review_versions", "retry_generation", "view_error"]
+            if version_count > 0
+            else ["refresh_status", "retry_generation", "view_error"]
+        ),
     )
     session.add(
         ChapterEvaluation(
@@ -748,6 +826,85 @@ OUTLINE_EXECUTION_METADATA_KEYS = (
 )
 
 
+def _outline_item_json_schema(*, require_chapter_number: bool = False) -> Dict[str, Any]:
+    string_array = {"type": "array", "items": {"type": "string"}}
+    cast_delta_schema = {
+        "type": "object",
+        "required": ["new", "returning", "exit_or_absent", "faction_roles"],
+        "properties": {
+            "new": string_array,
+            "returning": string_array,
+            "exit_or_absent": string_array,
+            "faction_roles": string_array,
+        },
+    }
+    foreshadowing_schema = {
+        "type": "object",
+        "required": ["plant", "payoff"],
+        "properties": {
+            "plant": string_array,
+            "payoff": string_array,
+        },
+    }
+    foreshadowing_tasks_schema = {
+        "type": "object",
+        "required": ["plant", "reinforce", "payoff", "avoid_forgetting"],
+        "properties": {
+            "plant": string_array,
+            "reinforce": string_array,
+            "payoff": string_array,
+            "avoid_forgetting": string_array,
+        },
+    }
+    required = [
+        "title",
+        "summary",
+        "narrative_phase",
+        "chapter_role",
+        "suspense_hook",
+        "emotional_progression",
+        "character_focus",
+        "cast_delta",
+        "conflict_escalation",
+        "continuity_notes",
+        "foreshadowing",
+        "foreshadowing_tasks",
+        "payoff_window",
+    ]
+    properties: Dict[str, Any] = {
+        "title": {"type": "string"},
+        "summary": {"type": "string"},
+        "narrative_phase": {"type": "string"},
+        "chapter_role": {"type": "string"},
+        "suspense_hook": {"type": "string"},
+        "emotional_progression": {"type": "string"},
+        "character_focus": string_array,
+        "cast_delta": cast_delta_schema,
+        "conflict_escalation": string_array,
+        "continuity_notes": string_array,
+        "foreshadowing": foreshadowing_schema,
+        "foreshadowing_tasks": foreshadowing_tasks_schema,
+        "payoff_window": {"type": "string"},
+    }
+    if require_chapter_number:
+        required = ["chapter_number", *required]
+        properties["chapter_number"] = {"type": "integer"}
+    return {"type": "object", "required": required, "properties": properties}
+
+
+def _outline_batch_json_schema() -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "required": ["chapters"],
+        "properties": {
+            "chapters": {
+                "type": "array",
+                "items": _outline_item_json_schema(require_chapter_number=True),
+            }
+        },
+    }
+
+
 def _unwrap_outline_payload_root(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
@@ -1014,6 +1171,7 @@ async def _finalize_chapter_async(
                 user_id=user_id,
                 skip_vector_update=skip_vector_update,
                 refresh_memory_layer=True,
+                chapter=chapter,
             )
     except Exception as exc:
         logger.warning(
@@ -1033,8 +1191,23 @@ async def _run_finalize_pipeline(
     user_id: int,
     skip_vector_update: bool = False,
     refresh_memory_layer: bool = True,
+    chapter: Optional[Chapter] = None,
 ) -> Dict[str, Any]:
     llm_service = LLMService(session)
+
+    if chapter is not None:
+        _append_generation_runtime_event(
+            chapter,
+            stage="finalize",
+            message="正在确认定稿并更新故事账本",
+            progress_percent=98,
+            event_kind="ledger",
+            title="定稿闭环开始",
+            summary="将同步章节摘要、角色状态、伏笔/线索和知识图谱。",
+            content_preview=selected_version.content,
+            metrics={"selected_version_id": selected_version.id if getattr(selected_version, "id", None) else None},
+        )
+        await session.commit()
 
     vector_store = None
     if settings.vector_store_enabled and not skip_vector_update:
@@ -1052,6 +1225,22 @@ async def _run_finalize_pipeline(
         skip_vector_update=skip_vector_update,
     )
     result: Dict[str, Any] = {"finalize": finalize_result}
+
+    if chapter is not None:
+        finalize_success = bool(finalize_result.get("success", True)) if isinstance(finalize_result, dict) else True
+        _append_generation_runtime_event(
+            chapter,
+            stage="finalize",
+            message="定稿摘要和章节快照已处理" if finalize_success else "定稿摘要或章节快照处理降级",
+            level="info" if finalize_success else "warning",
+            progress_percent=98,
+            event_kind="ledger",
+            title="定稿快照完成" if finalize_success else "定稿快照降级",
+            summary="全局摘要、剧情线和章节快照已写入或尝试写入。",
+            metrics=(finalize_result.get("updates") if isinstance(finalize_result, dict) else None),
+            content_preview=selected_version.content,
+        )
+        await session.commit()
 
     if not refresh_memory_layer:
         return result
@@ -1082,6 +1271,18 @@ async def _run_finalize_pipeline(
             user_id=user_id,
         )
         result["memory_layer"] = memory_result
+        if chapter is not None:
+            _append_generation_runtime_event(
+                chapter,
+                stage="ledger_memory",
+                message="角色状态和时间线账本更新完成",
+                progress_percent=99,
+                event_kind="ledger",
+                title="记忆层更新完成",
+                summary="已从定稿正文抽取角色状态、时间线和因果信息。",
+                metrics=memory_result,
+            )
+            await session.commit()
     except Exception as exc:
         await session.rollback()
         logger.warning(
@@ -1093,6 +1294,19 @@ async def _run_finalize_pipeline(
             "success": False,
             "error": str(exc)[:200],
         }
+        if chapter is not None:
+            _append_generation_runtime_event(
+                chapter,
+                stage="ledger_memory",
+                message="记忆层更新降级，定稿正文已保留",
+                level="warning",
+                progress_percent=99,
+                event_kind="ledger",
+                title="记忆层更新降级",
+                summary="角色状态或时间线抽取失败，后续可重试账本同步。",
+                metadata={"error": str(exc)[:300]},
+            )
+            await session.commit()
 
     try:
         foreshadowing_service = ForeshadowingService(session)
@@ -1123,6 +1337,27 @@ async def _run_finalize_pipeline(
             "auto_collected": auto_collect_result,
             "active_reminders_checked": len(reminders),
         }
+        if chapter is not None:
+            _append_generation_runtime_event(
+                chapter,
+                stage="ledger_foreshadowing",
+                message="伏笔回收和新伏笔抽取完成",
+                progress_percent=99,
+                event_kind="ledger",
+                title="伏笔闭环完成",
+                summary=(
+                    f"回收 {foreshadowing_result.get('resolved', 0)} 条，强化 "
+                    f"{foreshadowing_result.get('reinforced', 0)} 条，新增 "
+                    f"{auto_collect_result.get('created', 0) if isinstance(auto_collect_result, dict) else 0} 条。"
+                ),
+                metrics=result["foreshadowing_closure"],
+                artifact_refs={
+                    "resolution_ids": foreshadowing_result.get("resolution_ids", []),
+                    "reinforced_ids": foreshadowing_result.get("reinforced_ids", []),
+                    "unresolved_due_ids": foreshadowing_result.get("unresolved_due_ids", []),
+                },
+            )
+            await session.commit()
     except Exception as exc:
         await session.rollback()
         logger.warning(
@@ -1134,6 +1369,19 @@ async def _run_finalize_pipeline(
             "success": False,
             "error": str(exc)[:200],
         }
+        if chapter is not None:
+            _append_generation_runtime_event(
+                chapter,
+                stage="ledger_foreshadowing",
+                message="伏笔闭环降级，定稿正文已保留",
+                level="warning",
+                progress_percent=99,
+                event_kind="ledger",
+                title="伏笔闭环降级",
+                summary="伏笔回收或新伏笔抽取失败，后续可重试账本同步。",
+                metadata={"error": str(exc)[:300]},
+            )
+            await session.commit()
 
     try:
         clue_result = await ClueTrackerService(session).sync_from_foreshadowings(project_id)
@@ -1142,6 +1390,21 @@ async def _run_finalize_pipeline(
             "clues": clue_result,
             "knowledge_graph": graph_result,
         }
+        if chapter is not None:
+            _append_generation_runtime_event(
+                chapter,
+                stage="ledger_graph",
+                message="线索和知识图谱同步完成",
+                progress_percent=100,
+                event_kind="ledger",
+                title="线索/图谱同步完成",
+                summary="已把伏笔线索、角色状态和时间线同步进故事账本。",
+                metrics={
+                    "clues": clue_result if isinstance(clue_result, dict) else {},
+                    "knowledge_graph": graph_result if isinstance(graph_result, dict) else {},
+                },
+            )
+            await session.commit()
     except Exception as exc:
         await session.rollback()
         logger.warning(
@@ -1153,6 +1416,19 @@ async def _run_finalize_pipeline(
             "success": False,
             "error": str(exc)[:200],
         }
+        if chapter is not None:
+            _append_generation_runtime_event(
+                chapter,
+                stage="ledger_graph",
+                message="线索/知识图谱同步降级，定稿正文已保留",
+                level="warning",
+                progress_percent=100,
+                event_kind="ledger",
+                title="线索/图谱同步降级",
+                summary="线索或知识图谱同步失败，章节正文和其他账本结果不受影响。",
+                metadata={"error": str(exc)[:300]},
+            )
+            await session.commit()
 
     try:
         cache_service = CacheService()
@@ -1166,6 +1442,23 @@ async def _run_finalize_pipeline(
     except Exception as exc:
         logger.warning("清理分析缓存失败，已保留定稿结果: %s", exc)
         result["analysis_cache"] = {"success": False, "error": str(exc)[:200]}
+
+    if chapter is not None:
+        _append_generation_runtime_event(
+            chapter,
+            stage="finalized",
+            message="定稿闭环完成",
+            progress_percent=100,
+            event_kind="ledger",
+            title="定稿闭环完成",
+            summary="正文已确认，记忆、伏笔、线索和知识图谱同步结果已写入运行日志。",
+            metrics={
+                "memory_success": bool((result.get("memory_layer") or {}).get("success", True)),
+                "foreshadowing_success": bool((result.get("foreshadowing_closure") or {}).get("success", True)),
+                "ledger_sync_success": bool((result.get("ledger_sync") or {}).get("success", True)),
+            },
+        )
+        await session.commit()
 
     return result
 
@@ -1546,6 +1839,7 @@ async def finalize_chapter(
         user_id=current_user.id,
         skip_vector_update=request.skip_vector_update or False,
         refresh_memory_layer=True,
+        chapter=chapter,
     )
 
     return FinalizeChapterResponse(
@@ -2364,8 +2658,11 @@ async def rewrite_chapter_outline(
                     stage_label="章节大纲重写",
                     retry_attempts=3,
                     response_format="json_object",
+                    json_schema=_outline_item_json_schema(),
+                    json_schema_name="chapter_outline_rewrite",
+                    json_schema_strict=False,
                     allow_truncated_response=True,
-                    json_repair_attempts=1,
+                    json_repair_attempts=2,
                 ),
             )
         parsed = _unwrap_outline_payload_root(json_result.data)
@@ -2587,10 +2884,13 @@ async def generate_chapters_outline(
                             progress_stage="outline_chapter_skeleton",
                             retry_attempts=3,
                             response_format="json_object",
+                            json_schema=_outline_batch_json_schema(),
+                            json_schema_name="chapter_outline_batch",
+                            json_schema_strict=False,
                             max_tokens=5000,
                             allow_truncated_response=True,
                             retry_same_model_once=True,
-                            json_repair_attempts=1,
+                            json_repair_attempts=2,
                         ),
                     )
                     data = json_result.data

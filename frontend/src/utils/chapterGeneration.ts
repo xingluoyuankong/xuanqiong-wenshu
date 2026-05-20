@@ -63,6 +63,10 @@ const RUNTIME_BUSY_STAGES = new Set([
   'optimizer',
   'enrichment',
   'persist_versions',
+  'finalize',
+  'ledger_memory',
+  'ledger_foreshadowing',
+  'ledger_graph',
 ])
 
 const STAGE_LABEL_MAP: Record<string, string> = {
@@ -101,6 +105,11 @@ const STAGE_LABEL_MAP: Record<string, string> = {
   consistency: '一致性检查',
   continuity_gate: '长篇连续性检查',
   persist_versions: '保存候选版本',
+  finalize: '定稿快照',
+  ledger_memory: '记忆层更新',
+  ledger_foreshadowing: '伏笔闭环',
+  ledger_graph: '线索/图谱同步',
+  finalized: '定稿完成',
   selecting: '等待选择',
   waiting_for_confirm: '等待确认',
   ready: '已就绪',
@@ -153,6 +162,11 @@ const BACKEND_STAGE_DEFINITIONS: BackendStageDefinition[] = [
   { key: 'continuity_gate', label: '长篇连续性检查', milestone: 91 },
   { key: 'persist_versions', label: '保存候选版本', milestone: 92 },
   { key: 'waiting_for_confirm', label: '等待确认', milestone: 97, aliases: ['selecting'] },
+  { key: 'finalize', label: '定稿快照', milestone: 98 },
+  { key: 'ledger_memory', label: '记忆层更新', milestone: 99 },
+  { key: 'ledger_foreshadowing', label: '伏笔闭环', milestone: 99 },
+  { key: 'ledger_graph', label: '线索/图谱同步', milestone: 100 },
+  { key: 'finalized', label: '定稿完成', milestone: 100 },
   { key: 'successful', label: '已完成', milestone: 100, aliases: ['ready'] },
   { key: 'failed', label: '失败', milestone: 100, aliases: ['evaluation_failed'] },
 ]
@@ -181,6 +195,11 @@ const DEFAULT_PIPELINE_SEQUENCE = [
   'continuity_gate',
   'persist_versions',
   'waiting_for_confirm',
+  'finalize',
+  'ledger_memory',
+  'ledger_foreshadowing',
+  'ledger_graph',
+  'finalized',
 ] as const
 
 const OUTLINE_PIPELINE_SEQUENCE = [
@@ -248,6 +267,10 @@ const STAGE_STALL_THRESHOLDS: Record<string, number> = {
   consistency: 5 * 60_000,
   continuity_gate: 3 * 60_000,
   persist_versions: 3 * 60_000,
+  finalize: 4 * 60_000,
+  ledger_memory: 4 * 60_000,
+  ledger_foreshadowing: 3 * 60_000,
+  ledger_graph: 3 * 60_000,
   waiting_for_confirm: 30 * 60_000,
 }
 
@@ -326,7 +349,7 @@ export const canCancelGeneration = (
 
 export const isTrackableTaskStage = (rawStage: unknown): boolean => {
   const stage = normalizeRuntimeStage(rawStage)
-  return RUNTIME_BUSY_STAGES.has(stage) || ['waiting_for_confirm', 'ready', 'successful', 'failed', 'evaluation_failed'].includes(stage)
+  return RUNTIME_BUSY_STAGES.has(stage) || ['waiting_for_confirm', 'ready', 'successful', 'finalized', 'failed', 'evaluation_failed'].includes(stage)
 }
 
 export const isTrackableTask = (
@@ -408,7 +431,7 @@ const inferCurrentStepIndex = (currentStage: string) => {
 }
 
 const inferStageProgress = (runtimeRecord: Record<string, any>, currentStage: string, nowMs: number): number => {
-  if (['ready', 'successful', 'failed', 'evaluation_failed', 'waiting_for_confirm'].includes(currentStage)) return 100
+  if (['ready', 'successful', 'finalized', 'failed', 'evaluation_failed', 'waiting_for_confirm'].includes(currentStage)) return 100
 
   const currentMilestone = getStageMilestone(currentStage)
   const sequence = getPipelineSequence(currentStage)
@@ -534,7 +557,7 @@ export const buildChapterTaskUiModel = (
     : clampPercent(Number(runtimeRecord.progress_percent || getStageMilestone(stage) || 0) || 0)
   const sequence = getPipelineSequence(stage)
   const totalSteps = sequence.length
-  const currentStepIndex = ['ready', 'successful', 'failed', 'evaluation_failed'].includes(stage)
+  const currentStepIndex = ['ready', 'successful', 'finalized', 'failed', 'evaluation_failed'].includes(stage)
     ? totalSteps - 1
     : inferCurrentStepIndex(stage)
   const currentStep = Math.min(totalSteps, currentStepIndex + 1)
