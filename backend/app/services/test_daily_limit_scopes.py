@@ -61,6 +61,13 @@ def test_daily_limit_scope_reuses_parent_scope_when_nested():
 
 @pytest.mark.anyio
 async def test_preview_generation_scope_reuses_outer_logical_run():
+    expanded_chapter = "\n\n".join(
+        [
+            "complete chapter draft " + "action dialogue consequence " * 90,
+            "character makes a choice " + "conflict escalates " * 80,
+            "ending pressure carries forward " + "visible cost " * 80,
+        ]
+    )
     llm = ScopeAwareLLM(
         [
             json.dumps(
@@ -89,7 +96,7 @@ async def test_preview_generation_scope_reuses_outer_logical_run():
                 },
                 ensure_ascii=False,
             ),
-            "完整章节正文",
+            expanded_chapter,
         ]
     )
     service = PreviewGenerationService(db=None, llm_service=llm, prompt_service=object())
@@ -108,9 +115,24 @@ async def test_preview_generation_scope_reuses_outer_logical_run():
         )
 
     assert result["status"] == "success"
-    assert result["full_chapter"] == "完整章节正文"
+    assert result["full_chapter"] == expanded_chapter.strip()
     assert len(llm.scope_ids) == 3
     assert all(scope_id == outer_scope_id for scope_id in llm.scope_ids)
+
+
+def test_preview_expansion_guard_rejects_short_or_fragmented_full_chapter():
+    assert (
+        PreviewGenerationService._expanded_chapter_failure_reason("too short", 3000)
+        == "expanded_chapter_under_target_floor"
+    )
+    assert (
+        PreviewGenerationService._expanded_chapter_failure_reason("single paragraph " * 260, 3000)
+        == "expanded_chapter_too_fragmented"
+    )
+    assert PreviewGenerationService._expanded_chapter_failure_reason(
+        "\n\n".join(["scene action consequence " * 80 for _ in range(4)]),
+        3000,
+    ) == ""
 
 
 @pytest.mark.anyio
