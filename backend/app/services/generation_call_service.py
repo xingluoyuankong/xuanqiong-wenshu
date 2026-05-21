@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import random
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -37,6 +38,8 @@ class GenerationCallPolicy:
     json_repair_attempts: int = 1
     backoff_base_seconds: float = 1.0
     backoff_max_seconds: float = 12.0
+    heartbeat_interval_seconds: Optional[float] = None
+    soft_timeout_seconds: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -317,6 +320,105 @@ def validate_json_schema_subset(data: Dict[str, Any], schema: Optional[Dict[str,
     return errors
 
 
+async def _await_provider_text_with_heartbeat(
+    *,
+    llm_service: LLMService,
+    system_prompt: str,
+    conversation_history: List[Dict[str, str]],
+    temperature: float,
+    user_id: int,
+    timeout: float,
+    response_format_payload: Optional[Any],
+    policy: GenerationCallPolicy,
+    progress_callback: ProgressCallback | None,
+) -> str:
+    provider_task = asyncio.create_task(
+        llm_service.get_llm_response(
+            system_prompt=system_prompt,
+            conversation_history=conversation_history,
+            temperature=temperature,
+            user_id=user_id,
+            timeout=timeout,
+            response_format=response_format_payload,
+            max_tokens=policy.max_tokens,
+            top_p=policy.top_p,
+            prompt_cache_key=policy.prompt_cache_key,
+            allow_truncated_response=policy.allow_truncated_response,
+            retry_same_model_once=policy.retry_same_model_once,
+        )
+    )
+    loop = asyncio.get_running_loop()
+    started_at = loop.time()
+    hard_timeout = max(0.05, float(timeout or 0.0))
+    hard_deadline = started_at + hard_timeout
+    soft_timeout = policy.soft_timeout_seconds
+    soft_deadline = (
+        started_at + max(0.01, float(soft_timeout))
+        if soft_timeout and 0 < float(soft_timeout) < hard_timeout
+        else None
+    )
+    heartbeat_interval = policy.heartbeat_interval_seconds
+    next_heartbeat = (
+        started_at + max(0.01, float(heartbeat_interval))
+        if heartbeat_interval and progress_callback is not None
+        else None
+    )
+
+    try:
+        while True:
+            now = loop.time()
+            deadline_candidates = [hard_deadline]
+            if soft_deadline is not None:
+                deadline_candidates.append(soft_deadline)
+            if next_heartbeat is not None:
+                deadline_candidates.append(next_heartbeat)
+            done, _ = await asyncio.wait({provider_task}, timeout=max(0.05, min(deadline_candidates) - now))
+            if done:
+                return await provider_task
+
+            now = loop.time()
+            if soft_deadline is not None and now >= soft_deadline:
+                provider_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await provider_task
+                raise HTTPException(
+                    status_code=504,
+                    detail={
+                        "code": "PROVIDER_SOFT_TIMEOUT",
+                        "message": f"{policy.stage_label} 等待 Provider 返回超过软超时阈值",
+                        "hint": "已中止本次上游调用，可降低输出上限或切换 Provider 后重试。",
+                        "retryable": True,
+                        "soft_timeout_seconds": round(float(soft_timeout or 0), 2),
+                    },
+                )
+            if now >= hard_deadline:
+                provider_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await provider_task
+                raise HTTPException(
+                    status_code=504,
+                    detail={
+                        "code": "PROVIDER_TIMEOUT",
+                        "message": f"{policy.stage_label} 等待 Provider 返回超时",
+                        "hint": "请稍后重试或切换更稳定的 Provider。",
+                        "retryable": True,
+                        "timeout_seconds": round(hard_timeout, 2),
+                    },
+                )
+            if next_heartbeat is not None and now >= next_heartbeat:
+                elapsed = int(now - started_at)
+                await progress_callback(
+                    policy.progress_stage,
+                    f"{policy.stage_label} 已等待 Provider 返回 {elapsed} 秒，任务仍在继续",
+                )
+                next_heartbeat = now + max(0.01, float(heartbeat_interval))
+                continue
+    except BaseException:
+        if not provider_task.done():
+            provider_task.cancel()
+        raise
+
+
 async def call_generation_text(
     *,
     llm_service: LLMService,
@@ -334,18 +436,16 @@ async def call_generation_text(
     for attempt in range(1, attempts + 1):
         response_format_payload = build_response_format_payload(active_policy)
         try:
-            text = await llm_service.get_llm_response(
+            text = await _await_provider_text_with_heartbeat(
+                llm_service=llm_service,
                 system_prompt=system_prompt,
                 conversation_history=conversation_history,
                 temperature=temperature,
                 user_id=user_id,
                 timeout=timeout,
-                response_format=response_format_payload,
-                max_tokens=active_policy.max_tokens,
-                top_p=active_policy.top_p,
-                prompt_cache_key=active_policy.prompt_cache_key,
-                allow_truncated_response=active_policy.allow_truncated_response,
-                retry_same_model_once=active_policy.retry_same_model_once,
+                response_format_payload=response_format_payload,
+                policy=active_policy,
+                progress_callback=progress_callback,
             )
             return GenerationTextResult(text=text, attempts=attempt, response_format_used=response_format_payload)
         except HTTPException as exc:
@@ -388,6 +488,29 @@ async def call_generation_text(
                     await progress_callback(
                         active_policy.progress_stage,
                         f"{active_policy.stage_label} 上游模型拒绝当前输出上限，已降低 max_tokens 后重试",
+                )
+                await asyncio.sleep(resolve_retry_delay_seconds(exc, attempt, active_policy))
+                continue
+            if (
+                provider_error_type == "timeout"
+                and active_policy.max_tokens
+                and active_policy.max_tokens > 12000
+                and attempt < attempts
+            ):
+                previous_max_tokens = active_policy.max_tokens
+                reduced_max_tokens = max(12000, int(previous_max_tokens * 0.82))
+                logger.warning(
+                    "Retrying generation stage with reduced max_tokens after provider timeout: stage=%s max_tokens=%s reduced=%s detail=%s",
+                    active_policy.stage_label,
+                    previous_max_tokens,
+                    reduced_max_tokens,
+                    exc.detail,
+                )
+                active_policy = replace(active_policy, max_tokens=reduced_max_tokens)
+                if progress_callback is not None:
+                    await progress_callback(
+                        active_policy.progress_stage,
+                        f"{active_policy.stage_label} 等待 Provider 返回超时，已降低输出上限后重试",
                     )
                 await asyncio.sleep(resolve_retry_delay_seconds(exc, attempt, active_policy))
                 continue

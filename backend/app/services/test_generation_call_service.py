@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 
@@ -114,6 +115,50 @@ async def test_call_generation_text_reduces_max_tokens_after_provider_token_limi
     assert llm.calls[0]["max_tokens"] == 24000
     assert 12000 <= llm.calls[1]["max_tokens"] < 24000
     assert stages and stages[0][0] == "generating"
+
+
+@pytest.mark.anyio
+async def test_call_generation_text_heartbeats_and_reduces_max_tokens_after_soft_timeout():
+    stages = []
+
+    class SlowLLMService(_FakeLLMService):
+        async def get_llm_response(self, **kwargs):
+            self.calls.append(kwargs)
+            await asyncio.sleep(1)
+            return "late"
+
+    async def progress_callback(stage: str, message: str):
+        stages.append((stage, message))
+
+    llm = SlowLLMService([])
+
+    with pytest.raises(HTTPException) as exc_info:
+        await call_generation_text(
+            llm_service=llm,
+            system_prompt="system",
+            conversation_history=[{"role": "user", "content": "long chapter"}],
+            temperature=0.3,
+            user_id=1,
+            timeout=1.0,
+            policy=GenerationCallPolicy(
+                stage_label="长章正文候选",
+                progress_stage="generate_variants",
+                retry_attempts=2,
+                response_format=None,
+                max_tokens=20000,
+                heartbeat_interval_seconds=0.01,
+                soft_timeout_seconds=0.03,
+                backoff_base_seconds=0.01,
+            ),
+            progress_callback=progress_callback,
+        )
+
+    assert exc_info.value.status_code == 504
+    assert len(llm.calls) == 2
+    assert llm.calls[0]["max_tokens"] == 20000
+    assert 12000 <= llm.calls[1]["max_tokens"] < 20000
+    assert any(stage == "generate_variants" and "Provider" in message for stage, message in stages)
+    assert any("降低输出上限" in message for _, message in stages)
 
 
 def test_retry_delay_respects_retry_after_and_cap():
