@@ -20,7 +20,18 @@
     <section v-if="styleProgressVisible" class="style-progress-panel">
       <div class="style-progress-panel__head">
         <strong>{{ styleProgressTitle }}</strong>
-        <span>{{ styleProgressPercent }}%</span>
+        <div class="style-progress-panel__actions">
+          <span>{{ styleProgressPercent }}%</span>
+          <button
+            v-if="savingSource && sourceUploadRunId"
+            type="button"
+            class="style-progress-panel__cancel"
+            :disabled="sourceUploadCancelRequested"
+            @click="cancelSourceUpload"
+          >
+            {{ sourceUploadCancelRequested ? '取消中...' : '取消' }}
+          </button>
+        </div>
       </div>
       <p class="style-progress-panel__desc">{{ styleProgressDescription }}</p>
       <div class="style-progress-panel__track" aria-label="style-progress">
@@ -451,7 +462,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { NovelAPI, OptimizerAPI, type NovelProjectSummary } from '@/api/novel'
+import { NovelAPI, OptimizerAPI, type NovelProjectSummary, type StyleSourceUploadJobResponse } from '@/api/novel'
 
 const fileInputRef = ref<HTMLInputElement | null>(null)
 
@@ -475,6 +486,10 @@ const batchStrategy = ref('按卷或情节段拆分：先录入最能代表文�
 const selectedFileName = ref('')
 const selectedFileChars = ref(0)
 const selectedUploadFile = ref<File | null>(null)
+const sourceUploadRunId = ref('')
+const sourceUploadStage = ref('')
+const sourceUploadMessage = ref('')
+const sourceUploadCancelRequested = ref(false)
 const historyKeyword = ref('')
 const historyModeFilter = ref<'all' | 'file_stub' | 'chunk_manual' | 'hybrid'>('all')
 const historyTypeFilter = ref<'all' | 'external_novel' | 'external_text'>('all')
@@ -489,7 +504,18 @@ const error = ref('')
 const styleProgressVisible = computed(() => savingSource.value || creatingProfile.value)
 const styleProgressPercent = computed(() => {
   if (creatingProfile.value) return 78
-  if (savingSource.value) return 46
+  if (savingSource.value) {
+    const stageProgress: Record<string, number> = {
+      queued: 8,
+      upload_reading: 24,
+      upload_extracting: 58,
+      upload_saving: 84,
+      successful: 100,
+      failed: 100,
+      cancelled: 100
+    }
+    return stageProgress[sourceUploadStage.value] ?? 46
+  }
   return 0
 })
 const styleProgressTitle = computed(() => {
@@ -499,9 +525,14 @@ const styleProgressTitle = computed(() => {
 })
 const styleProgressDescription = computed(() => {
   if (creatingProfile.value) return '\u7cfb\u7edf\u6b63\u5728\u6c47\u603b\u5df2\u9009\u6765\u6e90\uff0c\u63d0\u70bc\u53d9\u4e8b\u3001\u8282\u594f\u3001\u53e5\u5f0f\u548c\u63cf\u5199\u503e\u5411\u3002'
+  if (savingSource.value && sourceUploadMessage.value) return sourceUploadMessage.value
   if (savingSource.value) return '\u5f53\u524d\u7d20\u6750\u6b63\u5728\u843d\u5e93\uff0c\u7a0d\u540e\u5c31\u53ef\u4ee5\u52a0\u5165\u5b66\u4e60\u6279\u6b21\u6216\u7ee7\u7eed\u8865\u5f55\u3002'
   return ''
 })
+
+const STYLE_SOURCE_UPLOAD_POLL_INTERVAL_MS = 2000
+const STYLE_SOURCE_UPLOAD_MAX_POLL_ATTEMPTS = 900
+const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
 const summaryLabels: Record<string, string> = {
   narrative: '叙事',
@@ -696,17 +727,61 @@ async function loadLibrary() {
   }
 }
 
+function readStyleSourceUploadError(status: StyleSourceUploadJobResponse): string {
+  const rawError = status.error
+  if (!rawError) return status.progress_message || '文风素材导入失败，请稍后重试'
+  if (typeof rawError === 'string') return rawError
+  return rawError.detail || rawError.message || status.progress_message || '文风素材导入失败，请稍后重试'
+}
+
+async function uploadSourceWithProgress(payload: {
+  file: File
+  title?: string
+  source_type?: string
+  extra?: Record<string, any>
+}): Promise<{ success: boolean; source: any }> {
+  if (!selectedProjectId.value) throw new Error('请先选择项目')
+  const projectId = selectedProjectId.value
+
+  let status = await OptimizerAPI.startStyleSourceUpload(projectId, payload)
+  sourceUploadRunId.value = status.run_id
+
+  for (let attempt = 0; attempt < STYLE_SOURCE_UPLOAD_MAX_POLL_ATTEMPTS; attempt += 1) {
+    sourceUploadStage.value = status.progress_stage || status.status
+    sourceUploadMessage.value = status.progress_message || '文风素材导入进行中...'
+
+    if (status.status === 'successful' && status.source) {
+      return { success: true, source: status.source }
+    }
+    if (status.status === 'failed') {
+      throw new Error(readStyleSourceUploadError(status))
+    }
+    if (status.status === 'cancelled') {
+      throw new Error(status.progress_message || '文风素材导入已取消')
+    }
+
+    await wait(STYLE_SOURCE_UPLOAD_POLL_INTERVAL_MS)
+    status = await OptimizerAPI.getStyleSourceUploadStatus(projectId, sourceUploadRunId.value)
+  }
+
+  throw new Error('文风素材导入后台任务等待超时，请稍后刷新文风中心查看结果。')
+}
+
 async function createSource() {
   if (!selectedProjectId.value) return
   savingSource.value = true
   error.value = ''
+  sourceUploadRunId.value = ''
+  sourceUploadStage.value = selectedUploadFile.value ? 'queued' : 'upload_saving'
+  sourceUploadMessage.value = selectedUploadFile.value ? '正在提交文风素材导入任务...' : '正在保存手动学习素材...'
+  sourceUploadCancelRequested.value = false
   try {
     const noteText = draftContent.value.trim()
     const noteLabel = batchLabel.value.trim() || noteText.slice(0, 80) || '未命名批次'
 
     let res: { success: boolean; source: any }
     if (selectedUploadFile.value) {
-      res = await OptimizerAPI.uploadStyleSource(selectedProjectId.value, {
+      res = await uploadSourceWithProgress({
         file: selectedUploadFile.value,
         title: draftTitle.value,
         source_type: importMode.value === 'chunk_manual' ? 'external_text' : 'external_novel',
@@ -763,6 +838,26 @@ async function createSource() {
     error.value = e.message || '保存素材失败'
   } finally {
     savingSource.value = false
+    sourceUploadRunId.value = ''
+    sourceUploadStage.value = ''
+    sourceUploadMessage.value = ''
+    sourceUploadCancelRequested.value = false
+  }
+}
+
+async function cancelSourceUpload() {
+  if (!selectedProjectId.value || !sourceUploadRunId.value || sourceUploadCancelRequested.value) return
+  sourceUploadCancelRequested.value = true
+  try {
+    const status = await OptimizerAPI.cancelStyleSourceUpload(selectedProjectId.value, sourceUploadRunId.value)
+    sourceUploadStage.value = status.progress_stage || status.status
+    sourceUploadMessage.value = status.progress_message || '正在取消文风素材导入...'
+    if (status.status !== 'cancelled') {
+      sourceUploadCancelRequested.value = false
+    }
+  } catch (e: any) {
+    sourceUploadCancelRequested.value = false
+    sourceUploadMessage.value = e?.message || '取消失败，文风素材导入仍在继续'
   }
 }
 
@@ -1020,6 +1115,33 @@ onMounted(async () => {
   font-size: 0.88rem;
   font-weight: 700;
   color: #0f172a;
+}
+
+.style-progress-panel__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.style-progress-panel__cancel {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.8);
+  color: #475569;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 4px 9px;
+  transition: all 0.18s ease;
+}
+
+.style-progress-panel__cancel:not(:disabled):hover {
+  border-color: rgba(225, 29, 72, 0.28);
+  color: #be123c;
+}
+
+.style-progress-panel__cancel:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .style-progress-panel__desc {

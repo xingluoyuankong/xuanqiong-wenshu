@@ -36,6 +36,12 @@ _STYLE_PROFILE_PROJECT_RUNS: Dict[str, str] = {}
 _STYLE_PROFILE_JOB_LOCK = asyncio.Lock()
 _STYLE_PROFILE_ACTIVE_STATUSES = {"queued", "extracting", "profiling", "saving"}
 _STYLE_PROFILE_HEARTBEAT_SECONDS = 30
+_STYLE_SOURCE_UPLOAD_JOBS: Dict[str, Dict[str, Any]] = {}
+_STYLE_SOURCE_UPLOAD_PROJECT_RUNS: Dict[str, str] = {}
+_STYLE_SOURCE_UPLOAD_JOB_LOCK = asyncio.Lock()
+_STYLE_SOURCE_UPLOAD_ACTIVE_STATUSES = {"queued", "upload_reading", "upload_extracting", "upload_saving"}
+_STYLE_SOURCE_UPLOAD_CANCELLABLE_STATUSES = {"queued", "upload_reading", "upload_extracting"}
+_STYLE_SOURCE_UPLOAD_HEARTBEAT_SECONDS = 20
 
 
 class ExtractStyleRequest(BaseModel):
@@ -81,6 +87,20 @@ class StyleProfileJobResponse(BaseModel):
     started_at: Optional[str] = None
     updated_at: Optional[str] = None
     profile: Optional[Dict[str, Any]] = None
+    error: Optional[StyleProfileJobError] = None
+
+
+class StyleSourceUploadJobResponse(BaseModel):
+    run_id: str
+    project_id: str
+    status: str
+    progress_stage: str = "queued"
+    progress_message: str = ""
+    started_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    filename: Optional[str] = None
+    source: Optional[Dict[str, Any]] = None
+    metrics: Dict[str, Any] = Field(default_factory=dict)
     error: Optional[StyleProfileJobError] = None
 
 
@@ -158,6 +178,22 @@ def _serialize_style_profile_job(job: Dict[str, Any]) -> StyleProfileJobResponse
     )
 
 
+def _serialize_style_source_upload_job(job: Dict[str, Any]) -> StyleSourceUploadJobResponse:
+    return StyleSourceUploadJobResponse(
+        run_id=str(job.get("run_id") or ""),
+        project_id=str(job.get("project_id") or ""),
+        status=str(job.get("status") or "idle"),
+        progress_stage=str(job.get("progress_stage") or job.get("status") or "idle"),
+        progress_message=str(job.get("progress_message") or ""),
+        started_at=job.get("started_at"),
+        updated_at=job.get("updated_at"),
+        filename=job.get("filename"),
+        source=job.get("source"),
+        metrics=dict(job.get("metrics") or {}),
+        error=job.get("error"),
+    )
+
+
 async def _set_style_profile_job_state(run_id: str, **updates: Any) -> Dict[str, Any]:
     async with _STYLE_PROFILE_JOB_LOCK:
         job = _STYLE_PROFILE_JOBS.get(run_id)
@@ -169,6 +205,157 @@ async def _set_style_profile_job_state(run_id: str, **updates: Any) -> Dict[str,
         job.update(updates)
         job["updated_at"] = _style_job_now_iso()
         return dict(job)
+
+
+async def _set_style_source_upload_job_state(run_id: str, **updates: Any) -> Dict[str, Any]:
+    async with _STYLE_SOURCE_UPLOAD_JOB_LOCK:
+        job = _STYLE_SOURCE_UPLOAD_JOBS.get(run_id)
+        if not job:
+            job = {"run_id": run_id, "status": "idle", "progress_stage": "idle"}
+            _STYLE_SOURCE_UPLOAD_JOBS[run_id] = job
+        if job.get("status") == "cancelled" and updates.get("status") != "cancelled":
+            return dict(job)
+        job.update(updates)
+        job["updated_at"] = _style_job_now_iso()
+        return dict(job)
+
+
+async def _run_style_source_upload_job(
+    run_id: str,
+    project_id: str,
+    user_id: int,
+    *,
+    filename: str,
+    raw_bytes: bytes,
+    title: Optional[str],
+    source_type: str,
+    parsed_extra: Dict[str, Any],
+) -> None:
+    async def heartbeat() -> None:
+        while True:
+            await asyncio.sleep(_STYLE_SOURCE_UPLOAD_HEARTBEAT_SECONDS)
+            async with _STYLE_SOURCE_UPLOAD_JOB_LOCK:
+                job = _STYLE_SOURCE_UPLOAD_JOBS.get(run_id)
+                if not job or job.get("status") not in _STYLE_SOURCE_UPLOAD_ACTIVE_STATUSES:
+                    return
+                stage = str(job.get("progress_stage") or "upload_extracting")
+                message = str(job.get("progress_message") or "正在处理文风素材上传")
+            await _set_style_source_upload_job_state(
+                run_id,
+                status=stage if stage in _STYLE_SOURCE_UPLOAD_ACTIVE_STATUSES else "upload_extracting",
+                progress_stage=stage,
+                progress_message=message,
+            )
+
+    heartbeat_task = asyncio.create_task(heartbeat())
+    try:
+        state = await _set_style_source_upload_job_state(
+            run_id,
+            status="upload_reading",
+            progress_stage="upload_reading",
+            progress_message="正在读取上传文件并准备抽取正文",
+            metrics={"uploaded_bytes": len(raw_bytes or b"")},
+        )
+        if state.get("status") == "cancelled":
+            return
+
+        async with AsyncSessionLocal() as job_session:
+            novel_service = NovelService(job_session)
+            await novel_service.ensure_project_owner(project_id, user_id)
+            style_service = StyleRAGService(job_session, LLMService(job_session))
+
+            state = await _set_style_source_upload_job_state(
+                run_id,
+                status="upload_extracting",
+                progress_stage="upload_extracting",
+                progress_message="正在从 txt/docx/epub 等素材中抽取可学习正文",
+            )
+            if state.get("status") == "cancelled":
+                return
+
+            extracted = style_service.extract_text_from_uploaded_file(filename or "", raw_bytes)
+            state = await _set_style_source_upload_job_state(
+                run_id,
+                status="upload_saving",
+                progress_stage="upload_saving",
+                progress_message=f"已抽取 {extracted.get('char_count', 0)} 字，正在写入文风素材库",
+                metrics={
+                    "uploaded_bytes": len(raw_bytes or b""),
+                    "format": extracted.get("format"),
+                    "extracted_chars": extracted.get("char_count", 0),
+                },
+            )
+            if state.get("status") == "cancelled":
+                return
+
+            source = await style_service.create_external_style_source(
+                user_id,
+                title=(title or filename or "未命名参考文件"),
+                content_text=extracted["text"],
+                source_type=source_type,
+                extra={
+                    **parsed_extra,
+                    "format": extracted["format"],
+                    "file_name": filename,
+                    "file_chars": extracted["char_count"],
+                    "import_mode": parsed_extra.get("import_mode") or "file_upload",
+                    "is_batch_note": parsed_extra.get("is_batch_note", False),
+                },
+            )
+            source_payload = source.to_dict()
+
+        async with _STYLE_SOURCE_UPLOAD_JOB_LOCK:
+            current = _STYLE_SOURCE_UPLOAD_JOBS.get(run_id)
+            if current and current.get("status") == "cancelled":
+                return
+
+        await _set_style_source_upload_job_state(
+            run_id,
+            status="successful",
+            progress_stage="successful",
+            progress_message="文风素材导入完成，可以加入画像学习批次",
+            source=source_payload,
+            metrics={
+                "uploaded_bytes": len(raw_bytes or b""),
+                "format": source_payload.get("extra", {}).get("format"),
+                "extracted_chars": source_payload.get("char_count", 0),
+                "source_id": source_payload.get("id"),
+            },
+            error=None,
+        )
+    except ValueError as exc:
+        await _set_style_source_upload_job_state(
+            run_id,
+            status="failed",
+            progress_stage="failed",
+            progress_message="文风素材导入失败",
+            error=_style_job_error(
+                "style_source_upload_failed",
+                "文风素材导入失败",
+                detail=str(exc),
+                retryable=False,
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 - background task must surface failures
+        logger.exception("文风素材上传后台任务失败: project=%s run_id=%s", project_id, run_id)
+        await _set_style_source_upload_job_state(
+            run_id,
+            status="failed",
+            progress_stage="failed",
+            progress_message="文风素材导入失败",
+            error=_style_job_error(
+                "style_source_upload_failed",
+                "文风素材导入失败",
+                detail=exc,
+                retryable=True,
+            ),
+        )
+    finally:
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
 
 
 async def _run_style_profile_job(
@@ -349,7 +536,141 @@ async def delete_style_source(
     return {"success": True}
 
 
-@router.post("/sources/upload", response_model=dict)
+@router.post("/sources/upload/start", response_model=StyleSourceUploadJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def start_style_source_upload(
+    project_id: str,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(default=None),
+    source_type: str = Form(default="external_novel"),
+    extra: Optional[str] = Form(default=None),
+    current_user: UserInDB = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> StyleSourceUploadJobResponse:
+    novel_service = NovelService(session)
+    await novel_service.ensure_project_owner(project_id, current_user.id)
+
+    try:
+        parsed_extra = json.loads(extra) if extra else {}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="extra 不是合法 JSON")
+
+    raw_bytes = await file.read()
+    if not raw_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="上传文件为空")
+
+    async with _STYLE_SOURCE_UPLOAD_JOB_LOCK:
+        existing_run_id = _STYLE_SOURCE_UPLOAD_PROJECT_RUNS.get(project_id)
+        existing = _STYLE_SOURCE_UPLOAD_JOBS.get(existing_run_id or "")
+        if existing and existing.get("status") in _STYLE_SOURCE_UPLOAD_ACTIVE_STATUSES:
+            return _serialize_style_source_upload_job(existing)
+
+        run_id = str(uuid.uuid4())
+        now = _style_job_now_iso()
+        job = {
+            "run_id": run_id,
+            "project_id": project_id,
+            "status": "queued",
+            "progress_stage": "queued",
+            "progress_message": "文风素材导入任务已入队",
+            "started_at": now,
+            "updated_at": now,
+            "filename": file.filename,
+            "source": None,
+            "metrics": {"uploaded_bytes": len(raw_bytes)},
+            "error": None,
+        }
+        _STYLE_SOURCE_UPLOAD_JOBS[run_id] = job
+        _STYLE_SOURCE_UPLOAD_PROJECT_RUNS[project_id] = run_id
+
+    background_tasks.add_task(
+        _run_style_source_upload_job,
+        run_id,
+        project_id,
+        int(current_user.id),
+        filename=file.filename or "",
+        raw_bytes=raw_bytes,
+        title=title,
+        source_type=source_type,
+        parsed_extra=parsed_extra,
+    )
+    return _serialize_style_source_upload_job(job)
+
+
+@router.get("/sources/upload/status", response_model=StyleSourceUploadJobResponse)
+async def get_style_source_upload_status(
+    project_id: str,
+    run_id: Optional[str] = Query(default=None),
+    current_user: UserInDB = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> StyleSourceUploadJobResponse:
+    novel_service = NovelService(session)
+    await novel_service.ensure_project_owner(project_id, current_user.id)
+
+    async with _STYLE_SOURCE_UPLOAD_JOB_LOCK:
+        resolved_run_id = run_id or _STYLE_SOURCE_UPLOAD_PROJECT_RUNS.get(project_id)
+        job = dict(_STYLE_SOURCE_UPLOAD_JOBS.get(resolved_run_id or "") or {})
+        if job and job.get("status") not in _STYLE_SOURCE_UPLOAD_ACTIVE_STATUSES:
+            _STYLE_SOURCE_UPLOAD_JOBS.pop(str(job.get("run_id") or ""), None)
+            if _STYLE_SOURCE_UPLOAD_PROJECT_RUNS.get(project_id) == job.get("run_id"):
+                _STYLE_SOURCE_UPLOAD_PROJECT_RUNS.pop(project_id, None)
+
+    if job:
+        return _serialize_style_source_upload_job(job)
+
+    return StyleSourceUploadJobResponse(
+        run_id=run_id or "",
+        project_id=project_id,
+        status="idle",
+        progress_stage="idle",
+        progress_message="暂无文风素材导入任务",
+    )
+
+
+@router.post("/sources/upload/{run_id}/cancel", response_model=StyleSourceUploadJobResponse)
+async def cancel_style_source_upload(
+    project_id: str,
+    run_id: str,
+    current_user: UserInDB = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> StyleSourceUploadJobResponse:
+    novel_service = NovelService(session)
+    await novel_service.ensure_project_owner(project_id, current_user.id)
+
+    async with _STYLE_SOURCE_UPLOAD_JOB_LOCK:
+        job = _STYLE_SOURCE_UPLOAD_JOBS.get(run_id)
+        if not job or job.get("project_id") != project_id:
+            return StyleSourceUploadJobResponse(
+                run_id=run_id,
+                project_id=project_id,
+                status="idle",
+                progress_stage="idle",
+                progress_message="暂无可取消的文风素材导入任务",
+            )
+
+        if job.get("status") in _STYLE_SOURCE_UPLOAD_CANCELLABLE_STATUSES:
+            job.update({
+                "status": "cancelled",
+                "progress_stage": "cancelled",
+                "progress_message": "文风素材导入任务已取消",
+                "updated_at": _style_job_now_iso(),
+                "error": _style_job_error(
+                    "style_source_upload_cancelled",
+                    "文风素材导入任务已取消",
+                    retryable=True,
+                ),
+            })
+        elif job.get("status") == "upload_saving":
+            job.update({
+                "progress_message": "素材已进入保存阶段，无法安全取消，请等待保存结果",
+                "updated_at": _style_job_now_iso(),
+            })
+        snapshot = dict(job)
+
+    return _serialize_style_source_upload_job(snapshot)
+
+
+@router.post("/sources/upload", response_model=dict, deprecated=True)
 async def upload_style_source(
     project_id: str,
     file: UploadFile = File(...),

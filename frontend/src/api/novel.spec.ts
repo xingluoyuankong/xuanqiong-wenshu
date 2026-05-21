@@ -100,6 +100,52 @@ describe('NovelAPI normalization', () => {
     expect(response.profile.id).toBe('profile-1')
   })
 
+  it('routes style source upload through the background job endpoint', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/style/sources/upload/start')) {
+        return new Response(JSON.stringify({
+          run_id: 'source-run-1',
+          project_id: 'project-1',
+          status: 'queued',
+          progress_stage: 'queued',
+          progress_message: '文风素材导入任务已入队',
+          filename: 'sample.txt',
+          metrics: { uploaded_bytes: 12 },
+        }), {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/style/sources/upload/status')) {
+        expect(url).toContain('run_id=source-run-1')
+        return new Response(JSON.stringify({
+          run_id: 'source-run-1',
+          project_id: 'project-1',
+          status: 'successful',
+          progress_stage: 'successful',
+          progress_message: '文风素材导入完成',
+          filename: 'sample.txt',
+          source: { id: 'source-1', title: 'sample.txt' },
+          metrics: { extracted_chars: 1200 },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      throw new Error(`unexpected url ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await OptimizerAPI.uploadStyleSource('project-1', {
+      file: new File(['文风素材内容'], 'sample.txt', { type: 'text/plain' }),
+      title: 'sample.txt',
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(response.source.id).toBe('source-1')
+  })
+
   it('routes novel import through the background job endpoint', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)

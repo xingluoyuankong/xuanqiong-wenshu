@@ -59,3 +59,10 @@
 - `NovelWorkspace.vue` 新增旧稿导入浮动进度条，直接展示后端 `progress_message`，用户能看到读取、分章、采样、角色筛选、蓝图抽取、保存等阶段。
 - 导入取消改为调用 `/api/novels/import/{run_id}/cancel`；如果后端进入保存等不可取消阶段，前端不再假装已取消，而是继续展示真实任务状态。
 - 前端验证：`cd frontend; npm run test:run` 通过，`cd frontend; npm run build` 通过，`git diff --check` 仅提示 Windows 工作区换行将被 Git 规范化。
+
+## 2026-05-21 文风素材上传任务化补充
+
+- `style.py` 新增 `/style/sources/upload/start/status/{run_id}/cancel` 任务链路，上传大文件时会展示读取、正文抽取、保存素材库等阶段；旧 `/sources/upload` 保留 deprecated 兼容。
+- `StyleCenterView.vue` 的文件素材导入改为轮询后台任务，进度条显示后端 `progress_message`，并提供取消按钮；保存阶段不可安全取消时会继续展示真实状态。
+- 定向验证：`python -m pytest backend/app/api/routers/test_style_profile_job.py -q` 通过，`python -m compileall backend/app/api/routers/style.py` 通过，`cd frontend; npm run test:run -- src/api/novel.spec.ts` 通过。
+- 全量验证：`python -m pytest backend -q` 通过（244 passed），`cd frontend; npm run test:run` 通过（125 passed），`cd frontend; npm run build` 通过；`git diff --check` 仅提示工作区换行规范化。

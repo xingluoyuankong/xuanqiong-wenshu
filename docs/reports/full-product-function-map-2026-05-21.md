@@ -36,7 +36,7 @@
 | 伏笔/线索 | `foreshadowing.py`、`clue_tracker.py` | active | 回收任务已进写作链路，但 UI 未形成“逾期/下章必须处理”工作流 | 伏笔沉默遗忘 | 伏笔页增加待回收、逾期、补丁建议分组 | 后端与浏览器测试 | P1 |
 | 记忆层 | `memory_layer_service.py`、`projects.py` | active | 压缩/回滚入口存在，用户不易知道压缩影响 | 长篇记忆治理不透明 | 管理页展示版本、压缩原因、回滚风险 | 单测、UI 验证 | P2 |
 | 知识图谱 | `knowledge_graph.py`、图谱组件 | active | 同步来自蓝图/记忆，但“事实源 vs 关系查询”边界不显性 | 用户误把图谱当全文事实库 | UI 标注事实源、最新章节、关系置信度 | 图谱页验证 | P1 |
-| 风格中心 | `StyleCenterView.vue`、`style_rag_service.py`、`/style/profiles/start/status/cancel` | active | 文风画像生成已改为后台任务；素材上传/大文本导入仍需继续拆批和显示片段进度 | 画像生成不再卡住前端，但超大素材学习仍需要更透明的进度 | 继续把素材导入拆批，并把画像任务的阶段、结果、失败根因接入 UI 日志 | 风格画像任务测试、风格学习实跑 | P1 |
+| 风格中心 | `StyleCenterView.vue`、`style_rag_service.py`、`/style/profiles/start/status/cancel`、`/style/sources/upload/start/status/cancel` | active | 文风画像生成和文件素材上传都已改为后台任务；超大素材仍需继续按批次规划学习 | 画像生成和大文件抽取不再卡住一次 HTTP 请求，用户能看到读取、抽取、保存阶段 | 继续把多批次学习建议和画像任务的结果、失败根因接入 UI 日志 | 风格画像/素材上传任务测试、风格学习实跑 | P1 |
 | 导入 | `NovelWorkspace.vue`、`import_service.py`、`/import/start/status/cancel` | active | 旧稿导入已改为后台任务；账本重建仍需继续补到角色/伏笔/图谱/记忆全链路 | 文件读取、分章、角色普查、蓝图抽取不再卡住一次 HTTP 请求 | 继续把导入后的角色/伏笔/图谱/记忆重建做成可观察阶段，并在 UI 展示进度 | 导入任务测试、旧稿导入实跑 | P1 |
 | 导出 | `/export/preflight`、`/export/txt`、`/export/docx`、`ExportService` | active | 已有导出硬校验，新增预检可展示缺章/未定稿/空章原因 | 还可继续补修复入口跳转 | 预检报告先阻止无效下载，并提示缺失章节 | 导出测试、构建 | P2 |
 | Token 预算 | `token_budget.py` | active | 配置和统计存在，但 LLM 调用侧预算事件仍需统一 | 用户难判断花费来源 | `generation_call_service` 记录模块/阶段 usage | 单测 | P2 |
@@ -55,12 +55,13 @@
 - `chapterWorkflow.ts` 版本选择/删除/评审改为有 `version_id` 时只发送稳定 ID，`version_index` 仅作为旧数据兜底。
 - `novel.ts` store 的优化入口改为有 `version_id` 时只发送稳定 ID，避免排序变化导致优化错版本。
 - 文风画像生成新增 `/style/profiles/start/status/cancel` 后台任务入口，前端旧 `createStyleProfile()` 已改为启动任务并轮询，不再让大素材画像生成阻塞一次 HTTP 请求。
+- 文风素材文件上传新增 `/style/sources/upload/start/status/{run_id}/cancel` 后台任务入口，前端文风中心显示真实上传/抽取/保存阶段并允许取消；旧 `/sources/upload` 保留 deprecated 兼容。
 - 旧稿导入新增 `/import/start/status/cancel` 后台任务入口，前端旧 `importNovel()` 已改为启动任务并轮询；导入阶段会回报读取、分章、采样、角色筛选、蓝图抽取和保存进度。
 - 章节大纲重写新增 `/chapters/rewrite-outline/start/status/cancel` 后台任务入口，前端旧 `rewriteChapterOutline()` 已改为启动任务并轮询，不再让局部重写卡在同步请求里。
 
 ## 下一批执行顺序
 
-1. 继续拆分风格素材导入，并补旧稿导入后的角色、伏笔、图谱、记忆重建进度。
+1. 补旧稿导入后的角色、伏笔、图谱、记忆重建进度，并继续完善风格中心多批次学习建议。
 2. 继续把日志页默认视图收敛到“生成状态”，开发者字段折叠。
 3. 补 Provider 健康归因与 Token 预算事件。
 4. 跑项目本体浏览器验证、完整实跑和反向修正。

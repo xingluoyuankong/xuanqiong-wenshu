@@ -510,6 +510,28 @@ export interface StyleProfileJobResponse {
   error?: BlueprintGenerationError | string | null
 }
 
+export interface StyleSourceUploadJobResponse {
+  run_id: string
+  project_id: string
+  status:
+    | 'idle'
+    | 'queued'
+    | 'upload_reading'
+    | 'upload_extracting'
+    | 'upload_saving'
+    | 'successful'
+    | 'failed'
+    | 'cancelled'
+  progress_stage: string
+  progress_message: string
+  started_at?: string | null
+  updated_at?: string | null
+  filename?: string | null
+  source?: any | null
+  metrics?: Record<string, any>
+  error?: BlueprintGenerationError | string | null
+}
+
 export interface NovelImportJobResponse {
   run_id: string
   status:
@@ -607,6 +629,8 @@ const BLUEPRINT_LEGACY_POLL_INTERVAL_MS = 2000
 const BLUEPRINT_LEGACY_MAX_POLL_ATTEMPTS = 900
 const STYLE_PROFILE_POLL_INTERVAL_MS = 2000
 const STYLE_PROFILE_MAX_POLL_ATTEMPTS = 900
+const STYLE_SOURCE_UPLOAD_POLL_INTERVAL_MS = 2000
+const STYLE_SOURCE_UPLOAD_MAX_POLL_ATTEMPTS = 900
 const NOVEL_IMPORT_POLL_INTERVAL_MS = 2000
 const NOVEL_IMPORT_MAX_POLL_ATTEMPTS = 900
 
@@ -624,6 +648,13 @@ const readStyleProfileJobError = (status: StyleProfileJobResponse): string => {
   if (!rawError) return status.progress_message || '文风画像生成失败，请稍后重试'
   if (typeof rawError === 'string') return rawError
   return rawError.detail || rawError.message || status.progress_message || '文风画像生成失败，请稍后重试'
+}
+
+const readStyleSourceUploadJobError = (status: StyleSourceUploadJobResponse): string => {
+  const rawError = status.error
+  if (!rawError) return status.progress_message || '文风素材导入失败，请稍后重试'
+  if (typeof rawError === 'string') return rawError
+  return rawError.detail || rawError.message || status.progress_message || '文风素材导入失败，请稍后重试'
 }
 
 const readNovelImportJobError = (status: NovelImportJobResponse): string => {
@@ -1161,14 +1192,59 @@ export class OptimizerAPI {
       extra?: Record<string, any>
     }
   ): Promise<{ success: boolean; source: any }> {
+    let status = await OptimizerAPI.startStyleSourceUpload(projectId, payload)
+
+    for (let attempt = 0; attempt < STYLE_SOURCE_UPLOAD_MAX_POLL_ATTEMPTS; attempt += 1) {
+      if (status.status === 'successful' && status.source) {
+        return { success: true, source: status.source }
+      }
+      if (status.status === 'failed') {
+        throw new Error(readStyleSourceUploadJobError(status))
+      }
+      if (status.status === 'cancelled') {
+        throw new Error(status.progress_message || '文风素材导入已取消')
+      }
+
+      await delay(STYLE_SOURCE_UPLOAD_POLL_INTERVAL_MS)
+      status = await OptimizerAPI.getStyleSourceUploadStatus(projectId, status.run_id)
+    }
+
+    throw new Error('文风素材导入后台任务等待超时，请稍后刷新文风中心查看结果。')
+  }
+
+  static async startStyleSourceUpload(
+    projectId: string,
+    payload: {
+      file: File
+      title?: string
+      source_type?: string
+      extra?: Record<string, any>
+    }
+  ): Promise<StyleSourceUploadJobResponse> {
     const formData = new FormData()
     formData.append('file', payload.file)
     if (payload.title) formData.append('title', payload.title)
     if (payload.source_type) formData.append('source_type', payload.source_type)
     if (payload.extra) formData.append('extra', JSON.stringify(payload.extra))
-    return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/sources/upload`, {
+    return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/sources/upload/start`, {
       method: 'POST',
       body: formData
+    })
+  }
+
+  static async getStyleSourceUploadStatus(
+    projectId: string,
+    runId: string
+  ): Promise<StyleSourceUploadJobResponse> {
+    return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/sources/upload/status?run_id=${encodeURIComponent(runId)}`)
+  }
+
+  static async cancelStyleSourceUpload(
+    projectId: string,
+    runId: string
+  ): Promise<StyleSourceUploadJobResponse> {
+    return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/sources/upload/${encodeURIComponent(runId)}/cancel`, {
+      method: 'POST'
     })
   }
 
