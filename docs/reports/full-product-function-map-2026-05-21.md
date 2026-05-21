@@ -92,3 +92,8 @@
 - `LLMSettings.vue` 复用现有健康检查返回的 `keys/status_code/latency_ms/detail/model_count`，在配置页展示 Key 级别状态、HTTP 状态、耗时、失败归因和重试/切换建议。
 - 修复影响：Provider 抖动、429 限流、401/403 鉴权失败、5xx 服务异常和 base_url 不可达不再只显示“配置组不可用”，用户能直接判断是等、换 Key、切备用 Provider，还是修 URL。
 - 架构边界：没有新增 Provider 调度器，也没有改写健康检查接口，只把后端已有诊断字段接到前端工作界面。
+
+## 2026-05-21 继续收口：运行日志生成状态分层
+- `RuntimeLogManagement.vue` 现在会从章节 `runtime_snapshot` 里合成用户态生成状态行：Provider 预检/自动切换、正文长度契约、长上下文角色/伏笔任务、Token 预算入账。
+- 修复影响：详细日志默认解释小说生成本身，不再要求用户展开开发者 metadata 才能知道“有没有检查 Provider”“本章按什么字数契约生成”“角色/伏笔账本是否注入”“生成 token 是否入账”。
+- 架构边界：没有新增日志后端或平行任务系统，只复用现有 `generation_runtime` 字段，把用户关心的状态从 snapshot 里提到前台。

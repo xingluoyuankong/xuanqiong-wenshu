@@ -230,6 +230,24 @@ const METRIC_LABELS: Record<string, string> = {
   review_status: '评审状态',
   optimization_strategy: '优化策略',
   optimization_strategy_phase: '策略阶段',
+  generated_version_count: '候选数',
+  candidate_count: '候选数',
+  best_version_index: '推荐版本',
+  token_budget_records: '预算记录',
+  estimated_generation_tokens: '估算 Token',
+  record_count: '记录数',
+  total_tokens: '总 Token',
+  estimated_cost: '估算成本',
+  active_profile_name: '当前 Provider',
+  recommended_profile_name: '推荐 Provider',
+  planned_character_count: '计划角色',
+  target_character_count: '目标角色',
+  must_resolve_count: '必须回收',
+  should_reinforce_count: '应强化',
+  avoid_forgetting_count: '禁忘',
+  active_clue_count: '活跃线索',
+  timeout_seconds: '超时秒数',
+  max_tokens: '最大 Token',
 }
 
 const PREVIEW_KEYS = [
@@ -355,6 +373,46 @@ function buildMetrics(event: Record<string, any>, metadata: Record<string, any>)
     .slice(0, 8)
 }
 
+function asRecord(value: unknown): Record<string, any> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}
+}
+
+function asArray(value: unknown): any[] {
+  return Array.isArray(value) ? value : []
+}
+
+function formatNumber(value: unknown): string {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return normalizeText(value, 80)
+  return number.toLocaleString('zh-CN')
+}
+
+function formatCost(value: unknown): string {
+  const number = Number(value)
+  if (!Number.isFinite(number) || number <= 0) return '0'
+  return `约 ¥${number.toFixed(number >= 1 ? 2 : 4)}`
+}
+
+function buildProviderAdvice(preflight: Record<string, any>) {
+  if (!preflight || !Object.keys(preflight).length) return ''
+  if (preflight.auto_switched) {
+    return `已从 ${preflight.current_profile_name || '原 Provider'} 切到 ${preflight.active_profile_name || preflight.recommended_profile_name || '可用 Provider'}，继续生成。`
+  }
+  if (preflight.checked === false && preflight.reason === 'single_profile_locked_skip_preflight') {
+    return `当前只有一个启用 Provider：${preflight.active_profile_name || preflight.current_profile_name || '未命名配置'}，已跳过切换预检。`
+  }
+  if (preflight.reason === 'preflight_error') {
+    return `预检失败但未阻断生成，后续调用会继续使用运行时重试和降级：${normalizeText(preflight.error, 160)}`
+  }
+  if (preflight.has_usable_profile === false) {
+    return '未找到可用 Provider，需在设置页修复 Key、额度或 base_url。'
+  }
+  if (preflight.checked) {
+    return `预检完成，当前可用 Provider 为 ${preflight.active_profile_name || preflight.current_profile_name || '未命名配置'}。`
+  }
+  return 'Provider 预检信息已记录。'
+}
+
 function normalizeArtifactRefs(value: unknown): string[] {
   if (!value) return []
   const items = Array.isArray(value) ? value : [value]
@@ -395,6 +453,120 @@ function buildSyntheticBackendLines(chapter: ChapterRuntimeLogItem) {
   const runtime = chapter.runtime_snapshot || {}
   const lines: RuntimeLine[] = []
   const timestamp = chapter.updated_at || chapter.started_at || new Date().toISOString()
+  const providerPreflight = asRecord(runtime.provider_preflight)
+  const tokenBudgetUsage = asRecord(runtime.token_budget_usage)
+  const longformContext = asRecord(runtime.longform_context)
+  const castPlan = asRecord(longformContext.cast_plan)
+  const foreshadowingTask = asRecord(longformContext.foreshadowing_task)
+  const draftContract = asRecord(runtime.chapter_draft_contract)
+  const generationLimits = asRecord(runtime.chapter_generation_limits)
+
+  if (Object.keys(providerPreflight).length) {
+    const providerWarning = providerPreflight.reason === 'preflight_error' || providerPreflight.has_usable_profile === false
+    const title = providerPreflight.auto_switched
+      ? 'Provider 已自动切换'
+      : providerWarning
+        ? 'Provider 预检需要关注'
+        : providerPreflight.checked
+          ? 'Provider 预检完成'
+          : 'Provider 预检已记录'
+    lines.push({
+      at: chapter.started_at || timestamp,
+      stage: 'provider_preflight',
+      level: providerWarning ? 'warning' : 'info',
+      kind: providerWarning ? 'error' : 'status',
+      title,
+      summary: buildProviderAdvice(providerPreflight),
+      contentPreview: '',
+      metrics: buildMetrics(
+        {
+          active_profile_name: providerPreflight.active_profile_name,
+          recommended_profile_name: providerPreflight.recommended_profile_name,
+        },
+        providerPreflight,
+      ),
+      artifactRefs: [],
+      message: title,
+      metadata: providerPreflight,
+      stateLabel: providerPreflight.auto_switched ? '已切换' : providerWarning ? '需关注' : '已记录',
+      stateClass: providerWarning ? 'state-degraded' : '',
+      syntheticKey: 'provider-preflight',
+    })
+  }
+
+  if (Object.keys(draftContract).length || Object.keys(generationLimits).length) {
+    const tier = normalizeText(draftContract.tier || draftContract.label || draftContract.mode, 80)
+    lines.push({
+      at: chapter.started_at || timestamp,
+      stage: 'chapter_draft_contract',
+      level: 'info',
+      kind: 'status',
+      title: '正文长度契约已生效',
+      summary: tier
+        ? `本章按“${tier}”策略生成：内部可用场景组规划，但最终仍输出连贯整章。`
+        : '本章已记录目标字数、最低字数、超时和 max_tokens，用于首稿质量门与失败归因。',
+      contentPreview: '',
+      metrics: buildMetrics(
+        {
+          target_word_count: runtime.target_word_count,
+          min_word_count: runtime.min_word_count,
+          timeout_seconds: generationLimits.timeout_seconds,
+          max_tokens: generationLimits.max_tokens,
+        },
+        { ...draftContract, ...generationLimits },
+      ),
+      artifactRefs: [],
+      message: '正文长度契约已生效',
+      metadata: { chapter_draft_contract: draftContract, chapter_generation_limits: generationLimits },
+      syntheticKey: 'chapter-draft-contract',
+    })
+  }
+
+  if (Object.keys(longformContext).length) {
+    const focusNames = asArray(castPlan.chapter_focus_names).map(item => normalizeText(item, 80)).filter(Boolean)
+    const mustResolve = asArray(foreshadowingTask.must_resolve)
+    const shouldReinforce = asArray(foreshadowingTask.should_reinforce)
+    const avoidForgetting = asArray(foreshadowingTask.avoid_forgetting)
+    const activeClues = asArray(foreshadowingTask.active_clues)
+    lines.push({
+      at: chapter.started_at || timestamp,
+      stage: 'longform_context',
+      level: 'info',
+      kind: 'continuity',
+      title: '长期上下文已装配',
+      summary: [
+        focusNames.length ? `本章关注角色：${focusNames.slice(0, 5).join('、')}` : '',
+        mustResolve.length ? `必须回收 ${mustResolve.length} 个伏笔/线索` : '',
+        shouldReinforce.length ? `应强化 ${shouldReinforce.length} 个伏笔/线索` : '',
+        avoidForgetting.length ? `禁忘 ${avoidForgetting.length} 个长期信息` : '',
+      ].filter(Boolean).join('；') || '已注入角色状态、伏笔/线索账本、记忆摘要、时间线和知识图谱摘要。',
+      contentPreview: normalizeText([
+        ...mustResolve.slice(0, 3),
+        ...shouldReinforce.slice(0, 2),
+      ], 520),
+      metrics: buildMetrics(
+        {
+          planned_character_count: castPlan.planned_character_count,
+          target_character_count: castPlan.target_character_count,
+          must_resolve_count: mustResolve.length,
+          should_reinforce_count: shouldReinforce.length,
+          avoid_forgetting_count: avoidForgetting.length,
+          active_clue_count: activeClues.length,
+        },
+        {},
+      ),
+      artifactRefs: [],
+      message: '长期上下文已装配',
+      metadata: {
+        cast_plan: castPlan,
+        foreshadowing_task: foreshadowingTask,
+        memory_digest: longformContext.memory_digest,
+        timeline_digest: longformContext.timeline_digest,
+        knowledge_digest: longformContext.knowledge_digest,
+      },
+      syntheticKey: 'longform-context',
+    })
+  }
 
   if (runtime.review_status === 'skipped_single_version') {
     lines.push({
@@ -440,6 +612,40 @@ function buildSyntheticBackendLines(chapter: ChapterRuntimeLogItem) {
       syntheticKey: `${stage}-${index}`,
     })
   })
+
+  if (Object.keys(tokenBudgetUsage).length) {
+    const hasError = Boolean(tokenBudgetUsage.error)
+    const recordCount = Number(tokenBudgetUsage.record_count || 0)
+    const totalTokens = Number(tokenBudgetUsage.total_tokens || 0)
+    lines.push({
+      at: timestamp,
+      stage: 'token_budget',
+      level: hasError ? 'warning' : 'info',
+      kind: hasError ? 'error' : 'save',
+      title: hasError ? 'Token 预算记录失败' : (recordCount > 0 ? 'Token 预算已记录' : 'Token 预算无需记录'),
+      summary: hasError
+        ? `预算入账未成功，但章节生成结果已保留：${normalizeText(tokenBudgetUsage.error, 180)}`
+        : recordCount > 0
+          ? `已把本章候选生成的估算消耗写入预算账本：${formatNumber(totalTokens)} token，${formatCost(tokenBudgetUsage.estimated_cost)}。`
+          : '本章候选没有可估算的生成调用 token，因此没有新增预算记录。',
+      contentPreview: '',
+      metrics: buildMetrics(
+        {
+          record_count: tokenBudgetUsage.record_count,
+          total_tokens: tokenBudgetUsage.total_tokens,
+          estimated_cost: formatCost(tokenBudgetUsage.estimated_cost),
+          module: tokenBudgetUsage.module,
+        },
+        tokenBudgetUsage,
+      ),
+      artifactRefs: normalizeArtifactRefs(tokenBudgetUsage.usage_ids),
+      message: 'Token 预算已同步到生成日志',
+      metadata: tokenBudgetUsage,
+      stateLabel: hasError ? '需关注' : '已入账',
+      stateClass: hasError ? 'state-degraded' : '',
+      syntheticKey: 'token-budget',
+    })
+  }
 
   return lines
 }
@@ -600,16 +806,32 @@ const formatDuration = (value?: number | null) => {
   const seconds = totalSeconds % 60
   return minutes > 0 ? `${minutes} 分 ${seconds} 秒` : `${seconds} 秒`
 }
-const buildSummaryEntries = (chapter: ChapterRuntimeLogItem) => [
-  { label: '开始时间', value: formatDateTime(chapter.started_at) },
-  { label: '最近更新', value: formatDateTime(chapter.updated_at) },
-  { label: '当前阶段', value: chapter.progress_stage || '未记录' },
-  { label: '评审状态', value: chapter.summary_snapshot.review_status || '未记录' },
-  { label: '目标字数', value: chapter.summary_snapshot.target_word_count || '未记录' },
-  { label: '实际字数', value: chapter.summary_snapshot.actual_word_count || chapter.word_count || '未记录' },
-  { label: '总耗时', value: chapter.summary_snapshot.pipeline_total_duration_ms ? formatDuration(chapter.summary_snapshot.pipeline_total_duration_ms) : '未记录' },
-  { label: '最后错误', value: chapter.summary_snapshot.last_error_summary || '无' },
-]
+const buildSummaryEntries = (chapter: ChapterRuntimeLogItem) => {
+  const runtime = chapter.runtime_snapshot || {}
+  const preflight = asRecord(runtime.provider_preflight)
+  const budget = asRecord(runtime.token_budget_usage)
+  const context = asRecord(runtime.longform_context)
+  const castPlan = asRecord(context.cast_plan)
+  const foreshadowingTask = asRecord(context.foreshadowing_task)
+  const foreshadowingCount =
+    asArray(foreshadowingTask.must_resolve).length +
+    asArray(foreshadowingTask.should_reinforce).length +
+    asArray(foreshadowingTask.avoid_forgetting).length
+  return [
+    { label: '开始时间', value: formatDateTime(chapter.started_at) },
+    { label: '最近更新', value: formatDateTime(chapter.updated_at) },
+    { label: '当前阶段', value: chapter.progress_stage || '未记录' },
+    { label: '评审状态', value: chapter.summary_snapshot.review_status || '未记录' },
+    { label: '目标字数', value: chapter.summary_snapshot.target_word_count || '未记录' },
+    { label: '实际字数', value: chapter.summary_snapshot.actual_word_count || chapter.word_count || '未记录' },
+    { label: '总耗时', value: chapter.summary_snapshot.pipeline_total_duration_ms ? formatDuration(chapter.summary_snapshot.pipeline_total_duration_ms) : '未记录' },
+    { label: 'Provider', value: preflight.active_profile_name || preflight.current_profile_name || preflight.reason || '未记录' },
+    { label: 'Token预算', value: budget.total_tokens ? `${formatNumber(budget.total_tokens)} token / ${formatCost(budget.estimated_cost)}` : '未记录' },
+    { label: '角色上下文', value: castPlan.planned_character_count ? `${castPlan.planned_character_count} 人计划 / ${asArray(castPlan.chapter_focus_names).length} 人聚焦` : '未记录' },
+    { label: '伏笔任务', value: foreshadowingCount ? `${foreshadowingCount} 项` : '未记录' },
+    { label: '最后错误', value: chapter.summary_snapshot.last_error_summary || '无' },
+  ]
+}
 
 watch(autoRefresh, enabled => {
   if (enabled) {

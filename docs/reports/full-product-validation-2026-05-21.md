@@ -102,3 +102,10 @@
 - 定向验证：`cd frontend; npm run test:run -- src/components/LLMSettings.spec.ts` 通过（1 passed）。
 - 前端全量验证：`cd frontend; npm run test:run` 通过（126 passed），`cd frontend; npm run build` 通过。
 - 浏览器验证：项目本体 `http://127.0.0.1:5174/llm-settings` 打开正常；点击“健康检查”后显示 CPA Provider、模型数量、Key 明细、耗时、状态和建议，浏览器 console error 为 0。
+
+## 2026-05-21 运行日志生成状态收口验证
+- 代码收口：`RuntimeLogManagement.vue` 把 `runtime_snapshot` 里的 `provider_preflight`、`chapter_draft_contract`、`chapter_generation_limits`、`longform_context` 和 `token_budget_usage` 提升为用户态详细生成状态行；原始字段仍折叠在开发者详情里。
+- 修复影响：管理台日志不再只靠原始程序 metadata 让用户猜后台发生了什么，能直接看到 Provider 预检/切换、正文长度契约、角色/伏笔上下文、Token 预算入账与失败原因。
+- 定向验证：`cd frontend; npm run test:run -- src/components/admin/RuntimeLogManagement.spec.ts` 通过（1 passed）。
+- 前端全量验证：`cd frontend; npm run test:run` 通过（126 passed），`cd frontend; npm run build` 通过。
+- 浏览器验证：项目本体 `http://127.0.0.1:5174/admin?tab=runtime-logs` 打开正常；详细生成状态日志、内容预览、Provider 摘要和 Token 预算摘要可见，浏览器 console error 为 0；桌面视口 `scrollWidth == clientWidth`，未出现横向溢出。

@@ -54,6 +54,41 @@ const runtimeProject = () => [{
       target_word_count: 5000,
       actual_word_count: 4700,
       pipeline_total_duration_ms: 125000,
+      provider_preflight: {
+        checked: true,
+        auto_switched: false,
+        reason: 'current_profile_usable',
+        active_profile_name: 'CPA Provider',
+        recommended_profile_name: 'CPA Provider',
+        has_usable_profile: true,
+      },
+      chapter_draft_contract: {
+        tier: '标准高质量章',
+      },
+      chapter_generation_limits: {
+        timeout_seconds: 240,
+        max_tokens: 12000,
+      },
+      longform_context: {
+        cast_plan: {
+          planned_character_count: 12,
+          target_character_count: 16,
+          chapter_focus_names: ['沈文朝', '潮祠守灯人'],
+        },
+        foreshadowing_task: {
+          must_resolve: [{ name: '第二遍潮歌', content: '解释潮歌为何只在退潮后出现' }],
+          should_reinforce: [{ name: '祠门铜铃' }],
+          avoid_forgetting: [{ name: '主角不能知道守灯人的真实身份' }],
+          active_clues: [{ name: '盐痕脚印' }],
+        },
+      },
+      token_budget_usage: {
+        record_count: 2,
+        total_tokens: 16800,
+        estimated_cost: 0.1344,
+        module: 'content',
+        usage_ids: [7, 8],
+      },
     },
     runtime_events: [{
       at: '2026-05-21T03:59:00Z',
@@ -101,6 +136,13 @@ describe('RuntimeLogManagement', () => {
     expect(wrapper.text()).toContain('章末压力不足')
     expect(wrapper.text()).toContain('目标字数')
     expect(wrapper.text()).toContain('实际字数')
+    expect(wrapper.text()).toContain('Provider 预检完成')
+    expect(wrapper.text()).toContain('CPA Provider')
+    expect(wrapper.text()).toContain('正文长度契约已生效')
+    expect(wrapper.text()).toContain('长期上下文已装配')
+    expect(wrapper.text()).toContain('本章关注角色：沈文朝、潮祠守灯人')
+    expect(wrapper.text()).toContain('Token 预算已记录')
+    expect(wrapper.text()).toContain('16,800 token')
     expect(wrapper.text()).toContain('开发者详情：metadata')
     expect(wrapper.text()).not.toContain('详细后台运行日志')
 
