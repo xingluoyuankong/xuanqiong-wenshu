@@ -96,7 +96,7 @@ _OUTLINE_JOBS: Dict[str, Dict[str, Any]] = {}
 _OUTLINE_PROJECT_RUNS: Dict[str, str] = {}
 _OUTLINE_JOB_LOCK = asyncio.Lock()
 _OUTLINE_JOB_HEARTBEAT_SECONDS = 30
-_OUTLINE_ACTIVE_STATUSES = {"queued", "generating", "outline_context", "outline_chapter_skeleton", "saving"}
+_OUTLINE_ACTIVE_STATUSES = {"queued", "generating", "outline_context", "outline_chapter_skeleton", "outline_rewrite", "saving"}
 _BUSY_CHAPTER_STATUSES = {
     ChapterGenerationStatus.GENERATING.value,
     ChapterGenerationStatus.EVALUATING.value,
@@ -1093,6 +1093,8 @@ async def _set_outline_job_state(run_id: str, **updates: Any) -> Dict[str, Any]:
         if not job:
             job = {"run_id": run_id, "status": "idle", "progress_stage": "idle"}
             _OUTLINE_JOBS[run_id] = job
+        if job.get("status") == "cancelled" and updates.get("status") != "cancelled":
+            return dict(job)
         job.update(updates)
         job["updated_at"] = _outline_job_now_iso()
         return dict(job)
@@ -1122,21 +1124,25 @@ async def _run_outline_generation_job(
 
     heartbeat_task = asyncio.create_task(heartbeat())
     try:
-        await _set_outline_job_state(
+        state = await _set_outline_job_state(
             run_id,
             status="generating",
             progress_stage="outline_context",
             progress_message="正在整理蓝图、已有章节和目标篇幅",
         )
+        if state.get("status") == "cancelled":
+            return
         request = GenerateOutlineRequest(**request_payload)
         current_user = UserInDB(id=user_id, username=f"outline-job-{user_id}", email=None, hashed_password="")
         async with AsyncSessionLocal() as job_session:
-            await _set_outline_job_state(
+            state = await _set_outline_job_state(
                 run_id,
                 status="generating",
                 progress_stage="outline_chapter_skeleton",
                 progress_message="正在分批生成可执行章节大纲",
             )
+            if state.get("status") == "cancelled":
+                return
             project_schema = await generate_chapters_outline(
                 project_id=project_id,
                 request=request,
@@ -1197,6 +1203,75 @@ async def _run_outline_generation_job(
             await heartbeat_task
         except asyncio.CancelledError:
             pass
+
+
+async def _run_outline_rewrite_job(
+    run_id: str,
+    project_id: str,
+    user_id: int,
+    request_payload: Dict[str, Any],
+) -> None:
+    try:
+        state = await _set_outline_job_state(
+            run_id,
+            status="outline_rewrite",
+            progress_stage="outline_rewrite",
+            progress_message="正在重写目标章节大纲并保护前后承接",
+        )
+        if state.get("status") == "cancelled":
+            return
+        request = RewriteChapterOutlineRequest(**request_payload)
+        current_user = UserInDB(id=user_id, username=f"outline-rewrite-job-{user_id}", email=None, hashed_password="")
+        async with AsyncSessionLocal() as job_session:
+            project_schema = await rewrite_chapter_outline(
+                project_id=project_id,
+                request=request,
+                session=job_session,
+                current_user=current_user,
+            )
+
+        async with _OUTLINE_JOB_LOCK:
+            current = _OUTLINE_JOBS.get(run_id)
+            if current and current.get("status") == "cancelled":
+                return
+
+        await _set_outline_job_state(
+            run_id,
+            status="successful",
+            progress_stage="successful",
+            progress_message="章节大纲重写完成",
+            project=project_schema,
+            error=None,
+        )
+    except HTTPException as exc:
+        logger.warning(
+            "章节大纲后台重写失败: project=%s run_id=%s status=%s detail=%s",
+            project_id,
+            run_id,
+            exc.status_code,
+            exc.detail,
+        )
+        await _set_outline_job_state(
+            run_id,
+            status="failed",
+            progress_stage="failed",
+            progress_message="章节大纲重写失败",
+            error=_outline_job_error(
+                "outline_rewrite_failed",
+                "章节大纲重写失败",
+                detail=exc.detail,
+                retryable=exc.status_code >= 500 or exc.status_code in {408, 409, 429},
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 - background task must surface failures
+        logger.exception("章节大纲后台重写异常: project=%s run_id=%s", project_id, run_id)
+        await _set_outline_job_state(
+            run_id,
+            status="failed",
+            progress_stage="failed",
+            progress_message="章节大纲重写失败",
+            error=_outline_job_error("outline_rewrite_failed", "章节大纲重写失败", detail=exc, retryable=True),
+        )
 
 
 def _extract_tail_excerpt(text: Optional[str], limit: int = 500) -> str:
@@ -3295,6 +3370,68 @@ async def rewrite_chapter_outline(
         raise HTTPException(status_code=500, detail=f"AI 重写失败: {str(exc)[:160]}")
 
     return await _load_project_schema(novel_service, project_id, current_user.id)
+
+
+@router.post("/novels/{project_id}/chapters/rewrite-outline/start", response_model=OutlineGenerationJobResponse)
+async def start_chapter_outline_rewrite(
+    project_id: str,
+    request: RewriteChapterOutlineRequest,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> OutlineGenerationJobResponse:
+    novel_service = NovelService(session)
+    await novel_service.ensure_project_owner(project_id, current_user.id)
+
+    async with _OUTLINE_JOB_LOCK:
+        existing_run_id = _OUTLINE_PROJECT_RUNS.get(project_id)
+        existing = _OUTLINE_JOBS.get(existing_run_id or "")
+        if existing and existing.get("status") in _OUTLINE_ACTIVE_STATUSES:
+            return _serialize_outline_job(existing)
+
+        run_id = str(uuid.uuid4())
+        now = _outline_job_now_iso()
+        job = {
+            "run_id": run_id,
+            "project_id": project_id,
+            "status": "queued",
+            "progress_stage": "queued",
+            "progress_message": "章节大纲重写任务已入队",
+            "started_at": now,
+            "updated_at": now,
+            "project": None,
+            "error": None,
+            "request": request.model_dump(),
+        }
+        _OUTLINE_JOBS[run_id] = job
+        _OUTLINE_PROJECT_RUNS[project_id] = run_id
+
+    background_tasks.add_task(
+        _run_outline_rewrite_job,
+        run_id,
+        project_id,
+        int(current_user.id),
+        request.model_dump(),
+    )
+    return _serialize_outline_job(job)
+
+
+@router.get("/novels/{project_id}/chapters/rewrite-outline/status", response_model=OutlineGenerationJobResponse)
+async def get_chapter_outline_rewrite_status(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> OutlineGenerationJobResponse:
+    return await get_chapters_outline_generation_status(project_id, session, current_user)
+
+
+@router.post("/novels/{project_id}/chapters/rewrite-outline/cancel", response_model=OutlineGenerationJobResponse)
+async def cancel_chapter_outline_rewrite(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> OutlineGenerationJobResponse:
+    return await cancel_chapters_outline_generation(project_id, session, current_user)
 
 
 @router.post("/novels/{project_id}/chapters/delete", response_model=NovelProjectSchema)

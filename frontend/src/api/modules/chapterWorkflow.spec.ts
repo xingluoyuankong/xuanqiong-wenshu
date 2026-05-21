@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { deleteChapterVersion, evaluateChapter, generateChapterOutline, selectChapterVersion } from './chapterWorkflow'
+import { deleteChapterVersion, evaluateChapter, generateChapterOutline, rewriteChapterOutline, selectChapterVersion } from './chapterWorkflow'
 
 const projectPayload = {
   id: 'project-1',
@@ -82,6 +82,34 @@ describe('chapter workflow version selectors', () => {
     const body = parseFirstRequestBody(fetchMock)
     expect(url).toContain('/chapters/outline/start')
     expect(body).toMatchObject({ start_chapter: 5, num_chapters: 8, target_total_chapters: 80 })
+    expect(result.id).toBe('project-1')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes chapter outline rewrite through the background job entry', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({
+        run_id: 'outline-rewrite-run-1',
+        project_id: 'project-1',
+        status: 'successful',
+        progress_stage: 'successful',
+        progress_message: '章节大纲重写完成',
+        project: projectPayload,
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await rewriteChapterOutline(
+      'project-1',
+      { chapter_number: 8, title: '旧标题', summary: '旧摘要' } as any,
+      { direction: '加强冲突' },
+    )
+
+    const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit?]
+    const body = parseFirstRequestBody(fetchMock)
+    expect(url).toContain('/chapters/rewrite-outline/start')
+    expect(body).toMatchObject({ chapter_number: 8, title: '旧标题', summary: '旧摘要', direction: '加强冲突' })
     expect(result.id).toBe('project-1')
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })

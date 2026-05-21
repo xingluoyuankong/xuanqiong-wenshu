@@ -26,7 +26,7 @@
 | 概念对话 | `InspirationMode.vue` -> `/concept/converse` | active | 对话状态和蓝图生成状态分离，失败后恢复提示仍偏散 | 用户不知道当前能否继续生成 | 保留现入口，增加阶段摘要、可恢复任务提示 | 灵感模式实跑、Vitest | P1 |
 | 蓝图/总纲生成 | `BlueprintConfirmation.vue` -> `/blueprint/generate/start/status/cancel` | active | 前端 store/API 仍保留旧同步 `generateBlueprint()` | 旧调用可绕开后台进度和取消 | 旧前端 API 改为后台任务轮询；后端旧路由标记 legacy | 前端测试、接口实跑 | P0 |
 | 旧蓝图同步路由 | `/blueprint/generate` | legacy | 已改为兼容转发后台任务，不再同步执行完整生成 | 外部旧客户端需适配任务响应 | 保留 Deprecation/Link 响应头，继续观察外部兼容 | 路由回归测试 | P1 |
-| 章节大纲生成/重写 | `/writer/chapters/outline`、`outline/start/status/cancel`、`rewrite-outline` | active | 章节大纲生成已首轮任务化，重写仍是同步局部调用 | 大纲生成不再卡前端；重写长等待仍需下一步收口 | 继续把重写也接入局部任务状态和更细 runtime events | 后端测试、UI 轮询 | P1 |
+| 章节大纲生成/重写 | `/writer/chapters/outline`、`outline/start/status/cancel`、`rewrite-outline/start/status/cancel` | active | 生成和重写都已任务化；下一步要把重写质量门细节写进更清晰 runtime events | 大纲生成/重写不再卡前端长请求 | 继续补重写前后锚点、伏笔任务和质量门解释的 UI 展示 | 后端测试、UI 轮询 | P1 |
 | 正文生成 | `PipelineOrchestrator` | active | 首稿质量门已加强，长章 Provider 等待仍需更多真实样本 | 长章体验受 Provider 抖动影响 | 继续记录 heartbeat、软超时、降 token 重试和内容预览 | 7000-10000 字实跑 | P0 |
 | 正文重写/优化 | `optimizer.py`、`self_critique_service.py`、`consistency_service.py` | active | 自动流程已局部化，但前端仍需更清楚解释拒稿原因 | 用户误以为优化失败或没效果 | 详细日志展示锚点、补丁建议、拒绝原因 | 优化实跑、日志页验证 | P0 |
 | 候选版本选择/删除/评审 | `chapterWorkflow.ts`、`writer.py` | active | 前端仍同时发送 `version_index` 与 `version_id` | 删除/评审可能因排序变化错位 | 前端有 `version_id` 时只发送 `version_id`，index 仅兜底 | WriterDesk Vitest | P0 |
@@ -56,11 +56,11 @@
 - `novel.ts` store 的优化入口改为有 `version_id` 时只发送稳定 ID，避免排序变化导致优化错版本。
 - 文风画像生成新增 `/style/profiles/start/status/cancel` 后台任务入口，前端旧 `createStyleProfile()` 已改为启动任务并轮询，不再让大素材画像生成阻塞一次 HTTP 请求。
 - 旧稿导入新增 `/import/start/status/cancel` 后台任务入口，前端旧 `importNovel()` 已改为启动任务并轮询；导入阶段会回报读取、分章、采样、角色筛选、蓝图抽取和保存进度。
+- 章节大纲重写新增 `/chapters/rewrite-outline/start/status/cancel` 后台任务入口，前端旧 `rewriteChapterOutline()` 已改为启动任务并轮询，不再让局部重写卡在同步请求里。
 
 ## 下一批执行顺序
 
-1. 把章节大纲重写推进到局部任务状态机，避免长等待时前端无进度。
-2. 继续拆分风格素材导入，并补旧稿导入后的角色、伏笔、图谱、记忆重建进度。
-3. 继续把日志页默认视图收敛到“生成状态”，开发者字段折叠。
-4. 补导出前校验、Provider 健康归因与 Token 预算事件。
-5. 跑全量自动化测试、启动项目本体，做完整实跑和反向修正。
+1. 继续拆分风格素材导入，并补旧稿导入后的角色、伏笔、图谱、记忆重建进度。
+2. 继续把日志页默认视图收敛到“生成状态”，开发者字段折叠。
+3. 补 Provider 健康归因与 Token 预算事件。
+4. 跑项目本体浏览器验证、完整实跑和反向修正。

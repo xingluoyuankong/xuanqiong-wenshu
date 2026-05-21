@@ -479,7 +479,17 @@ export interface BlueprintGenerationJobResponse {
 export interface OutlineGenerationJobResponse {
   run_id: string
   project_id: string
-  status: 'idle' | 'queued' | 'generating' | 'successful' | 'failed' | 'cancelled'
+  status:
+    | 'idle'
+    | 'queued'
+    | 'generating'
+    | 'outline_context'
+    | 'outline_chapter_skeleton'
+    | 'outline_rewrite'
+    | 'saving'
+    | 'successful'
+    | 'failed'
+    | 'cancelled'
   progress_stage: string
   progress_message: string
   started_at?: string | null

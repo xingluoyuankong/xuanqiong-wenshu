@@ -271,11 +271,11 @@ export const updateChapterOutline = (
   body: JSON.stringify(chapterOutline),
 })
 
-export const rewriteChapterOutline = (
+export const startChapterOutlineRewrite = (
   projectId: string,
   chapterOutline: ChapterOutline,
   options: RewriteChapterOutlineOptions = {},
-) => requestProject(`${WRITER_BASE}/${projectId}/chapters/rewrite-outline`, {
+) => request(`${WRITER_BASE}/${projectId}/chapters/rewrite-outline/start`, {
   method: 'POST',
   body: JSON.stringify({
     chapter_number: chapterOutline.chapter_number,
@@ -283,7 +283,42 @@ export const rewriteChapterOutline = (
     summary: chapterOutline.summary,
     direction: options.direction?.trim() || undefined,
   }),
-})
+}) as Promise<OutlineGenerationJobResponse>
+
+export const getChapterOutlineRewriteStatus = (
+  projectId: string,
+) => request(`${WRITER_BASE}/${projectId}/chapters/rewrite-outline/status`) as Promise<OutlineGenerationJobResponse>
+
+export const cancelChapterOutlineRewrite = (
+  projectId: string,
+) => request(`${WRITER_BASE}/${projectId}/chapters/rewrite-outline/cancel`, {
+  method: 'POST',
+}) as Promise<OutlineGenerationJobResponse>
+
+export const rewriteChapterOutline = async (
+  projectId: string,
+  chapterOutline: ChapterOutline,
+  options: RewriteChapterOutlineOptions = {},
+) => {
+  let status = await startChapterOutlineRewrite(projectId, chapterOutline, options)
+
+  for (let attempt = 0; attempt < OUTLINE_MAX_POLL_ATTEMPTS; attempt += 1) {
+    if (status.status === 'successful' && status.project) {
+      return normalizeProject(status.project)
+    }
+    if (status.status === 'failed') {
+      throw new Error(readOutlineJobError(status))
+    }
+    if (status.status === 'cancelled') {
+      throw new Error(status.progress_message || '章节大纲重写已取消')
+    }
+
+    await delay(OUTLINE_POLL_INTERVAL_MS)
+    status = await getChapterOutlineRewriteStatus(projectId)
+  }
+
+  throw new Error('章节大纲重写后台任务等待超时，请稍后刷新项目查看结果。')
+}
 
 export const deleteChapter = (
   projectId: string,
