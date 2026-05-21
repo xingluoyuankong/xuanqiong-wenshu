@@ -66,3 +66,9 @@
 2. 继续把日志页默认视图收敛到“生成状态”，开发者字段折叠。
 3. 补 Provider 健康归因与 Token 预算事件。
 4. 跑项目本体浏览器验证、完整实跑和反向修正。
+
+## 2026-05-21 继续收口：旧稿导入伏笔/线索入库
+- `ImportService._rebuild_import_ledgers()` 不再只把导入蓝图里的 `foreshadowing_system` 写进 `ProjectMemory.plot_arcs`，现在会复用现有 `Foreshadowing` 模型创建实体，并立即调用 `ClueTrackerService.sync_from_foreshadowings()` 同步到 `StoryClue`。
+- 修复影响：旧稿导入后，伏笔页、线索页、长上下文包、后续章节任务都能读到导入文本里的 setup/payoff，不会出现“记忆里有摘要，但伏笔账本为空”的断链。
+- 去重策略：按导入章节、伏笔名和内容摘要去重，避免账本重建重复插入。
+- 验证：新增 `backend/app/services/test_import_service.py`，覆盖旧稿导入账本重建后同时产生 `Foreshadowing`、`StoryClue`、`ProjectMemory` 和 `ChapterSnapshot`。

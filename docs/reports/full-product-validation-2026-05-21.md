@@ -73,3 +73,9 @@
 - 导入任务取消保护扩展到 `import_ledger_rebuild`，进入保存/账本重建后不再中途取消，避免写一半造成账本缺口。
 - 定向验证：`python -m pytest backend/app/services/test_daily_limit_scopes.py::test_import_service_scope_reuses_outer_logical_run backend/app/api/routers/test_import_novel_job.py -q` 通过，`python -m compileall backend/app/services/import_service.py backend/app/api/routers/novels.py` 通过，`cd frontend; npm run test:run -- src/api/novel.spec.ts` 通过。
 - 全量验证：`python -m pytest backend -q` 通过（245 passed），`cd frontend; npm run test:run` 通过（125 passed），`cd frontend; npm run build` 通过；`git diff --check` 仅提示工作区换行规范化。
+
+## 2026-05-21 旧稿导入伏笔/线索闭环验证
+- 代码收口：`ImportService._rebuild_import_ledgers()` 现在把导入蓝图里的 `foreshadowing_system` 落成 `Foreshadowing`，再同步到 `StoryClue`，并在导入完成 metrics 中返回 `foreshadowing_count` 与 `clue_tracker`。
+- 自动化验证：`python -m pytest backend/app/services/test_import_service.py backend/app/api/routers/test_import_novel_job.py -q` 通过，覆盖导入任务取消保护和旧稿账本重建后伏笔/线索实体存在。
+- 编译验证：`python -m compileall backend/app/services/import_service.py backend/app/services/test_import_service.py` 通过。
+- 后端全量验证：`python -m pytest backend -q` 通过（246 passed），`python -m compileall backend/app` 通过。

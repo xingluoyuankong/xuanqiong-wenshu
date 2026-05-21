@@ -11,10 +11,11 @@ from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import BlueprintCharacter, ChapterSnapshot, CharacterState, ProjectMemory, TimelineEvent
+from ..models import BlueprintCharacter, Chapter, ChapterSnapshot, CharacterState, Foreshadowing, ProjectMemory, TimelineEvent
 from ..schemas.novel import Blueprint
 from ..services.generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text, parse_llm_json_value
 from ..services.knowledge_graph_service import KnowledgeGraphService
+from ..services.clue_tracker_service import ClueTrackerService
 from ..services.llm_service import LLMService
 from ..services.novel_service import NovelService
 from ..services.prompt_service import PromptService
@@ -377,6 +378,12 @@ class ImportService:
             ))
             timeline_count += 1
 
+        foreshadowing_count = await self._persist_import_foreshadowings(
+            project_id,
+            foreshadowing_payloads,
+            chapter_count=len(chapters),
+        )
+        clue_metrics = await ClueTrackerService(self.session).sync_from_foreshadowings(project_id)
         graph_metrics = await KnowledgeGraphService(self.session).sync_from_story_memory(project_id)
 
         return {
@@ -384,8 +391,224 @@ class ImportService:
             "snapshot_count": snapshot_count,
             "character_state_count": state_count,
             "timeline_event_count": timeline_count,
+            "foreshadowing_count": foreshadowing_count,
+            "clue_tracker": clue_metrics,
             "knowledge_graph": graph_metrics,
         }
+
+    async def _persist_import_foreshadowings(
+        self,
+        project_id: str,
+        foreshadowing_payloads: List[Any],
+        *,
+        chapter_count: int,
+    ) -> int:
+        if not foreshadowing_payloads:
+            return 0
+
+        chapter_result = await self.session.execute(
+            select(Chapter).where(Chapter.project_id == project_id)
+        )
+        chapters_by_number = {chapter.chapter_number: chapter for chapter in chapter_result.scalars().all()}
+        if not chapters_by_number:
+            return 0
+
+        existing_result = await self.session.execute(
+            select(Foreshadowing).where(Foreshadowing.project_id == project_id)
+        )
+        existing_keys = {
+            (item.chapter_number, (item.name or "").strip(), (item.content or "").strip()[:512])
+            for item in existing_result.scalars().all()
+        }
+
+        created = 0
+        for index, raw_item in enumerate(foreshadowing_payloads, start=1):
+            item = self._coerce_mapping(raw_item)
+            if not item:
+                continue
+
+            planted_chapter = self._coerce_chapter_number(
+                self._first_present(
+                    item,
+                    "chapter",
+                    "chapter_number",
+                    "planted_chapter",
+                    "plant_chapter",
+                    "setup_chapter",
+                    "start_chapter",
+                ),
+                default=1,
+                chapter_count=chapter_count,
+            )
+            chapter = chapters_by_number.get(planted_chapter) or chapters_by_number.get(1)
+            if chapter is None:
+                continue
+
+            resolved_chapter_number = self._coerce_optional_chapter_number(
+                self._first_present(
+                    item,
+                    "resolved_chapter_number",
+                    "resolution_chapter",
+                    "resolved_at_chapter",
+                    "payoff_chapter",
+                ),
+                chapter_count=chapter_count,
+                clamp=False,
+            )
+            target_reveal_chapter = self._coerce_optional_chapter_number(
+                self._first_present(item, "target_reveal_chapter", "payoff_window", "expected_payoff"),
+                chapter_count=chapter_count,
+                clamp=False,
+            )
+            resolved_chapter = chapters_by_number.get(resolved_chapter_number) if resolved_chapter_number else None
+
+            plant_text = self._compact_text(self._first_present(item, "plant", "setup", "content", "description"))
+            payoff_text = self._compact_text(self._first_present(item, "payoff", "resolution", "reveal_method"))
+            trigger_text = self._compact_text(item.get("trigger"))
+            summary_text = self._compact_text(item.get("summary"))
+            name = self._compact_text(self._first_present(item, "name", "title", "summary", "trigger", "plant"))[:255]
+            if not name:
+                name = f"imported_foreshadowing_{index}"
+
+            content_parts = [part for part in [summary_text, plant_text, trigger_text] if part]
+            content = " / ".join(content_parts).strip() or name
+            dedupe_key = (planted_chapter, name.strip(), content[:512])
+            if dedupe_key in existing_keys:
+                continue
+
+            status_text = str(item.get("status") or "").strip().lower()
+            status_value = "revealed" if resolved_chapter_number or status_text in {"resolved", "revealed", "paid_off"} else "planted"
+
+            self.session.add(
+                Foreshadowing(
+                    project_id=project_id,
+                    chapter_id=chapter.id,
+                    chapter_number=planted_chapter,
+                    content=content,
+                    type=self._normalise_import_foreshadowing_type(item),
+                    keywords=self._extract_import_keywords(item),
+                    status=status_value,
+                    resolved_chapter_id=resolved_chapter.id if resolved_chapter else None,
+                    resolved_chapter_number=resolved_chapter_number,
+                    name=name,
+                    target_reveal_chapter=target_reveal_chapter or resolved_chapter_number,
+                    reveal_method=payoff_text or None,
+                    reveal_impact=self._compact_text(item.get("impact") or item.get("reveal_impact")) or None,
+                    related_characters=self._coerce_list(item.get("owner") or item.get("related_characters")),
+                    related_plots=self._coerce_list(item.get("related_plots") or item.get("plotline") or item.get("arc")),
+                    importance=self._normalise_import_importance(item.get("importance") or item.get("priority")),
+                    urgency=self._coerce_urgency(item.get("urgency")),
+                    is_manual=False,
+                    ai_confidence=0.55,
+                    author_note="source:file_import_blueprint",
+                )
+            )
+            existing_keys.add(dedupe_key)
+            created += 1
+
+        if created:
+            await self.session.flush()
+        return created
+
+    @staticmethod
+    def _coerce_mapping(value: Any) -> Dict[str, Any]:
+        if hasattr(value, "model_dump"):
+            dumped = value.model_dump(exclude_none=True)
+            return dumped if isinstance(dumped, dict) else {}
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str) and value.strip():
+            return {"summary": value.strip()}
+        return {}
+
+    @staticmethod
+    def _first_present(item: Dict[str, Any], *keys: str) -> Any:
+        for key in keys:
+            value = item.get(key)
+            if value not in (None, "", [], {}):
+                return value
+        return None
+
+    @staticmethod
+    def _compact_text(value: Any, *, limit: int = 800) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, (dict, list)):
+            text = json.dumps(value, ensure_ascii=False)
+        else:
+            text = str(value)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text[:limit]
+
+    @classmethod
+    def _coerce_chapter_number(cls, value: Any, *, default: int, chapter_count: int) -> int:
+        parsed = cls._coerce_optional_chapter_number(value, chapter_count=chapter_count)
+        return parsed or max(1, min(default, max(chapter_count, 1)))
+
+    @staticmethod
+    def _coerce_optional_chapter_number(value: Any, *, chapter_count: int, clamp: bool = True) -> Optional[int]:
+        if value in (None, "", [], {}):
+            return None
+        if isinstance(value, dict):
+            value = value.get("chapter") or value.get("chapter_number") or value.get("start") or value.get("end")
+        if isinstance(value, (list, tuple)):
+            value = value[0] if value else None
+        match = re.search(r"\d+", str(value or ""))
+        if not match:
+            return None
+        number = int(match.group(0))
+        if number < 1:
+            return None
+        return min(number, max(chapter_count, 1)) if clamp else number
+
+    @staticmethod
+    def _coerce_list(value: Any) -> List[str]:
+        if value in (None, "", [], {}):
+            return []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, dict):
+            return [str(part).strip() for part in value.values() if str(part).strip()]
+        return [part.strip() for part in re.split(r"[,，、/|]", str(value)) if part.strip()]
+
+    @classmethod
+    def _extract_import_keywords(cls, item: Dict[str, Any]) -> List[str]:
+        raw_keywords = item.get("keywords") or item.get("tags")
+        keywords = cls._coerce_list(raw_keywords)
+        for key in ("name", "title", "trigger", "owner"):
+            text = cls._compact_text(item.get(key), limit=80)
+            if text and text not in keywords:
+                keywords.append(text)
+        return keywords[:12]
+
+    @staticmethod
+    def _normalise_import_foreshadowing_type(item: Dict[str, Any]) -> str:
+        raw = str(item.get("type") or item.get("kind") or "").strip().lower()
+        if raw in {"question", "mystery", "hint", "clue", "setup"}:
+            return raw
+        if raw in {"secret", "character_secret"}:
+            return "mystery"
+        if raw in {"evidence", "key_evidence"}:
+            return "clue"
+        return "setup"
+
+    @staticmethod
+    def _normalise_import_importance(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        if text in {"major", "main", "high", "5", "4", "important"}:
+            return "major"
+        if text in {"minor", "medium", "3"}:
+            return "minor"
+        return "subtle"
+
+    @staticmethod
+    def _coerce_urgency(value: Any) -> Optional[int]:
+        if value in (None, "", [], {}):
+            return None
+        match = re.search(r"\d+", str(value))
+        if not match:
+            return None
+        return max(1, min(10, int(match.group(0))))
 
     def _build_import_timeline_summary(self, chapters: List[Tuple[str, str]], *, limit: int = 12) -> str:
         if not chapters:
