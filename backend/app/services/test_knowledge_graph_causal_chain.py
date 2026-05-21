@@ -56,5 +56,17 @@ async def test_knowledge_graph_sync_backfills_causal_chain_edges(tmp_path):
             assert edge.causality == "Lin Qi steals the ledger code."
             assert edge.extra["source"] == "causal_chain"
             assert "missing code" in edge.extra["effect"]
+
+            graph = await KnowledgeGraphService(session).get_project_graph("p-causal-kg")
+            lin_node = next(node for node in graph["nodes"] if node["name"] == "Lin Qi")
+            causal_edge = graph["edges"][0]
+            assert lin_node["fact_source"] == "blueprint_character"
+            assert lin_node["first_chapter"] == 4
+            assert lin_node["latest_chapter"] == 4
+            assert lin_node["relationship_count"] == 1
+            assert causal_edge["fact_source"] == "causal_chain"
+            assert causal_edge["source_chapter"] == 4
+            assert causal_edge["latest_chapter"] == 4
+            assert causal_edge["confidence"] >= 90
     finally:
         await engine.dispose()

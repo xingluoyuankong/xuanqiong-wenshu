@@ -22,7 +22,7 @@
         </article>
       </div>
       <div class="rounded-2xl border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm leading-6 text-sky-800">
-        说明：这里不是静态图。每次进入页面都会先从角色状态与时间线自动同步，再展示关系图谱。
+        说明：图谱用于查关系与来源证据；角色“当前事实”仍以记忆层/故事账本为准。每次进入页面都会先同步角色状态、时间线和因果边。
       </div>
       <div class="flex gap-2">
         <button class="flex-1 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-900" :disabled="loading" @click="reload">刷新图谱</button>
@@ -45,6 +45,11 @@
             <span class="rounded-full bg-white px-2 py-1 text-[11px] text-slate-500">{{ node.role_type || '未分类' }}</span>
           </div>
           <div class="mt-2 text-xs leading-5 text-slate-500 line-clamp-2">{{ node.description || '暂无角色描述' }}</div>
+          <div class="mt-2 flex flex-wrap gap-1.5 text-[11px] text-slate-500">
+            <span class="rounded-full bg-white px-2 py-0.5">{{ formatLifecycle(node.lifecycle) }}</span>
+            <span class="rounded-full bg-white px-2 py-0.5">{{ formatNodeChapterLabel(node) }}</span>
+            <span class="rounded-full bg-white px-2 py-0.5">{{ formatConfidence(node.confidence) }}</span>
+          </div>
         </button>
         <div v-if="!filteredNodes.length" class="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">暂无可展示角色</div>
       </div>
@@ -65,8 +70,16 @@
             <div class="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
               <span class="rounded-full bg-white px-2 py-1">{{ selectedNode.role_type || '未分类角色' }}</span>
               <span class="rounded-full bg-white px-2 py-1">状态：{{ selectedNode.status || '未标记' }}</span>
+              <span class="rounded-full bg-white px-2 py-1">来源：{{ formatFactSource(selectedNode) }}</span>
+              <span class="rounded-full bg-white px-2 py-1">{{ formatConfidence(selectedNode.confidence) }}</span>
             </div>
             <p class="mt-4 text-sm leading-6 text-slate-700">{{ selectedNode.description || '暂无角色描述。' }}</p>
+            <div class="mt-4 grid gap-2 sm:grid-cols-2">
+              <div v-for="item in selectedNodeFactRows" :key="item.label" class="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                <div class="text-[11px] uppercase tracking-wide text-slate-400">{{ item.label }}</div>
+                <div class="mt-1 text-sm font-medium text-slate-700">{{ item.value }}</div>
+              </div>
+            </div>
             <div class="mt-4 grid gap-3 md:grid-cols-2">
               <div>
                 <div class="text-sm font-medium text-slate-800">性格特征</div>
@@ -93,7 +106,7 @@
                   <span class="rounded-full bg-slate-100 px-2 py-1 text-[11px] text-slate-500">{{ edge.event_type }}</span>
                 </div>
                 <div class="mt-2 text-sm leading-6 text-slate-600">{{ edge.description || '暂无事件描述' }}</div>
-                <div class="mt-2 text-xs text-slate-500">第 {{ edge.chapter_number || '?' }} 章 · 重要度 {{ edge.importance || 0 }}/10</div>
+                <div class="mt-2 text-xs text-slate-500">{{ formatEdgeFactLine(edge) }} · 重要度 {{ edge.importance || 0 }}/10</div>
               </div>
               <div v-if="!selectedNodeEdges.length" class="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-6 text-sm text-slate-500">当前没有与该角色绑定的关系边。</div>
             </div>
@@ -113,6 +126,7 @@
                 <span class="rounded-full bg-white px-2 py-1 text-[11px] text-slate-500">{{ edge.event_type || '关系' }}</span>
               </div>
               <div class="mt-2 text-sm leading-6 text-slate-600 line-clamp-2">{{ edge.description || '暂无说明' }}</div>
+              <div class="mt-2 text-xs text-slate-500">{{ formatEdgeFactLine(edge) }}</div>
             </div>
             <div v-if="!topEdges.length" class="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">暂无关系边数据。</div>
           </div>
@@ -154,6 +168,64 @@ const projectId = computed(() => props.projectId || '')
 const nodes = computed<any[]>(() => Array.isArray(graph.value.nodes) ? graph.value.nodes : [])
 const edges = computed<any[]>(() => Array.isArray(graph.value.edges) ? graph.value.edges : [])
 
+const factSourceLabels: Record<string, string> = {
+  blueprint_character: '蓝图角色',
+  dynamic_character: '动态角色入池',
+  chapter_state: '章节状态',
+  timeline_event: '时间线事件',
+  blueprint_relationship: '蓝图关系',
+  causal_chain: '因果链',
+  manual: '手工补充',
+}
+
+const lifecycleLabels: Record<string, string> = {
+  active: '活跃追踪',
+  dynamic: '动态入池',
+  ended: '已退场',
+  planned: '规划中',
+  tracked: '已追踪',
+  manual: '手工补充',
+}
+
+const formatChapter = (value: unknown) => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? `第 ${parsed} 章` : '未标记'
+}
+
+const formatConfidence = (value: unknown) => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? `置信度 ${Math.max(0, Math.min(100, Math.round(parsed)))}%` : '置信度未标记'
+}
+
+const formatLifecycle = (value: unknown) => {
+  const key = String(value || '').trim()
+  return lifecycleLabels[key] || key || '未标记生命周期'
+}
+
+const formatFactSource = (item: any) => {
+  const key = String(item?.fact_source || '').trim()
+  return item?.fact_source_label || factSourceLabels[key] || key || '未标记来源'
+}
+
+const formatNodeChapterLabel = (node: any) => {
+  if (node?.first_chapter && node?.latest_chapter && node.first_chapter !== node.latest_chapter) {
+    return `第 ${node.first_chapter}-${node.latest_chapter} 章`
+  }
+  if (node?.latest_chapter) return `最新第 ${node.latest_chapter} 章`
+  if (node?.first_chapter) return `首见第 ${node.first_chapter} 章`
+  return '章节未标记'
+}
+
+const formatEdgeFactLine = (edge: any) => {
+  const parts = [
+    formatFactSource(edge),
+    edge?.source_chapter ? `来源${formatChapter(edge.source_chapter)}` : '',
+    edge?.latest_chapter ? `最新${formatChapter(edge.latest_chapter)}` : '',
+    formatConfidence(edge?.confidence),
+  ].filter(Boolean)
+  return parts.join(' · ')
+}
+
 const filteredNodes = computed(() => {
   const keyword = search.value.trim().toLowerCase()
   if (!keyword) return nodes.value
@@ -168,6 +240,19 @@ const selectedNodeEdges = computed(() => {
 })
 
 const topEdges = computed(() => edges.value.slice().sort((a, b) => (b.importance || 0) - (a.importance || 0)).slice(0, 8))
+
+const selectedNodeFactRows = computed(() => {
+  const node = selectedNode.value
+  if (!node) return []
+  return [
+    { label: '来源', value: formatFactSource(node) },
+    { label: '生命周期', value: formatLifecycle(node.lifecycle) },
+    { label: '首次登场/引用', value: formatChapter(node.first_chapter) },
+    { label: '最新状态章节', value: formatChapter(node.latest_chapter) },
+    { label: '关系边数量', value: `${Number(node.relationship_count || 0)} 条` },
+    { label: '事实置信度', value: formatConfidence(node.confidence) },
+  ]
+})
 
 const selectNode = (node: any) => {
   selectedNode.value = node

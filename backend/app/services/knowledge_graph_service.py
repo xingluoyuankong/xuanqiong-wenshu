@@ -70,6 +70,218 @@ def _is_legacy_supplemental_node(node: CharacterNode) -> bool:
     return any(name.startswith(prefix) and any(ch.isdigit() for ch in name) for prefix in _LEGACY_SUPPLEMENTAL_NODE_PREFIXES)
 
 
+_FACT_SOURCE_LABELS: dict[str, str] = {
+    "blueprint_character": "蓝图角色",
+    "dynamic_character": "动态角色入池",
+    "chapter_state": "章节状态",
+    "timeline_event": "时间线事件",
+    "blueprint_relationship": "蓝图关系",
+    "causal_chain": "因果链",
+    "manual": "手工补充",
+}
+
+_FACT_SOURCE_CONFIDENCE_BASE: dict[str, int] = {
+    "blueprint_character": 82,
+    "dynamic_character": 76,
+    "chapter_state": 90,
+    "timeline_event": 74,
+    "blueprint_relationship": 80,
+    "causal_chain": 88,
+    "manual": 58,
+}
+
+
+def _safe_int(value: Any) -> Optional[int]:
+    try:
+        if value is None or value == "":
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _label_fact_source(source_key: Any) -> str:
+    key = str(source_key or "").strip().lower()
+    return _FACT_SOURCE_LABELS.get(key, key or "手工补充")
+
+
+def _coerce_mapping(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _first_int(*values: Any) -> Optional[int]:
+    for value in values:
+        parsed = _safe_int(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _max_int(*values: Any) -> Optional[int]:
+    parsed = [_safe_int(value) for value in values]
+    parsed = [value for value in parsed if value is not None]
+    return max(parsed) if parsed else None
+
+
+def _build_node_fact_profile(
+    node: CharacterNode,
+    *,
+    blueprint_character: BlueprintCharacter | None,
+    latest_state: CharacterState | None,
+    connected_edges: List[EventEdge],
+    project_latest_chapter: Optional[int],
+) -> Dict[str, Any]:
+    node_extra = _coerce_mapping(node.extra)
+    blueprint_extra = _coerce_mapping(getattr(blueprint_character, "extra", None))
+    state_extra = _coerce_mapping(getattr(latest_state, "extra", None))
+
+    source_key = (
+        _safe_text(node_extra.get("fact_source"))
+        or _safe_text(blueprint_extra.get("fact_source"))
+        or _safe_text(state_extra.get("fact_source"))
+    )
+    if not source_key:
+        if node_extra.get("auto_created_from_memory") or blueprint_extra.get("auto_created_from_memory"):
+            source_key = "dynamic_character"
+        elif latest_state is not None:
+            source_key = "chapter_state"
+        elif blueprint_character is not None:
+            source_key = "blueprint_character"
+        else:
+            for edge in connected_edges:
+                edge_source = _safe_text(_coerce_mapping(edge.extra).get("source"))
+                if edge_source:
+                    source_key = edge_source
+                    break
+            if not source_key:
+                source_key = "manual"
+
+    connected_chapters = [
+        parsed
+        for edge in connected_edges
+        if (parsed := _safe_int(edge.chapter_number)) is not None
+    ]
+    state_chapter = _safe_int(getattr(latest_state, "chapter_number", None))
+    first_chapter = _first_int(
+        node_extra.get("first_chapter"),
+        blueprint_extra.get("first_appearance_chapter"),
+        blueprint_extra.get("first_chapter"),
+        state_chapter,
+        min(connected_chapters) if connected_chapters else None,
+    )
+    latest_chapter = _max_int(
+        node_extra.get("latest_chapter"),
+        node_extra.get("latest_seen_chapter"),
+        blueprint_extra.get("latest_chapter"),
+        state_chapter,
+        max(connected_chapters) if connected_chapters else None,
+    )
+    if latest_chapter is None:
+        latest_chapter = first_chapter
+
+    health = _safe_text(getattr(latest_state, "health_status", None)) or _safe_text(node.status)
+    health_key = health.strip().lower()
+    if health_key in {"dead", "deceased", "fallen"}:
+        lifecycle = "ended"
+    elif source_key == "dynamic_character":
+        lifecycle = "dynamic"
+    elif latest_state is not None:
+        if project_latest_chapter is not None and latest_chapter is not None and latest_chapter < max(1, project_latest_chapter - 2):
+            lifecycle = "tracked"
+        else:
+            lifecycle = "active"
+    elif blueprint_character is not None:
+        lifecycle = "planned"
+    else:
+        lifecycle = "manual"
+
+    relationship_count = len(connected_edges)
+    confidence = _first_int(
+        node_extra.get("confidence"),
+        blueprint_extra.get("confidence"),
+        state_extra.get("confidence"),
+    )
+    if confidence is None:
+        confidence = _FACT_SOURCE_CONFIDENCE_BASE.get(source_key, 60)
+        if latest_state is not None:
+            confidence += 4
+        if first_chapter is not None and latest_chapter is not None and latest_chapter > first_chapter:
+            confidence += 4
+        if relationship_count >= 6:
+            confidence += 4
+        if source_key == "manual":
+            confidence -= 4
+        confidence = max(0, min(100, confidence))
+
+    return {
+        "fact_source": source_key,
+        "fact_source_label": _label_fact_source(source_key),
+        "first_chapter": first_chapter,
+        "latest_chapter": latest_chapter,
+        "confidence": confidence,
+        "lifecycle": lifecycle,
+        "relationship_count": relationship_count,
+    }
+
+
+def _build_edge_fact_profile(
+    edge: EventEdge,
+    *,
+    source_profile: Dict[str, Any],
+    target_profile: Dict[str, Any],
+) -> Dict[str, Any]:
+    edge_extra = _coerce_mapping(edge.extra)
+    source_key = _safe_text(edge_extra.get("fact_source")) or _safe_text(edge_extra.get("source"))
+    if not source_key:
+        if edge.event_type == "causality":
+            source_key = "causal_chain"
+        elif edge.chapter_number is not None:
+            source_key = "timeline_event"
+        else:
+            source_key = "blueprint_relationship"
+
+    source_chapter = _first_int(
+        edge_extra.get("source_chapter"),
+        edge_extra.get("cause_chapter"),
+        edge.chapter_number,
+        source_profile.get("first_chapter"),
+        target_profile.get("first_chapter"),
+    )
+    latest_chapter = _max_int(
+        edge_extra.get("latest_chapter"),
+        edge_extra.get("effect_chapter"),
+        edge.chapter_number,
+        source_profile.get("latest_chapter"),
+        target_profile.get("latest_chapter"),
+    )
+    if latest_chapter is None:
+        latest_chapter = source_chapter
+
+    confidence = _first_int(edge_extra.get("confidence"))
+    if confidence is None:
+        importance = _safe_int(edge.importance) or 5
+        confidence = max(10, min(100, importance * 10))
+        if source_key in {"causal_chain", "timeline_event"}:
+            confidence += 5
+        if source_key == "blueprint_relationship":
+            confidence += 3
+        if source_profile.get("lifecycle") == "active" or target_profile.get("lifecycle") == "active":
+            confidence += 2
+        confidence = max(0, min(100, confidence))
+
+    return {
+        "fact_source": source_key,
+        "fact_source_label": _label_fact_source(source_key),
+        "source_chapter": source_chapter,
+        "latest_chapter": latest_chapter,
+        "confidence": confidence,
+    }
+
+
 class PlotThread:
     """情节线索 - 表示一个完整的叙事线"""
 
@@ -277,6 +489,15 @@ class KnowledgeGraphService:
                         importance=event.importance,
                         emotional_impact="turning" if event.is_turning_point else "ongoing",
                         plot_advancement="major" if event.event_type == "major" else "normal",
+                        extra={
+                            "source": "timeline_event",
+                            "timeline_event_id": event.id,
+                            "event_title": event.event_title,
+                            "event_type": event.event_type,
+                            "source_chapter": event.chapter_number,
+                            "latest_chapter": event.chapter_number,
+                            "is_turning_point": event.is_turning_point,
+                        },
                     )
                     self.db.add(edge)
                     edge_keys.add(key)
@@ -456,12 +677,66 @@ class KnowledgeGraphService:
         nodes = await self.get_project_nodes(project_id)
         edges = await self.get_project_edges(project_id)
 
+        blueprint_result = await self.db.execute(
+            select(BlueprintCharacter).where(BlueprintCharacter.project_id == project_id)
+        )
+        blueprint_characters = list(blueprint_result.scalars().all())
+        blueprint_by_id = {character.id: character for character in blueprint_characters if character.id is not None}
+        blueprint_by_name = {
+            (character.name or "").strip(): character
+            for character in blueprint_characters
+            if (character.name or "").strip()
+        }
+
+        state_result = await self.db.execute(
+            select(CharacterState)
+            .where(CharacterState.project_id == project_id)
+            .order_by(CharacterState.chapter_number.asc(), CharacterState.id.asc())
+        )
+        latest_states: Dict[str, CharacterState] = {}
+        project_chapter_numbers: List[int] = []
+        for state in state_result.scalars().all():
+            name = (state.character_name or "").strip()
+            chapter_number = _safe_int(state.chapter_number)
+            if chapter_number is not None:
+                project_chapter_numbers.append(chapter_number)
+            if name:
+                latest_states[name] = state
+
+        for edge in edges:
+            chapter_number = _safe_int(edge.chapter_number)
+            if chapter_number is not None:
+                project_chapter_numbers.append(chapter_number)
+        project_latest_chapter = max(project_chapter_numbers) if project_chapter_numbers else None
+
+        node_edges: Dict[int, List[EventEdge]] = defaultdict(list)
+        for edge in edges:
+            if edge.source_node_id is not None:
+                node_edges[edge.source_node_id].append(edge)
+            if edge.target_node_id is not None:
+                node_edges[edge.target_node_id].append(edge)
+
         # 构建节点映射
         node_map = {node.id: node for node in nodes}
+        node_profiles: Dict[int, Dict[str, Any]] = {}
 
         # 序列化节点
         nodes_data = []
         for node in nodes:
+            node_name = (node.name or "").strip()
+            blueprint_character = (
+                blueprint_by_id.get(node.blueprint_character_id)
+                if node.blueprint_character_id is not None
+                else None
+            ) or blueprint_by_name.get(node_name)
+            profile = _build_node_fact_profile(
+                node,
+                blueprint_character=blueprint_character,
+                latest_state=latest_states.get(node_name),
+                connected_edges=node_edges.get(node.id, []),
+                project_latest_chapter=project_latest_chapter,
+            )
+            node_profiles[node.id] = profile
             nodes_data.append({
                 "id": node.id,
                 "project_id": node.project_id,
@@ -477,6 +752,7 @@ class KnowledgeGraphService:
                 "emotional_state": node.emotional_state,
                 "blueprint_character_id": node.blueprint_character_id,
                 "extra": node.extra,
+                **profile,
                 "created_at": node.created_at.isoformat() if node.created_at else None,
                 "updated_at": node.updated_at.isoformat() if node.updated_at else None
             })
@@ -486,6 +762,11 @@ class KnowledgeGraphService:
         for edge in edges:
             source_node = node_map.get(edge.source_node_id)
             target_node = node_map.get(edge.target_node_id)
+            profile = _build_edge_fact_profile(
+                edge,
+                source_profile=node_profiles.get(edge.source_node_id, {}),
+                target_profile=node_profiles.get(edge.target_node_id, {}),
+            )
             edges_data.append({
                 "id": edge.id,
                 "source_id": edge.source_node_id,
@@ -503,6 +784,7 @@ class KnowledgeGraphService:
                 "emotional_impact": edge.emotional_impact,
                 "plot_advancement": edge.plot_advancement,
                 "extra": edge.extra,
+                **profile,
                 "created_at": edge.created_at.isoformat() if edge.created_at else None,
                 "updated_at": edge.updated_at.isoformat() if edge.updated_at else None
             })

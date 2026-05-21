@@ -40,6 +40,8 @@ async def test_outline_generation_job_has_start_status_and_cancel(monkeypatch):
 
     assert started.status == "queued"
     assert started.progress_stage == "queued"
+    assert started.events
+    assert started.events[-1]["stage"] == "queued"
     assert len(background_tasks.tasks) == 1
 
     running = await writer.get_chapters_outline_generation_status(
@@ -58,6 +60,7 @@ async def test_outline_generation_job_has_start_status_and_cancel(monkeypatch):
     assert cancelled.status == "cancelled"
     assert cancelled.error is not None
     assert cancelled.error.code == "outline_generation_cancelled"
+    assert any(event.get("stage") == "cancelled" for event in cancelled.events)
 
 
 @pytest.mark.asyncio
@@ -77,6 +80,8 @@ async def test_outline_rewrite_job_has_start_status_and_cancel(monkeypatch):
 
     assert started.status == "queued"
     assert started.progress_stage == "queued"
+    assert started.events
+    assert started.events[-1]["stage"] == "queued"
     assert len(background_tasks.tasks) == 1
 
     running = await writer.get_chapter_outline_rewrite_status(
@@ -95,6 +100,7 @@ async def test_outline_rewrite_job_has_start_status_and_cancel(monkeypatch):
     assert cancelled.status == "cancelled"
     assert cancelled.error is not None
     assert cancelled.error.code == "outline_generation_cancelled"
+    assert any(event.get("stage") == "cancelled" for event in cancelled.events)
 
     overwritten = await writer._set_outline_job_state(
         started.run_id,

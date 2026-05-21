@@ -495,6 +495,7 @@ export interface OutlineGenerationJobResponse {
   started_at?: string | null
   updated_at?: string | null
   project?: NovelProject | null
+  events?: GenerationRuntimeEvent[]
   error?: BlueprintGenerationError | string | null
 }
 

@@ -666,6 +666,48 @@ def _build_memory_layer_runtime_summary(memory_result: Dict[str, Any]) -> str:
     return "已写入" + "，".join(pieces) + "。"
 
 
+def _build_ledger_sync_runtime_summary(clue_result: Dict[str, Any], graph_result: Dict[str, Any]) -> str:
+    pieces: List[str] = []
+    if isinstance(clue_result, dict):
+        created = int(clue_result.get("created") or 0)
+        updated = int(clue_result.get("updated") or 0)
+        if created:
+            pieces.append(f"线索新增 {created} 条")
+        if updated:
+            pieces.append(f"线索更新 {updated} 条")
+    if isinstance(graph_result, dict):
+        created_nodes = int(graph_result.get("created_nodes") or 0)
+        created_edges = int(graph_result.get("created_edges") or 0)
+        removed_nodes = int(graph_result.get("removed_nodes") or 0)
+        removed_edges = int(graph_result.get("removed_edges") or 0)
+        if created_nodes:
+            pieces.append(f"图谱新增角色节点 {created_nodes} 个")
+        if created_edges:
+            pieces.append(f"图谱新增关系边 {created_edges} 条")
+        if removed_nodes:
+            pieces.append(f"清理过期节点 {removed_nodes} 个")
+        if removed_edges:
+            pieces.append(f"清理过期关系 {removed_edges} 条")
+    if not pieces:
+        return "线索与知识图谱已完成检查，本章没有需要新增或清理的账本项。"
+    return "，".join(pieces) + "。"
+
+
+def _build_finalized_runtime_summary(result: Dict[str, Any]) -> str:
+    degraded: List[str] = []
+    for key, label in (
+        ("memory_layer", "记忆层"),
+        ("foreshadowing_closure", "伏笔闭环"),
+        ("ledger_sync", "线索/图谱同步"),
+    ):
+        value = result.get(key)
+        if isinstance(value, dict) and value.get("success") is False:
+            degraded.append(label)
+    if degraded:
+        return "正文已确认；" + "、".join(degraded) + "有降级警告，已保留原文并写入可重试的账本提示。"
+    return "正文已确认；记忆、伏笔、线索和知识图谱同步结果已写入运行日志。"
+
+
 def _get_generation_run_id(chapter: Optional[Chapter]) -> Optional[str]:
     runtime = _load_generation_runtime_state(chapter).get("generation_runtime")
     if not isinstance(runtime, dict):
@@ -1069,7 +1111,44 @@ def _outline_job_error(
     }
 
 
+def _outline_stage_title(stage: str) -> str:
+    return {
+        "queued": "任务排队",
+        "outline_context": "上下文审计",
+        "outline_chapter_skeleton": "章节职责与骨架",
+        "outline_rewrite": "局部大纲重写",
+        "saving": "保存章节大纲",
+        "successful": "章节大纲完成",
+        "failed": "章节大纲失败",
+        "cancelled": "任务已取消",
+        "idle": "暂无任务",
+    }.get(stage, "章节大纲任务")
+
+
+def _outline_runtime_event(
+    stage: str,
+    message: str,
+    *,
+    status: str = "",
+    level: str = "info",
+) -> Dict[str, Any]:
+    return {
+        "at": _outline_job_now_iso(),
+        "stage": stage,
+        "level": level,
+        "kind": "status",
+        "title": _outline_stage_title(stage),
+        "summary": message,
+        "message": message,
+        "metrics": {
+            "status": status or stage,
+            "progress_stage": stage,
+        },
+    }
+
+
 def _normalize_outline_job_payload(job: Dict[str, Any]) -> Dict[str, Any]:
+    events = job.get("events") if isinstance(job.get("events"), list) else []
     return {
         "run_id": str(job.get("run_id") or ""),
         "project_id": str(job.get("project_id") or ""),
@@ -1079,6 +1158,7 @@ def _normalize_outline_job_payload(job: Dict[str, Any]) -> Dict[str, Any]:
         "started_at": job.get("started_at"),
         "updated_at": job.get("updated_at"),
         "project": job.get("project"),
+        "events": [event for event in events[-200:] if isinstance(event, dict)],
         "error": job.get("error"),
     }
 
@@ -1095,8 +1175,18 @@ async def _set_outline_job_state(run_id: str, **updates: Any) -> Dict[str, Any]:
             _OUTLINE_JOBS[run_id] = job
         if job.get("status") == "cancelled" and updates.get("status") != "cancelled":
             return dict(job)
+        previous_stage = str(job.get("progress_stage") or job.get("status") or "idle")
+        previous_message = str(job.get("progress_message") or "")
+        previous_status = str(job.get("status") or "idle")
         job.update(updates)
         job["updated_at"] = _outline_job_now_iso()
+        stage = str(job.get("progress_stage") or job.get("status") or "idle")
+        message = str(job.get("progress_message") or "")
+        status = str(job.get("status") or stage)
+        if stage != previous_stage or message != previous_message or status != previous_status:
+            events = job.get("events") if isinstance(job.get("events"), list) else []
+            level = "error" if status == "failed" else "warning" if status == "cancelled" else "info"
+            job["events"] = [*events[-199:], _outline_runtime_event(stage, message, status=status, level=level)]
         return dict(job)
 
 
@@ -1155,6 +1245,12 @@ async def _run_outline_generation_job(
             if current and current.get("status") == "cancelled":
                 return
 
+        await _set_outline_job_state(
+            run_id,
+            status="saving",
+            progress_stage="saving",
+            progress_message="正在保存章节大纲并更新项目状态",
+        )
         await _set_outline_job_state(
             run_id,
             status="successful",
@@ -1235,6 +1331,12 @@ async def _run_outline_rewrite_job(
             if current and current.get("status") == "cancelled":
                 return
 
+        await _set_outline_job_state(
+            run_id,
+            status="saving",
+            progress_stage="saving",
+            progress_message="正在保存重写后的章节大纲",
+        )
         await _set_outline_job_state(
             run_id,
             status="successful",
@@ -2039,6 +2141,10 @@ async def _run_finalize_pipeline(
         }
         if chapter is not None:
             await _refresh_chapter_runtime_state(session, chapter)
+            ledger_summary = _build_ledger_sync_runtime_summary(
+                clue_result if isinstance(clue_result, dict) else {},
+                graph_result if isinstance(graph_result, dict) else {},
+            )
             _append_generation_runtime_event(
                 chapter,
                 stage="ledger_graph",
@@ -2046,7 +2152,7 @@ async def _run_finalize_pipeline(
                 progress_percent=100,
                 event_kind="ledger",
                 title="线索/图谱同步完成",
-                summary="已把伏笔线索、角色状态和时间线同步进故事账本。",
+                summary=ledger_summary,
                 metrics={
                     "clues": clue_result if isinstance(clue_result, dict) else {},
                     "knowledge_graph": graph_result if isinstance(graph_result, dict) else {},
@@ -2102,7 +2208,7 @@ async def _run_finalize_pipeline(
             progress_percent=100,
             event_kind="ledger",
             title="定稿闭环完成",
-            summary="正文已确认，记忆、伏笔、线索和知识图谱同步结果已写入运行日志。",
+            summary=_build_finalized_runtime_summary(result),
             metrics={
                 "memory_success": bool((result.get("memory_layer") or {}).get("success", True)),
                 "foreshadowing_success": bool((result.get("foreshadowing_closure") or {}).get("success", True)),
@@ -3402,6 +3508,7 @@ async def start_chapter_outline_rewrite(
             "project": None,
             "error": None,
             "request": request.model_dump(),
+            "events": [_outline_runtime_event("queued", "章节大纲重写任务已入队", status="queued")],
         }
         _OUTLINE_JOBS[run_id] = job
         _OUTLINE_PROJECT_RUNS[project_id] = run_id
@@ -3481,6 +3588,7 @@ async def start_chapters_outline_generation(
             "project": None,
             "error": None,
             "request": request.model_dump(),
+            "events": [_outline_runtime_event("queued", "章节大纲生成任务已入队", status="queued")],
         }
         _OUTLINE_JOBS[run_id] = job
         _OUTLINE_PROJECT_RUNS[project_id] = run_id
@@ -3544,6 +3652,7 @@ async def cancel_chapters_outline_generation(
                 progress_message="暂无可取消的章节大纲生成任务",
             )
         if job.get("status") in _OUTLINE_ACTIVE_STATUSES:
+            events = job.get("events") if isinstance(job.get("events"), list) else []
             job.update({
                 "status": "cancelled",
                 "progress_stage": "cancelled",
@@ -3554,6 +3663,10 @@ async def cancel_chapters_outline_generation(
                     "章节大纲生成任务已取消",
                     retryable=True,
                 ),
+                "events": [
+                    *events[-199:],
+                    _outline_runtime_event("cancelled", "章节大纲生成任务已取消", status="cancelled", level="warning"),
+                ],
             })
         snapshot = dict(job)
 

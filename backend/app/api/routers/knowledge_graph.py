@@ -68,6 +68,13 @@ class CharacterNodeResponse(BaseModel):
     emotional_state: Optional[str]
     blueprint_character_id: Optional[int]
     extra: Optional[dict]
+    fact_source: Optional[str] = None
+    fact_source_label: Optional[str] = None
+    first_chapter: Optional[int] = None
+    latest_chapter: Optional[int] = None
+    confidence: Optional[int] = None
+    lifecycle: Optional[str] = None
+    relationship_count: Optional[int] = None
     created_at: str
     updated_at: str
 
@@ -125,6 +132,11 @@ class EventEdgeResponse(BaseModel):
     emotional_impact: Optional[str]
     plot_advancement: Optional[str]
     extra: Optional[dict]
+    fact_source: Optional[str] = None
+    fact_source_label: Optional[str] = None
+    source_chapter: Optional[int] = None
+    latest_chapter: Optional[int] = None
+    confidence: Optional[int] = None
     created_at: str
     updated_at: str
 
@@ -152,6 +164,63 @@ class PlotThreadResponse(BaseModel):
     characters: List[str]
     events: List[dict]
     chapter_range: tuple
+
+
+def _node_response_from_payload(node: dict) -> CharacterNodeResponse:
+    return CharacterNodeResponse(
+        id=node["id"],
+        project_id=node["project_id"],
+        name=node["name"],
+        role_type=node["role_type"],
+        description=node["description"],
+        traits=node["traits"],
+        goals=node["goals"],
+        fears=node["fears"],
+        background=node["background"],
+        status=node["status"],
+        location=node["location"],
+        emotional_state=node["emotional_state"],
+        blueprint_character_id=node["blueprint_character_id"],
+        extra=node["extra"],
+        fact_source=node.get("fact_source"),
+        fact_source_label=node.get("fact_source_label"),
+        first_chapter=node.get("first_chapter"),
+        latest_chapter=node.get("latest_chapter"),
+        confidence=node.get("confidence"),
+        lifecycle=node.get("lifecycle"),
+        relationship_count=node.get("relationship_count"),
+        created_at=node["created_at"] or "",
+        updated_at=node["updated_at"] or "",
+    )
+
+
+def _edge_response_from_payload(project_id: str, edge: dict) -> EventEdgeResponse:
+    return EventEdgeResponse(
+        id=edge["id"],
+        project_id=project_id,
+        source_id=edge["source_id"],
+        target_id=edge["target_id"],
+        source_name=edge["source_name"],
+        target_name=edge["target_name"],
+        event_type=edge["event_type"],
+        description=edge["description"],
+        chapter_number=edge["chapter_number"],
+        scene_number=edge["scene_number"],
+        timestamp=edge["timestamp"],
+        order_index=edge["order_index"],
+        causality=edge["causality"],
+        importance=edge["importance"],
+        emotional_impact=edge["emotional_impact"],
+        plot_advancement=edge["plot_advancement"],
+        extra=edge["extra"],
+        fact_source=edge.get("fact_source"),
+        fact_source_label=edge.get("fact_source_label"),
+        source_chapter=edge.get("source_chapter"),
+        latest_chapter=edge.get("latest_chapter"),
+        confidence=edge.get("confidence"),
+        created_at=edge["created_at"] or "",
+        updated_at=edge["updated_at"] or "",
+    )
 
 
 @router.post("/{project_id}/knowledge-graph/nodes", response_model=CharacterNodeResponse)
@@ -207,29 +276,9 @@ async def get_graph_nodes(
         novel_service = NovelService(session)
         await novel_service.ensure_project_owner(project_id, current_user.id)
         service = KnowledgeGraphService(session)
-        nodes = await service.get_project_nodes(project_id)
-
-        return [
-            CharacterNodeResponse(
-                id=node.id,
-                project_id=node.project_id,
-                name=node.name,
-                role_type=node.role_type,
-                description=node.description,
-                traits=node.traits or [],
-                goals=node.goals or [],
-                fears=node.fears or [],
-                background=node.background,
-                status=node.status,
-                location=node.location,
-                emotional_state=node.emotional_state,
-                blueprint_character_id=node.blueprint_character_id,
-                extra=node.extra,
-                created_at=node.created_at.isoformat() if node.created_at else "",
-                updated_at=node.updated_at.isoformat() if node.updated_at else ""
-            )
-            for node in nodes
-        ]
+        await service.sync_from_story_memory(project_id)
+        graph_data = await service.get_project_graph(project_id)
+        return [_node_response_from_payload(node) for node in graph_data["nodes"]]
     except HTTPException:
         raise
     except Exception as e:
@@ -373,36 +422,9 @@ async def get_graph_edges(
         novel_service = NovelService(session)
         await novel_service.ensure_project_owner(project_id, current_user.id)
         service = KnowledgeGraphService(session)
-        edges = await service.get_project_edges(project_id)
-
-        # 获取节点名称映射
-        nodes = await service.get_project_nodes(project_id)
-        node_names = {node.id: node.name for node in nodes}
-
-        return [
-            EventEdgeResponse(
-                id=edge.id,
-                project_id=edge.project_id,
-                source_id=edge.source_node_id,
-                target_id=edge.target_node_id,
-                source_name=node_names.get(edge.source_node_id),
-                target_name=node_names.get(edge.target_node_id),
-                event_type=edge.event_type,
-                description=edge.description,
-                chapter_number=edge.chapter_number,
-                scene_number=edge.scene_number,
-                timestamp=edge.timestamp,
-                order_index=edge.order_index,
-                causality=edge.causality,
-                importance=edge.importance,
-                emotional_impact=edge.emotional_impact,
-                plot_advancement=edge.plot_advancement,
-                extra=edge.extra,
-                created_at=edge.created_at.isoformat() if edge.created_at else "",
-                updated_at=edge.updated_at.isoformat() if edge.updated_at else ""
-            )
-            for edge in edges
-        ]
+        await service.sync_from_story_memory(project_id)
+        graph_data = await service.get_project_graph(project_id)
+        return [_edge_response_from_payload(project_id, edge) for edge in graph_data["edges"]]
     except HTTPException:
         raise
     except Exception as e:
@@ -449,54 +471,8 @@ async def get_full_graph(
         await service.sync_from_story_memory(project_id)
         graph_data = await service.get_project_graph(project_id)
 
-        # 转换节点
-        nodes = [
-            CharacterNodeResponse(
-                id=node["id"],
-                project_id=node["project_id"],
-                name=node["name"],
-                role_type=node["role_type"],
-                description=node["description"],
-                traits=node["traits"],
-                goals=node["goals"],
-                fears=node["fears"],
-                background=node["background"],
-                status=node["status"],
-                location=node["location"],
-                emotional_state=node["emotional_state"],
-                blueprint_character_id=node["blueprint_character_id"],
-                extra=node["extra"],
-                created_at=node["created_at"] or "",
-                updated_at=node["updated_at"] or ""
-            )
-            for node in graph_data["nodes"]
-        ]
-
-        # 转换边
-        edges = [
-            EventEdgeResponse(
-                id=edge["id"],
-                project_id=project_id,
-                source_id=edge["source_id"],
-                target_id=edge["target_id"],
-                source_name=edge["source_name"],
-                target_name=edge["target_name"],
-                event_type=edge["event_type"],
-                description=edge["description"],
-                chapter_number=edge["chapter_number"],
-                scene_number=edge["scene_number"],
-                timestamp=edge["timestamp"],
-                order_index=edge["order_index"],
-                causality=edge["causality"],
-                importance=edge["importance"],
-                emotional_impact=edge["emotional_impact"],
-                plot_advancement=edge["plot_advancement"],
-                extra=edge["extra"],
-                created_at=edge["created_at"] or "",
-                updated_at=edge["updated_at"] or ""
-            )
-            for edge in graph_data["edges"]
-        ]
+        nodes = [_node_response_from_payload(node) for node in graph_data["nodes"]]
+        edges = [_edge_response_from_payload(project_id, edge) for edge in graph_data["edges"]]
 
         return KnowledgeGraphResponse(
             project_id=project_id,

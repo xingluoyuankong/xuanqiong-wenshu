@@ -282,6 +282,7 @@ class OutlineGenerationJobResponse(BaseModel):
     started_at: Optional[str] = None
     updated_at: Optional[str] = None
     project: Optional[NovelProject] = None
+    events: List[Dict[str, Any]] = Field(default_factory=list)
     error: Optional[BlueprintGenerationError] = None
 
 

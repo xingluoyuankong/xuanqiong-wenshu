@@ -61,6 +61,8 @@ from app.services.self_critique_service import CritiqueDimension, SelfCritiqueSe
 from app.api.routers.writer import (
     _append_generation_runtime_event,
     _build_failed_generation_runtime_state,
+    _build_finalized_runtime_summary,
+    _build_ledger_sync_runtime_summary,
     _build_memory_layer_runtime_summary,
     _run_finalize_pipeline,
 )
@@ -311,6 +313,34 @@ def test_memory_layer_runtime_summary_reports_dynamic_characters():
     assert "时间线事件 1 条" in summary
     assert "因果链 1 条" in summary
     assert "动态角色入池：林渡" in summary
+
+
+def test_ledger_sync_runtime_summary_reports_graph_and_clue_counts():
+    summary = _build_ledger_sync_runtime_summary(
+        {"created": 2, "updated": 3},
+        {"created_nodes": 1, "created_edges": 4, "removed_nodes": 1, "removed_edges": 2},
+    )
+
+    assert "线索新增 2 条" in summary
+    assert "线索更新 3 条" in summary
+    assert "图谱新增角色节点 1 个" in summary
+    assert "图谱新增关系边 4 条" in summary
+    assert "清理过期节点 1 个" in summary
+    assert "清理过期关系 2 条" in summary
+
+
+def test_finalized_runtime_summary_mentions_degraded_ledgers():
+    summary = _build_finalized_runtime_summary(
+        {
+            "memory_layer": {"success": False},
+            "foreshadowing_closure": {"success": True},
+            "ledger_sync": {"success": False},
+        }
+    )
+
+    assert "记忆层" in summary
+    assert "线索/图谱同步" in summary
+    assert "降级警告" in summary
 
 
 def test_build_character_naming_profile_includes_style_constraints():
