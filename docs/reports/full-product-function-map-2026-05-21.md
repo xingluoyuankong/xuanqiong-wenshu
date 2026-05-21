@@ -77,3 +77,8 @@
 - `generation_call_service.py` 的 `GenerationTextResult/GenerationJsonResult` 新增本地估算的输入/输出/总 token、prompt/输出字符数、最终生效 `max_tokens` 和最近一次 Provider 错误归因。
 - `PipelineOrchestrator` 在正文候选 metadata 写入 `generation_call_metrics`，后续详细日志、候选版本解释、预算页可以直接展示“尝试次数、是否因限额/超时降级、估算消耗”。
 - 修复影响：Provider 抖动或模型拒绝过高 `max_tokens` 后，即使最终成功，候选版本 metadata 也不会丢掉这段降级历史。
+
+## 2026-05-21 继续收口：候选版本详情展示生成调用指标
+- `WDVersionDetailModal.vue` 在“生成链路摘要”里增加生成调用卡片，读取候选 metadata 的 `generation_call_metrics`，展示候选生成阶段、尝试次数、估算 token、最终 `max_tokens` 和 Provider 错误归因。
+- 修复影响：用户打开候选版本详情时可以直接看到“这版正文是否经历重试/降级/输出限制”，不用去翻程序日志猜后台发生了什么。
+- 前端兼容：没有 `generation_call_metrics` 的旧候选不会显示空卡片；最多展示 4 条，避免详情弹窗被长调用列表淹没。

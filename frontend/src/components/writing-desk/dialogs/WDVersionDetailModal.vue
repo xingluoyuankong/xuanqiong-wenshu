@@ -92,6 +92,15 @@
                 <li v-if="runtimeWordReason">{{ runtimeWordReason }}</li>
               </ul>
             </article>
+
+            <article v-if="generationCallMetrics.length" class="m3-review-card">
+              <p class="m3-kicker">生成调用</p>
+              <ul>
+                <li v-for="item in generationCallMetrics" :key="item.label">
+                  {{ item.label }}：{{ item.summary }}
+                </li>
+              </ul>
+            </article>
           </div>
         </section>
 
@@ -254,8 +263,27 @@ const runtimeWordReason = computed(() => {
   }
   return map[String(reason)] || String(reason)
 })
+const generationCallMetrics = computed(() => {
+  const items = runtimeMeta.value.generation_call_metrics
+  if (!Array.isArray(items)) return []
+  return items
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') return null
+      const record = item as Record<string, any>
+      const label = String(record.label || `调用 ${index + 1}`)
+      const parts = [
+        record.attempts ? `尝试 ${record.attempts} 次` : '',
+        record.estimated_total_tokens ? `约 ${record.estimated_total_tokens} tokens` : '',
+        record.effective_max_tokens ? `上限 ${record.effective_max_tokens}` : '',
+        record.provider_error_type ? `曾遇到 ${record.provider_error_type}` : '',
+      ].filter(Boolean)
+      return { label, summary: parts.join(' / ') || '已记录调用指标' }
+    })
+    .filter((item): item is { label: string; summary: string } => Boolean(item))
+    .slice(0, 4)
+})
 const hasReviewInsights = computed(() => Boolean(
-  qualityMetrics.value || selfCritiqueSummary.value || consistencySummary.value || optimizerSummary.value || runtimeWordSummary.value
+  qualityMetrics.value || selfCritiqueSummary.value || consistencySummary.value || optimizerSummary.value || runtimeWordSummary.value || generationCallMetrics.value.length
 ))
 </script>
 

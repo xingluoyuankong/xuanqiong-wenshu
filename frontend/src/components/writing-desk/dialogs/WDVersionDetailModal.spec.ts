@@ -21,7 +21,16 @@ describe('WDVersionDetailModal', () => {
               dialogue_changes_state: true,
               ending_pressure_passed: false,
               static_description_risk: false,
-            }
+            },
+            generation_call_metrics: [
+              {
+                label: 'draft_candidate_1',
+                attempts: 2,
+                estimated_total_tokens: 4200,
+                effective_max_tokens: 16800,
+                provider_error_type: 'output_token_limit',
+              },
+            ],
           }
         }
       }
@@ -32,5 +41,9 @@ describe('WDVersionDetailModal', () => {
     expect(wrapper.text()).toContain('场景兑现：75%')
     expect(wrapper.text()).toContain('对白改局势：通过')
     expect(wrapper.text()).toContain('章末递压：未通过')
+    expect(wrapper.text()).toContain('draft_candidate_1')
+    expect(wrapper.text()).toContain('4200 tokens')
+    expect(wrapper.text()).toContain('16800')
+    expect(wrapper.text()).toContain('output_token_limit')
   })
 })

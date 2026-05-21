@@ -85,3 +85,8 @@
 - 定向验证：`python -m pytest backend/app/services/test_generation_call_service.py -q` 通过（19 passed）。
 - 编译验证：`python -m compileall backend/app/services/generation_call_service.py backend/app/services/pipeline_orchestrator.py backend/app/services/test_generation_call_service.py` 通过。
 - 后端全量验证：`python -m pytest backend -q` 通过（247 passed），`python -m compileall backend/app` 通过。
+
+## 2026-05-21 候选版本详情调用指标前端验证
+- 代码收口：`WDVersionDetailModal.vue` 展示候选 metadata 中的 `generation_call_metrics`，把尝试次数、估算 token、最终 `max_tokens` 和 Provider 错误归因放进用户可见的生成链路摘要。
+- 定向验证：`cd frontend; npm run test:run -- src/components/writing-desk/dialogs/WDVersionDetailModal.spec.ts` 通过（1 passed）。
+- 前端全量验证：`cd frontend; npm run test:run` 通过（125 passed），`cd frontend; npm run build` 通过。
