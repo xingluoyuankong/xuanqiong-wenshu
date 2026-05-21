@@ -12,6 +12,27 @@
       </div>
     </transition>
 
+    <transition
+      enter-active-class="transition-all duration-300"
+      leave-active-class="transition-all duration-300"
+      enter-from-class="opacity-0 translate-y-4"
+      leave-to-class="opacity-0 translate-y-4"
+    >
+      <div v-if="isImporting" class="fixed bottom-5 left-1/2 z-50 flex w-[min(92vw,560px)] -translate-x-1/2 flex-wrap items-center justify-between gap-3 rounded-[20px] border border-emerald-100 bg-white px-4 py-3 text-sm shadow-2xl shadow-slate-950/15">
+        <div class="min-w-0">
+          <p class="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-700">旧稿导入</p>
+          <p class="mt-1 truncate font-medium text-slate-800">{{ importStatusMessage || '正在提交旧稿导入任务...' }}</p>
+        </div>
+        <button
+          class="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-rose-200 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+          :disabled="!importRunId || importCancelRequested"
+          @click="cancelImport"
+        >
+          {{ importCancelRequested ? '取消中...' : '取消' }}
+        </button>
+      </div>
+    </transition>
+
     <header class="xq-topbar xq-topbar--workspace sticky top-0 z-30 border-b border-white/70 bg-white/80 backdrop-blur-xl">
       <div class="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
         <div class="min-w-0">
@@ -333,6 +354,9 @@ const authStore = useAuthStore()
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const isImporting = ref(false)
+const importStatusMessage = ref('')
+const importRunId = ref('')
+const importCancelRequested = ref(false)
 const showDeleteDialog = ref(false)
 const projectToDelete = ref<NovelProjectSummary | null>(null)
 const isDeleting = ref(false)
@@ -348,6 +372,10 @@ const filters = [
   { id: 'active', label: '连载中' },
   { id: 'finished', label: '已完结' },
 ] as const
+
+const IMPORT_POLL_INTERVAL_MS = 2000
+const IMPORT_MAX_POLL_ATTEMPTS = 900
+const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
 const projects = computed(() =>
   [...novelStore.projects].sort((a, b) => parseTime(b.last_edited) - parseTime(a.last_edited))
@@ -458,16 +486,61 @@ async function handleFileImport(event: Event) {
   }
 
   isImporting.value = true
+  importStatusMessage.value = '正在提交旧稿导入任务...'
+  importRunId.value = ''
+  importCancelRequested.value = false
   try {
-    const response = await NovelAPI.importNovel(file)
-    await loadProjects()
-    router.push(`/novel/${response.id}`)
+    let status = await NovelAPI.startNovelImport(file)
+    importRunId.value = status.run_id
+
+    for (let attempt = 0; attempt < IMPORT_MAX_POLL_ATTEMPTS; attempt += 1) {
+      importStatusMessage.value = status.progress_message || '旧稿导入进行中...'
+      if (status.status === 'successful' && status.project_id) {
+        await loadProjects()
+        router.push(`/novel/${status.project_id}`)
+        return
+      }
+      if (status.status === 'failed') {
+        const rawError = status.error
+        const message = typeof rawError === 'string'
+          ? rawError
+          : rawError?.detail || rawError?.message || status.progress_message
+        throw new Error(message || '导入失败，请重试')
+      }
+      if (status.status === 'cancelled' || importCancelRequested.value) {
+        throw new Error(status.progress_message || '旧稿导入已取消')
+      }
+
+      await wait(IMPORT_POLL_INTERVAL_MS)
+      status = await NovelAPI.getNovelImportStatus(importRunId.value)
+    }
+
+    throw new Error('旧稿导入后台任务等待超时，请稍后刷新项目列表查看结果。')
   } catch (error: any) {
     console.error('导入失败:', error)
     window.alert(error?.message || '导入失败，请重试')
   } finally {
     isImporting.value = false
+    importStatusMessage.value = ''
+    importRunId.value = ''
+    importCancelRequested.value = false
     target.value = ''
+  }
+}
+
+async function cancelImport() {
+  if (!importRunId.value || importCancelRequested.value) return
+  importCancelRequested.value = true
+  try {
+    const status = await NovelAPI.cancelNovelImport(importRunId.value)
+    importStatusMessage.value = status.progress_message || '正在取消旧稿导入...'
+    if (status.status !== 'cancelled') {
+      importCancelRequested.value = false
+    }
+  } catch (error) {
+    console.error('取消导入失败:', error)
+    importCancelRequested.value = false
+    importStatusMessage.value = '取消失败，导入任务仍在继续'
   }
 }
 
