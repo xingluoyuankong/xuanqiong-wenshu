@@ -12,6 +12,19 @@ from app.services.ultimate_writing_flow import _resolve_direct_generation_contra
 
 
 class TestGenerationQualityGuards:
+    def test_stable_retry_success_threshold_clamps_to_requested_candidate_count(self):
+        primary_required = PipelineOrchestrator._required_success_count(2)
+
+        assert primary_required == 2
+        assert PipelineOrchestrator._attempt_required_success_count(
+            required_success_count=primary_required,
+            requested_count=1,
+        ) == 1
+        assert PipelineOrchestrator._attempt_required_success_count(
+            required_success_count=primary_required,
+            requested_count=2,
+        ) == 2
+
     def test_runtime_event_keeps_developer_detail_separate_from_user_summary(self):
         compact = PipelineOrchestrator._compact_runtime_event({
             "at": "2026-05-21T00:00:00+00:00",

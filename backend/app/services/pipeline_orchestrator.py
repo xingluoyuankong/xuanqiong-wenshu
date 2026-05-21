@@ -2211,6 +2211,10 @@ class PipelineOrchestrator:
 
         versions: List[Dict[str, Any]] = []
         generation_errors: List[Exception] = []
+        best_partial_versions: List[Dict[str, Any]] = []
+        best_partial_errors: List[Exception] = []
+        best_partial_config: PipelineConfig = config
+        best_partial_required_success_count = required_success_count
         await self._update_generation_runtime(
             chapter,
             generation_run_id=generation_run_id,
@@ -2249,6 +2253,10 @@ class PipelineOrchestrator:
 
         for attempt_idx, attempt_config in enumerate(attempt_configs):
             version_count = attempt_config.version_count
+            attempt_required_success_count = self._attempt_required_success_count(
+                required_success_count=required_success_count,
+                requested_count=version_count,
+            )
             version_style_hints = self._resolve_style_hints(enhanced_context, version_count)
 
             generation_tasks: List[asyncio.Task] = []
@@ -2319,7 +2327,9 @@ class PipelineOrchestrator:
                     "requested_version_count": version_count,
                     "successful_versions": success_count,
                     "failed_versions": len(attempt_errors),
-                    "meets_success_threshold": success_count >= required_success_count,
+                    "required_success_count": attempt_required_success_count,
+                    "original_required_success_count": required_success_count,
+                    "meets_success_threshold": success_count >= attempt_required_success_count,
                     "duration_ms": generation_attempt_duration_ms,
                     "generation_phase_total_ms": generation_phase_total_ms,
                     "guardrail_check_total_ms": guardrail_check_total_ms,
@@ -2328,7 +2338,20 @@ class PipelineOrchestrator:
                 }
             )
 
-            if success_count >= required_success_count:
+            if success_count > 0 and (
+                not best_partial_versions
+                or success_count > len(best_partial_versions)
+                or (
+                    success_count == len(best_partial_versions)
+                    and attempt_config.preset == "stable"
+                )
+            ):
+                best_partial_versions = attempt_versions
+                best_partial_errors = attempt_errors
+                best_partial_config = attempt_config
+                best_partial_required_success_count = attempt_required_success_count
+
+            if success_count >= attempt_required_success_count:
                 versions = attempt_versions
                 generation_errors = attempt_errors
                 active_config = attempt_config
@@ -2336,7 +2359,8 @@ class PipelineOrchestrator:
                     "requested_version_count": version_count,
                     "successful_versions": success_count,
                     "failed_versions": len(attempt_errors),
-                    "required_success_count": required_success_count,
+                    "required_success_count": attempt_required_success_count,
+                    "original_required_success_count": required_success_count,
                 }
                 if attempt_idx > 0:
                     runtime_metadata["stable_retry_used"] = True
@@ -2403,7 +2427,8 @@ class PipelineOrchestrator:
                         "stable_retry_used": True,
                         "generation_mode": "stable",
                         "successful_versions": success_count,
-                        "required_success_count": required_success_count,
+                        "required_success_count": attempt_required_success_count,
+                        "original_required_success_count": required_success_count,
                     },
                 )
                 logger.warning(
@@ -2411,10 +2436,55 @@ class PipelineOrchestrator:
                     project_id,
                     chapter_number,
                     success_count,
-                    required_success_count,
+                    attempt_required_success_count,
                 )
                 continue
             break
+
+        if not versions and best_partial_versions:
+            versions = best_partial_versions
+            generation_errors = best_partial_errors
+            active_config = best_partial_config
+            runtime_metadata["stable_retry_used"] = bool(active_config.preset == "stable" or runtime_metadata.get("stable_retry_used"))
+            runtime_metadata["generation_mode"] = active_config.preset
+            runtime_metadata["quality_gates"]["partial_candidate_salvage_used"] = True
+            runtime_metadata["candidate_generation"] = {
+                "requested_version_count": active_config.version_count,
+                "successful_versions": len(best_partial_versions),
+                "failed_versions": len(best_partial_errors),
+                "required_success_count": best_partial_required_success_count,
+                "original_required_success_count": required_success_count,
+                "salvaged_partial_success": True,
+            }
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="review",
+                message="Provider 抖动导致候选不足，已保留合格候选并进入评审",
+                progress_percent=62,
+                level="warning",
+                event_kind="content",
+                title="保留合格候选",
+                summary="多候选生成未完全达标，但已有候选通过首稿底线，系统继续评审而不是直接失败。",
+                content_preview=self._truncate_runtime_text(
+                    (best_partial_versions[0].get("content") or "") if best_partial_versions else "",
+                    420,
+                ),
+                metrics={
+                    "generated_version_count": len(best_partial_versions),
+                    "failed_versions": len(best_partial_errors),
+                    "required_success_count": best_partial_required_success_count,
+                    "original_required_success_count": required_success_count,
+                    "target_word_count": config.target_word_count,
+                    "salvaged_partial_success": True,
+                },
+                extra={
+                    "generated_version_count": len(best_partial_versions),
+                    "stable_retry_used": runtime_metadata["stable_retry_used"],
+                    "generation_mode": runtime_metadata["generation_mode"],
+                    "salvaged_partial_success": True,
+                },
+            )
 
         version_count = active_config.version_count
         await self._assert_generation_active(
@@ -3602,6 +3672,14 @@ class PipelineOrchestrator:
         if requested_count <= 1:
             return 1
         return max(2, (requested_count + 1) // 2)
+
+    @staticmethod
+    def _attempt_required_success_count(*, required_success_count: int, requested_count: int) -> int:
+        """Clamp a retry attempt's threshold to the number of candidates it actually requested."""
+        return min(
+            max(1, int(required_success_count or 1)),
+            max(1, int(requested_count or 1)),
+        )
 
     @staticmethod
     def _should_retry_due_to_low_success_rate(

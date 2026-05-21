@@ -76,7 +76,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useLocale } from '@/composables/useLocale'
 import { useNovelStore } from '@/stores/novel'
-import { buildChapterTaskUiModel, isTrackableTask, resolveProjectTaskContext } from '@/utils/chapterGeneration'
+import { buildChapterTaskUiModel, isBusyTask, isTrackableTask, normalizeRuntimeStage, resolveProjectTaskContext } from '@/utils/chapterGeneration'
 import { stripThinkTags } from '@/utils/safeMarkdown'
 import { navigateBackOrFallback } from '@/utils/safeNavigation'
 
@@ -104,12 +104,22 @@ const taskUiModel = computed(() => buildChapterTaskUiModel(currentTaskRuntime.va
   status: currentTaskRuntime.value?.progress_stage || currentTaskRuntime.value?.status,
 }))
 
+const currentTaskNeedsAction = computed(() => {
+  const runtimeStage = normalizeRuntimeStage(currentTaskRuntime.value?.progress_stage || currentTaskRuntime.value?.status)
+  const chapterStatus = String(currentTaskChapter.value?.generation_status || '')
+  return ['waiting_for_confirm', 'failed', 'evaluation_failed'].includes(runtimeStage)
+    || ['waiting_for_confirm', 'failed', 'evaluation_failed'].includes(chapterStatus)
+})
+
+const currentTaskIsBusy = computed(() => isBusyTask(currentTaskChapter.value, currentTaskRuntime.value))
+
 const globalTaskVisible = computed(() =>
   Boolean(
     !isWritingDeskRoute.value &&
     currentProject.value?.id &&
     currentTaskChapter.value?.chapter_number &&
-    isTrackableTask(currentTaskChapter.value, currentTaskRuntime.value)
+    isTrackableTask(currentTaskChapter.value, currentTaskRuntime.value) &&
+    (currentTaskIsBusy.value || currentTaskNeedsAction.value)
   )
 )
 
