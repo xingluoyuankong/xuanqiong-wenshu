@@ -285,7 +285,7 @@ describe('InspirationMode', () => {
             },
           },
         },
-        chapter_outline: Array.from({ length: 24 }, (_, index) => ({ chapter_number: index + 1, title: `第${index + 1}章`, summary: '摘要' })),
+        chapter_outline: Array.from({ length: 60 }, (_, index) => ({ chapter_number: index + 1, title: `第${index + 1}章`, summary: '摘要' })),
       },
       ai_message: 'blueprint generated',
     })

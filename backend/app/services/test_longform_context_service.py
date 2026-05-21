@@ -346,10 +346,22 @@ async def test_memory_update_writes_causal_chains_into_longform_context(tmp_path
             assert result["character_states_updated"] == 1
             assert result["timeline_events_added"] == 1
             assert result["causal_chains_added"] == 1
+            assert result["dynamic_characters_created"] == 1
+            assert result["dynamic_character_names"] == ["Lin Qi"]
 
             chain = (await session.execute(select(CausalChain).where(CausalChain.project_id == "p-causal"))).scalar_one()
             assert chain.status == "pending"
             assert "ledger code" in chain.cause_description
+            dynamic_character = (
+                await session.execute(
+                    select(BlueprintCharacter).where(
+                        BlueprintCharacter.project_id == "p-causal",
+                        BlueprintCharacter.name == "Lin Qi",
+                    )
+                )
+            ).scalar_one()
+            assert dynamic_character.extra["auto_created_from_memory"] is True
+            assert dynamic_character.extra["first_appearance_chapter"] == 4
 
             loaded = await session.execute(
                 select(NovelProject)

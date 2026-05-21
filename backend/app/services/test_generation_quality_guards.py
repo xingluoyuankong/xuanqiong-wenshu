@@ -1,13 +1,61 @@
 import pytest
 
+from app.api.routers.optimizer import _continuity_guard_failure as optimizer_continuity_guard_failure
 from app.services.ai_review_service import AIReviewService, ReviewResult
+from app.services.consistency_service import ConsistencyService
+from app.services.continuity_guard_utils import continuity_terms_guard_failure
 from app.services.enrichment_service import ENRICH_CHAPTER_PROMPT, ENRICH_DIALOGUE_PROMPT, ENRICH_SCENE_PROMPT, EnrichmentService
 from app.services.longform_context_service import CastPlan, ForeshadowingChapterTask, LongformContextPackage
 from app.services.pipeline_orchestrator import PipelineOrchestrator
 from app.services.self_critique_service import SelfCritiqueService
+from app.services.ultimate_writing_flow import _resolve_direct_generation_contract
 
 
 class TestGenerationQualityGuards:
+    def test_ultimate_direct_generation_contract_scales_long_chapters(self):
+        standard = _resolve_direct_generation_contract(5000)
+        long_chapter = _resolve_direct_generation_contract(10000)
+
+        assert standard["tier"] == "standard_high_quality"
+        assert standard["min_word_count"] >= 4500
+        assert standard["scene_min"] >= 3
+        assert long_chapter["tier"] == "long_chapter"
+        assert long_chapter["scene_max"] >= 8
+        assert long_chapter["timeout_seconds"] > standard["timeout_seconds"]
+        assert long_chapter["max_tokens"] > standard["max_tokens"]
+
+    def test_quality_gate_does_not_mislabel_rich_scene_evidence_as_progression_weak(self):
+        story_guard = {
+            "word_count": 8387,
+            "mission_hit_count": 0,
+            "dialogue_marker_count": 302,
+            "scene_count": 6,
+            "scene_fulfillment_rate": 0.8333,
+            "scene_structure_rate": 0.8333,
+            "dialogue_changes_state": True,
+            "ending_pressure_passed": True,
+            "event_density_passed": True,
+            "state_change_interval_passed": True,
+            "long_chapter_density_passed": True,
+            "static_description_risk": False,
+        }
+
+        warning_summary = PipelineOrchestrator._build_quality_issue_summary(story_guard=story_guard)
+        gate = PipelineOrchestrator._build_structural_quality_gate(
+            {
+                "story_progression_guard": story_guard,
+                "self_critique_after_consistency": {
+                    "final_score": 75,
+                    "critical_count": 0,
+                    "major_count": 0,
+                },
+            }
+        )
+
+        assert "chapter_progression_weak" not in warning_summary["codes"]
+        assert "chapter_progression_weak" not in gate["quality_issue_codes"]
+        assert gate["passed"] is True
+
     def test_build_prompt_sections_prioritize_core_story_constraints(self):
         sections = PipelineOrchestrator._build_prompt_sections(
             writer_blueprint={"title": "测试书", "characters": [{"name": "林七"}], "extra": "设定" * 300},
@@ -1295,6 +1343,152 @@ def test_guardrail_rewrite_guard_rejects_lost_mission_continuity_terms():
         == "rewrite_lost_mission_continuity_terms"
     )
     assert PipelineOrchestrator._guardrail_rewrite_guard_failure(original, good_rewrite, chapter_mission=mission) is None
+
+
+def test_shared_continuity_guard_only_requires_terms_present_in_original():
+    original = (
+        "Lin Qi names the ledger code and points toward the south pier. "
+        "Shen Fang is being traced before the gate closes."
+    )
+    candidate = "Lin Qi says the matter is dangerous before the gate closes."
+    context = {
+        "chapter_mission": {
+            "continuity_anchor": {
+                "inherit_from_previous": ["ledger code", "south pier", "unseen clue"],
+                "deliver_to_next": ["Shen Fang is being traced"],
+            }
+        }
+    }
+
+    failure = continuity_terms_guard_failure(
+        original=original,
+        candidate=candidate,
+        context=context,
+        reason_code="lost_terms",
+    )
+    assert failure is not None
+    assert failure.startswith("lost_terms:")
+    assert continuity_terms_guard_failure(
+        original=original,
+        candidate=original.replace("gate", "archive gate"),
+        context=context,
+        reason_code="lost_terms",
+    ) is None
+
+
+def test_consistency_guard_rejects_fixes_that_drop_context_terms():
+    service = ConsistencyService(db=None, llm_service=None)
+    original = "\n\n".join(
+        [
+            "Opening anchor: Lin Qi waits near the archive gate.",
+            "The ledger code points to the south pier, while Shen Fang is being traced.",
+            "Ending anchor: he leaves with the pressure unresolved.",
+        ]
+    )
+    fixed = "\n\n".join(
+        [
+            "Opening anchor: Lin Qi waits near the archive gate.",
+            "The clerk says the situation is dangerous and asks him to leave.",
+            "Ending anchor: he leaves with the pressure unresolved.",
+        ]
+    )
+    context = {
+        "chapter_mission": {
+            "continuity_anchor": {
+                "inherit_from_previous": ["ledger code", "south pier"],
+                "deliver_to_next": ["Shen Fang is being traced"],
+            }
+        }
+    }
+
+    assert service._fix_continuity_guard_failure(original, fixed, context=context).startswith(
+        "fixed_lost_continuity_terms"
+    )
+    assert service._fix_continuity_guard_failure(original, original.replace("clerk", "archivist"), context=context) is None
+
+
+def test_enrichment_guard_rejects_expansion_that_loses_context_terms():
+    service = EnrichmentService(db=None, llm_service=None)
+    original = "\n\n".join(
+        [
+            "Opening anchor: Lin Qi waits near the archive gate.",
+            "The ledger code points to the south pier, while Shen Fang is being traced.",
+            "Ending anchor: he leaves with the pressure unresolved.",
+        ]
+    )
+    enriched = "\n\n".join(
+        [
+            "Opening anchor: Lin Qi waits near the archive gate. He listens to the rain for a long time.",
+            "The clerk refuses and speaks vaguely about danger, adding a few tense gestures.",
+            "Ending anchor: he leaves with the pressure unresolved. The next choice feels heavy.",
+        ]
+    )
+    context = {
+        "chapter_mission": {
+            "continuity_anchor": {
+                "inherit_from_previous": ["ledger code", "south pier"],
+                "deliver_to_next": ["Shen Fang is being traced"],
+            }
+        }
+    }
+
+    assert service._enrichment_continuity_guard_failure(original, enriched, context=context).startswith(
+        "enrichment_lost_continuity_terms"
+    )
+
+
+def test_optimizer_guard_rejects_optimization_that_loses_context_terms():
+    original = (
+        "Lin Qi keeps the ledger code and tells Shen Fang they must reach the south pier before dawn."
+    )
+    optimized = (
+        "Lin Qi walks through the market and thinks about leaving before dawn. "
+        "He reviews the danger, changes his route, and decides the next move must stay quiet."
+    )
+    reason = optimizer_continuity_guard_failure(
+        original,
+        optimized,
+        context={
+            "longform_context": {
+                "memory_digest": {"inherit_from_previous": ["ledger code", "south pier"]},
+                "character_focus": ["Shen Fang"],
+            },
+            "continuity_contract": {
+                "hard_rules": ["keep ledger code", "keep south pier", "keep Shen Fang"],
+            },
+        },
+    )
+
+    assert reason is not None
+    assert reason.startswith("optimized_content_lost_continuity_terms")
+
+
+def test_self_critique_local_guard_rejects_lost_context_terms():
+    service = SelfCritiqueService(db=None, llm_service=None, prompt_service=None)
+    plan = {
+        "target_paragraphs": [
+            "The ledger code points to the south pier, while Shen Fang is being traced."
+        ],
+        "prev_anchor": "Opening anchor: Lin Qi waits near the archive gate.",
+        "next_anchor": "Ending anchor: he leaves with the pressure unresolved.",
+        "context": {
+            "chapter_mission": {
+                "continuity_anchor": {
+                    "inherit_from_previous": ["ledger code", "south pier"],
+                    "deliver_to_next": ["Shen Fang is being traced"],
+                }
+            }
+        },
+    }
+
+    assert service._local_cohesion_failure_reason(
+        plan,
+        "The clerk says the matter is risky and refuses to explain more.",
+    ).startswith("localized_lost_continuity_terms")
+    assert service._local_cohesion_failure_reason(
+        plan,
+        "The ledger code points to the south pier, and Shen Fang is being traced more aggressively.",
+    ) is None
 
 
 def test_self_critique_keeps_major_only_revision_local_after_content_changes():

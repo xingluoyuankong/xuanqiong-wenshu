@@ -480,11 +480,23 @@ class PipelineOrchestrator:
 
         if blockers is None and reason_codes is None:
             guard = story_guard or {}
+            rich_progression_evidence = (
+                float(guard.get("scene_fulfillment_rate") or 0.0) >= 0.75
+                and float(guard.get("scene_structure_rate") or 0.0) >= 0.7
+                and bool(guard.get("dialogue_changes_state", True))
+                and bool(guard.get("ending_pressure_passed", guard.get("ending_hook_detected", True)))
+                and bool(guard.get("event_density_passed", True))
+                and bool(guard.get("state_change_interval_passed", True))
+            )
             if guard.get("static_description_risk"):
                 add("static_description_risk")
             if guard.get("expected_dialogue") and int(guard.get("dialogue_marker_count") or 0) < 4 and int(guard.get("word_count") or 0) >= 1500:
                 add("insufficient_dialogue_pressure")
-            if int(guard.get("word_count") or 0) >= 1500 and int(guard.get("mission_hit_count") or 0) < 2:
+            if (
+                int(guard.get("word_count") or 0) >= 1500
+                and int(guard.get("mission_hit_count") or 0) < 2
+                and not rich_progression_evidence
+            ):
                 add("chapter_progression_weak")
             if int(guard.get("scene_count") or 0) > 0 and float(guard.get("scene_fulfillment_rate") or 1.0) < 0.75:
                 add("scene_fulfillment_weak")
@@ -641,6 +653,20 @@ class PipelineOrchestrator:
             story_word_count = int(story_guard.get("word_count") or 0)
             story_dialogue_markers = int(story_guard.get("dialogue_marker_count") or 0)
             story_mission_hits = int(story_guard.get("mission_hit_count") or 0)
+            scene_count = int(story_guard.get("scene_count") or 0)
+            scene_rate = float(story_guard.get("scene_fulfillment_rate") or 1.0)
+            scene_structure_rate = float(story_guard.get("scene_structure_rate") or 1.0)
+            rich_progression_evidence = (
+                scene_count > 0
+                and scene_rate >= 0.75
+                and scene_structure_rate >= 0.7
+                and story_dialogue_markers >= 8
+                and not story_guard.get("static_description_risk")
+                and story_guard.get("dialogue_changes_state", True)
+                and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
+                and story_guard.get("event_density_passed", True)
+                and story_guard.get("state_change_interval_passed", True)
+            )
             if story_guard.get("static_description_risk"):
                 blockers.append({
                     "source": "story_progression_guard",
@@ -663,15 +689,17 @@ class PipelineOrchestrator:
                 and len(critical_consistency) == 0
                 and len(major_consistency) < 2
             )
-            if story_word_count >= 1500 and story_mission_hits < 2 and not progression_soft_pass:
+            if (
+                story_word_count >= 1500
+                and story_mission_hits < 2
+                and not progression_soft_pass
+                and not rich_progression_evidence
+            ):
                 blockers.append({
                     "source": "story_progression_guard",
                     "code": "chapter_progression_weak",
                     "message": "正文对本章目标、冲突、转折的命中不足，容易读起来像铺陈多、实质推进少。",
                 })
-            scene_count = int(story_guard.get("scene_count") or 0)
-            scene_rate = float(story_guard.get("scene_fulfillment_rate") or 1.0)
-            scene_structure_rate = float(story_guard.get("scene_structure_rate") or 1.0)
             scene_soft_pass = (
                 (
                     story_mission_hits >= 3
@@ -2672,6 +2700,46 @@ class PipelineOrchestrator:
                     await mark_stage("consistency", consistency_started_at, detail="一致性校验阶段完成")
                     runtime_metadata["consistency_status"] = consistency_report.get("status", "unknown")
                     review_summaries["consistency"] = consistency_report
+                    repair_attempts = consistency_report.get("repair_attempts")
+                    if not isinstance(repair_attempts, list):
+                        repair_attempts = []
+                    unresolved_consistency_issues = self._normalize_consistency_issues_for_local_fix(consistency_report)
+                    if repair_attempts or unresolved_consistency_issues:
+                        manual_confirmation_required = any(
+                            bool(item.get("manual_confirmation_required"))
+                            for item in repair_attempts
+                            if isinstance(item, dict)
+                        )
+                        await self._update_generation_runtime(
+                            chapter,
+                            generation_run_id=generation_run_id,
+                            stage="consistency",
+                            message=(
+                                "一致性局部修复已完成，仍有问题需按局部补丁处理"
+                                if unresolved_consistency_issues
+                                else "一致性局部修复已完成，未触发整章自动替换"
+                            ),
+                            progress_percent=91,
+                            level="warning" if unresolved_consistency_issues else "info",
+                            event_kind="continuity",
+                            title="一致性局部修复结果",
+                            summary=(
+                                f"局部修复尝试 {len(repair_attempts)} 次，未解决问题 {len(unresolved_consistency_issues)} 项；"
+                                "整章候选需要人工确认。"
+                                if manual_confirmation_required
+                                else f"局部修复尝试 {len(repair_attempts)} 次，未解决问题 {len(unresolved_consistency_issues)} 项。"
+                            ),
+                            metrics={
+                                "repair_attempt_count": len(repair_attempts),
+                                "unresolved_consistency_issues": len(unresolved_consistency_issues),
+                                "auto_fix_accepted": bool(consistency_report.get("auto_fix_accepted")),
+                            },
+                            extra={
+                                "repair_attempts": repair_attempts[:3],
+                                "manual_stagewide_confirmation_required": manual_confirmation_required,
+                                "manual_patch_suggestions": unresolved_consistency_issues[:5],
+                            },
+                        )
                 except Exception as exc:  # noqa: BLE001 - degraded stage should not fail whole request
                     runtime_metadata["degraded_stages"].append({"stage": "consistency", "reason": str(exc)})
                     if isinstance(exc, SQLAlchemyError):
@@ -2826,6 +2894,16 @@ class PipelineOrchestrator:
                         target_word_count=active_config.target_word_count,
                         min_word_count=active_config.min_word_count,
                         max_iterations=active_config.max_enrich_iterations,
+                        context={
+                            "chapter_mission": chapter_mission,
+                            "previous_summary": history_context["previous_summary"],
+                            "previous_tail": history_context.get("previous_tail"),
+                            "previous_chapter_bundle": history_context.get("previous_chapter_bundle"),
+                            "recent_track": history_context.get("recent_track"),
+                            "plot_arc_digest": history_context.get("plot_arc_digest"),
+                            "project_memory": project_memory_text,
+                            "longform_context": longform_context.to_optimizer_payload(max_prompt_chars=2600) if longform_context else None,
+                        },
                     )
                     if enrichment_summary is not None:
                         best_content, content_guard = self._preserve_non_regressive_content(
@@ -6117,6 +6195,15 @@ class PipelineOrchestrator:
                                 report["auto_fix_acceptance_reason"] = retry_reason
                                 return retry_fixed, report
                     return chapter_text, report
+                report["repair_attempts"].append({
+                    "attempt": 1,
+                    "mode": "local_patch",
+                    "accepted": False,
+                    "acceptance_reason": "local_repair_failed_full_chapter_deferred",
+                    "content_changed": False,
+                    "full_chapter_fallback_deferred": True,
+                    "manual_confirmation_required": True,
+                })
 
             return chapter_text, report
 
@@ -6217,6 +6304,7 @@ class PipelineOrchestrator:
         target_word_count: int = 3000,
         min_word_count: Optional[int] = None,
         max_iterations: int = 2,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Tuple[str, Optional[Dict[str, Any]]]:
         original_word_count = self._count_words(chapter_content)
         should_enrich, effective_min = self._should_run_enrichment(
@@ -6243,6 +6331,7 @@ class PipelineOrchestrator:
             target_word_count=target_word_count,
             user_id=user_id,
             max_iterations=max_iterations,
+            context=context,
         )
         enriched_word_count = self._count_words(enriched_text)
         if enriched_word_count <= original_word_count:

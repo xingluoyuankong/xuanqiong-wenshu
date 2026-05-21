@@ -19,6 +19,7 @@ from ...schemas.novel import Chapter as ChapterSchema
 from ...schemas.user import UserInDB
 from ...services.llm_service import LLMService
 from ...services.generation_call_service import GenerationCallPolicy, GenerationJSONDecodeError, call_generation_json
+from ...services.continuity_guard_utils import continuity_terms_guard_failure
 from ...services.longform_context_service import LongformContextService
 from ...services.novel_service import NovelService
 from ...services.prompt_service import PromptService
@@ -219,7 +220,12 @@ def _build_continuity_contract(project: Any, request: OptimizeRequest, original_
     }
 
 
-def _continuity_guard_failure(original_content: str, optimized_content: str) -> Optional[str]:
+def _continuity_guard_failure(
+    original_content: str,
+    optimized_content: str,
+    *,
+    context: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
     original_len = _compact_len(original_content)
     optimized_len = _compact_len(optimized_content)
     if optimized_len < 80:
@@ -243,6 +249,17 @@ def _continuity_guard_failure(original_content: str, optimized_content: str) -> 
             missing_motif_groups.append(str(group.get("label") or "unknown"))
     if missing_motif_groups:
         return "optimized content lost critical continuity motifs: " + ", ".join(missing_motif_groups[:6])
+    term_failure = continuity_terms_guard_failure(
+        original=original_content,
+        candidate=optimized_content,
+        context=context,
+        extra_sources=[(context or {}).get("continuity_contract")],
+        reason_code="optimized_content_lost_continuity_terms",
+        min_required_terms=2,
+        keep_ratio=0.55,
+    )
+    if term_failure:
+        return term_failure
     return None
 
 
@@ -394,7 +411,12 @@ async def optimize_chapter(
         result = json_result.data
         optimized_content = str(result.get("optimized_content") or "").strip()
         optimization_notes = str(result.get("optimization_notes") or "优化完成").strip()
-        guard_failure = _continuity_guard_failure(original_content, optimized_content)
+        guard_context = {
+            "continuity_contract": optimize_input.get("continuity_contract"),
+            "longform_context": optimize_input.get("longform_continuity_package"),
+            "chapter_mission": optimize_input.get("continuity_contract"),
+        }
+        guard_failure = _continuity_guard_failure(original_content, optimized_content, context=guard_context)
         if guard_failure:
             logger.warning(
                 "章节优化结果未通过连续性保护，返回原文: project=%s chapter=%s dimension=%s reason=%s",
