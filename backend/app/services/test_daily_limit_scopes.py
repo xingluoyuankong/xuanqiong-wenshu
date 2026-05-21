@@ -519,6 +519,7 @@ async def test_consistency_scope_reuses_outer_logical_run(monkeypatch):
             chapter_text="第一段。\n\n第二段。",
             user_id=41,
             auto_fix_threshold=ViolationSeverity.CRITICAL,
+            allow_full_chapter_fallback=True,
         )
 
     assert result["check_result"].is_consistent is False

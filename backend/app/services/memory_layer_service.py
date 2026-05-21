@@ -141,6 +141,7 @@ class MemoryLayerService:
                 project_id=project_id,
                 character_name=character_name,
                 state_updates=state_updates,
+                first_appearance_chapter=chapter_number,
             )
             resolved_character_id = blueprint_character.id
 
@@ -180,6 +181,7 @@ class MemoryLayerService:
         project_id: str,
         character_name: str,
         state_updates: Optional[Dict[str, Any]] = None,
+        first_appearance_chapter: Optional[int] = None,
     ) -> BlueprintCharacter:
         normalized_name = (character_name or "").strip()
         if not normalized_name:
@@ -221,7 +223,12 @@ class MemoryLayerService:
             goals=inferred_goal_text or None,
             relationship_to_protagonist="待追踪",
             position=next_position,
-            extra={"auto_created_from_memory": True},
+            extra={
+                "auto_created_from_memory": True,
+                "first_appearance_chapter": first_appearance_chapter,
+                "dynamic_role_policy": "正文首次识别后自动入池；后续必须继续同步角色状态、关系、势力或知识图谱节点。",
+                "knowledge_boundary": "由写后记忆抽取继续补充，不能默认全知。",
+            },
         )
         self.db.add(blueprint_character)
         await self.db.flush()
@@ -789,8 +796,23 @@ class MemoryLayerService:
             results = {
                 "character_states_updated": 0,
                 "timeline_events_added": 0,
-                "causal_chains_added": 0
+                "causal_chains_added": 0,
+                "dynamic_characters_created": 0,
+                "dynamic_character_names": [],
             }
+            known_character_names = {str(name or "").strip() for name in (character_names or []) if str(name or "").strip()}
+            try:
+                existing_result = await self.db.execute(
+                    select(BlueprintCharacter.name).where(BlueprintCharacter.project_id == project_id)
+                )
+                known_character_names.update(
+                    str(name or "").strip()
+                    for name in existing_result.scalars().all()
+                    if str(name or "").strip()
+                )
+            except Exception:
+                # Some tests use a commit-only fake DB; the caller-provided cast list is enough there.
+                pass
 
             # 1. 提取并更新角色状态
             character_states = await self.extract_character_states_from_chapter(
@@ -799,10 +821,16 @@ class MemoryLayerService:
             for state_data in character_states:
                 char_name = state_data.pop("character_name", None)
                 if char_name:
+                    normalized_name = str(char_name).strip()
+                    is_dynamic_new = bool(normalized_name and normalized_name not in known_character_names)
                     await self.update_character_state(
-                        project_id, char_name, chapter_number, state_data, auto_commit=False
+                        project_id, normalized_name or char_name, chapter_number, state_data, auto_commit=False
                     )
                     results["character_states_updated"] += 1
+                    if is_dynamic_new:
+                        known_character_names.add(normalized_name)
+                        results["dynamic_characters_created"] += 1
+                        results["dynamic_character_names"].append(normalized_name)
 
             # 2. 提取并添加时间线事件
             events = await self.extract_timeline_events_from_chapter(

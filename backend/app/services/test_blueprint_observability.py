@@ -51,13 +51,19 @@ from app.models import BlueprintGenerationJob, NovelProject, User
 from app.models.novel import BlueprintCharacter, ChapterOutline, NovelBlueprint
 from app.schemas.novel import Blueprint
 from app.services import llm_service as llm_service_module
+from app.services import consistency_service as consistency_service_module
 from app.services import novel_service as novel_service_module
 from app.services.consistency_service import ConsistencyService, ConsistencyViolation, ViolationSeverity
 from app.services.llm_service import LLMService
 from app.services.novel_service import NovelService, _extract_generation_runtime_payload
 from app.services.pipeline_orchestrator import PipelineOrchestrator
 from app.services.self_critique_service import CritiqueDimension, SelfCritiqueService
-from app.api.routers.writer import _append_generation_runtime_event, _build_failed_generation_runtime_state, _run_finalize_pipeline
+from app.api.routers.writer import (
+    _append_generation_runtime_event,
+    _build_failed_generation_runtime_state,
+    _build_memory_layer_runtime_summary,
+    _run_finalize_pipeline,
+)
 
 
 @pytest.fixture
@@ -201,6 +207,64 @@ async def test_run_finalize_pipeline_uses_explicit_chapter_number_without_touchi
     assert result == {"finalize": {"success": True, "chapter_number": 7}}
 
 
+@pytest.mark.anyio
+async def test_run_finalize_pipeline_snapshots_selected_version_before_service_rollback(monkeypatch):
+    from app.api.routers import writer as writer_router
+
+    class ExpiringSelectedVersion:
+        def __init__(self):
+            self.expired = False
+            self._content = "定稿正文"
+            self._id = 12
+            self._chapter_id = 34
+
+        @property
+        def content(self):
+            if self.expired:
+                raise AssertionError("selected_version.content was touched after finalize rollback")
+            return self._content
+
+        @property
+        def id(self):
+            if self.expired:
+                raise AssertionError("selected_version.id was touched after finalize rollback")
+            return self._id
+
+        @property
+        def chapter_id(self):
+            if self.expired:
+                raise AssertionError("selected_version.chapter_id was touched after finalize rollback")
+            return self._chapter_id
+
+    selected_version = ExpiringSelectedVersion()
+
+    async def fake_finalize(self, project_id, chapter_number, chapter_text, user_id, skip_vector_update=False):
+        selected_version.expired = True
+        return {"success": True, "chapter_number": chapter_number}
+
+    monkeypatch.setattr(writer_router.FinalizeService, "finalize_chapter", fake_finalize)
+    chapter = DummyChapter(
+        chapter_number=7,
+        real_summary=json.dumps({"generation_runtime": {"run_id": "run-1", "events": []}}, ensure_ascii=False),
+    )
+
+    result = await _run_finalize_pipeline(
+        session=DummyAsyncSession(),
+        project_id="project-1",
+        chapter_number=7,
+        selected_version=selected_version,
+        user_id=42,
+        skip_vector_update=True,
+        refresh_memory_layer=False,
+        chapter=chapter,
+    )
+
+    assert result == {"finalize": {"success": True, "chapter_number": 7}}
+    runtime = json.loads(chapter.real_summary)["generation_runtime"]
+    assert runtime["progress_stage"] == "finalize"
+    assert runtime["events"][-1]["content_preview"] == "定稿正文"
+
+
 def test_blueprint_character_name_validator_rejects_placeholder_protagonist():
     assert _blueprint_has_valid_character_names({"characters": [{"name": "主角", "role": "主角"}]}) is False
     assert _blueprint_has_valid_character_names({"characters": [{"name": "林渡", "role": "主角"}]}) is True
@@ -230,6 +294,23 @@ def test_append_generation_runtime_event_records_finalize_ledger_preview():
     assert event["content_preview"].endswith("...")
     assert event["metrics"]["resolved"] == 1
     assert event["artifact_refs"]["resolution_ids"] == [10]
+
+
+def test_memory_layer_runtime_summary_reports_dynamic_characters():
+    summary = _build_memory_layer_runtime_summary(
+        {
+            "character_states_updated": 2,
+            "timeline_events_added": 1,
+            "causal_chains_added": 1,
+            "dynamic_characters_created": 1,
+            "dynamic_character_names": ["林渡"],
+        }
+    )
+
+    assert "角色状态 2 条" in summary
+    assert "时间线事件 1 条" in summary
+    assert "因果链 1 条" in summary
+    assert "动态角色入池：林渡" in summary
 
 
 def test_build_character_naming_profile_includes_style_constraints():
@@ -2312,6 +2393,86 @@ def test_consistency_fallback_fix_guard_accepts_anchored_full_chapter_repair():
     ) is None
 
 
+@pytest.mark.anyio
+async def test_consistency_auto_fix_skips_full_chapter_fallback_without_confirmation(monkeypatch):
+    service = ConsistencyService(db=None, llm_service=FakeLLMService(""))
+
+    async def fake_context(*args, **kwargs):
+        return {"novel_setting": "设定", "character_state": "角色状态", "global_summary": "前文"}
+
+    async def fake_local(*args, **kwargs):
+        return None
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("full-chapter consistency fallback should require explicit confirmation")
+
+    monkeypatch.setattr(service, "_get_check_context", fake_context)
+    monkeypatch.setattr(service, "_auto_fix_locally", fake_local)
+    monkeypatch.setattr(consistency_service_module, "call_generation_text", fail_if_called)
+
+    result = await service.auto_fix(
+        project_id="project-1",
+        chapter_text="第一段保留前锚点。\n\n第二段存在冲突。\n\n第三段保留后锚点。",
+        violations=[
+            ConsistencyViolation(
+                severity=ViolationSeverity.MAJOR,
+                category="plot",
+                description="来源存在双版本残留。",
+                location="第2段",
+                suggested_fix="统一来源，只保留一个正式版本。",
+            )
+        ],
+        user_id=1,
+    )
+
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_consistency_auto_fix_allows_full_chapter_fallback_when_confirmed(monkeypatch):
+    service = ConsistencyService(db=None, llm_service=FakeLLMService(""))
+    original = "\n\n".join(
+        [
+            "第一段保留前锚点，主角带着旧卷宗进入听潮祠。",
+            "第二段说明上一章留下的缉印令压力仍在。",
+            "第三段对话存在两个来源版本，需要统一。",
+            "第四段保留后锚点，门外水路封锁的锣声逼近。",
+        ]
+    )
+    fixed = original.replace("第三段对话存在两个来源版本，需要统一。", "第三段对话只保留借阅单这一条正式来源，并让主角用编号反制。")
+
+    async def fake_context(*args, **kwargs):
+        return {"novel_setting": "设定", "character_state": "角色状态", "global_summary": "前文"}
+
+    async def fake_local(*args, **kwargs):
+        return None
+
+    async def fake_call_generation_text(*args, **kwargs):
+        return type("Result", (), {"text": fixed})()
+
+    monkeypatch.setattr(service, "_get_check_context", fake_context)
+    monkeypatch.setattr(service, "_auto_fix_locally", fake_local)
+    monkeypatch.setattr(consistency_service_module, "call_generation_text", fake_call_generation_text)
+
+    result = await service.auto_fix(
+        project_id="project-1",
+        chapter_text=original,
+        violations=[
+            ConsistencyViolation(
+                severity=ViolationSeverity.CRITICAL,
+                category="plot",
+                description="来源存在双版本残留。",
+                location="第3段",
+                suggested_fix="统一来源，只保留一个正式版本。",
+            )
+        ],
+        user_id=1,
+        allow_full_chapter_fallback=True,
+    )
+
+    assert result == fixed
+
+
 
 def test_should_accept_consistency_improvement_when_unresolved_severity_drops():
     before_report = {
@@ -2453,6 +2614,59 @@ async def test_run_consistency_check_retries_with_post_fix_feedback(monkeypatch)
     assert report["repair_attempts"][0]["accepted"] is False
     assert report["repair_attempts"][1]["accepted"] is True
     assert report["repair_attempts"][1]["retry_source"] == "post_fix_feedback"
+
+
+@pytest.mark.anyio
+async def test_run_consistency_check_reports_deferred_full_chapter_fallback(monkeypatch):
+    orchestrator = PipelineOrchestrator(DummyAsyncSession())
+    orchestrator.llm_service = FakeLLMService("")
+    violation = ConsistencyViolation(
+        severity=ViolationSeverity.MAJOR,
+        category="plot",
+        description="来源仍像两条并行事件链。",
+        location="第2段",
+        suggested_fix="统一来源，只保留一个正式版本。",
+    )
+
+    async def fake_check_consistency(self, project_id, chapter_text, user_id, include_foreshadowing=True):
+        return type(
+            "CheckResult",
+            (),
+            {
+                "is_consistent": False,
+                "violations": [violation],
+                "summary": "发现一致性问题。",
+                "check_time_ms": 12,
+                "status": "warning",
+            },
+        )()
+
+    async def fake_auto_fix(self, project_id, chapter_text, violations, user_id):
+        return None
+
+    monkeypatch.setattr(ConsistencyService, "check_consistency", fake_check_consistency)
+    monkeypatch.setattr(ConsistencyService, "auto_fix", fake_auto_fix)
+
+    fixed, report = await orchestrator._run_consistency_check(
+        project_id="project-1",
+        chapter_text="原稿",
+        user_id=1,
+    )
+
+    assert fixed == "原稿"
+    assert report["auto_fix_applied"] is False
+    assert report["auto_fix_accepted"] is False
+    assert report["repair_attempts"] == [
+        {
+            "attempt": 1,
+            "mode": "local_patch",
+            "accepted": False,
+            "acceptance_reason": "local_repair_failed_full_chapter_deferred",
+            "content_changed": False,
+            "full_chapter_fallback_deferred": True,
+            "manual_confirmation_required": True,
+        }
+    ]
 
 
 @pytest.mark.anyio
@@ -3231,7 +3445,24 @@ def test_length_contract_does_not_infer_from_existing_generated_ranges():
         existing_blueprint=existing_blueprint,
     )
 
-    assert contract == {}
+    assert contract["target_chapter_count"] == 60
+    assert contract["source"] == "inferred_project_scale"
+    assert contract["target_chapter_count"] != 390
+
+
+def test_length_contract_infers_longform_from_total_word_count():
+    contract = _build_length_contract(
+        formatted_history=[
+            {"role": "user", "content": "写一部百万字左右的玄幻长篇，跨章节伏笔和角色状态要持续。"},
+        ],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=None,
+    )
+
+    assert contract["source"] == "inferred_project_scale"
+    assert contract["target_chapter_count"] >= 180
+    assert contract["chapter_outline_seed_count"] >= 80
 
 
 def test_length_contract_reuses_stored_contract_when_user_does_not_restates_length():

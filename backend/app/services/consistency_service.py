@@ -25,6 +25,7 @@ from ..models.memory_layer import CharacterState
 from ..models.novel import NovelBlueprint
 from ..models.project_memory import ProjectMemory
 from ..utils.json_utils import remove_think_tags, unwrap_markdown_json
+from .continuity_guard_utils import continuity_terms_guard_failure
 from .generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text
 from .llm_service import LLMService
 
@@ -408,7 +409,12 @@ class ConsistencyService:
                 rebuilt.append(paragraph)
             if not inserted:
                 return None
-            return "\n\n".join(part.strip() for part in rebuilt if part.strip())
+            rebuilt_text = "\n\n".join(part.strip() for part in rebuilt if part.strip())
+            guard_failure = self._fix_continuity_guard_failure(chapter_text, rebuilt_text, context=context)
+            if guard_failure:
+                logger.warning("Local consistency fix rejected by continuity guard: reason=%s", guard_failure)
+                return None
+            return rebuilt_text
         except Exception as exc:
             logger.warning("局部一致性修复失败: %s", exc)
             return None
@@ -419,6 +425,8 @@ class ConsistencyService:
         chapter_text: str,
         violations: List[ConsistencyViolation],
         user_id: int,
+        *,
+        allow_full_chapter_fallback: bool = False,
     ) -> Optional[str]:
         with LLMService.daily_limit_scope(f"consistency_fix:{project_id}:{user_id}:{len(chapter_text or '')}"):
             if not violations:
@@ -433,6 +441,14 @@ class ConsistencyService:
             )
             if localized_fixed and localized_fixed != chapter_text:
                 return localized_fixed
+
+            if not allow_full_chapter_fallback:
+                logger.info(
+                    "一致性局部修复未产出可接受补丁，已跳过整章兜底: project=%s violations=%s",
+                    project_id,
+                    len(violations),
+                )
+                return None
 
             violations_text = "\n".join(
                 f"- [{v.severity.value}] {v.category}: {v.description}"
@@ -474,7 +490,7 @@ class ConsistencyService:
                 cleaned = remove_think_tags(text_result.text).strip() if text_result.text else ""
                 if not cleaned:
                     return None
-                guard_failure = self._fix_continuity_guard_failure(chapter_text, cleaned)
+                guard_failure = self._fix_continuity_guard_failure(chapter_text, cleaned, context=context)
                 if guard_failure:
                     logger.warning(
                         "Consistency fallback fix rejected by continuity guard: project=%s reason=%s",
@@ -487,7 +503,13 @@ class ConsistencyService:
                 logger.error("自动修复失败: %s", exc)
                 return None
 
-    def _fix_continuity_guard_failure(self, original: str, fixed: str) -> Optional[str]:
+    def _fix_continuity_guard_failure(
+        self,
+        original: str,
+        fixed: str,
+        *,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
         original_clean = str(original or "").strip()
         fixed_clean = str(fixed or "").strip()
         if not fixed_clean:
@@ -519,6 +541,14 @@ class ConsistencyService:
             missing = [anchor for anchor in anchors if anchor and anchor not in compact_fixed]
             if len(missing) == len(anchors):
                 return "lost_front_and_back_anchors"
+        term_failure = continuity_terms_guard_failure(
+            original=original_clean,
+            candidate=fixed_clean,
+            context=context,
+            reason_code="fixed_lost_continuity_terms",
+        )
+        if term_failure:
+            return term_failure
         return None
 
     async def check_and_fix(
@@ -527,6 +557,8 @@ class ConsistencyService:
         chapter_text: str,
         user_id: int,
         auto_fix_threshold: ViolationSeverity = ViolationSeverity.CRITICAL,
+        *,
+        allow_full_chapter_fallback: bool = False,
     ) -> Dict[str, Any]:
         with LLMService.daily_limit_scope(f"consistency_check_fix:{project_id}:{user_id}:{len(chapter_text or '')}"):
             check_result = await self.check_consistency(project_id=project_id, chapter_text=chapter_text, user_id=user_id)
@@ -550,6 +582,7 @@ class ConsistencyService:
                     chapter_text=chapter_text,
                     violations=violations_to_fix,
                     user_id=user_id,
+                    allow_full_chapter_fallback=allow_full_chapter_fallback,
                 )
 
             result["needs_manual_review"] = any(

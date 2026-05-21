@@ -362,6 +362,64 @@ def _extract_requested_chapter_count(text: str) -> Optional[int]:
     return matches[-1]
 
 
+def _extract_requested_total_word_count(text: str) -> Optional[int]:
+    if not text:
+        return None
+    normalized = str(text).replace(",", "").replace("，", "")
+    if re.search(r"(?:百万字|一百万字|one\s+million\s+words?)", normalized, flags=re.IGNORECASE):
+        return 1_000_000
+
+    matches: List[int] = []
+    for match in re.finditer(r"(\d+(?:\.\d+)?)\s*万\s*字", normalized, flags=re.IGNORECASE):
+        try:
+            matches.append(int(float(match.group(1)) * 10_000))
+        except (TypeError, ValueError):
+            continue
+    for match in re.finditer(r"(\d+(?:\.\d+)?)\s*(?:k|千)\s*(?:字|words?)", normalized, flags=re.IGNORECASE):
+        try:
+            matches.append(int(float(match.group(1)) * 1_000))
+        except (TypeError, ValueError):
+            continue
+    for match in re.finditer(r"(\d{5,8})\s*(?:字|words?)", normalized, flags=re.IGNORECASE):
+        try:
+            matches.append(int(match.group(1)))
+        except (TypeError, ValueError):
+            continue
+    return matches[-1] if matches else None
+
+
+def _infer_target_chapter_count_from_fragments(fragments: List[str]) -> Optional[int]:
+    text = "\n".join(str(fragment or "") for fragment in fragments if str(fragment or "").strip())
+    if not text:
+        return None
+
+    word_count = _extract_requested_total_word_count(text)
+    lowered = text.lower()
+    is_short = any(marker in text for marker in ("短篇", "小短篇", "短故事", "短剧")) or any(
+        marker in lowered for marker in ("short story", "short novel")
+    )
+    is_mid = any(marker in text for marker in ("中篇", "中短篇")) or "novella" in lowered
+    is_long = any(
+        marker in text
+        for marker in ("长篇", "超长篇", "百万字", "连载", "网文", "玄幻", "仙侠", "修仙", "奇幻", "群像", "升级")
+    ) or any(marker in lowered for marker in ("longform", "serial", "epic fantasy"))
+
+    if word_count:
+        chapter_word_target = 3200 if is_short else 4500
+        if is_long and word_count >= 500_000:
+            chapter_word_target = 5000
+        inferred = max(1, int(round(word_count / chapter_word_target)))
+        return max(6 if is_short else 8, min(1000, inferred))
+
+    if is_short:
+        return 12
+    if is_mid:
+        return 36
+    if is_long:
+        return 120
+    return 60
+
+
 def _resolve_length_contract_defaults(target_chapter_count: int) -> Dict[str, int]:
     if target_chapter_count <= 10:
         stage_min, stage_max = 3, min(5, target_chapter_count)
@@ -495,7 +553,15 @@ def _build_length_contract(
     if target_chapter_count:
         return _make_length_contract(target_chapter_count, source="explicit_user_or_project_length")
 
-    return _extract_stored_length_contract(existing_blueprint)
+    stored_contract = _extract_stored_length_contract(existing_blueprint)
+    if stored_contract:
+        return stored_contract
+
+    inferred_chapter_count = _infer_target_chapter_count_from_fragments(primary_fragments)
+    if inferred_chapter_count:
+        return _make_length_contract(inferred_chapter_count, source="inferred_project_scale")
+
+    return {}
 
 
 def _attach_length_contract_to_blueprint(
@@ -545,8 +611,10 @@ def _format_length_contract_instruction(length_contract: Dict[str, Any]) -> str:
     stage_min = int(length_contract.get("stage_count_min") or 4)
     stage_max = int(length_contract.get("stage_count_max") or 12)
     seed_count = int(length_contract.get("chapter_outline_seed_count") or _resolve_length_contract_defaults(target)["chapter_outline_seed_count"])
+    source = str(length_contract.get("source") or "")
+    prefix = "用户/项目已明确篇幅目标" if source != "inferred_project_scale" else "系统已按题材/篇幅自然推断目标"
     return (
-        f"用户/项目已明确篇幅目标：约 {target} 章。小说总纲阶段数应控制在 {stage_min}-{stage_max} 个，"
+        f"{prefix}：约 {target} 章。小说总纲阶段数应控制在 {stage_min}-{stage_max} 个，"
         f"expected_chapter_range 必须连续覆盖第 1-{target} 章，不得扩写到 {target} 章之外；"
         f"章节大纲首轮生成 {seed_count} 章。短篇不会被强行扩成长篇，长篇也不会被压缩成 12 章骨架；"
         "超过首轮数量的章节后续按批次继续生成，不能让总纲只覆盖一个很薄的开头。"
@@ -601,12 +669,12 @@ def _resolve_blueprint_chapter_outline_count(blueprint_data: Dict[str, Any]) -> 
     if length_contract:
         try:
             target = int(length_contract.get("target_chapter_count") or 0)
-            default_seed = _resolve_length_contract_defaults(target)["chapter_outline_seed_count"] if target > 0 else 24
+            default_seed = _resolve_length_contract_defaults(target)["chapter_outline_seed_count"] if target > 0 else 60
             seed_count = int(length_contract.get("chapter_outline_seed_count") or default_seed)
         except (TypeError, ValueError):
-            seed_count = 24
+            seed_count = 60
         return max(1, min(120, seed_count))
-    return 24
+    return 60
 
 
 def _resolve_novel_outline_min_stage_count(blueprint_data: Dict[str, Any]) -> int:

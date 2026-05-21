@@ -30,6 +30,35 @@ from ..utils.json_utils import remove_think_tags
 logger = logging.getLogger(__name__)
 
 
+def _resolve_direct_generation_contract(target_word_count: int) -> Dict[str, Any]:
+    target = max(500, min(15000, int(target_word_count or 3000)))
+    if target <= 2500:
+        tier = "short_or_light"
+        scene_min, scene_max = 1, 3
+    elif target <= 7000:
+        tier = "standard_high_quality"
+        scene_min, scene_max = 3, 5
+    elif target <= 12000:
+        tier = "long_chapter"
+        scene_min, scene_max = 5, 8
+    else:
+        tier = "experimental_long_chapter"
+        scene_min, scene_max = 6, 9
+
+    min_word_count = max(500, int(target * 0.9))
+    preferred_floor = max(min_word_count, int(target * 0.92))
+    return {
+        "target_word_count": target,
+        "min_word_count": min_word_count,
+        "preferred_floor": preferred_floor,
+        "tier": tier,
+        "scene_min": scene_min,
+        "scene_max": scene_max,
+        "timeout_seconds": max(180.0, min(1500.0, 90.0 + target / 100 * 12.0)),
+        "max_tokens": max(4000, min(32000, int(target * 2.4))),
+    }
+
+
 class UltimateWritingFlow:
     """终极写作流程服务"""
 
@@ -134,9 +163,9 @@ class UltimateWritingFlow:
                 result["metadata"]["flow_stages"].append("version_generation")
 
                 style_hints = [
-                    "情绪更细腻，节奏更慢，多写内心戏和感官描写",
-                    "冲突更强，节奏更快，多写动作和对话",
-                    "悬念更重，多埋伏笔，结尾钩子更强",
+                    "情绪更细腻，但每个情绪段都必须改变判断、关系或行动选择",
+                    "冲突更强，更多对话攻防、反击回合和可见代价",
+                    "悬念更重，每个伏笔都要连接当前行动压力，章末递交新问题",
                 ]
 
                 for version_index in range(version_count):
@@ -301,6 +330,11 @@ class UltimateWritingFlow:
         user_id: int
     ) -> str:
         """直接生成章节（不使用预览）"""
+        contract = _resolve_direct_generation_contract(target_word_count)
+        scene_budget = (
+            f"{contract['scene_min']}-{contract['scene_max']} 个场景/场景组；"
+            "场景组只是内部计划单位，最终正文必须整章连续输出。"
+        )
         prompt = f"""你是一位资深网文作者，现在需要写一章精彩的小说。
 
 [蓝图上下文]
@@ -319,35 +353,42 @@ class UltimateWritingFlow:
 [风格提示]
 {style_hint or '无特殊要求'}
 
-[目标字数]
-**必须达到 {target_word_count} 字左右**（这是硬性要求，请务必写够字数！如果字数不足，请继续扩写细节描写和对话。）
+[章节正文质量与字数契约]
+- 目标字数：{contract['target_word_count']} 字；最低线：{contract['min_word_count']} 字；优先冲到 {contract['preferred_floor']} 字以上。
+- 篇幅档位：{contract['tier']}。
+- 场景预算：{scene_budget}
+- 字数必须长在有效戏剧内容里：行动回合、对话攻防、调查/战斗/交易过程、因果后果、关系变化、信息差变化、章末压力。
+- 禁止靠景物堆叠、心理独白、重复解释、旁白总结来凑字。
 
 写作要求：
-1. 使用镜头语言，多写动作、对话、感官描写
-2. 禁止总结性结尾，禁止"他知道..."、"他明白..."等全知视角
-3. 禁止使用"值得注意的是"、"总而言之"等 AI 典型词汇
-4. 章节结尾必须有钩子，吸引读者继续阅读
-5. 严格遵循情绪曲线指导的节奏要求
+1. 开篇 15% 内必须承接上一章压力并让主角做出选择，不能空转铺陈。
+2. 每个场景/场景组都要有 goal、conflict、turn/payoff、bridge：目标、阻碍、转折/代价、通向下一场的桥。
+3. 对话必须改变局势：逼问、试探、交换、误导、暴露破绽或迫使行动，不写闲聊。
+4. 角色状态要可追踪：立场、知识边界、关系温度、伤势/资源/秘密至少有一项发生变化。
+5. 伏笔不是装饰：新埋、强化或回收都必须服务本章事件压力。
+6. 章节结尾必须递交新的行动压力或信息反转，禁止总结性收束。
+7. 禁止使用"值得注意的是"、"总而言之"等 AI 典型词汇。
 
 直接输出章节正文。"""
 
         try:
-            # 根据目标字数计算 max_tokens（中文约 1.5 字/token，留出余量）
-            max_tokens = max(4000, int(target_word_count * 1.8))
             result = await call_generation_text(
                 llm_service=self.llm_service,
                 system_prompt="你是一位资深网文作者，文笔流畅，擅长写出让读者欲罢不能的章节。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.8,
                 user_id=user_id,
-                timeout=180.0,
+                timeout=float(contract["timeout_seconds"]),
                 policy=GenerationCallPolicy(
                     stage_label="终极写作流程-整章直写",
                     progress_stage="ultimate_direct_generate",
-                    retry_attempts=2,
+                    retry_attempts=3,
                     response_format=None,
-                    max_tokens=max_tokens,
+                    max_tokens=int(contract["max_tokens"]),
                     allow_truncated_response=True,
+                    prompt_cache_key=f"ultimate_direct:{contract['tier']}:{contract['target_word_count']}",
+                    backoff_base_seconds=1.2,
+                    backoff_max_seconds=18.0,
                 ),
             )
             cleaned = remove_think_tags(result.text) if result.text else ""

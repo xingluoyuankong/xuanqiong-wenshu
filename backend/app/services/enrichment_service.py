@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from .continuity_guard_utils import continuity_terms_guard_failure
 from .generation_call_service import GenerationCallPolicy, call_generation_text
 from .llm_service import LLMService
 from ..utils.json_utils import remove_think_tags
@@ -201,7 +202,8 @@ class EnrichmentService:
         chapter_text: str,
         target_word_count: int,
         user_id: int,
-        threshold: float = 0.92
+        threshold: float = 0.92,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Optional[EnrichmentResult]:
         """
         检查字数并在需要时进行扩写
@@ -230,7 +232,8 @@ class EnrichmentService:
                 chapter_text=chapter_text,
                 target_word_count=target_word_count,
                 current_word_count=current_count,
-                user_id=user_id
+                user_id=user_id,
+                context=context,
             )
 
             if not enriched:
@@ -251,7 +254,8 @@ class EnrichmentService:
         chapter_text: str,
         target_word_count: int,
         user_id: int,
-        max_iterations: int = 3
+        max_iterations: int = 3,
+        context: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         迭代扩写直到达到目标字数
@@ -289,7 +293,8 @@ class EnrichmentService:
                     chapter_text=current_text,
                     target_word_count=target_word_count,
                     user_id=user_id,
-                    threshold=threshold
+                    threshold=threshold,
+                    context=context,
                 )
 
                 if not result or not result.enriched_content:
@@ -432,7 +437,8 @@ class EnrichmentService:
         chapter_text: str,
         target_word_count: int,
         current_word_count: int,
-        user_id: int
+        user_id: int,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """执行章节扩写"""
         enrichment_context = self._build_enrichment_context(
@@ -480,7 +486,7 @@ class EnrichmentService:
             normalized = remove_think_tags(text_result.text) if text_result.text else ""
             if not normalized:
                 return None
-            guard_failure = self._enrichment_continuity_guard_failure(chapter_text, normalized)
+            guard_failure = self._enrichment_continuity_guard_failure(chapter_text, normalized, context=context)
             if guard_failure:
                 logger.warning("扩写结果未通过连续性保护，已放弃本次扩写: %s", guard_failure)
                 return None
@@ -556,7 +562,13 @@ class EnrichmentService:
             "focus_guidance": "\n".join(focus_items),
         }
 
-    def _enrichment_continuity_guard_failure(self, original: str, enriched: str) -> Optional[str]:
+    def _enrichment_continuity_guard_failure(
+        self,
+        original: str,
+        enriched: str,
+        *,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
         """Reject expansions that look like a fresh rewrite instead of anchored supplementation."""
         original_clean = (original or "").strip()
         enriched_clean = (enriched or "").strip()
@@ -575,6 +587,14 @@ class EnrichmentService:
         missing = [anchor for anchor in anchors if anchor and anchor not in enriched_clean]
         if len(missing) == len(anchors) and len(anchors) >= 2:
             return "lost_front_and_back_anchors"
+        term_failure = continuity_terms_guard_failure(
+            original=original_clean,
+            candidate=enriched_clean,
+            context=context,
+            reason_code="enrichment_lost_continuity_terms",
+        )
+        if term_failure:
+            return term_failure
         missing_motifs = self._missing_required_motifs(original_clean, enriched_clean)
         if missing_motifs:
             return "lost_required_motifs:" + ",".join(missing_motifs[:4])

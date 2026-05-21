@@ -180,7 +180,12 @@ describe('ChapterGenerating', () => {
               level: 'info',
               title: '记忆层更新完成',
               summary: '已从定稿正文抽取角色状态、时间线和因果信息。',
-              metrics: { character_states_updated: 3, timeline_events_added: 2 },
+              metrics: {
+                character_states_updated: 3,
+                timeline_events_added: 2,
+                dynamic_characters_created: 1,
+                dynamic_character_names: ['林渡'],
+              },
             },
             {
               at: '2026-04-21T08:00:01Z',
@@ -215,6 +220,8 @@ describe('ChapterGenerating', () => {
     expect(wrapper.text()).toContain('记忆层更新完成')
     expect(wrapper.text()).toContain('伏笔闭环完成')
     expect(wrapper.text()).toContain('更新角色状态数：3')
+    expect(wrapper.text()).toContain('动态角色入池数：1')
+    expect(wrapper.text()).toContain('动态入池角色：林渡')
     expect(wrapper.text()).toContain('回收伏笔数：1')
     expect(wrapper.text()).not.toContain('正文候选完成')
   })
@@ -261,5 +268,60 @@ describe('ChapterGenerating', () => {
     expect(wrapper.find('.cg-log-item__patches').text()).toContain('Need a stronger confrontation before reveal')
     expect(wrapper.find('.cg-log-item__patches').text()).toContain('Add a negotiation beat that changes the leverage.')
     expect(wrapper.find('.cg-log-item__patches').text()).toContain('Patch only the negotiation window and keep both anchors')
+  })
+
+  it('shows consistency local-repair diagnostics without hiding patch suggestions', () => {
+    const wrapper = shallowMount(ChapterGenerating, {
+      props: {
+        chapterNumber: 10,
+        generationRuntime: {
+          progress_stage: 'consistency',
+          progress_message: '一致性局部修复已完成，仍有问题需按局部补丁处理',
+          events: [
+            {
+              at: '2026-04-21T08:00:00Z',
+              stage: 'consistency',
+              kind: 'continuity',
+              level: 'warning',
+              title: '一致性局部修复结果',
+              summary: '局部修复尝试 1 次，未解决问题 1 项；整章候选需要人工确认。',
+              metrics: {
+                repair_attempt_count: 1,
+                unresolved_consistency_issues: 1,
+                auto_fix_accepted: false,
+              },
+              metadata: {
+                manual_stagewide_confirmation_required: true,
+                repair_attempts: [
+                  {
+                    attempt: 1,
+                    mode: 'local_patch',
+                    full_chapter_fallback_deferred: true,
+                  },
+                ],
+                manual_patch_suggestions: [
+                  {
+                    dimension: 'continuity',
+                    location: '第2段',
+                    problem: '来源仍像两条并行事件链。',
+                    suggestion: '统一来源，只保留一个正式版本。',
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        progressStage: 'consistency',
+        progressMessage: '一致性局部修复已完成，仍有问题需按局部补丁处理',
+        allowedActions: ['refresh_status'],
+      },
+    })
+
+    expect(wrapper.text()).toContain('一致性局部修复结果')
+    expect(wrapper.text()).toContain('局部修复尝试数：1')
+    expect(wrapper.text()).toContain('未解决一致性问题数：1')
+    expect(wrapper.text()).toContain('自动局部修复已采纳：否')
+    expect(wrapper.find('.cg-log-item__notice').text()).toContain('整章候选没有自动套用')
+    expect(wrapper.find('.cg-log-item__patches').text()).toContain('来源仍像两条并行事件链')
   })
 })

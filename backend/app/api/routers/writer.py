@@ -629,6 +629,37 @@ def _append_generation_runtime_event(
     chapter.real_summary = json.dumps({"generation_runtime": normalized_runtime}, ensure_ascii=False)
 
 
+def _build_memory_layer_runtime_summary(memory_result: Dict[str, Any]) -> str:
+    if not isinstance(memory_result, dict):
+        return "记忆层已尝试同步，结果结构异常，保留原文并等待后续重试。"
+
+    dynamic_names = [
+        str(name).strip()
+        for name in (memory_result.get("dynamic_character_names") or [])
+        if str(name).strip()
+    ]
+    pieces: List[str] = []
+    character_count = int(memory_result.get("character_states_updated") or 0)
+    timeline_count = int(memory_result.get("timeline_events_added") or 0)
+    causal_count = int(memory_result.get("causal_chains_added") or 0)
+    dynamic_count = int(memory_result.get("dynamic_characters_created") or len(dynamic_names) or 0)
+
+    if character_count:
+        pieces.append(f"角色状态 {character_count} 条")
+    if timeline_count:
+        pieces.append(f"时间线事件 {timeline_count} 条")
+    if causal_count:
+        pieces.append(f"因果链 {causal_count} 条")
+    if dynamic_count:
+        shown_names = "、".join(dynamic_names[:5]) if dynamic_names else f"{dynamic_count} 个新角色"
+        suffix = "等" if len(dynamic_names) > 5 else ""
+        pieces.append(f"动态角色入池：{shown_names}{suffix}")
+
+    if not pieces:
+        return "记忆层已检查本章，没有发现必须新增的角色状态、时间线或因果账本。"
+    return "已写入" + "，".join(pieces) + "。"
+
+
 def _get_generation_run_id(chapter: Optional[Chapter]) -> Optional[str]:
     runtime = _load_generation_runtime_state(chapter).get("generation_runtime")
     if not isinstance(runtime, dict):
@@ -1487,6 +1518,63 @@ async def _finalize_chapter_async(
             chapter_number,
             exc,
         )
+        await _record_background_finalize_failure(
+            project_id=project_id,
+            chapter_number=chapter_number,
+            error=exc,
+        )
+
+
+async def _record_background_finalize_failure(
+    *,
+    project_id: str,
+    chapter_number: int,
+    error: Exception,
+) -> None:
+    """Mark async finalize as degraded so the UI does not wait forever."""
+    try:
+        async with AsyncSessionLocal() as session:
+            stmt = select(Chapter).where(
+                Chapter.project_id == project_id,
+                Chapter.chapter_number == chapter_number,
+            )
+            result = await session.execute(stmt)
+            chapter = result.scalars().first()
+            if not chapter:
+                return
+            _append_generation_runtime_event(
+                chapter,
+                stage="finalized",
+                message="定稿正文已保存，账本同步降级",
+                level="warning",
+                progress_percent=100,
+                event_kind="ledger",
+                title="定稿降级完成",
+                summary="后台账本更新遇到异常，已保留选中正文；可稍后重试账本同步。",
+                metadata={"error": str(error)[:300]},
+            )
+            await session.commit()
+    except Exception as record_exc:
+        logger.warning(
+            "记录后台定稿降级状态失败: project=%s chapter=%s error=%s",
+            project_id,
+            chapter_number,
+            record_exc,
+        )
+
+
+async def _refresh_chapter_runtime_state(session: AsyncSession, chapter: Optional[Chapter]) -> None:
+    if chapter is None:
+        return
+    refresh = getattr(session, "refresh", None)
+    if not callable(refresh):
+        return
+    try:
+        await refresh(chapter, attribute_names=["real_summary", "chapter_number"])
+    except TypeError:
+        await refresh(chapter)
+    except Exception:
+        logger.debug("刷新章节运行态失败，继续使用当前内存值", exc_info=True)
 
 
 async def _run_finalize_pipeline(
@@ -1501,6 +1589,9 @@ async def _run_finalize_pipeline(
     chapter: Optional[Chapter] = None,
 ) -> Dict[str, Any]:
     llm_service = LLMService(session)
+    selected_content = getattr(selected_version, "content", None) or ""
+    selected_version_id = getattr(selected_version, "id", None)
+    selected_chapter_id = getattr(selected_version, "chapter_id", None)
 
     if chapter is not None:
         _append_generation_runtime_event(
@@ -1511,8 +1602,8 @@ async def _run_finalize_pipeline(
             event_kind="ledger",
             title="定稿闭环开始",
             summary="将同步章节摘要、角色状态、伏笔/线索和知识图谱。",
-            content_preview=selected_version.content,
-            metrics={"selected_version_id": selected_version.id if getattr(selected_version, "id", None) else None},
+            content_preview=selected_content,
+            metrics={"selected_version_id": selected_version_id},
         )
         await session.commit()
 
@@ -1527,13 +1618,14 @@ async def _run_finalize_pipeline(
     finalize_result = await finalize_service.finalize_chapter(
         project_id=project_id,
         chapter_number=chapter_number,
-        chapter_text=selected_version.content,
+        chapter_text=selected_content,
         user_id=user_id,
         skip_vector_update=skip_vector_update,
     )
     result: Dict[str, Any] = {"finalize": finalize_result}
 
     if chapter is not None:
+        await _refresh_chapter_runtime_state(session, chapter)
         finalize_success = bool(finalize_result.get("success", True)) if isinstance(finalize_result, dict) else True
         _append_generation_runtime_event(
             chapter,
@@ -1545,7 +1637,7 @@ async def _run_finalize_pipeline(
             title="定稿快照完成" if finalize_success else "定稿快照降级",
             summary="全局摘要、剧情线和章节快照已写入或尝试写入。",
             metrics=(finalize_result.get("updates") if isinstance(finalize_result, dict) else None),
-            content_preview=selected_version.content,
+            content_preview=selected_content,
         )
         await session.commit()
 
@@ -1573,21 +1665,27 @@ async def _run_finalize_pipeline(
         memory_result = await memory_service.update_memory_after_chapter(
             project_id=project_id,
             chapter_number=chapter_number,
-            chapter_content=selected_version.content,
+            chapter_content=selected_content,
             character_names=character_names,
             user_id=user_id,
         )
         result["memory_layer"] = memory_result
         if chapter is not None:
+            await _refresh_chapter_runtime_state(session, chapter)
+            memory_summary = _build_memory_layer_runtime_summary(memory_result)
             _append_generation_runtime_event(
                 chapter,
                 stage="ledger_memory",
-                message="角色状态和时间线账本更新完成",
+                message="角色状态、时间线和因果账本更新完成",
                 progress_percent=99,
                 event_kind="ledger",
                 title="记忆层更新完成",
-                summary="已从定稿正文抽取角色状态、时间线和因果信息。",
+                summary=memory_summary,
                 metrics=memory_result,
+                artifact_refs={
+                    "dynamic_character_names": memory_result.get("dynamic_character_names", []),
+                    "dynamic_characters_created": memory_result.get("dynamic_characters_created", 0),
+                },
             )
             await session.commit()
     except Exception as exc:
@@ -1602,6 +1700,7 @@ async def _run_finalize_pipeline(
             "error": str(exc)[:200],
         }
         if chapter is not None:
+            await _refresh_chapter_runtime_state(session, chapter)
             _append_generation_runtime_event(
                 chapter,
                 stage="ledger_memory",
@@ -1619,15 +1718,15 @@ async def _run_finalize_pipeline(
         foreshadowing_service = ForeshadowingService(session)
         foreshadowing_result = await foreshadowing_service.auto_resolve_from_chapter(
             project_id=project_id,
-            chapter_id=selected_version.chapter_id,
+            chapter_id=selected_chapter_id,
             chapter_number=chapter_number,
-            chapter_content=selected_version.content,
+            chapter_content=selected_content,
         )
         auto_collect_result = await foreshadowing_service.auto_collect_from_chapter(
             project_id=project_id,
-            chapter_id=selected_version.chapter_id,
+            chapter_id=selected_chapter_id,
             chapter_number=chapter_number,
-            chapter_content=selected_version.content,
+            chapter_content=selected_content,
             max_items=6,
         )
         total_chapters = await session.scalar(
@@ -1645,6 +1744,7 @@ async def _run_finalize_pipeline(
             "active_reminders_checked": len(reminders),
         }
         if chapter is not None:
+            await _refresh_chapter_runtime_state(session, chapter)
             _append_generation_runtime_event(
                 chapter,
                 stage="ledger_foreshadowing",
@@ -1677,6 +1777,7 @@ async def _run_finalize_pipeline(
             "error": str(exc)[:200],
         }
         if chapter is not None:
+            await _refresh_chapter_runtime_state(session, chapter)
             _append_generation_runtime_event(
                 chapter,
                 stage="ledger_foreshadowing",
@@ -1698,6 +1799,7 @@ async def _run_finalize_pipeline(
             "knowledge_graph": graph_result,
         }
         if chapter is not None:
+            await _refresh_chapter_runtime_state(session, chapter)
             _append_generation_runtime_event(
                 chapter,
                 stage="ledger_graph",
@@ -1724,6 +1826,7 @@ async def _run_finalize_pipeline(
             "error": str(exc)[:200],
         }
         if chapter is not None:
+            await _refresh_chapter_runtime_state(session, chapter)
             _append_generation_runtime_event(
                 chapter,
                 stage="ledger_graph",
@@ -1751,6 +1854,8 @@ async def _run_finalize_pipeline(
         result["analysis_cache"] = {"success": False, "error": str(exc)[:200]}
 
     if chapter is not None:
+        await _refresh_chapter_runtime_state(session, chapter)
+        memory_layer_result = result.get("memory_layer") if isinstance(result.get("memory_layer"), dict) else {}
         _append_generation_runtime_event(
             chapter,
             stage="finalized",
@@ -1763,6 +1868,8 @@ async def _run_finalize_pipeline(
                 "memory_success": bool((result.get("memory_layer") or {}).get("success", True)),
                 "foreshadowing_success": bool((result.get("foreshadowing_closure") or {}).get("success", True)),
                 "ledger_sync_success": bool((result.get("ledger_sync") or {}).get("success", True)),
+                "dynamic_characters_created": memory_layer_result.get("dynamic_characters_created", 0),
+                "dynamic_character_names": memory_layer_result.get("dynamic_character_names", []),
             },
         )
         await session.commit()

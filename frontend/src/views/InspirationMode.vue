@@ -609,6 +609,16 @@ const readPositiveInt = (value: unknown): number | null => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null
 }
 
+const resolveLengthContractSeedCount = (targetCount: number, seedCount?: number | null): number => {
+  let defaultSeed = 60
+  if (targetCount <= 60) defaultSeed = targetCount
+  else if (targetCount <= 120) defaultSeed = 60
+  else if (targetCount <= 300) defaultSeed = 80
+  else if (targetCount <= 600) defaultSeed = 100
+  else defaultSeed = 120
+  return Math.min(targetCount, Math.max(defaultSeed, seedCount || 0))
+}
+
 const resolveChapterOutlineExpectedCount = (blueprint: Blueprint | null | undefined) => {
   if (!blueprint) return 0
   const worldSetting = isRecord(blueprint.world_setting) ? blueprint.world_setting : {}
@@ -624,9 +634,9 @@ const resolveChapterOutlineExpectedCount = (blueprint: Blueprint | null | undefi
   for (const candidate of candidates) {
     const seedCount = readPositiveInt(candidate.chapter_outline_seed_count)
     const targetCount = readPositiveInt(candidate.target_chapter_count)
-    if (seedCount && targetCount) return Math.min(seedCount, targetCount)
+    if (seedCount && targetCount) return resolveLengthContractSeedCount(targetCount, seedCount)
     if (seedCount) return seedCount
-    if (targetCount && targetCount <= 60) return targetCount
+    if (targetCount) return resolveLengthContractSeedCount(targetCount)
   }
 
   return Array.isArray(blueprint.chapter_outline) ? blueprint.chapter_outline.length : 0

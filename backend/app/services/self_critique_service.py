@@ -10,6 +10,7 @@ import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .continuity_guard_utils import continuity_terms_guard_failure
 from .generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text
 from .llm_service import LLMService
 from .prompt_service import PromptService
@@ -1417,6 +1418,7 @@ class SelfCritiqueService:
             "strategy_instruction": strategy["instruction"],
             "rewrite_mode": rewrite_mode,
             "residue_hints": self._build_residue_hints(localized_issues),
+            "context": context or {},
         }
 
     def _local_cohesion_failure_reason(self, plan: Dict[str, Any], localized_text: str) -> Optional[str]:
@@ -1447,6 +1449,14 @@ class SelfCritiqueService:
             return "head_copies_prev_anchor"
         if last_line.endswith(("……", "——")) and not next_anchor:
             return "dangling_ending_without_next_anchor"
+        term_failure = continuity_terms_guard_failure(
+            original="\n\n".join(str(item) for item in target_paragraphs),
+            candidate=localized,
+            context=plan.get("context") if isinstance(plan.get("context"), dict) else None,
+            reason_code="localized_lost_continuity_terms",
+        )
+        if term_failure:
+            return term_failure
         return None
 
     def _passes_local_cohesion_check(self, plan: Dict[str, Any], localized_text: str) -> bool:
@@ -1483,7 +1493,14 @@ class SelfCritiqueService:
             return None
         return repaired
 
-    def _stagewide_revision_guard_failure_reason(self, original_content: str, revised_content: str, *, residue_cleanup_mode: bool) -> Optional[str]:
+    def _stagewide_revision_guard_failure_reason(
+        self,
+        original_content: str,
+        revised_content: str,
+        *,
+        residue_cleanup_mode: bool,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
         original = str(original_content or "").strip()
         revised = str(revised_content or "").strip()
         if not original:
@@ -1503,6 +1520,14 @@ class SelfCritiqueService:
             return f"too_few_paragraphs:{len(revised_paragraphs)}<{min_paragraphs}"
         if revised.endswith(("，", "、", "：", "；", "（", "[", "{", "“", "‘", "—", "-")):
             return "dangling_ending_punctuation"
+        term_failure = continuity_terms_guard_failure(
+            original=original,
+            candidate=revised,
+            context=context,
+            reason_code="stagewide_lost_continuity_terms",
+        )
+        if term_failure:
+            return term_failure
         return None
 
     def _passes_stagewide_revision_guard(self, original_content: str, revised_content: str, *, residue_cleanup_mode: bool) -> bool:
@@ -1577,6 +1602,7 @@ class SelfCritiqueService:
                 chapter_content,
                 revised,
                 residue_cleanup_mode=residue_cleanup_mode,
+                context=context,
             )
             if failure_reason is not None:
                 logger.info(
