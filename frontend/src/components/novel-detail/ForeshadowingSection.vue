@@ -29,6 +29,41 @@
       </article>
     </section>
 
+    <section class="rounded-3xl border border-sky-100 bg-white p-5 shadow-sm">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h4 class="text-base font-semibold text-slate-900">下章必须处理</h4>
+          <p class="mt-1 text-sm text-slate-500">根据目标回收章节、提醒、紧迫度和拖延距离，把最容易被遗忘的伏笔先挑出来。</p>
+        </div>
+        <span class="rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">第 {{ maxChapter + 1 }} 章任务建议</span>
+      </div>
+      <div v-if="nextChapterTasks.length" class="mt-4 grid gap-3 lg:grid-cols-2">
+        <article v-for="item in nextChapterTasks" :key="`next-${item.id}`" class="rounded-2xl border border-sky-100 bg-sky-50/70 px-4 py-3">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="text-sm font-semibold leading-6 text-slate-900">{{ itemTitle(item) }}</div>
+              <p class="mt-1 text-sm leading-6 text-slate-600">{{ item.content }}</p>
+            </div>
+            <span class="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-medium text-sky-700">{{ item.priorityLabel }}</span>
+          </div>
+          <div class="mt-3 flex flex-wrap gap-2 text-xs text-slate-600">
+            <span class="rounded-full bg-white/90 px-2 py-1">第 {{ item.chapter_number }} 章埋下</span>
+            <span v-if="item.targetHint" class="rounded-full bg-white/90 px-2 py-1">{{ item.targetHint }}</span>
+            <span v-if="item.urgency" class="rounded-full bg-white/90 px-2 py-1">紧迫度 {{ item.urgency }}/10</span>
+            <span v-if="item.related_characters?.length" class="rounded-full bg-white/90 px-2 py-1">角色：{{ item.related_characters.slice(0, 3).join('、') }}</span>
+          </div>
+          <div v-if="item.reveal_method || item.reveal_impact" class="mt-3 grid gap-2 text-xs leading-5 text-slate-600 md:grid-cols-2">
+            <div v-if="item.reveal_method" class="rounded-xl bg-white/80 px-3 py-2">回收方式：{{ item.reveal_method }}</div>
+            <div v-if="item.reveal_impact" class="rounded-xl bg-white/80 px-3 py-2">回收影响：{{ item.reveal_impact }}</div>
+          </div>
+          <div class="mt-3 rounded-xl bg-white/80 px-3 py-2 text-xs leading-5 text-slate-700">
+            局部补丁建议：{{ patchSuggestion(item) }}
+          </div>
+        </article>
+      </div>
+      <div v-else class="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">当前没有必须压到下一章处理的伏笔。</div>
+    </section>
+
     <section class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -49,7 +84,7 @@
           <div class="text-sm font-medium text-slate-700">待处理提醒</div>
           <div v-for="item in reminders" :key="item.id" class="rounded-2xl border border-sky-100 bg-sky-50/80 px-4 py-3">
             <div class="text-sm font-medium text-slate-900">{{ item.message }}</div>
-            <div class="mt-1 text-xs text-slate-500">{{ mapReminderType(item.reminder_type) }} · {{ formatDate(item.created_at) }}</div>
+            <div class="mt-1 text-xs text-slate-500">{{ mapReminderType(item.reminder_type) }} · {{ formatDate(item.created_at) }}{{ reminderRangeLabel(item) }}</div>
           </div>
           <div v-if="!reminders.length" class="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">当前没有待处理提醒，说明伏笔节奏暂时正常。</div>
         </div>
@@ -74,14 +109,18 @@
             :class="column.cardClass"
           >
             <div class="flex items-start justify-between gap-3">
-              <div class="text-sm font-medium leading-6 text-slate-900">{{ item.content }}</div>
+              <div class="text-sm font-medium leading-6 text-slate-900">{{ itemTitle(item) }}</div>
               <span class="rounded-full bg-white/90 px-2 py-1 text-[11px] text-slate-500">第 {{ item.chapter_number }} 章</span>
             </div>
+            <div v-if="item.name" class="mt-1 text-xs leading-5 text-slate-500 line-clamp-2">{{ item.content }}</div>
             <div class="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
               <span class="rounded-full bg-white/80 px-2 py-1">{{ mapForeshadowType(item.type) }}</span>
               <span v-if="item.resolved_chapter_number" class="rounded-full bg-white/80 px-2 py-1">已在第 {{ item.resolved_chapter_number }} 章回收</span>
               <span v-else-if="item.stageHint" class="rounded-full bg-white/80 px-2 py-1">{{ item.stageHint }}</span>
+              <span v-if="item.targetHint && !item.resolved_chapter_number" class="rounded-full bg-white/80 px-2 py-1">{{ item.targetHint }}</span>
+              <span v-if="item.urgency" class="rounded-full bg-white/80 px-2 py-1">紧迫度 {{ item.urgency }}/10</span>
             </div>
+            <div v-if="item.reveal_method && !item.resolved_chapter_number" class="mt-2 text-xs leading-5 text-slate-500">建议回收：{{ item.reveal_method }}</div>
             <div v-if="item.author_note" class="mt-2 text-xs leading-5 text-slate-500">作者备注：{{ item.author_note }}</div>
           </div>
           <div v-if="!column.items.length" class="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">暂无内容</div>
@@ -109,18 +148,54 @@ const analysis = ref<ForeshadowingAnalysisResponse | null>(null)
 
 const projectId = computed(() => props.projectId || '')
 const maxChapter = computed(() => list.value.reduce((max, item) => Math.max(max, item.chapter_number, item.resolved_chapter_number || 0), 0))
+const activeReminderIds = computed(() => new Set(reminders.value.filter(item => item.status !== 'resolved' && item.status !== 'dismissed').map(item => item.foreshadowing_id)))
 
 const enrichItem = (item: ForeshadowingItem) => {
   const distance = maxChapter.value - item.chapter_number
+  const targetReveal = typeof item.target_reveal_chapter === 'number' ? item.target_reveal_chapter : null
+  const targetDistance = targetReveal == null ? null : targetReveal - maxChapter.value
+  const hasReminder = activeReminderIds.value.has(item.id)
+  const urgency = Number(item.urgency || 0)
   let stageHint = '刚埋下，后续可以继续铺陈'
+  let targetHint = ''
+  let priorityLabel = '保持可见'
+  let priorityRank = 0
   if (item.resolved_chapter_number) {
     stageHint = `回收跨度 ${Math.max(item.resolved_chapter_number - item.chapter_number, 0)} 章`
+    priorityLabel = '已回收'
   } else if (distance >= 4) {
     stageHint = '拖延较久，建议尽快安排回收或推进'
+    priorityLabel = '逾期风险'
+    priorityRank = 3
   } else if (distance >= 2) {
     stageHint = '已进入推进区，可在后续章节继续强化'
+    priorityLabel = '近期强化'
+    priorityRank = 1
   }
-  return { ...item, stageHint, distance }
+  if (targetReveal != null) {
+    if (targetDistance == null) {
+      targetHint = `计划第 ${targetReveal} 章回收`
+    } else if (targetDistance < 0) {
+      targetHint = `已超过计划回收 ${Math.abs(targetDistance)} 章`
+      priorityLabel = '计划逾期'
+      priorityRank = Math.max(priorityRank, 4)
+    } else if (targetDistance <= 1) {
+      targetHint = `计划第 ${targetReveal} 章前后回收`
+      priorityLabel = '下章处理'
+      priorityRank = Math.max(priorityRank, 5)
+    } else {
+      targetHint = `计划第 ${targetReveal} 章回收`
+    }
+  }
+  if (hasReminder) {
+    priorityLabel = '提醒待办'
+    priorityRank = Math.max(priorityRank, 6)
+  }
+  if (urgency >= 8 && !item.resolved_chapter_number) {
+    priorityLabel = '高紧迫'
+    priorityRank = Math.max(priorityRank, 7)
+  }
+  return { ...item, stageHint, distance, targetHint, targetDistance, hasReminder, priorityLabel, priorityRank }
 }
 
 const resolvedItems = computed(() => list.value.filter(item => item.resolved_chapter_number))
@@ -128,11 +203,17 @@ const unresolvedItems = computed(() => list.value.filter(item => !item.resolved_
 const plantedItems = computed(() => unresolvedItems.value.map(enrichItem).filter(item => item.distance < 2))
 const progressingItems = computed(() => unresolvedItems.value.map(enrichItem).filter(item => item.distance >= 2 && item.distance < 4))
 const overdueItems = computed(() => unresolvedItems.value.map(enrichItem).filter(item => item.distance >= 4))
+const nextChapterTasks = computed(() => unresolvedItems.value
+  .map(enrichItem)
+  .filter(item => item.priorityRank >= 5 || item.distance >= 5)
+  .sort((a, b) => b.priorityRank - a.priorityRank || Number(b.urgency || 0) - Number(a.urgency || 0) || b.distance - a.distance)
+  .slice(0, 8))
 
 const summaryCards = computed(() => [
   { label: '总伏笔数', value: String(list.value.length) },
   { label: '待回收', value: String(overdueItems.value.length), hint: '拖延过久最容易削弱读者期待' },
   { label: '已回收', value: String(resolvedItems.value.length), hint: analysis.value?.avg_resolution_distance != null ? `平均回收跨度 ${analysis.value.avg_resolution_distance.toFixed(1)} 章` : undefined },
+  { label: '下章任务', value: String(nextChapterTasks.value.length), hint: '来自目标回收、提醒和紧迫度' },
   { label: '整体质量', value: analysis.value?.overall_quality_score != null ? `${analysis.value.overall_quality_score.toFixed(1)} / 10` : '—', hint: analysis.value?.unresolved_ratio != null ? `未回收占比 ${(analysis.value.unresolved_ratio * 100).toFixed(0)}%` : undefined }
 ])
 
@@ -187,6 +268,23 @@ const mapReminderType = (value: string) => {
   if (normalized.includes('stale')) return '拖延预警'
   if (normalized.includes('consistency')) return '一致性提醒'
   return value || '系统提醒'
+}
+
+const itemTitle = (item: ForeshadowingItem) => item.name || item.content
+
+const patchSuggestion = (item: ReturnType<typeof enrichItem>) => {
+  if (item.reveal_method) return `在不推翻原章节的前提下，新增一个局部场景或对话回合，让“${itemTitle(item)}”按计划回收：${item.reveal_method}`
+  if (item.target_reveal_chapter) return `在第 ${maxChapter.value + 1} 章给“${itemTitle(item)}”安排可见动作、证据或角色反应，避免继续超过第 ${item.target_reveal_chapter} 章回收窗口。`
+  if (item.related_characters?.length) return `让 ${item.related_characters.slice(0, 2).join('、')} 在下一章的行动或对话中触碰这条伏笔，不要整章重写，只补关键承接片段。`
+  return `给“${itemTitle(item)}”补一个明确的发现、追问、代价或误导反转，让读者重新记住它。`
+}
+
+const reminderRangeLabel = (item: ForeshadowingReminderItem) => {
+  const range = item.suggested_chapter_range
+  if (!range || (!range.start && !range.end)) return ''
+  if (range.start && range.end) return ` · 建议第 ${range.start}-${range.end} 章处理`
+  if (range.start) return ` · 建议第 ${range.start} 章后处理`
+  return ` · 建议第 ${range.end} 章前处理`
 }
 
 const formatDate = (value: string) => {

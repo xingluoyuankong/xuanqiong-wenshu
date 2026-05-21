@@ -1719,10 +1719,19 @@ export class TokenBudgetAPI {
 
 export interface ForeshadowingItem {
   id: number
+  name?: string | null
   chapter_number: number
   content: string
   type: string
   status: string
+  target_reveal_chapter?: number | null
+  reveal_method?: string | null
+  reveal_impact?: string | null
+  related_characters?: string[] | null
+  related_plots?: string[] | null
+  importance?: string | null
+  urgency?: number | null
+  keywords?: string[] | null
   resolved_chapter_number: number | null
   is_manual: boolean
   ai_confidence: number | null
@@ -1770,6 +1779,7 @@ export interface ForeshadowingReminderItem {
   reminder_type: string
   message: string
   status: string
+  suggested_chapter_range?: { start?: number; end?: number } | null
   created_at: string
 }
 

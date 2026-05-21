@@ -43,10 +43,19 @@ class ForeshadowingResponse(BaseModel):
     """伏笔响应"""
     id: int
     project_id: str
+    name: Optional[str] = None
     chapter_number: int
     content: str
     type: str
     status: str
+    target_reveal_chapter: Optional[int] = None
+    reveal_method: Optional[str] = None
+    reveal_impact: Optional[str] = None
+    related_characters: Optional[List[str]] = None
+    related_plots: Optional[List[str]] = None
+    importance: Optional[str] = None
+    urgency: Optional[int] = None
+    keywords: Optional[List[str]] = None
     resolved_chapter_number: Optional[int]
     is_manual: bool
     ai_confidence: Optional[float]
@@ -61,6 +70,7 @@ class ReminderResponse(BaseModel):
     reminder_type: str
     message: str
     status: str
+    suggested_chapter_range: Optional[dict] = None
 
 
 class AnalysisResponse(BaseModel):
@@ -73,6 +83,44 @@ class AnalysisResponse(BaseModel):
     unresolved_ratio: Optional[float]
     overall_quality_score: Optional[float]
     recommendations: List[str]
+
+
+def _normalize_optional_string_list(value: object) -> Optional[List[str]]:
+    if not value:
+        return None
+    if isinstance(value, str):
+        values = [part.strip() for part in value.replace("，", ",").split(",")]
+    elif isinstance(value, list):
+        values = [str(item).strip() for item in value]
+    else:
+        return None
+    result = [item for item in values if item]
+    return result or None
+
+
+def _serialize_foreshadowing(item: Foreshadowing) -> dict:
+    return {
+        "id": item.id,
+        "project_id": item.project_id,
+        "name": item.name,
+        "chapter_number": item.chapter_number,
+        "content": item.content,
+        "type": item.type,
+        "status": item.status,
+        "target_reveal_chapter": item.target_reveal_chapter,
+        "reveal_method": item.reveal_method,
+        "reveal_impact": item.reveal_impact,
+        "related_characters": _normalize_optional_string_list(item.related_characters),
+        "related_plots": _normalize_optional_string_list(item.related_plots),
+        "importance": item.importance,
+        "urgency": item.urgency,
+        "keywords": _normalize_optional_string_list(item.keywords),
+        "resolved_chapter_number": item.resolved_chapter_number,
+        "is_manual": item.is_manual,
+        "ai_confidence": item.ai_confidence,
+        "author_note": item.author_note,
+        "created_at": item.created_at.isoformat(),
+    }
 
 
 @router.post("/{project_id}/foreshadowings", response_model=ForeshadowingResponse)
@@ -104,19 +152,7 @@ async def create_foreshadowing(
         await session.commit()
         await session.refresh(foreshadowing)
 
-        return ForeshadowingResponse(
-            id=foreshadowing.id,
-            project_id=foreshadowing.project_id,
-            chapter_number=foreshadowing.chapter_number,
-            content=foreshadowing.content,
-            type=foreshadowing.type,
-            status=foreshadowing.status,
-            resolved_chapter_number=foreshadowing.resolved_chapter_number,
-            is_manual=foreshadowing.is_manual,
-            ai_confidence=foreshadowing.ai_confidence,
-            author_note=foreshadowing.author_note,
-            created_at=foreshadowing.created_at.isoformat(),
-        )
+        return ForeshadowingResponse(**_serialize_foreshadowing(foreshadowing))
     except HTTPException:
         raise
     except Exception as e:
@@ -151,21 +187,7 @@ async def list_foreshadowings(
             "total": total,
             "limit": limit,
             "offset": offset,
-            "data": [
-                {
-                    "id": f.id,
-                    "chapter_number": f.chapter_number,
-                    "content": f.content,
-                    "type": f.type,
-                    "status": f.status,
-                    "resolved_chapter_number": f.resolved_chapter_number,
-                    "is_manual": f.is_manual,
-                    "ai_confidence": f.ai_confidence,
-                    "author_note": f.author_note,
-                    "created_at": f.created_at.isoformat(),
-                }
-                for f in foreshadowings
-            ],
+            "data": [_serialize_foreshadowing(f) for f in foreshadowings],
         }
     except HTTPException:
         raise
@@ -239,6 +261,7 @@ async def get_reminders(
                     "reminder_type": r.reminder_type,
                     "message": r.message,
                     "status": r.status,
+                    "suggested_chapter_range": r.suggested_chapter_range,
                     "created_at": r.created_at.isoformat(),
                 }
                 for r in reminders

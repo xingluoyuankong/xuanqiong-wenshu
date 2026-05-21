@@ -109,3 +109,10 @@
 - 定向验证：`cd frontend; npm run test:run -- src/components/admin/RuntimeLogManagement.spec.ts` 通过（1 passed）。
 - 前端全量验证：`cd frontend; npm run test:run` 通过（126 passed），`cd frontend; npm run build` 通过。
 - 浏览器验证：项目本体 `http://127.0.0.1:5174/admin?tab=runtime-logs` 打开正常；详细生成状态日志、内容预览、Provider 摘要和 Token 预算摘要可见，浏览器 console error 为 0；桌面视口 `scrollWidth == clientWidth`，未出现横向溢出。
+
+## 2026-05-21 伏笔下章任务闭环验证
+- 代码收口：伏笔列表 API 现在透出已有 `Foreshadowing` 计划字段：`name/target_reveal_chapter/reveal_method/reveal_impact/related_characters/related_plots/importance/urgency/keywords`，提醒 API 透出 `suggested_chapter_range`。
+- 前端收口：`ForeshadowingSection.vue` 新增“下章必须处理”工作区，把计划逾期、提醒待办、高紧迫伏笔提升为下章任务，并给出局部补丁建议；普通看板也显示目标回收窗口、紧迫度和建议回收方式。
+- 定向验证：`python -m pytest backend/app/api/routers/test_foreshadowing_route.py -q` 通过（1 passed）；`cd frontend; npm run test:run -- src/components/novel-detail/ForeshadowingSection.spec.ts` 通过（1 passed）。
+- 全量验证：`python -m pytest backend -q` 通过（250 passed）；`cd frontend; npm run test:run` 通过（127 passed）；`cd frontend; npm run build` 通过。
+- 浏览器验证：项目本体 `http://127.0.0.1:5174/detail/35cbd8ec-6fdb-47d1-bf6d-437970143d4e?section=foreshadowing` 打开正常；“下章必须处理”“下章任务”“局部补丁建议”可见，浏览器 console error 为 0；桌面视口无横向溢出。
