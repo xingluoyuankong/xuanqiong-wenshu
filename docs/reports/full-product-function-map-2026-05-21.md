@@ -82,3 +82,8 @@
 - `WDVersionDetailModal.vue` 在“生成链路摘要”里增加生成调用卡片，读取候选 metadata 的 `generation_call_metrics`，展示候选生成阶段、尝试次数、估算 token、最终 `max_tokens` 和 Provider 错误归因。
 - 修复影响：用户打开候选版本详情时可以直接看到“这版正文是否经历重试/降级/输出限制”，不用去翻程序日志猜后台发生了什么。
 - 前端兼容：没有 `generation_call_metrics` 的旧候选不会显示空卡片；最多展示 4 条，避免详情弹窗被长调用列表淹没。
+
+## 2026-05-21 继续收口：生成调用指标同步 Token 预算
+- `TokenBudgetService` 新增 `record_generation_call_metrics()`，把候选版本 metadata 里的估算 token、尝试次数、max_tokens 和 Provider 错误归因转成现有 `TokenUsage` 记录，不新增平行预算表。
+- `PipelineOrchestrator` 在候选版本落库后记录正文生成预算用量，并把 `token_budget_usage` 写入 runtime metadata；预算记录失败只产生 warning，不阻断章节生成。
+- 修复影响：Token 预算页不再只靠手工或外部调用记录，正文首稿生成产生的估算消耗会进入项目预算统计，用户能把“生成了什么”和“消耗了多少”对上。

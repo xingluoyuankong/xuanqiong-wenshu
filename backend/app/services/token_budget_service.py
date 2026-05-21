@@ -2,12 +2,28 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Iterable
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.token_budget import TokenBudget, TokenUsage, TokenBudgetAlert
+
+ESTIMATED_CNY_PER_1K_TOKENS = 0.01
+VALID_USAGE_MODULES = {"world", "character", "outline", "content", "other"}
+MODULE_ALIASES = {
+    "blueprint": "outline",
+    "chapter_outline": "outline",
+    "outline_generation": "outline",
+    "draft": "content",
+    "chapter": "content",
+    "generation": "content",
+    "rewrite": "content",
+    "optimization": "content",
+    "style": "other",
+    "import": "other",
+    "review": "other",
+}
 
 
 class TokenBudgetService:
@@ -102,6 +118,104 @@ class TokenBudgetService:
         await self.db.commit()
         await self.db.refresh(usage)
         return usage
+
+    @staticmethod
+    def normalize_usage_module(module: Optional[str]) -> str:
+        """Normalize generation/rewrite labels into the existing budget module buckets."""
+        key = str(module or "").strip().lower()
+        if not key:
+            return "other"
+        if key in VALID_USAGE_MODULES:
+            return key
+        return MODULE_ALIASES.get(key, "other")
+
+    @staticmethod
+    def estimate_cost_from_tokens(tokens_used: int, *, cny_per_1k: float = ESTIMATED_CNY_PER_1K_TOKENS) -> float:
+        """Estimate RMB cost when the provider does not return billable usage."""
+        tokens = max(0, int(tokens_used or 0))
+        if tokens <= 0:
+            return 0.0
+        rate = max(0.0, float(cny_per_1k or 0))
+        if rate <= 0:
+            return 0.0
+        return round(max(0.0001, tokens / 1000 * rate), 6)
+
+    @staticmethod
+    def _coerce_positive_int(value: Any) -> int:
+        try:
+            number = int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+        return max(0, number)
+
+    async def record_generation_call_metrics(
+        self,
+        *,
+        project_id: str,
+        metrics: Iterable[Dict[str, Any]],
+        module: str = "content",
+        chapter_id: Optional[int] = None,
+        operation_type: str = "generation",
+        description_prefix: str = "AI 生成调用",
+    ) -> Dict[str, Any]:
+        """Persist estimated usage emitted by generation_call_service result metadata."""
+        normalized_module = self.normalize_usage_module(module)
+        usages: List[TokenUsage] = []
+        total_tokens = 0
+        total_cost = 0.0
+
+        for item in metrics or []:
+            if not isinstance(item, dict):
+                continue
+            tokens_used = self._coerce_positive_int(item.get("estimated_total_tokens"))
+            if tokens_used <= 0:
+                continue
+            cost = self.estimate_cost_from_tokens(tokens_used)
+            label = str(item.get("label") or "generation_call").strip()[:80]
+            error_type = str(item.get("provider_error_type") or "").strip()
+            attempts = self._coerce_positive_int(item.get("attempts"))
+            max_tokens = self._coerce_positive_int(item.get("effective_max_tokens"))
+            details = [
+                description_prefix,
+                label,
+                f"attempts={attempts}" if attempts else "",
+                f"max_tokens={max_tokens}" if max_tokens else "",
+                f"provider_error={error_type}" if error_type else "",
+            ]
+            usage = TokenUsage(
+                project_id=project_id,
+                chapter_id=chapter_id,
+                module=normalized_module,
+                tokens_used=tokens_used,
+                cost=cost,
+                model_name=str(item.get("model_name") or "")[:64] or None,
+                operation_type=str(operation_type or "generation")[:32],
+                description=" / ".join(part for part in details if part),
+            )
+            self.db.add(usage)
+            usages.append(usage)
+            total_tokens += tokens_used
+            total_cost += cost
+
+        if not usages:
+            return {
+                "record_count": 0,
+                "total_tokens": 0,
+                "estimated_cost": 0.0,
+                "module": normalized_module,
+            }
+
+        await self.db.commit()
+        for usage in usages:
+            await self.db.refresh(usage)
+        await self.check_and_create_alert(project_id)
+        return {
+            "record_count": len(usages),
+            "total_tokens": total_tokens,
+            "estimated_cost": round(total_cost, 6),
+            "module": normalized_module,
+            "usage_ids": [usage.id for usage in usages],
+        }
 
     async def get_usage_stats(
         self,

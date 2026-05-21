@@ -90,3 +90,9 @@
 - 代码收口：`WDVersionDetailModal.vue` 展示候选 metadata 中的 `generation_call_metrics`，把尝试次数、估算 token、最终 `max_tokens` 和 Provider 错误归因放进用户可见的生成链路摘要。
 - 定向验证：`cd frontend; npm run test:run -- src/components/writing-desk/dialogs/WDVersionDetailModal.spec.ts` 通过（1 passed）。
 - 前端全量验证：`cd frontend; npm run test:run` 通过（125 passed），`cd frontend; npm run build` 通过。
+
+## 2026-05-21 Token 预算自动记账验证
+- 代码收口：`TokenBudgetService.record_generation_call_metrics()` 会把候选版本 `generation_call_metrics` 记录为 `TokenUsage`；`PipelineOrchestrator` 在候选版本落库后同步预算摘要到 `runtime_metadata.token_budget_usage`。
+- 定向验证：`python -m pytest backend/app/services/test_token_budget_service.py -q` 通过（2 passed）。
+- 编译验证：`python -m compileall backend/app/services/token_budget_service.py backend/app/services/pipeline_orchestrator.py backend/app/services/test_token_budget_service.py` 通过。
+- 后端全量验证：`python -m pytest backend -q` 通过（249 passed），`python -m compileall backend/app` 通过。

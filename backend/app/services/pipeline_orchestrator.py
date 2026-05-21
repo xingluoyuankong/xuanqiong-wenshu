@@ -48,6 +48,7 @@ from ..services.prompt_service import PromptService
 from ..services.reader_simulator_service import ReaderSimulatorService, ReaderType
 from ..services.style_rag_service import StyleRAGService
 from ..services.self_critique_service import CritiqueDimension, SelfCritiqueService
+from ..services.token_budget_service import TokenBudgetService
 from ..services.vector_store_service import VectorStoreService
 from ..services.writer_context_builder import WriterContextBuilder
 from ..utils.json_utils import remove_think_tags, unwrap_markdown_json
@@ -1619,6 +1620,55 @@ class PipelineOrchestrator:
         else:
             logger.warning("降级阶段失败后已完成会话回滚：reason=%s", reason)
 
+    async def _record_generation_token_budget_usage(
+        self,
+        *,
+        project_id: str,
+        chapter: Chapter,
+        versions: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        metrics: List[Dict[str, Any]] = []
+        for version_index, version in enumerate(versions):
+            metadata = version.get("metadata") if isinstance(version, dict) else None
+            items = metadata.get("generation_call_metrics") if isinstance(metadata, dict) else None
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                enriched = dict(item)
+                label = str(enriched.get("label") or "generation_call")
+                enriched["label"] = f"v{version_index + 1}:{label}"
+                metrics.append(enriched)
+
+        if not metrics:
+            return {"record_count": 0, "total_tokens": 0, "estimated_cost": 0.0, "module": "content"}
+
+        try:
+            return await TokenBudgetService(self.session).record_generation_call_metrics(
+                project_id=project_id,
+                metrics=metrics,
+                module="content",
+                chapter_id=chapter.id,
+                operation_type="generation",
+                description_prefix=f"第 {chapter.chapter_number} 章正文候选",
+            )
+        except Exception as exc:  # noqa: BLE001 - budget accounting must not block generation
+            await self._safe_session_rollback("token_budget_usage")
+            logger.warning(
+                "记录章节生成 token 预算失败：project=%s chapter=%s error=%s",
+                project_id,
+                chapter.chapter_number,
+                exc,
+            )
+            return {
+                "record_count": 0,
+                "total_tokens": 0,
+                "estimated_cost": 0.0,
+                "module": "content",
+                "error": str(exc)[:180],
+            }
+
     async def _persist_quality_gate_blocked_versions(
         self,
         *,
@@ -3176,6 +3226,12 @@ class PipelineOrchestrator:
             expected_generation_run_id=generation_run_id,
         )
         await mark_stage("persist_versions", persist_versions_started_at, detail="候选版本落库阶段完成")
+        token_budget_usage = await self._record_generation_token_budget_usage(
+            project_id=project_id,
+            chapter=chapter,
+            versions=versions,
+        )
+        runtime_metadata["token_budget_usage"] = token_budget_usage
 
         variants = []
         for idx, version_model in enumerate(versions_models):
@@ -3224,6 +3280,8 @@ class PipelineOrchestrator:
                 "generated_version_count": len(variants),
                 "best_version_index": best_version_index,
                 "pipeline_total_duration_ms": runtime_metadata["pipeline_total_duration_ms"],
+                "token_budget_records": token_budget_usage.get("record_count"),
+                "estimated_generation_tokens": token_budget_usage.get("total_tokens"),
             },
             artifact_refs={
                 "version_ids": [item.get("version_id") for item in variants if item.get("version_id")],
@@ -3242,6 +3300,7 @@ class PipelineOrchestrator:
                 "allowed_actions": ["confirm_version", "review_versions", "refresh_status"],
                 "stage_timings_ms": runtime_metadata["stage_timings_ms"],
                 "pipeline_total_duration_ms": runtime_metadata["pipeline_total_duration_ms"],
+                "token_budget_usage": token_budget_usage,
                 "degraded_stages": runtime_metadata.get("degraded_stages", []),
                 "self_critique_final_score": self_critique_summary.get("final_score"),
                 "self_critique_improvement": self_critique_summary.get("improvement"),
