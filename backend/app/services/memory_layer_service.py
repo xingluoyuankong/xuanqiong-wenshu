@@ -28,12 +28,14 @@ logger = logging.getLogger(__name__)
 
 CAUSAL_CHAIN_EXTRACTION_SCHEMA: Dict[str, Any] = {
     "type": "object",
+    "additionalProperties": False,
     "required": ["causal_chains"],
     "properties": {
         "causal_chains": {
             "type": "array",
             "items": {
                 "type": "object",
+                "additionalProperties": False,
                 "required": ["cause_description", "effect_description"],
                 "properties": {
                     "cause_description": {"type": "string"},
@@ -647,7 +649,7 @@ class MemoryLayerService:
                     normalized.append(item)
             return normalized[:6]
         except Exception as e:
-            logger.warning(f"鎻愬彇鍥犳灉閾惧け璐? {e}")
+            logger.warning("提取因果链失败: %s", e)
 
         return []
 

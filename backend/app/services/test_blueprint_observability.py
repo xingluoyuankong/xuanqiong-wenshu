@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 import json
 
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -49,7 +49,7 @@ from app.api.routers.novels import (
 from app.db.base import Base
 from app.models import BlueprintGenerationJob, NovelProject, User
 from app.models.novel import BlueprintCharacter, ChapterOutline, NovelBlueprint
-from app.schemas.novel import Blueprint
+from app.schemas.novel import Blueprint, FinalizeChapterRequest
 from app.services import llm_service as llm_service_module
 from app.services import consistency_service as consistency_service_module
 from app.services import novel_service as novel_service_module
@@ -167,8 +167,118 @@ class DummyAsyncSession:
         self.commit_calls += 1
 
 
+class DummyExecuteSession(DummyAsyncSession):
+    def __init__(self, chapter):
+        super().__init__()
+        self.chapter = chapter
+
+    async def execute(self, *_args, **_kwargs):
+        return self
+
+    def scalars(self):
+        return self
+
+    def first(self):
+        return self.chapter
+
+
 class DummyPromptService:
     pass
+
+
+@pytest.mark.anyio
+async def test_finalize_chapter_defaults_to_background_ledger_sync(monkeypatch):
+    from app.api.routers import writer as writer_router
+
+    class FakeNovelService:
+        def __init__(self, session):
+            self.session = session
+
+        async def ensure_project_owner(self, project_id, user_id):
+            return DummyChapter(id=project_id, user_id=user_id)
+
+    async def fail_if_sync_pipeline_runs(**_kwargs):
+        raise AssertionError("finalize route should queue ledger sync by default")
+
+    version = DummyChapter(id=333, chapter_id=77, content="定稿正文" * 40)
+    chapter = DummyChapter(
+        id=77,
+        chapter_number=7,
+        versions=[version],
+        selected_version_id=None,
+        status="waiting_for_confirm",
+        word_count=0,
+        real_summary=json.dumps({"generation_runtime": {"run_id": "run-finalize", "events": []}}, ensure_ascii=False),
+    )
+    session = DummyExecuteSession(chapter)
+    background_tasks = BackgroundTasks()
+
+    monkeypatch.setattr(writer_router, "NovelService", FakeNovelService)
+    monkeypatch.setattr(writer_router, "_run_finalize_pipeline", fail_if_sync_pipeline_runs)
+
+    response = await writer_router.finalize_chapter(
+        7,
+        FinalizeChapterRequest(project_id="project-1", selected_version_id=333),
+        background_tasks,
+        session,
+        DummyChapter(id=42),
+    )
+
+    runtime = json.loads(chapter.real_summary)["generation_runtime"]
+    assert response.result["queued"] is True
+    assert response.result["async_finalize"] is True
+    assert chapter.selected_version_id == 333
+    assert chapter.status == "successful"
+    assert session.commit_calls == 2
+    assert len(background_tasks.tasks) == 1
+    assert runtime["progress_stage"] == "finalize"
+    assert runtime["events"][-1]["title"] == "定稿后台同步排队"
+
+
+@pytest.mark.anyio
+async def test_finalize_chapter_can_still_run_sync_when_requested(monkeypatch):
+    from app.api.routers import writer as writer_router
+
+    class FakeNovelService:
+        def __init__(self, session):
+            self.session = session
+
+        async def ensure_project_owner(self, project_id, user_id):
+            return DummyChapter(id=project_id, user_id=user_id)
+
+    async def fake_pipeline(**kwargs):
+        assert kwargs["project_id"] == "project-1"
+        assert kwargs["chapter_number"] == 7
+        assert kwargs["selected_version"].id == 333
+        return {"finalize": {"success": True}, "memory_layer": {"success": True}}
+
+    version = DummyChapter(id=333, chapter_id=77, content="同步定稿正文")
+    chapter = DummyChapter(
+        id=77,
+        chapter_number=7,
+        versions=[version],
+        selected_version_id=None,
+        status="waiting_for_confirm",
+        word_count=0,
+        real_summary=json.dumps({"generation_runtime": {"run_id": "run-sync", "events": []}}, ensure_ascii=False),
+    )
+    session = DummyExecuteSession(chapter)
+    background_tasks = BackgroundTasks()
+
+    monkeypatch.setattr(writer_router, "NovelService", FakeNovelService)
+    monkeypatch.setattr(writer_router, "_run_finalize_pipeline", fake_pipeline)
+
+    response = await writer_router.finalize_chapter(
+        7,
+        FinalizeChapterRequest(project_id="project-1", selected_version_id=333, async_finalize=False),
+        background_tasks,
+        session,
+        DummyChapter(id=42),
+    )
+
+    assert response.result == {"finalize": {"success": True}, "memory_layer": {"success": True}}
+    assert len(background_tasks.tasks) == 0
+    assert chapter.selected_version_id == 333
 
 
 @pytest.mark.anyio

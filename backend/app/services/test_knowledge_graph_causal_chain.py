@@ -8,11 +8,19 @@ from app.models.memory_layer import CausalChain
 from app.models.novel import BlueprintCharacter, NovelProject
 from app.models.user import User
 from app.services.knowledge_graph_service import KnowledgeGraphService
+from app.services.memory_layer_service import CAUSAL_CHAIN_EXTRACTION_SCHEMA
 
 
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+def test_causal_chain_extraction_schema_is_strict_for_structured_outputs():
+    item_schema = CAUSAL_CHAIN_EXTRACTION_SCHEMA["properties"]["causal_chains"]["items"]
+
+    assert CAUSAL_CHAIN_EXTRACTION_SCHEMA["additionalProperties"] is False
+    assert item_schema["additionalProperties"] is False
 
 
 @pytest.mark.anyio

@@ -1153,6 +1153,29 @@ class TestGenerationQualityGuards:
         assert guard["scene_fulfillment_rate"] >= 0.5
         assert guard["ending_pressure_passed"] is True
 
+    def test_story_quality_metrics_count_scene_characters_and_payoff_as_mission_anchors(self):
+        guard = PipelineOrchestrator._score_story_quality_candidate(
+            content=(
+                "沈文朝和季阿七赶到黑帆旧坞，鲁百舵用旧式船匠刻线法重校半毁航图。"
+                "聂沧澜质疑沧璃给出的半段潮歌路线，认为那会把众人引进封海外环裂口。"
+                "季阿七抢在潮窗闭合前控舟，众人最终穿过外环边线，听见雾里有人叫他们回来。"
+            ),
+            violations=[],
+            chapter_mission={
+                "scene_list": [
+                    {
+                        "characters": ["沈文朝", "季阿七", "聂沧澜", "鲁百舵", "沧璃"],
+                        "outcome": "半毁航图被重校，目标转为封海外环裂口",
+                        "payoff": "回收旧图不是货路图，而是指向外环潮脉入口",
+                        "bridge": "半段潮歌路线带众人进入下一章异潮环境",
+                    }
+                ],
+            },
+        )
+
+        assert guard["mission_hit_count"] >= 4
+        assert any(hit in guard["mission_hits"] for hit in ("鲁百舵", "沧璃", "半毁航图"))
+
     def test_ending_pressure_uses_outline_hook_when_deliver_to_next_is_sparse(self):
         text = (
             "沈文朝退到窗下时，外头的水路已经被盐商会封锁。"

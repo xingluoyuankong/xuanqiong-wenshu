@@ -11,7 +11,9 @@
 
     <n-spin :show="loading">
       <n-alert v-if="error" type="error" closable @close="$emit('clear-error')">{{ error }}</n-alert>
-      <n-data-table :columns="columns" :data="configs" :loading="loading" :bordered="false" :row-key="rowKey" class="config-table" />
+      <div class="config-table-shell">
+        <n-data-table :columns="columns" :data="configs" :loading="loading" :bordered="false" :row-key="rowKey" class="config-table" />
+      </div>
     </n-spin>
   </n-card>
 </template>
@@ -144,4 +146,18 @@ function typeLabel(type: SystemConfigViewModel['valueType']) {
 .name-cell__key { color:#64748b; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 .static-value { color:#0f172a; }
 .action-cell { display:flex; gap:8px; }
+.config-table-shell {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.config-table-shell :deep(.n-data-table) {
+  min-width: 920px;
+}
+@media (max-width: 720px) {
+  .config-table-shell {
+    margin-inline: -8px;
+    padding-inline: 8px;
+  }
+}
 </style>

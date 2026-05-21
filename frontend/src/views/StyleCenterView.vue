@@ -1869,52 +1869,13 @@ onMounted(async () => {
 }
 
 @media (max-width: 1180px) {
-  .pipeline-grid,
+  .pipeline-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .style-center-grid--top,
   .style-center-grid--bottom,
-  .style-progress-panel {
-  display: grid;
-  gap: 6px;
-  margin-bottom: 14px;
-  padding: 12px 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(37, 99, 235, 0.14);
-  background: rgba(239, 246, 255, 0.9);
-}
-
-.style-progress-panel__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 0.88rem;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.style-progress-panel__desc {
-  margin: 0;
-  color: #475569;
-  font-size: 0.8rem;
-  line-height: 1.45;
-}
-
-.style-progress-panel__track {
-  width: 100%;
-  height: 7px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.22);
-}
-
-.style-progress-panel__bar {
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #2563eb, #14b8a6);
-  transition: width 0.25s ease;
-}
-
-.style-center-summary-grid {
+  .style-center-summary-grid {
     grid-template-columns: 1fr;
   }
 }

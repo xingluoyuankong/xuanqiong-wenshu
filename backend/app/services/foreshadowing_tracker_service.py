@@ -3,7 +3,7 @@
 
 提供伏笔的状态追踪、提醒和发展建议功能。
 """
-from typing import Optional, List, Dict, Any
+from typing import Awaitable, Callable, Optional, List, Dict, Any
 import json
 from datetime import datetime
 
@@ -159,6 +159,7 @@ class ForeshadowingTrackerService:
         chapter_number: int,
         chapter_outline: Optional[str] = None,
         user_id: Optional[int] = None,
+        progress_callback: Optional[Callable[[str, str], Awaitable[None]]] = None,
     ) -> Dict[str, Any]:
         """获取伏笔提醒和发展建议"""
         with LLMService.daily_limit_scope(f"foreshadowing_reminder:{project_id}:{chapter_number}:{user_id or 0}"):
@@ -195,7 +196,9 @@ class ForeshadowingTrackerService:
                         progress_stage="foreshadowing_chapter_task",
                         retry_attempts=2,
                         json_repair_attempts=1,
+                        heartbeat_interval_seconds=15.0,
                     ),
+                    progress_callback=progress_callback,
                 )
                 return result.data
             except Exception:

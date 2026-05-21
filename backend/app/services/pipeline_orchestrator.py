@@ -1491,6 +1491,8 @@ class PipelineOrchestrator:
         stage_remaining = {
             "queued": preparing_budget + generating_budget + review_budget + enrichment_budget + 36,
             "prepare_context": generating_budget + review_budget + enrichment_budget + 28,
+            "enhanced_context": generating_budget + review_budget + enrichment_budget + 24,
+            "foreshadowing_chapter_task": generating_budget + review_budget + enrichment_budget + 22,
             "generate_mission": generating_budget + review_budget + enrichment_budget + 18,
             "generate_variants": review_budget + enrichment_budget + 16,
             "review": enrichment_budget + 18,
@@ -1509,6 +1511,8 @@ class PipelineOrchestrator:
             "audit_context": 11,
             "cast_plan": 14,
             "foreshadowing_plan": 17,
+            "enhanced_context": 18,
+            "foreshadowing_chapter_task": 19,
             "generate_mission": 22,
             "longform_context": 26,
             "generate_variants": 62,
@@ -2037,11 +2041,57 @@ class PipelineOrchestrator:
         enhanced_context = None
         if config.enable_constitution or config.enable_persona or config.enable_foreshadowing or config.enable_faction:
             enhanced_flow = EnhancedWritingFlow(self.session, self.llm_service, self.prompt_service)
+
+            async def report_enhanced_context_progress(stage: str, message: str) -> None:
+                await self._update_generation_runtime(
+                    chapter,
+                    generation_run_id=generation_run_id,
+                    stage=stage,
+                    message=message,
+                    progress_percent=self._infer_stage_progress_percent(stage),
+                    event_kind="progress",
+                    title="写前账本等待中",
+                    summary=message,
+                    extra={
+                        "provider_waiting": True,
+                        "context_stage": stage,
+                        "context_stage_label": "写前增强上下文",
+                        "target_word_count": config.target_word_count,
+                        "min_word_count": config.min_word_count,
+                    },
+                )
+                await self._assert_generation_active(
+                    chapter,
+                    generation_run_id=generation_run_id,
+                    stage=f"{stage}_provider_wait",
+                )
+
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="enhanced_context",
+                message="正在装配小说宪法、文风、伏笔提醒和势力关系",
+                progress_percent=18,
+                extra={
+                    "context_stage": "enhanced_context",
+                    "context_stage_label": "写前增强上下文",
+                    "enable_constitution": config.enable_constitution,
+                    "enable_persona": config.enable_persona,
+                    "enable_foreshadowing": config.enable_foreshadowing,
+                    "enable_faction": config.enable_faction,
+                },
+            )
+            await self._assert_generation_active(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="enhanced_context",
+            )
             enhanced_context = await enhanced_flow.prepare_writing_context(
                 project_id=project_id,
                 chapter_number=chapter_number,
                 chapter_outline=outline_summary,
                 user_id=user_id,
+                progress_callback=report_enhanced_context_progress,
             )
 
         memory_context = None
@@ -4680,7 +4730,7 @@ class PipelineOrchestrator:
                 if prior_excerpt:
                     final_prompt_input += f"\n\n[上一版片段（只用于识别缺陷，不要照抄）]\n{prior_excerpt}"
                 if style_hint:
-                    final_prompt_input += f"\n\n[鐗堟湰椋庢牸鎻愮ず]\n{style_hint}"
+                    final_prompt_input += f"\n\n[版本风格提示]\n{style_hint}"
 
                 generation_started_at = time.perf_counter()
                 try:
@@ -4722,8 +4772,8 @@ class PipelineOrchestrator:
                         status_code=503,
                         detail={
                             "code": "PROVIDER_NETWORK_ERROR",
-                            "message": "鐢熸垚璇锋眰杩囩▼涓笌 AI 鏈嶅姟缃戠粶閫氫俊澶辫触銆?",
-                            "hint": "璇锋鏌ョ綉缁滆繛閫氭€с€丳rovider 鐘舵€佹垨绋嶅悗閲嶈瘯銆?",
+                            "message": "生成请求过程中与 AI 服务网络通信失败。",
+                            "hint": "请检查网络连通性、Provider 状态或稍后重试。",
                             "retryable": True,
                         },
                     ) from exc
@@ -5182,11 +5232,26 @@ class PipelineOrchestrator:
         add_phrase((chapter_mission.get("continuity_anchor") or {}).get("inherit_from_previous"))
         add_phrase((chapter_mission.get("continuity_anchor") or {}).get("deliver_to_next"))
         add_phrase(chapter_mission.get("character_arc_task"))
+        add_phrase(chapter_mission.get("pov"))
+        add_phrase(chapter_mission.get("pov_character"))
+        add_phrase(chapter_mission.get("focus_characters"))
         add_phrase((chapter_mission.get("dialogue_strategy") or {}).get("purpose"))
         add_phrase((chapter_mission.get("dialogue_strategy") or {}).get("subtext"))
         for scene in chapter_mission.get("scene_list") or []:
             if isinstance(scene, dict):
-                for key in ("goal", "conflict", "turn", "emotion_shift", "dialogue_value", "end_hook"):
+                add_phrase(scene.get("characters"))
+                for key in (
+                    "goal",
+                    "conflict",
+                    "turn",
+                    "outcome",
+                    "payoff",
+                    "bridge",
+                    "emotion_shift",
+                    "dialogue_value",
+                    "end_hook",
+                    "foreshadowing_task",
+                ):
                     add_phrase(scene.get(key))
 
         deduped: List[str] = []

@@ -2556,6 +2556,7 @@ async def advanced_generate_chapter(
 async def finalize_chapter(
     chapter_number: int,
     request: FinalizeChapterRequest,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> FinalizeChapterResponse:
@@ -2589,6 +2590,39 @@ async def finalize_chapter(
     chapter.status = ChapterGenerationStatus.SUCCESSFUL.value
     chapter.word_count = len(selected_version.content or "")
     await session.commit()
+
+    if request.async_finalize is not False:
+        _append_generation_runtime_event(
+            chapter,
+            stage="finalize",
+            message="定稿账本后台同步已排队",
+            progress_percent=98,
+            event_kind="ledger",
+            title="定稿后台同步排队",
+            summary="正文已确认，角色、伏笔、线索和知识图谱会在后台继续同步；可在章节状态或运行日志里查看进度。",
+            content_preview=selected_version.content,
+            metrics={"selected_version_id": selected_version.id, "async_finalize": True},
+        )
+        await session.commit()
+        background_tasks.add_task(
+            _schedule_finalize_task,
+            request.project_id,
+            chapter.chapter_number,
+            selected_version.id,
+            current_user.id,
+            request.skip_vector_update or False,
+        )
+        return FinalizeChapterResponse(
+            project_id=request.project_id,
+            chapter_number=chapter_number,
+            selected_version_id=selected_version.id,
+            result={
+                "queued": True,
+                "async_finalize": True,
+                "message": "定稿正文已保存，账本同步已进入后台任务。",
+                "status_url": f"/api/writer/novels/{request.project_id}/chapters/{chapter_number}/status",
+            },
+        )
 
     finalize_result = await _run_finalize_pipeline(
         session=session,

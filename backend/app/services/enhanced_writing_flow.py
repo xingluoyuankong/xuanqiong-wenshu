@@ -8,7 +8,7 @@
 - 伏笔追踪
 - 势力关系网络
 """
-from typing import Optional, Dict, Any, List
+from typing import Awaitable, Callable, Optional, Dict, Any, List
 import json
 import logging
 
@@ -51,6 +51,7 @@ class EnhancedWritingFlow:
         chapter_number: int,
         chapter_outline: Optional[str] = None,
         user_id: Optional[int] = None,
+        progress_callback: Optional[Callable[[str, str], Awaitable[None]]] = None,
     ) -> Dict[str, Any]:
         """
         准备写作上下文，包含所有增强功能的上下文信息
@@ -91,6 +92,7 @@ class EnhancedWritingFlow:
                 chapter_number,
                 chapter_outline,
                 user_id=user_id,
+                progress_callback=progress_callback,
             )
             context["foreshadowing_reminders"] = reminders
         except Exception as e:

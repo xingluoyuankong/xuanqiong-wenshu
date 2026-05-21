@@ -379,6 +379,7 @@ class FinalizeChapterRequest(BaseModel):
     project_id: str
     selected_version_id: int
     skip_vector_update: Optional[bool] = Field(default=False, description="是否跳过向量库更新")
+    async_finalize: Optional[bool] = Field(default=True, description="是否后台执行账本同步，默认避免长定稿请求超时")
 
 
 class FinalizeChapterResponse(BaseModel):
