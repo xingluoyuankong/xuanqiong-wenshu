@@ -543,6 +543,7 @@ export interface NovelImportJobResponse {
     | 'import_character_verify'
     | 'import_blueprint_extract'
     | 'import_saving'
+    | 'import_ledger_rebuild'
     | 'successful'
     | 'failed'
     | 'cancelled'

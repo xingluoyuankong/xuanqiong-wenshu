@@ -4,14 +4,17 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Chapter
+from ..models import BlueprintCharacter, ChapterSnapshot, CharacterState, ProjectMemory, TimelineEvent
 from ..schemas.novel import Blueprint
 from ..services.generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text, parse_llm_json_value
+from ..services.knowledge_graph_service import KnowledgeGraphService
 from ..services.llm_service import LLMService
 from ..services.novel_service import NovelService
 from ..services.prompt_service import PromptService
@@ -210,8 +213,27 @@ class ImportService:
                 await self.novel_service.select_chapter_version(chapter, 0)
 
             # 更新项目状态
+            await self._emit_import_progress(
+                progress_callback,
+                "import_ledger_rebuild",
+                "正在重建角色、章节快照、记忆和知识图谱账本",
+                {"chapter_count": len(chapters), "character_count": len(blueprint_data.characters or [])},
+            )
+            ledger_metrics = await self._rebuild_import_ledgers(
+                project.id,
+                blueprint_data,
+                chapters,
+                filename=file.filename or "",
+            )
+
             project.status = "blueprint_ready"
             await self.session.commit()
+            await self._emit_import_progress(
+                progress_callback,
+                "import_ledger_rebuild",
+                "导入账本重建完成",
+                ledger_metrics,
+            )
 
             return project.id
 
@@ -228,6 +250,163 @@ class ImportService:
     async def _raise_if_import_cancelled(self, should_cancel: Optional[ImportCancelChecker]) -> None:
         if should_cancel is not None and await should_cancel():
             raise ImportCancelledError("import job cancelled")
+
+    async def _rebuild_import_ledgers(
+        self,
+        project_id: str,
+        blueprint_data: Blueprint,
+        chapters: List[Tuple[str, str]],
+        *,
+        filename: str,
+    ) -> Dict[str, Any]:
+        blueprint_payload = blueprint_data.model_dump(exclude_none=True) if hasattr(blueprint_data, "model_dump") else {}
+        character_payloads = list(blueprint_payload.get("characters") or [])
+        relationship_payloads = list(blueprint_payload.get("relationships") or [])
+        foreshadowing_payloads = list(blueprint_payload.get("foreshadowing_system") or [])
+        now = datetime.now(timezone.utc).isoformat()
+
+        memory_result = await self.session.execute(select(ProjectMemory).where(ProjectMemory.project_id == project_id))
+        memory = memory_result.scalars().first()
+        if memory is None:
+            memory = ProjectMemory(project_id=project_id)
+            self.session.add(memory)
+
+        memory.global_summary = blueprint_data.full_synopsis or blueprint_data.one_sentence_summary or ""
+        memory.plot_arcs = {
+            "main_conflicts": [
+                {
+                    "id": f"import_conflict_{index}",
+                    "description": str(item.get("description") or item.get("relation_type") or item)[:240],
+                    "status": "imported",
+                }
+                for index, item in enumerate(relationship_payloads[:12], start=1)
+                if isinstance(item, dict)
+            ],
+            "unresolved_hooks": [
+                {
+                    "id": f"import_hook_{index}",
+                    "description": str(item.get("setup") or item.get("description") or item.get("name") or item)[:240],
+                    "planted_chapter": item.get("chapter") or item.get("planted_chapter") or 1,
+                    "expected_payoff": item.get("payoff_window") or item.get("target_reveal_chapter"),
+                    "status": "imported",
+                }
+                for index, item in enumerate(foreshadowing_payloads[:20], start=1)
+                if isinstance(item, dict)
+            ],
+            "character_arcs": [
+                {
+                    "character": str(item.get("name") or item.get("character_name") or "")[:80],
+                    "current_stage": str(item.get("arc") or item.get("motivation") or item.get("role") or "导入初始状态")[:240],
+                    "next_milestone": str(item.get("goal") or item.get("development") or "等待后续生成承接")[:240],
+                }
+                for item in character_payloads[:24]
+                if isinstance(item, dict) and str(item.get("name") or item.get("character_name") or "").strip()
+            ],
+        }
+        memory.story_timeline_summary = self._build_import_timeline_summary(chapters)
+        memory.last_updated_chapter = len(chapters)
+        memory.version = (memory.version or 0) + 1
+        memory.extra = {
+            **dict(memory.extra or {}),
+            "import_ledger_rebuild": {
+                "source": "file_import",
+                "filename": filename,
+                "chapter_count": len(chapters),
+                "character_count": len(character_payloads),
+                "relationship_count": len(relationship_payloads),
+                "foreshadowing_count": len(foreshadowing_payloads),
+                "rebuilt_at": now,
+            },
+        }
+
+        snapshot_count = 0
+        for chapter_number, (title, content) in enumerate(chapters, start=1):
+            self.session.add(ChapterSnapshot(
+                project_id=project_id,
+                chapter_number=chapter_number,
+                global_summary_snapshot=memory.global_summary,
+                character_states_snapshot={"source": "file_import", "character_count": len(character_payloads)},
+                plot_arcs_snapshot=memory.plot_arcs,
+                chapter_summary=self._make_import_chapter_summary(title, content),
+                word_count=len(content or ""),
+                extra={"source": "file_import", "title": title, "snapshot_kind": "import_baseline"},
+            ))
+            snapshot_count += 1
+
+        await self.session.flush()
+
+        character_result = await self.session.execute(
+            select(BlueprintCharacter).where(BlueprintCharacter.project_id == project_id)
+        )
+        blueprint_characters = list(character_result.scalars().all())
+        state_count = 0
+        for character in blueprint_characters:
+            self.session.add(CharacterState(
+                project_id=project_id,
+                character_id=character.id,
+                character_name=character.name or "未命名角色",
+                chapter_number=0,
+                location="导入基线",
+                emotion="初始",
+                health_status="unknown",
+                current_goals=[character.goals] if getattr(character, "goals", None) else [],
+                relationship_changes=[],
+                new_knowledge=[],
+                extra={
+                    "source": "file_import",
+                    "identity": getattr(character, "identity", None),
+                    "position": getattr(character, "position", None),
+                    "created_at": now,
+                },
+            ))
+            state_count += 1
+
+        timeline_count = 0
+        for chapter_number, (title, content) in enumerate(chapters[:200], start=1):
+            self.session.add(TimelineEvent(
+                project_id=project_id,
+                chapter_number=chapter_number,
+                story_time=f"导入章节 {chapter_number}",
+                event_type="imported_chapter",
+                event_title=title or f"第{chapter_number}章",
+                event_description=self._make_import_chapter_summary(title, content),
+                involved_characters=[],
+                importance=5,
+                is_turning_point=False,
+                extra={"source": "file_import"},
+            ))
+            timeline_count += 1
+
+        graph_metrics = await KnowledgeGraphService(self.session).sync_from_story_memory(project_id)
+
+        return {
+            "memory_version": memory.version,
+            "snapshot_count": snapshot_count,
+            "character_state_count": state_count,
+            "timeline_event_count": timeline_count,
+            "knowledge_graph": graph_metrics,
+        }
+
+    def _build_import_timeline_summary(self, chapters: List[Tuple[str, str]], *, limit: int = 12) -> str:
+        if not chapters:
+            return "导入项目暂无章节。"
+        total = len(chapters)
+        if total <= limit:
+            selected = list(enumerate(chapters, start=1))
+        else:
+            head = list(enumerate(chapters[:4], start=1))
+            mid_index = max(4, total // 2)
+            middle = list(enumerate(chapters[mid_index:mid_index + 4], start=mid_index + 1))
+            tail_start = max(mid_index + 4, total - 4)
+            tail = list(enumerate(chapters[tail_start:], start=tail_start + 1))
+            selected = head + middle + tail
+        return "\n".join(f"第{number}章：{title}" for number, (title, _) in selected[:limit])
+
+    def _make_import_chapter_summary(self, title: str, content: str, *, limit: int = 220) -> str:
+        cleaned = re.sub(r"\s+", " ", content or "").strip()
+        if len(cleaned) > limit:
+            cleaned = cleaned[:limit].rstrip() + "..."
+        return f"{title}：{cleaned}" if title else cleaned
 
     async def _read_file_content(self, file: UploadFile) -> str:
         content_bytes = await file.read()

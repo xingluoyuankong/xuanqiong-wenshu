@@ -56,3 +56,24 @@ async def test_import_job_has_start_status_and_cancel():
         progress_message="后台任务稍后启动",
     )
     assert overwritten["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_import_cancel_does_not_abort_ledger_rebuild():
+    current_user = UserInDB(id=9, username="importer", email=None, hashed_password="x")
+    run_id = "import-ledger"
+    novels._IMPORT_JOBS[run_id] = {
+        "run_id": run_id,
+        "user_id": current_user.id,
+        "status": "import_ledger_rebuild",
+        "progress_stage": "import_ledger_rebuild",
+        "progress_message": "正在重建账本",
+    }
+
+    cancelled = await novels.cancel_import_novel(
+        run_id=run_id,
+        current_user=current_user,
+    )
+
+    assert cancelled.status == "import_ledger_rebuild"
+    assert cancelled.progress_stage == "import_ledger_rebuild"

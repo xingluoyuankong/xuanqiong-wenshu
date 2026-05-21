@@ -66,3 +66,10 @@
 - `StyleCenterView.vue` 的文件素材导入改为轮询后台任务，进度条显示后端 `progress_message`，并提供取消按钮；保存阶段不可安全取消时会继续展示真实状态。
 - 定向验证：`python -m pytest backend/app/api/routers/test_style_profile_job.py -q` 通过，`python -m compileall backend/app/api/routers/style.py` 通过，`cd frontend; npm run test:run -- src/api/novel.spec.ts` 通过。
 - 全量验证：`python -m pytest backend -q` 通过（244 passed），`cd frontend; npm run test:run` 通过（125 passed），`cd frontend; npm run build` 通过；`git diff --check` 仅提示工作区换行规范化。
+
+## 2026-05-21 旧稿导入账本重建补充
+
+- `ImportService` 在旧稿导入保存章节后新增 `import_ledger_rebuild` 阶段，基于导入蓝图和章节内容建立项目记忆、章节快照、角色初始状态、时间线事件，并调用 `KnowledgeGraphService.sync_from_story_memory()` 同步知识图谱。
+- 导入任务取消保护扩展到 `import_ledger_rebuild`，进入保存/账本重建后不再中途取消，避免写一半造成账本缺口。
+- 定向验证：`python -m pytest backend/app/services/test_daily_limit_scopes.py::test_import_service_scope_reuses_outer_logical_run backend/app/api/routers/test_import_novel_job.py -q` 通过，`python -m compileall backend/app/services/import_service.py backend/app/api/routers/novels.py` 通过，`cd frontend; npm run test:run -- src/api/novel.spec.ts` 通过。
+- 全量验证：`python -m pytest backend -q` 通过（245 passed），`cd frontend; npm run test:run` 通过（125 passed），`cd frontend; npm run build` 通过；`git diff --check` 仅提示工作区换行规范化。

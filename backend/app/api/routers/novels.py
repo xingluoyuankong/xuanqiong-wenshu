@@ -71,8 +71,9 @@ _IMPORT_RUNNING_STATUSES = {
     "import_character_verify",
     "import_blueprint_extract",
     "import_saving",
+    "import_ledger_rebuild",
 }
-_IMPORT_CANCELABLE_STATUSES = _IMPORT_RUNNING_STATUSES - {"import_saving"}
+_IMPORT_CANCELABLE_STATUSES = _IMPORT_RUNNING_STATUSES - {"import_saving", "import_ledger_rebuild"}
 
 JSON_RESPONSE_INSTRUCTION = """
 IMPORTANT: 你的回复必须是合法的 JSON 对象，并严格包含以下字段：
@@ -2657,7 +2658,7 @@ async def cancel_import_novel(
                 "updated_at": _import_job_now_iso(),
                 "error": _import_job_error("import_cancelled", "旧稿导入任务已取消", retryable=True),
             })
-        elif job.get("status") == "import_saving":
+        elif job.get("status") in {"import_saving", "import_ledger_rebuild"}:
             job.update({
                 "progress_message": "正在安全写入项目，保存阶段不能中途取消",
                 "updated_at": _import_job_now_iso(),

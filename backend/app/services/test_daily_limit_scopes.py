@@ -793,6 +793,11 @@ async def test_import_service_scope_reuses_outer_logical_run(monkeypatch):
 
     file_stub = SimpleNamespace(filename="雾港回声.txt")
 
+    async def fake_rebuild_import_ledgers(project_id, blueprint_data, chapters, filename):
+        return {"snapshot_count": len(chapters)}
+
+    monkeypatch.setattr(service, "_rebuild_import_ledgers", fake_rebuild_import_ledgers)
+
     with LLMService.daily_limit_scope("outer-import") as outer_scope:
         outer_scope_id = id(outer_scope)
         project_id = await service.import_novel_from_file(user_id=71, file=file_stub)
