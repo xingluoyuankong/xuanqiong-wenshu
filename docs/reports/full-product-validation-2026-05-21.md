@@ -101,3 +101,4 @@
 - 代码收口：`LLMSettings.vue` 展示 Key 级健康明细，包括 base_url、HTTP 状态、延迟、Provider 失败归因和修复/重试建议。
 - 定向验证：`cd frontend; npm run test:run -- src/components/LLMSettings.spec.ts` 通过（1 passed）。
 - 前端全量验证：`cd frontend; npm run test:run` 通过（126 passed），`cd frontend; npm run build` 通过。
+- 浏览器验证：项目本体 `http://127.0.0.1:5174/llm-settings` 打开正常；点击“健康检查”后显示 CPA Provider、模型数量、Key 明细、耗时、状态和建议，浏览器 console error 为 0。
