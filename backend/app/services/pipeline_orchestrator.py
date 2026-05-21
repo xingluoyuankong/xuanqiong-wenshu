@@ -12,7 +12,7 @@ import time
 from copy import deepcopy
 from datetime import datetime, timezone
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import HTTPException
@@ -1233,6 +1233,20 @@ class PipelineOrchestrator:
         return 3000.0
 
     @staticmethod
+    def _resolve_chapter_generation_soft_timeout(target_word_count: int) -> Optional[float]:
+        """Abort a single provider attempt before the whole background task looks frozen."""
+        words = max(500, int(target_word_count or 0))
+        if words < 4000:
+            return None
+        if words < 7500:
+            return 540.0
+        if words < 10000:
+            return 720.0
+        if words < 12500:
+            return 900.0
+        return 1080.0
+
+    @staticmethod
     def _resolve_chapter_mission_timeout(target_word_count: int) -> float:
         """Give long-form director-script generation enough time to avoid fallback.
 
@@ -1784,6 +1798,7 @@ class PipelineOrchestrator:
         )
         runtime_metadata["chapter_generation_limits"] = {
             "timeout_seconds": self._resolve_chapter_generation_timeout(config.target_word_count),
+            "soft_timeout_seconds": self._resolve_chapter_generation_soft_timeout(config.target_word_count),
             "max_tokens": self._resolve_chapter_generation_max_tokens(config.target_word_count),
             "mission_timeout_seconds": self._resolve_chapter_mission_timeout(config.target_word_count),
             "mission_max_tokens": self._resolve_chapter_mission_max_tokens(config.target_word_count),
@@ -2105,6 +2120,30 @@ class PipelineOrchestrator:
             },
         )
         generation_variants_started_at = time.perf_counter()
+
+        async def report_generation_call_progress(stage: str, message: str) -> None:
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage=stage,
+                message=message,
+                progress_percent=self._infer_stage_progress_percent(stage),
+                event_kind="progress",
+                title="Provider 等待中",
+                summary=message,
+                extra={
+                    "provider_waiting": True,
+                    "target_word_count": config.target_word_count,
+                    "min_word_count": config.min_word_count,
+                    "soft_timeout_seconds": self._resolve_chapter_generation_soft_timeout(config.target_word_count),
+                },
+            )
+            await self._assert_generation_active(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage=f"{stage}_provider_wait",
+            )
+
         for attempt_idx, attempt_config in enumerate(attempt_configs):
             version_count = attempt_config.version_count
             version_style_hints = self._resolve_style_hints(enhanced_context, version_count)
@@ -2133,6 +2172,7 @@ class PipelineOrchestrator:
                             analysis_guidance_context=analysis_guidance_context,
                             enhanced_context=enhanced_context,
                             config=attempt_config,
+                            progress_callback=report_generation_call_progress,
                         )
                     )
                 )
@@ -4530,6 +4570,7 @@ class PipelineOrchestrator:
         analysis_guidance_context: Optional[str],
         enhanced_context: Optional[Dict[str, Any]],
         config: PipelineConfig,
+        progress_callback: Optional[Callable[[str, str], Awaitable[None]]] = None,
     ) -> Dict[str, Any]:
         with LLMService.daily_limit_scope(f"writer_version:{project_id}:{chapter_number}:{index}:{user_id}"):
             version_started_at = time.perf_counter()
@@ -4581,7 +4622,10 @@ class PipelineOrchestrator:
                             prompt_cache_key=f"xq:{project_id}:{chapter_number}:draft",
                             allow_truncated_response=config.allow_truncated_response,
                             retry_same_model_once=True,
+                            heartbeat_interval_seconds=60.0,
+                            soft_timeout_seconds=self._resolve_chapter_generation_soft_timeout(config.target_word_count),
                         ),
+                        progress_callback=progress_callback,
                     )
                     response = text_result.text
                 except HTTPException:
@@ -4696,7 +4740,10 @@ class PipelineOrchestrator:
                             prompt_cache_key=f"xq:{project_id}:{chapter_number}:draft",
                             allow_truncated_response=config.allow_truncated_response,
                             retry_same_model_once=True,
+                            heartbeat_interval_seconds=60.0,
+                            soft_timeout_seconds=self._resolve_chapter_generation_soft_timeout(config.target_word_count),
                         ),
+                        progress_callback=progress_callback,
                     )
                     response = text_result.text
                 except HTTPException:
