@@ -48,6 +48,12 @@ class GenerationTextResult:
     attempts: int
     response_format_used: Optional[Any] = None
     provider_error_type: Optional[str] = None
+    effective_max_tokens: Optional[int] = None
+    prompt_character_count: int = 0
+    output_character_count: int = 0
+    estimated_input_tokens: int = 0
+    estimated_output_tokens: int = 0
+    estimated_total_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -58,6 +64,13 @@ class GenerationJsonResult:
     attempts: int
     response_format_used: Optional[Any] = None
     schema_validated: bool = False
+    provider_error_type: Optional[str] = None
+    effective_max_tokens: Optional[int] = None
+    prompt_character_count: int = 0
+    output_character_count: int = 0
+    estimated_input_tokens: int = 0
+    estimated_output_tokens: int = 0
+    estimated_total_tokens: int = 0
 
 
 class GenerationJSONDecodeError(ValueError):
@@ -94,6 +107,38 @@ def _coerce_retry_after_seconds(value: Any) -> Optional[float]:
     if parsed < 0:
         return None
     return parsed
+
+
+def estimate_generation_token_count(text: str) -> int:
+    """Rough local estimate for budget/logging when the provider omits usage."""
+
+    source = str(text or "")
+    if not source:
+        return 0
+    cjk_chars = sum(1 for ch in source if "\u4e00" <= ch <= "\u9fff")
+    non_cjk_chars = max(0, len(source) - cjk_chars)
+    return max(1, int(cjk_chars * 0.65 + non_cjk_chars / 4))
+
+
+def _estimate_generation_usage(
+    *,
+    system_prompt: str,
+    conversation_history: List[Dict[str, str]],
+    output_text: str,
+) -> Dict[str, int]:
+    prompt_text = "\n".join(
+        [str(system_prompt or "")]
+        + [str(item.get("content") or "") for item in conversation_history if isinstance(item, dict)]
+    )
+    estimated_input = estimate_generation_token_count(prompt_text)
+    estimated_output = estimate_generation_token_count(output_text)
+    return {
+        "prompt_character_count": len(prompt_text),
+        "output_character_count": len(output_text or ""),
+        "estimated_input_tokens": estimated_input,
+        "estimated_output_tokens": estimated_output,
+        "estimated_total_tokens": estimated_input + estimated_output,
+    }
 
 
 def _resolve_retry_after_seconds(exc: HTTPException) -> Optional[float]:
@@ -433,6 +478,7 @@ async def call_generation_text(
     attempts = max(1, policy.retry_attempts)
     active_policy = policy
     last_http_exc: HTTPException | None = None
+    last_provider_error_type: Optional[str] = None
     for attempt in range(1, attempts + 1):
         response_format_payload = build_response_format_payload(active_policy)
         try:
@@ -447,10 +493,23 @@ async def call_generation_text(
                 policy=active_policy,
                 progress_callback=progress_callback,
             )
-            return GenerationTextResult(text=text, attempts=attempt, response_format_used=response_format_payload)
+            usage = _estimate_generation_usage(
+                system_prompt=system_prompt,
+                conversation_history=conversation_history,
+                output_text=text,
+            )
+            return GenerationTextResult(
+                text=text,
+                attempts=attempt,
+                response_format_used=response_format_payload,
+                provider_error_type=last_provider_error_type,
+                effective_max_tokens=active_policy.max_tokens,
+                **usage,
+            )
         except HTTPException as exc:
             last_http_exc = exc
             provider_error_type = classify_provider_error(exc)
+            last_provider_error_type = provider_error_type
             if (
                 active_policy.json_schema
                 and _looks_like_structured_output_unsupported(exc)
@@ -580,6 +639,13 @@ async def call_generation_json(
                 attempts=total_text_attempts,
                 response_format_used=text_result.response_format_used,
                 schema_validated=bool(policy.json_schema),
+                provider_error_type=text_result.provider_error_type,
+                effective_max_tokens=text_result.effective_max_tokens,
+                prompt_character_count=text_result.prompt_character_count,
+                output_character_count=text_result.output_character_count,
+                estimated_input_tokens=text_result.estimated_input_tokens,
+                estimated_output_tokens=text_result.estimated_output_tokens,
+                estimated_total_tokens=text_result.estimated_total_tokens,
             )
         except GenerationJSONDecodeError as exc:
             last_decode_error = exc

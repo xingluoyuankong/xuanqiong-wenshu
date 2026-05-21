@@ -4583,6 +4583,22 @@ class PipelineOrchestrator:
                 "pipeline": {"preset": config.preset},
             }
 
+            def record_generation_call_metrics(label: str, text_result: Any) -> None:
+                metrics = {
+                    "label": label,
+                    "attempts": getattr(text_result, "attempts", None),
+                    "provider_error_type": getattr(text_result, "provider_error_type", None),
+                    "effective_max_tokens": getattr(text_result, "effective_max_tokens", None),
+                    "estimated_input_tokens": getattr(text_result, "estimated_input_tokens", None),
+                    "estimated_output_tokens": getattr(text_result, "estimated_output_tokens", None),
+                    "estimated_total_tokens": getattr(text_result, "estimated_total_tokens", None),
+                    "prompt_character_count": getattr(text_result, "prompt_character_count", None),
+                    "output_character_count": getattr(text_result, "output_character_count", None),
+                }
+                metadata.setdefault("generation_call_metrics", []).append(
+                    {key: value for key, value in metrics.items() if value is not None}
+                )
+
             async def run_writer_pass(
                 *,
                 temperature: float,
@@ -4630,6 +4646,7 @@ class PipelineOrchestrator:
                         ),
                         progress_callback=progress_callback,
                     )
+                    record_generation_call_metrics(f"draft_candidate_{index + 1}", text_result)
                     response = text_result.text
                 except HTTPException:
                     raise
@@ -4748,6 +4765,7 @@ class PipelineOrchestrator:
                         ),
                         progress_callback=progress_callback,
                     )
+                    record_generation_call_metrics(f"draft_candidate_{index + 1}_fallback", text_result)
                     response = text_result.text
                 except HTTPException:
                     raise

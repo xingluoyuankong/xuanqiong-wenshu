@@ -79,3 +79,9 @@
 - 自动化验证：`python -m pytest backend/app/services/test_import_service.py backend/app/api/routers/test_import_novel_job.py -q` 通过，覆盖导入任务取消保护和旧稿账本重建后伏笔/线索实体存在。
 - 编译验证：`python -m compileall backend/app/services/import_service.py backend/app/services/test_import_service.py` 通过。
 - 后端全量验证：`python -m pytest backend -q` 通过（246 passed），`python -m compileall backend/app` 通过。
+
+## 2026-05-21 生成调用指标验证
+- 代码收口：`GenerationTextResult/GenerationJsonResult` 增加估算 token、字符数、最终 `max_tokens`、Provider 错误归因；正文候选 metadata 增加 `generation_call_metrics`。
+- 定向验证：`python -m pytest backend/app/services/test_generation_call_service.py -q` 通过（19 passed）。
+- 编译验证：`python -m compileall backend/app/services/generation_call_service.py backend/app/services/pipeline_orchestrator.py backend/app/services/test_generation_call_service.py` 通过。
+- 后端全量验证：`python -m pytest backend -q` 通过（247 passed），`python -m compileall backend/app` 通过。

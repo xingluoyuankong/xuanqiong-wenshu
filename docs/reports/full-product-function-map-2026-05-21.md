@@ -72,3 +72,8 @@
 - 修复影响：旧稿导入后，伏笔页、线索页、长上下文包、后续章节任务都能读到导入文本里的 setup/payoff，不会出现“记忆里有摘要，但伏笔账本为空”的断链。
 - 去重策略：按导入章节、伏笔名和内容摘要去重，避免账本重建重复插入。
 - 验证：新增 `backend/app/services/test_import_service.py`，覆盖旧稿导入账本重建后同时产生 `Foreshadowing`、`StoryClue`、`ProjectMemory` 和 `ChapterSnapshot`。
+
+## 2026-05-21 继续收口：生成调用指标进入候选 metadata
+- `generation_call_service.py` 的 `GenerationTextResult/GenerationJsonResult` 新增本地估算的输入/输出/总 token、prompt/输出字符数、最终生效 `max_tokens` 和最近一次 Provider 错误归因。
+- `PipelineOrchestrator` 在正文候选 metadata 写入 `generation_call_metrics`，后续详细日志、候选版本解释、预算页可以直接展示“尝试次数、是否因限额/超时降级、估算消耗”。
+- 修复影响：Provider 抖动或模型拒绝过高 `max_tokens` 后，即使最终成功，候选版本 metadata 也不会丢掉这段降级历史。

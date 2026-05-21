@@ -12,6 +12,7 @@ from app.services.generation_call_service import (
     call_generation_json,
     call_generation_text,
     classify_provider_error,
+    estimate_generation_token_count,
     parse_llm_json_value,
     resolve_retry_delay_seconds,
     validate_json_schema_subset,
@@ -78,6 +79,8 @@ async def test_call_generation_text_retries_retryable_http_exception():
 
     assert result.text == "ok"
     assert len(llm.calls) == 2
+    assert result.provider_error_type == "provider_jitter"
+    assert result.estimated_total_tokens > 0
     assert stages == [("generating", "蓝图生成遇到上游抖动，正在进行第 1/1 次重试")]
 
 
@@ -114,6 +117,9 @@ async def test_call_generation_text_reduces_max_tokens_after_provider_token_limi
     assert len(llm.calls) == 2
     assert llm.calls[0]["max_tokens"] == 24000
     assert 12000 <= llm.calls[1]["max_tokens"] < 24000
+    assert result.provider_error_type == "output_token_limit"
+    assert result.effective_max_tokens == llm.calls[1]["max_tokens"]
+    assert result.estimated_output_tokens > 0
     assert stages and stages[0][0] == "generating"
 
 
@@ -159,6 +165,12 @@ async def test_call_generation_text_heartbeats_and_reduces_max_tokens_after_soft
     assert 12000 <= llm.calls[1]["max_tokens"] < 20000
     assert any(stage == "generate_variants" and "Provider" in message for stage, message in stages)
     assert any("降低输出上限" in message for _, message in stages)
+
+
+def test_estimate_generation_token_count_handles_cjk_and_ascii():
+    assert estimate_generation_token_count("") == 0
+    assert estimate_generation_token_count("hello world " * 10) >= 20
+    assert estimate_generation_token_count("玄穹文枢正在生成更长的章节") >= 8
 
 
 def test_retry_delay_respects_retry_after_and_cap():
