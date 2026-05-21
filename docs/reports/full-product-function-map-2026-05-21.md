@@ -38,7 +38,7 @@
 | 知识图谱 | `knowledge_graph.py`、图谱组件 | active | 同步来自蓝图/记忆，但“事实源 vs 关系查询”边界不显性 | 用户误把图谱当全文事实库 | UI 标注事实源、最新章节、关系置信度 | 图谱页验证 | P1 |
 | 风格中心 | `StyleCenterView.vue`、`style_rag_service.py` | active | 大文本学习仍偏同步体验，进度与回滚不足 | 长文本导入容易卡住 | 改后台任务，展示批次、样本、画像和应用范围 | 风格学习实跑 | P1 |
 | 导入 | `NovelWorkspace.vue`、`import_service.py` | active | 导入后缺少完整账本重建进度 | 旧稿进入后连续性资源不足 | 导入任务化：分章、摘要、角色、伏笔、图谱、记忆 | 旧稿导入实跑 | P1 |
-| 导出 | `/export/txt`、`/export/docx`、`ExportService` | active | 缺章/未定稿/空章提示需更清楚 | 导出失败不易修 | 导出前校验报告，UI 标明缺失章节和修复入口 | 导出测试 | P2 |
+| 导出 | `/export/preflight`、`/export/txt`、`/export/docx`、`ExportService` | active | 已有导出硬校验，新增预检可展示缺章/未定稿/空章原因 | 还可继续补修复入口跳转 | 预检报告先阻止无效下载，并提示缺失章节 | 导出测试、构建 | P2 |
 | Token 预算 | `token_budget.py` | active | 配置和统计存在，但 LLM 调用侧预算事件仍需统一 | 用户难判断花费来源 | `generation_call_service` 记录模块/阶段 usage | 单测 | P2 |
 | LLM 设置 | `llm_config.py`、设置页 | active | 健康检查与最近失败归因没有聚合到生成日志 | Provider 抖动难复盘 | 设置页显示最近错误、Retry-After、模型/base_url | 手动验证 | P2 |
 | 管理台日志 | `RuntimeLogManagement.vue`、`admin.py` | active | 已能看生成状态，但程序日志/生成状态边界仍需继续分层 | 用户被开发细节干扰 | 用户态默认显示内容/质量/账本，开发者详情折叠 | 管理台验证 | P1 |
@@ -51,6 +51,7 @@
 - 前端旧 `NovelAPI.generateBlueprint()` 已改为启动 `/blueprint/generate/start` 并轮询 `/status`，保留旧方法签名但不再绕过后台任务。
 - 后端旧 `/blueprint/generate` 已改为兼容转发后台任务，旧调用也不再绕过进度、取消和状态模型。
 - 章节大纲生成新增后台任务入口，前端旧 `generateChapterOutline()` 已改为启动 `/chapters/outline/start` 并轮询 `/status`。
+- 导出新增 `/export/preflight`，前端下载全书前会展示缺章、未定稿、空正文和可导出字数，不再只报“导出失败”。
 - `chapterWorkflow.ts` 版本选择/删除/评审改为有 `version_id` 时只发送稳定 ID，`version_index` 仅作为旧数据兜底。
 - `novel.ts` store 的优化入口改为有 `version_id` 时只发送稳定 ID，避免排序变化导致优化错版本。
 

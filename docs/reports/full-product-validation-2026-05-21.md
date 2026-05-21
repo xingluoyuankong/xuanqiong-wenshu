@@ -7,6 +7,7 @@
 - 后端同步 `/blueprint/generate` 已标记 deprecated，并返回 `Deprecation`、`Link`、`X-Xuanqiong-Legacy-Route` 响应头。
 - 后端同步 `/blueprint/generate` 已进一步改为兼容转发：只启动/复用后台蓝图任务，不再直接执行完整同步生成。
 - 章节大纲生成新增后台任务入口 `/chapters/outline/start/status/cancel`，前端默认通过后台任务启动和轮询结果，旧 `/chapters/outline` 仅保留 deprecated 兼容。
+- 导出新增 `/export/preflight`，TXT/DOCX 下载前先返回缺章、未定稿、空版本和可导出字数，前端直接展示具体问题。
 - 章节候选版本选择、删除、评审、优化改为 `version_id` 优先；没有稳定 ID 时才发送 `version_index`。
 - `GenerationRuntimeEvent` 支持 `developer_detail`，日志页会把它折进“开发者详情”，不污染用户看的生成状态摘要。
 
@@ -14,10 +15,11 @@
 
 - `python -m compileall backend/app`：通过。
 - `python -m pytest backend/app/services/test_generation_quality_guards.py -q`：57 passed。
-- `python -m pytest backend -q`：238 passed。
+- `python -m pytest backend -q`：239 passed。
 - `cd frontend; npm run test:run`：121 passed。
 - `cd frontend; npm run build`：通过。
 - `python -m pytest backend/app/api/routers/test_blueprint_legacy_route.py backend/app/api/routers/test_outline_generation_job.py -q`：2 passed。
+- `python -m pytest backend/app/services/test_export_service.py -q`：4 passed。
 - `cd frontend; npm run test:run -- src/api/modules/chapterWorkflow.spec.ts`：4 passed。
 
 ## 项目本体启动验证

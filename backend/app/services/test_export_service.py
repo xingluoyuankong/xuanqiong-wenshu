@@ -36,3 +36,31 @@ def test_export_validation_rejects_non_successful_chapter() -> None:
 
     assert exc.value.status_code == 409
     assert "状态为 generating" in exc.value.detail["issues"][0]
+
+
+@pytest.mark.asyncio
+async def test_export_preflight_reports_outline_only_chapters() -> None:
+    service = ExportService(session=None)  # type: ignore[arg-type]
+
+    async def fake_get_project(project_id: str) -> SimpleNamespace:
+        return SimpleNamespace(id=project_id)
+
+    async def fake_get_ordered_chapters(project_id: str) -> list[SimpleNamespace]:
+        return [chapter(1, content="有效正文")]
+
+    async def fake_get_outlines_map(project_id: str) -> dict[int, SimpleNamespace]:
+        return {
+            1: SimpleNamespace(chapter_number=1, title="第一章"),
+            2: SimpleNamespace(chapter_number=2, title="第二章"),
+        }
+
+    service._get_project = fake_get_project  # type: ignore[method-assign]
+    service._get_ordered_chapters = fake_get_ordered_chapters  # type: ignore[method-assign]
+    service._get_outlines_map = fake_get_outlines_map  # type: ignore[method-assign]
+
+    result = await service.preflight_export("project-1")
+
+    assert result["ready"] is False
+    assert result["exportable_chapters"] == 1
+    assert result["missing_chapter_numbers"] == [2]
+    assert "第2章只有大纲" in result["issues"][0]

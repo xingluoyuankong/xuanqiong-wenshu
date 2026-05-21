@@ -2521,6 +2521,21 @@ async def export_novel_as_txt(
     )
 
 
+@router.get("/{project_id}/export/preflight")
+async def preflight_export_novel(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """导出前预检：告诉用户缺章、未定稿或空版本，而不是直接下载失败。"""
+    user_id = int(current_user.id)
+    novel_service = NovelService(session)
+    await novel_service.ensure_project_owner(project_id, user_id)
+
+    export_service = ExportService(session)
+    return await export_service.preflight_export(project_id)
+
+
 @router.get("/{project_id}/export/docx")
 async def export_novel_as_docx(
     project_id: str,

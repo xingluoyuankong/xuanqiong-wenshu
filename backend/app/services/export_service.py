@@ -49,6 +49,40 @@ class ExportService:
 
         return "\n".join(output)
 
+    async def preflight_export(self, project_id: str) -> dict:
+        """导出前检查，给前端展示可执行的缺章/空章/未定稿原因。"""
+        await self._get_project(project_id)
+        chapters = await self._get_ordered_chapters(project_id)
+        outlines = await self._get_outlines_map(project_id)
+        issues = self._collect_export_issues(chapters)
+        chapter_numbers = {int(getattr(chapter, "chapter_number", 0) or 0) for chapter in chapters}
+        outline_numbers = {int(number) for number in outlines.keys()}
+        missing_chapter_numbers = sorted(number for number in outline_numbers if number not in chapter_numbers)
+
+        if not chapters:
+            issues.append("没有章节可导出")
+        for number in missing_chapter_numbers:
+            issues.append(f"第{number}章只有大纲，尚未生成或定稿正文")
+
+        exportable_chapters = 0
+        total_word_count = 0
+        for chapter in chapters:
+            selected_version = getattr(chapter, "selected_version", None)
+            content = (getattr(selected_version, "content", "") or "").strip() if selected_version else ""
+            if getattr(chapter, "status", None) == "successful" and content:
+                exportable_chapters += 1
+                total_word_count += len("".join(content.split()))
+
+        return {
+            "ready": not issues,
+            "total_chapters": len(chapters),
+            "outline_chapters": len(outlines),
+            "exportable_chapters": exportable_chapters,
+            "total_word_count": total_word_count,
+            "missing_chapter_numbers": missing_chapter_numbers,
+            "issues": issues,
+        }
+
     async def export_novel_as_docx(self, project_id: str) -> bytes:
         """导出小说为 DOCX 格式"""
         try:
@@ -126,7 +160,7 @@ class ExportService:
         outlines = result.scalars().all()
         return {outline.chapter_number: outline for outline in outlines}
 
-    def _validate_exportable_chapters(self, chapters: list[Chapter]) -> None:
+    def _collect_export_issues(self, chapters: list[Chapter]) -> list[str]:
         """导出前硬校验：禁止把空章节/未选中版本伪装成正常导出。
 
         历史实现会在 selected_version 缺失时回退到最新版本，导致数据库状态断链被
@@ -147,6 +181,10 @@ class ExportService:
             if not content:
                 invalid.append(f"第{chapter_no}章选中版本正文为空")
 
+        return invalid
+
+    def _validate_exportable_chapters(self, chapters: list[Chapter]) -> None:
+        invalid = self._collect_export_issues(chapters)
         if invalid:
             raise HTTPException(
                 status_code=409,

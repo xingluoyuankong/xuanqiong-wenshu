@@ -462,6 +462,16 @@ interface ChapterDetail extends ChapterItem {
   generation_status?: string
 }
 
+interface ExportPreflight {
+  ready: boolean
+  total_chapters: number
+  outline_chapters: number
+  exportable_chapters: number
+  total_word_count: number
+  missing_chapter_numbers?: number[]
+  issues?: string[]
+}
+
 const props = defineProps<{
   chapters: ChapterItem[]
   isAdmin?: boolean
@@ -608,21 +618,56 @@ const exportChapterAsDocx = async () => {
   triggerBrowserDownload(blob, `${safeTitle}.docx`)
 }
 
+const readExportFailure = async (response: Response): Promise<string> => {
+  const rawText = await response.text().catch(() => '')
+  try {
+    const data = rawText ? JSON.parse(rawText) : {}
+    const detail = data?.detail
+    if (detail && typeof detail === 'object') {
+      const message = typeof detail.message === 'string' ? detail.message : '导出失败'
+      const issues = Array.isArray(detail.issues) ? detail.issues.slice(0, 8).join('\n') : ''
+      return issues ? `${message}\n${issues}` : message
+    }
+    if (typeof detail === 'string') return detail
+    if (typeof data?.message === 'string') return data.message
+  } catch {
+    // fallback below
+  }
+  return rawText.trim() || '导出失败，请检查章节是否已生成并确认版本。'
+}
+
+const checkExportPreflight = async (): Promise<boolean> => {
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/novels/${projectId}/export/preflight`)
+  if (!response.ok) {
+    throw new Error(await readExportFailure(response))
+  }
+  const data = await response.json() as ExportPreflight
+  if (data.ready) return true
+
+  const issues = Array.isArray(data.issues) ? data.issues.slice(0, 10) : []
+  const header = [
+    `当前可导出章节：${data.exportable_chapters}/${Math.max(data.total_chapters, data.outline_chapters)}`,
+    data.total_word_count ? `可导出字数约 ${data.total_word_count} 字` : '',
+  ].filter(Boolean).join('\n')
+  throw new Error([header, ...issues].filter(Boolean).join('\n') || '小说仍有章节未生成、未定稿或正文为空。')
+}
+
 // 导出全部章节
 const exportAllChapters = async (format: 'txt' | 'docx') => {
   try {
+    await checkExportPreflight()
     const url = `${API_BASE_URL}${API_PREFIX}/novels/${projectId}/export/${format}`
     const response = await fetch(url)
 
     if (!response.ok) {
-      throw new Error('导出失败')
+      throw new Error(await readExportFailure(response))
     }
 
     const blob = await response.blob()
     triggerBrowserDownload(blob, `小说_${projectId}_${new Date().toISOString().split('T')[0]}.${format}`)
   } catch (err) {
     console.error('导出失败:', err)
-    alert('导出失败，请重试')
+    alert(err instanceof Error ? err.message : '导出失败，请重试')
   }
 }
 
