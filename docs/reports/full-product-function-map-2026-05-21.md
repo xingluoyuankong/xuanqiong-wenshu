@@ -36,7 +36,7 @@
 | 伏笔/线索 | `foreshadowing.py`、`clue_tracker.py` | active | 回收任务已进写作链路，但 UI 未形成“逾期/下章必须处理”工作流 | 伏笔沉默遗忘 | 伏笔页增加待回收、逾期、补丁建议分组 | 后端与浏览器测试 | P1 |
 | 记忆层 | `memory_layer_service.py`、`projects.py` | active | 压缩/回滚入口存在，用户不易知道压缩影响 | 长篇记忆治理不透明 | 管理页展示版本、压缩原因、回滚风险 | 单测、UI 验证 | P2 |
 | 知识图谱 | `knowledge_graph.py`、图谱组件 | active | 同步来自蓝图/记忆，但“事实源 vs 关系查询”边界不显性 | 用户误把图谱当全文事实库 | UI 标注事实源、最新章节、关系置信度 | 图谱页验证 | P1 |
-| 风格中心 | `StyleCenterView.vue`、`style_rag_service.py` | active | 大文本学习仍偏同步体验，进度与回滚不足 | 长文本导入容易卡住 | 改后台任务，展示批次、样本、画像和应用范围 | 风格学习实跑 | P1 |
+| 风格中心 | `StyleCenterView.vue`、`style_rag_service.py`、`/style/profiles/start/status/cancel` | active | 文风画像生成已改为后台任务；素材上传/大文本导入仍需继续拆批和显示片段进度 | 画像生成不再卡住前端，但超大素材学习仍需要更透明的进度 | 继续把素材导入拆批，并把画像任务的阶段、结果、失败根因接入 UI 日志 | 风格画像任务测试、风格学习实跑 | P1 |
 | 导入 | `NovelWorkspace.vue`、`import_service.py` | active | 导入后缺少完整账本重建进度 | 旧稿进入后连续性资源不足 | 导入任务化：分章、摘要、角色、伏笔、图谱、记忆 | 旧稿导入实跑 | P1 |
 | 导出 | `/export/preflight`、`/export/txt`、`/export/docx`、`ExportService` | active | 已有导出硬校验，新增预检可展示缺章/未定稿/空章原因 | 还可继续补修复入口跳转 | 预检报告先阻止无效下载，并提示缺失章节 | 导出测试、构建 | P2 |
 | Token 预算 | `token_budget.py` | active | 配置和统计存在，但 LLM 调用侧预算事件仍需统一 | 用户难判断花费来源 | `generation_call_service` 记录模块/阶段 usage | 单测 | P2 |
@@ -54,11 +54,12 @@
 - 导出新增 `/export/preflight`，前端下载全书前会展示缺章、未定稿、空正文和可导出字数，不再只报“导出失败”。
 - `chapterWorkflow.ts` 版本选择/删除/评审改为有 `version_id` 时只发送稳定 ID，`version_index` 仅作为旧数据兜底。
 - `novel.ts` store 的优化入口改为有 `version_id` 时只发送稳定 ID，避免排序变化导致优化错版本。
+- 文风画像生成新增 `/style/profiles/start/status/cancel` 后台任务入口，前端旧 `createStyleProfile()` 已改为启动任务并轮询，不再让大素材画像生成阻塞一次 HTTP 请求。
 
 ## 下一批执行顺序
 
 1. 把章节大纲重写推进到局部任务状态机，避免长等待时前端无进度。
-2. 风格学习和旧稿导入任务化，产出可取消、可恢复、可查看片段的进度日志。
+2. 继续拆分风格素材导入和旧稿导入任务，产出可取消、可恢复、可查看片段的进度日志。
 3. 继续把日志页默认视图收敛到“生成状态”，开发者字段折叠。
 4. 补导出前校验、Provider 健康归因与 Token 预算事件。
 5. 跑全量自动化测试、启动项目本体，做完整实跑和反向修正。

@@ -1,4 +1,4 @@
-﻿// AIMETA P=小说API客户端_小说和章节接口|R=小说CRUD_章节管理_生成|NR=不含UI逻辑|E=api:novel|X=internal|A=novelApi对象|D=axios|S=net|RD=./README.ai
+// AIMETA P=小说API客户端_小说和章节接口|R=小说CRUD_章节管理_生成|NR=不含UI逻辑|E=api:novel|X=internal|A=novelApi对象|D=axios|S=net|RD=./README.ai
 import { API_BASE_URL, API_PREFIX } from '@/api/config'
 import { normalizeChapterContent } from '@/utils/chapterContent'
 
@@ -488,6 +488,18 @@ export interface OutlineGenerationJobResponse {
   error?: BlueprintGenerationError | string | null
 }
 
+export interface StyleProfileJobResponse {
+  run_id: string
+  project_id: string
+  status: 'idle' | 'queued' | 'extracting' | 'profiling' | 'saving' | 'successful' | 'failed' | 'cancelled'
+  progress_stage: string
+  progress_message: string
+  started_at?: string | null
+  updated_at?: string | null
+  profile?: any | null
+  error?: BlueprintGenerationError | string | null
+}
+
 export interface UIControl {
   type: 'single_choice' | 'multi_choice' | 'text_input'
   options?: Array<{ id: string; label: string }>
@@ -559,6 +571,8 @@ const WRITER_PREFIX = '/api/writer'
 const WRITER_BASE = `${API_BASE_URL}${WRITER_PREFIX}/novels`
 const BLUEPRINT_LEGACY_POLL_INTERVAL_MS = 2000
 const BLUEPRINT_LEGACY_MAX_POLL_ATTEMPTS = 900
+const STYLE_PROFILE_POLL_INTERVAL_MS = 2000
+const STYLE_PROFILE_MAX_POLL_ATTEMPTS = 900
 
 const delay = (ms: number) => new Promise((resolve) => globalThis.setTimeout(resolve, ms))
 
@@ -567,6 +581,13 @@ const readBlueprintJobError = (status: BlueprintGenerationJobResponse): string =
   if (!rawError) return status.progress_message || '蓝图生成失败，请稍后重试'
   if (typeof rawError === 'string') return rawError
   return rawError.detail || rawError.message || status.progress_message || '蓝图生成失败，请稍后重试'
+}
+
+const readStyleProfileJobError = (status: StyleProfileJobResponse): string => {
+  const rawError = status.error
+  if (!rawError) return status.progress_message || '文风画像生成失败，请稍后重试'
+  if (typeof rawError === 'string') return rawError
+  return rawError.detail || rawError.message || status.progress_message || '文风画像生成失败，请稍后重试'
 }
 
 export class NovelAPI {
@@ -1017,9 +1038,43 @@ export class OptimizerAPI {
     projectId: string,
     payload: { source_ids: string[]; name?: string; append_to_profile_id?: string }
   ): Promise<{ success: boolean; profile: any }> {
-    return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/profiles`, {
+    let status = await OptimizerAPI.startStyleProfileGeneration(projectId, payload)
+
+    for (let attempt = 0; attempt < STYLE_PROFILE_MAX_POLL_ATTEMPTS; attempt += 1) {
+      if (status.status === 'successful' && status.profile) {
+        return { success: true, profile: status.profile }
+      }
+      if (status.status === 'failed') {
+        throw new Error(readStyleProfileJobError(status))
+      }
+      if (status.status === 'cancelled') {
+        throw new Error(status.progress_message || '文风画像生成已取消')
+      }
+
+      await delay(STYLE_PROFILE_POLL_INTERVAL_MS)
+      status = await OptimizerAPI.getStyleProfileGenerationStatus(projectId)
+    }
+
+    throw new Error('文风画像后台任务等待超时，请稍后刷新文风中心查看结果。')
+  }
+
+  static async startStyleProfileGeneration(
+    projectId: string,
+    payload: { source_ids: string[]; name?: string; append_to_profile_id?: string }
+  ): Promise<StyleProfileJobResponse> {
+    return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/profiles/start`, {
       method: 'POST',
       body: JSON.stringify(payload)
+    })
+  }
+
+  static async getStyleProfileGenerationStatus(projectId: string): Promise<StyleProfileJobResponse> {
+    return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/profiles/status`)
+  }
+
+  static async cancelStyleProfileGeneration(projectId: string): Promise<StyleProfileJobResponse> {
+    return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/profiles/cancel`, {
+      method: 'POST'
     })
   }
 

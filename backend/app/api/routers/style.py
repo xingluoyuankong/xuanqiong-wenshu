@@ -8,17 +8,20 @@
 - DELETE /api/projects/{id}/style - 清除风格配置
 - POST /api/projects/{id}/style/generate - 带风格上下文的生成
 """
+import asyncio
 import json
 import logging
+import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Literal
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ...core.dependencies import get_current_user
-from ...db.session import get_session
+from ...db.session import AsyncSessionLocal, get_session
 from ...schemas.user import UserInDB
 from ...services.llm_service import LLMService
 from ...services.style_rag_service import StyleRAGService, StyleFeature
@@ -27,6 +30,12 @@ from ...services.novel_service import NovelService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/style", tags=["style-rag"])
+
+_STYLE_PROFILE_JOBS: Dict[str, Dict[str, Any]] = {}
+_STYLE_PROFILE_PROJECT_RUNS: Dict[str, str] = {}
+_STYLE_PROFILE_JOB_LOCK = asyncio.Lock()
+_STYLE_PROFILE_ACTIVE_STATUSES = {"queued", "extracting", "profiling", "saving"}
+_STYLE_PROFILE_HEARTBEAT_SECONDS = 30
 
 
 class ExtractStyleRequest(BaseModel):
@@ -54,6 +63,25 @@ class CreateStyleProfileRequest(BaseModel):
     source_ids: List[str] = Field(..., min_length=1)
     name: Optional[str] = Field(default=None, max_length=100)
     append_to_profile_id: Optional[str] = Field(default=None, min_length=1)
+
+
+class StyleProfileJobError(BaseModel):
+    code: str
+    message: str
+    detail: Optional[str] = None
+    retryable: bool = True
+
+
+class StyleProfileJobResponse(BaseModel):
+    run_id: str
+    project_id: str
+    status: str
+    progress_stage: str = "queued"
+    progress_message: str = ""
+    started_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    profile: Optional[Dict[str, Any]] = None
+    error: Optional[StyleProfileJobError] = None
 
 
 class ActivateStyleProfileRequest(BaseModel):
@@ -97,6 +125,151 @@ class StyleSummaryResponse(BaseModel):
     has_style: bool
     summary: Optional[dict] = None
     source: Optional[dict] = None
+
+
+def _style_job_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _style_job_error(code: str, message: str, *, detail: Any = None, retryable: bool = True) -> Dict[str, Any]:
+    if detail is None:
+        detail_text = None
+    elif isinstance(detail, str):
+        detail_text = detail[:800]
+    else:
+        try:
+            detail_text = json.dumps(detail, ensure_ascii=False, default=str)[:800]
+        except TypeError:
+            detail_text = str(detail)[:800]
+    return {"code": code, "message": message, "detail": detail_text, "retryable": retryable}
+
+
+def _serialize_style_profile_job(job: Dict[str, Any]) -> StyleProfileJobResponse:
+    return StyleProfileJobResponse(
+        run_id=str(job.get("run_id") or ""),
+        project_id=str(job.get("project_id") or ""),
+        status=str(job.get("status") or "idle"),
+        progress_stage=str(job.get("progress_stage") or job.get("status") or "idle"),
+        progress_message=str(job.get("progress_message") or ""),
+        started_at=job.get("started_at"),
+        updated_at=job.get("updated_at"),
+        profile=job.get("profile"),
+        error=job.get("error"),
+    )
+
+
+async def _set_style_profile_job_state(run_id: str, **updates: Any) -> Dict[str, Any]:
+    async with _STYLE_PROFILE_JOB_LOCK:
+        job = _STYLE_PROFILE_JOBS.get(run_id)
+        if not job:
+            job = {"run_id": run_id, "status": "idle", "progress_stage": "idle"}
+            _STYLE_PROFILE_JOBS[run_id] = job
+        if job.get("status") == "cancelled" and updates.get("status") != "cancelled":
+            return dict(job)
+        job.update(updates)
+        job["updated_at"] = _style_job_now_iso()
+        return dict(job)
+
+
+async def _run_style_profile_job(
+    run_id: str,
+    project_id: str,
+    user_id: int,
+    request_payload: Dict[str, Any],
+) -> None:
+    async def heartbeat() -> None:
+        while True:
+            await asyncio.sleep(_STYLE_PROFILE_HEARTBEAT_SECONDS)
+            async with _STYLE_PROFILE_JOB_LOCK:
+                job = _STYLE_PROFILE_JOBS.get(run_id)
+                if not job or job.get("status") not in _STYLE_PROFILE_ACTIVE_STATUSES:
+                    return
+                stage = str(job.get("progress_stage") or "profiling")
+                message = str(job.get("progress_message") or "正在生成文风画像")
+            await _set_style_profile_job_state(
+                run_id,
+                status=stage if stage in _STYLE_PROFILE_ACTIVE_STATUSES else "profiling",
+                progress_stage=stage,
+                progress_message=message,
+            )
+
+    heartbeat_task = asyncio.create_task(heartbeat())
+    try:
+        request = CreateStyleProfileRequest(**request_payload)
+        state = await _set_style_profile_job_state(
+            run_id,
+            status="extracting",
+            progress_stage="extracting",
+            progress_message="正在读取参考素材并整理风格样本",
+        )
+        if state.get("status") == "cancelled":
+            return
+        async with AsyncSessionLocal() as job_session:
+            novel_service = NovelService(job_session)
+            await novel_service.ensure_project_owner(project_id, user_id)
+            style_service = StyleRAGService(job_session, LLMService(job_session))
+            state = await _set_style_profile_job_state(
+                run_id,
+                status="profiling",
+                progress_stage="profiling",
+                progress_message="正在提炼叙事、句式、对话和节奏画像",
+            )
+            if state.get("status") == "cancelled":
+                return
+            profile = await style_service.create_profile_from_sources(
+                user_id,
+                source_ids=request.source_ids,
+                name=request.name,
+                append_to_profile_id=request.append_to_profile_id,
+            )
+            profile_payload = profile.to_dict()
+
+        async with _STYLE_PROFILE_JOB_LOCK:
+            current = _STYLE_PROFILE_JOBS.get(run_id)
+            if current and current.get("status") == "cancelled":
+                return
+
+        await _set_style_profile_job_state(
+            run_id,
+            status="successful",
+            progress_stage="successful",
+            progress_message="文风画像生成完成",
+            profile=profile_payload,
+            error=None,
+        )
+    except ValueError as exc:
+        await _set_style_profile_job_state(
+            run_id,
+            status="failed",
+            progress_stage="failed",
+            progress_message="文风画像生成失败",
+            error=_style_job_error(
+                "style_profile_generation_failed",
+                "文风画像生成失败",
+                detail=str(exc),
+                retryable=False,
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 - background task must surface failures
+        logger.exception("文风画像后台任务失败: project=%s run_id=%s", project_id, run_id)
+        await _set_style_profile_job_state(
+            run_id,
+            status="failed",
+            progress_stage="failed",
+            progress_message="文风画像生成失败",
+            error=_style_job_error(
+                "style_profile_generation_failed",
+                "文风画像生成失败",
+                detail=exc,
+                retryable=True,
+            ),
+        )
+    finally:
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
 
 
 @router.get("/sources", response_model=dict)
@@ -229,7 +402,116 @@ async def list_style_profiles(
     return {"profiles": [profile.to_dict() for profile in profiles]}
 
 
-@router.post("/profiles", response_model=dict)
+@router.post("/profiles/start", response_model=StyleProfileJobResponse)
+async def start_style_profile_generation(
+    project_id: str,
+    request: CreateStyleProfileRequest,
+    background_tasks: BackgroundTasks,
+    current_user: UserInDB = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> StyleProfileJobResponse:
+    novel_service = NovelService(session)
+    await novel_service.ensure_project_owner(project_id, current_user.id)
+
+    async with _STYLE_PROFILE_JOB_LOCK:
+        existing_run_id = _STYLE_PROFILE_PROJECT_RUNS.get(project_id)
+        existing = _STYLE_PROFILE_JOBS.get(existing_run_id or "")
+        if existing and existing.get("status") in _STYLE_PROFILE_ACTIVE_STATUSES:
+            return _serialize_style_profile_job(existing)
+
+        run_id = str(uuid.uuid4())
+        now = _style_job_now_iso()
+        job = {
+            "run_id": run_id,
+            "project_id": project_id,
+            "status": "queued",
+            "progress_stage": "queued",
+            "progress_message": "文风画像生成任务已入队",
+            "started_at": now,
+            "updated_at": now,
+            "profile": None,
+            "error": None,
+            "request": request.model_dump(),
+        }
+        _STYLE_PROFILE_JOBS[run_id] = job
+        _STYLE_PROFILE_PROJECT_RUNS[project_id] = run_id
+
+    background_tasks.add_task(
+        _run_style_profile_job,
+        run_id,
+        project_id,
+        int(current_user.id),
+        request.model_dump(),
+    )
+    return _serialize_style_profile_job(job)
+
+
+@router.get("/profiles/status", response_model=StyleProfileJobResponse)
+async def get_style_profile_generation_status(
+    project_id: str,
+    current_user: UserInDB = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> StyleProfileJobResponse:
+    novel_service = NovelService(session)
+    await novel_service.ensure_project_owner(project_id, current_user.id)
+
+    async with _STYLE_PROFILE_JOB_LOCK:
+        run_id = _STYLE_PROFILE_PROJECT_RUNS.get(project_id)
+        job = dict(_STYLE_PROFILE_JOBS.get(run_id or "") or {})
+        if job and job.get("status") not in _STYLE_PROFILE_ACTIVE_STATUSES:
+            _STYLE_PROFILE_JOBS.pop(str(job.get("run_id") or ""), None)
+            _STYLE_PROFILE_PROJECT_RUNS.pop(project_id, None)
+
+    if job:
+        return _serialize_style_profile_job(job)
+
+    return StyleProfileJobResponse(
+        run_id="",
+        project_id=project_id,
+        status="idle",
+        progress_stage="idle",
+        progress_message="暂无文风画像生成任务",
+    )
+
+
+@router.post("/profiles/cancel", response_model=StyleProfileJobResponse)
+async def cancel_style_profile_generation(
+    project_id: str,
+    current_user: UserInDB = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> StyleProfileJobResponse:
+    novel_service = NovelService(session)
+    await novel_service.ensure_project_owner(project_id, current_user.id)
+
+    async with _STYLE_PROFILE_JOB_LOCK:
+        run_id = _STYLE_PROFILE_PROJECT_RUNS.get(project_id)
+        job = _STYLE_PROFILE_JOBS.get(run_id or "")
+        if not job:
+            return StyleProfileJobResponse(
+                run_id="",
+                project_id=project_id,
+                status="idle",
+                progress_stage="idle",
+                progress_message="暂无可取消的文风画像生成任务",
+            )
+        if job.get("status") in _STYLE_PROFILE_ACTIVE_STATUSES:
+            job.update({
+                "status": "cancelled",
+                "progress_stage": "cancelled",
+                "progress_message": "文风画像生成任务已取消",
+                "updated_at": _style_job_now_iso(),
+                "error": _style_job_error(
+                    "style_profile_generation_cancelled",
+                    "文风画像生成任务已取消",
+                    retryable=True,
+                ),
+            })
+        snapshot = dict(job)
+
+    return _serialize_style_profile_job(snapshot)
+
+
+@router.post("/profiles", response_model=dict, deprecated=True)
 async def create_style_profile(
     project_id: str,
     request: CreateStyleProfileRequest,

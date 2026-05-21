@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { NovelAPI } from './novel'
+import { NovelAPI, OptimizerAPI } from './novel'
 
 describe('NovelAPI normalization', () => {
   afterEach(() => {
@@ -68,5 +68,35 @@ describe('NovelAPI normalization', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(response.blueprint.title).toBe('测试长篇')
     expect(response.ai_message).toBe('蓝图已生成')
+  })
+
+  it('routes style profile creation through the background job endpoint', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      expect(url).toContain('/style/profiles/start')
+      expect(url).not.toMatch(/\/style\/profiles$/)
+      const body = JSON.parse(String(init?.body || '{}'))
+      expect(body).toMatchObject({ source_ids: ['src-1'], name: '冷峻叙事' })
+      return new Response(JSON.stringify({
+        run_id: 'style-run-1',
+        project_id: 'project-1',
+        status: 'successful',
+        progress_stage: 'successful',
+        progress_message: '文风画像生成完成',
+        profile: { id: 'profile-1', name: '冷峻叙事' },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await OptimizerAPI.createStyleProfile('project-1', {
+      source_ids: ['src-1'],
+      name: '冷峻叙事',
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(response.profile.id).toBe('profile-1')
   })
 })
