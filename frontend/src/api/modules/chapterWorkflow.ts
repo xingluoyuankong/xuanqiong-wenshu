@@ -7,12 +7,15 @@ import {
   type GenerateChapterOptions,
   type GenerateOutlineOptions,
   type NovelProject,
+  type OutlineGenerationJobResponse,
   type RewriteChapterOutlineOptions,
 } from '@/api/novel'
 import { normalizeChapterContent } from '@/utils/chapterContent'
 
 const WRITER_PREFIX = '/api/writer'
 const WRITER_BASE = `${API_BASE_URL}${WRITER_PREFIX}/novels`
+const OUTLINE_POLL_INTERVAL_MS = 2000
+const OUTLINE_MAX_POLL_ATTEMPTS = 900
 
 const readText = (value: unknown): string | undefined => {
   if (typeof value !== 'string') return undefined
@@ -140,6 +143,15 @@ const normalizeProject = (project: NovelProject): NovelProject => ({
     ? project.chapters.map((chapter) => normalizeChapter(chapter))
     : [],
 })
+
+const delay = (ms: number) => new Promise((resolve) => globalThis.setTimeout(resolve, ms))
+
+const readOutlineJobError = (status: OutlineGenerationJobResponse): string => {
+  const rawError = status.error
+  if (!rawError) return status.progress_message || '章节大纲生成失败，请稍后重试'
+  if (typeof rawError === 'string') return rawError
+  return rawError.detail || rawError.message || status.progress_message || '章节大纲生成失败，请稍后重试'
+}
 
 const requestProject = async (url: string, options?: RequestInit): Promise<NovelProject> => {
   const project = await request(url, options)
@@ -281,12 +293,11 @@ export const deleteChapter = (
   body: JSON.stringify({ chapter_numbers: chapterNumbers }),
 })
 
-export const generateChapterOutline = (
-  projectId: string,
+const buildOutlinePayload = (
   startChapter: number,
   numChapters: number,
   options: GenerateOutlineOptions = {},
-) => {
+): Record<string, number> => {
   const payload: Record<string, number> = {
     start_chapter: startChapter,
     num_chapters: numChapters,
@@ -300,9 +311,53 @@ export const generateChapterOutline = (
   if (options.chapterWordTarget && options.chapterWordTarget > 0) {
     payload.chapter_word_target = options.chapterWordTarget
   }
+  return payload
+}
 
-  return requestProject(`${WRITER_BASE}/${projectId}/chapters/outline`, {
+export const startChapterOutlineGeneration = (
+  projectId: string,
+  startChapter: number,
+  numChapters: number,
+  options: GenerateOutlineOptions = {},
+) => {
+  return request(`${WRITER_BASE}/${projectId}/chapters/outline/start`, {
     method: 'POST',
-    body: JSON.stringify(payload),
-  })
+    body: JSON.stringify(buildOutlinePayload(startChapter, numChapters, options)),
+  }) as Promise<OutlineGenerationJobResponse>
+}
+
+export const getChapterOutlineGenerationStatus = (
+  projectId: string,
+) => request(`${WRITER_BASE}/${projectId}/chapters/outline/status`) as Promise<OutlineGenerationJobResponse>
+
+export const cancelChapterOutlineGeneration = (
+  projectId: string,
+) => request(`${WRITER_BASE}/${projectId}/chapters/outline/cancel`, {
+  method: 'POST',
+}) as Promise<OutlineGenerationJobResponse>
+
+export const generateChapterOutline = async (
+  projectId: string,
+  startChapter: number,
+  numChapters: number,
+  options: GenerateOutlineOptions = {},
+) => {
+  let status = await startChapterOutlineGeneration(projectId, startChapter, numChapters, options)
+
+  for (let attempt = 0; attempt < OUTLINE_MAX_POLL_ATTEMPTS; attempt += 1) {
+    if (status.status === 'successful' && status.project) {
+      return normalizeProject(status.project)
+    }
+    if (status.status === 'failed') {
+      throw new Error(readOutlineJobError(status))
+    }
+    if (status.status === 'cancelled') {
+      throw new Error(status.progress_message || '章节大纲生成已取消')
+    }
+
+    await delay(OUTLINE_POLL_INTERVAL_MS)
+    status = await getChapterOutlineGenerationStatus(projectId)
+  }
+
+  throw new Error('章节大纲后台任务等待超时，请稍后刷新项目查看结果。')
 }

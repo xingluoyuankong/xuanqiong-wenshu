@@ -3518,27 +3518,35 @@ async def _generate_blueprint_impl(
     return BlueprintGenerationResponse(blueprint=blueprint, ai_message=ai_message)
 
 
-@router.post("/{project_id}/blueprint/generate", response_model=BlueprintGenerationResponse, deprecated=True)
+@router.post(
+    "/{project_id}/blueprint/generate",
+    response_model=BlueprintGenerationJobResponse,
+    deprecated=True,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def generate_blueprint(
     project_id: str,
     response: Response,
+    background_tasks: BackgroundTasks,
+    payload: Dict[str, Any] | None = Body(default=None),
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
-) -> BlueprintGenerationResponse:
+) -> BlueprintGenerationJobResponse:
     response.headers["Deprecation"] = "true"
     response.headers["X-Xuanqiong-Legacy-Route"] = "blueprint-generate-sync"
     response.headers["Link"] = f"</api/novels/{project_id}/blueprint/generate/start>; rel=\"successor-version\""
     logger.warning(
-        "Legacy synchronous blueprint route called; prefer background job route: project=%s user=%s",
+        "Legacy synchronous blueprint route called; forwarding to background job route: project=%s user=%s",
         project_id,
         current_user.id,
     )
-    with LLMService.daily_limit_scope(f"blueprint:{project_id}:full:{int(current_user.id)}"):
-        return await _generate_blueprint_impl(
-            project_id=project_id,
-            session=session,
-            current_user=current_user,
-        )
+    return await start_blueprint_generation(
+        project_id=project_id,
+        background_tasks=background_tasks,
+        payload=payload,
+        session=session,
+        current_user=current_user,
+    )
 
 
 @router.post("/{project_id}/blueprint/save", response_model=NovelProjectSchema)

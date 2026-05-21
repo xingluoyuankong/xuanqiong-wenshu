@@ -4,7 +4,7 @@
 
 - 工作目录：`D:\小说写作\xuanqiong-wenshu`
 - 分支：`codex/final-continuity-20260520`
-- 当前 HEAD：`7b26be5 fix: add long chapter provider wait safeguards`
+- 当前工作基线：`64e22fc feat: audit full product generation paths` 之后继续推进。
 - 代码规模：后端 Python 约 153 文件 / 57626 行；前端 Vue 约 99 文件 / 27626 行；前端 TS 约 56 文件 / 8489 行。
 - 未纳入提交：`CLAUDE.md`、`memory/`、2026-04/05 的旧未跟踪报告与 `托管优化计划-2026-04-28.txt`。
 
@@ -25,8 +25,8 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 概念对话 | `InspirationMode.vue` -> `/concept/converse` | active | 对话状态和蓝图生成状态分离，失败后恢复提示仍偏散 | 用户不知道当前能否继续生成 | 保留现入口，增加阶段摘要、可恢复任务提示 | 灵感模式实跑、Vitest | P1 |
 | 蓝图/总纲生成 | `BlueprintConfirmation.vue` -> `/blueprint/generate/start/status/cancel` | active | 前端 store/API 仍保留旧同步 `generateBlueprint()` | 旧调用可绕开后台进度和取消 | 旧前端 API 改为后台任务轮询；后端旧路由标记 legacy | 前端测试、接口实跑 | P0 |
-| 旧蓝图同步路由 | `/blueprint/generate` | legacy | 仍能同步执行完整生成 | 长请求、不可取消、进度不可见 | 保留兼容，后续改为返回弃用提示或任务结果代理 | 路由回归测试 | P1 |
-| 章节大纲生成/重写 | `/writer/chapters/outline`、`rewrite-outline` | active | 已强化执行字段，但任务进度仍不如正文生成细 | 失败时用户难定位卡点 | 拆分后台任务：上下文、批次、校验、保存 | 后端测试、UI 轮询 | P1 |
+| 旧蓝图同步路由 | `/blueprint/generate` | legacy | 已改为兼容转发后台任务，不再同步执行完整生成 | 外部旧客户端需适配任务响应 | 保留 Deprecation/Link 响应头，继续观察外部兼容 | 路由回归测试 | P1 |
+| 章节大纲生成/重写 | `/writer/chapters/outline`、`outline/start/status/cancel`、`rewrite-outline` | active | 章节大纲生成已首轮任务化，重写仍是同步局部调用 | 大纲生成不再卡前端；重写长等待仍需下一步收口 | 继续把重写也接入局部任务状态和更细 runtime events | 后端测试、UI 轮询 | P1 |
 | 正文生成 | `PipelineOrchestrator` | active | 首稿质量门已加强，长章 Provider 等待仍需更多真实样本 | 长章体验受 Provider 抖动影响 | 继续记录 heartbeat、软超时、降 token 重试和内容预览 | 7000-10000 字实跑 | P0 |
 | 正文重写/优化 | `optimizer.py`、`self_critique_service.py`、`consistency_service.py` | active | 自动流程已局部化，但前端仍需更清楚解释拒稿原因 | 用户误以为优化失败或没效果 | 详细日志展示锚点、补丁建议、拒绝原因 | 优化实跑、日志页验证 | P0 |
 | 候选版本选择/删除/评审 | `chapterWorkflow.ts`、`writer.py` | active | 前端仍同时发送 `version_index` 与 `version_id` | 删除/评审可能因排序变化错位 | 前端有 `version_id` 时只发送 `version_id`，index 仅兜底 | WriterDesk Vitest | P0 |
@@ -49,13 +49,15 @@
 ## 第一批已执行的收口
 
 - 前端旧 `NovelAPI.generateBlueprint()` 已改为启动 `/blueprint/generate/start` 并轮询 `/status`，保留旧方法签名但不再绕过后台任务。
+- 后端旧 `/blueprint/generate` 已改为兼容转发后台任务，旧调用也不再绕过进度、取消和状态模型。
+- 章节大纲生成新增后台任务入口，前端旧 `generateChapterOutline()` 已改为启动 `/chapters/outline/start` 并轮询 `/status`。
 - `chapterWorkflow.ts` 版本选择/删除/评审改为有 `version_id` 时只发送稳定 ID，`version_index` 仅作为旧数据兜底。
 - `novel.ts` store 的优化入口改为有 `version_id` 时只发送稳定 ID，避免排序变化导致优化错版本。
 
 ## 下一批执行顺序
 
-1. 后端旧 `/blueprint/generate` 标记 legacy，并增加回归测试确保新 UI 不再调用它。
-2. 把章节大纲生成/重写推进到后台任务状态机，复用章节生成的进度快照格式。
-3. 风格学习和旧稿导入任务化，产出可取消、可恢复、可查看片段的进度日志。
-4. 继续把日志页默认视图收敛到“生成状态”，开发者字段折叠。
+1. 把章节大纲重写推进到局部任务状态机，避免长等待时前端无进度。
+2. 风格学习和旧稿导入任务化，产出可取消、可恢复、可查看片段的进度日志。
+3. 继续把日志页默认视图收敛到“生成状态”，开发者字段折叠。
+4. 补导出前校验、Provider 健康归因与 Token 预算事件。
 5. 跑全量自动化测试、启动项目本体，做完整实跑和反向修正。

@@ -48,6 +48,7 @@ from ...schemas.novel import (
     GenerateChapterRequest,
     GenerateOutlineRequest,
     NovelProject as NovelProjectSchema,
+    OutlineGenerationJobResponse,
     RewriteChapterOutlineRequest,
     SelectVersionRequest,
     UpdateChapterOutlineRequest,
@@ -91,6 +92,11 @@ GENERATION_HEARTBEAT_GRACE_SECONDS = 8 * 60
 BACKGROUND_GENERATION_TIMEOUT_DISABLED = os.getenv("XUANQIONG_WENSHU_DISABLE_GENERATION_TIMEOUT", "0").strip().lower() in {"1", "true", "yes", "on"}
 _GENERATION_TASK_SEMAPHORE = asyncio.Semaphore(2)
 _FINALIZE_TASK_SEMAPHORE = asyncio.Semaphore(1)
+_OUTLINE_JOBS: Dict[str, Dict[str, Any]] = {}
+_OUTLINE_PROJECT_RUNS: Dict[str, str] = {}
+_OUTLINE_JOB_LOCK = asyncio.Lock()
+_OUTLINE_JOB_HEARTBEAT_SECONDS = 30
+_OUTLINE_ACTIVE_STATUSES = {"queued", "generating", "outline_context", "outline_chapter_skeleton", "saving"}
 _BUSY_CHAPTER_STATUSES = {
     ChapterGenerationStatus.GENERATING.value,
     ChapterGenerationStatus.EVALUATING.value,
@@ -1033,6 +1039,164 @@ async def _load_project_schema(
     if generation_runtime:
         return project.model_copy(update={"generation_runtime": generation_runtime})
     return project
+
+
+def _outline_job_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _outline_job_error(
+    code: str,
+    message: str,
+    *,
+    detail: Any = None,
+    retryable: bool = True,
+) -> Dict[str, Any]:
+    if detail is None:
+        detail_text = None
+    elif isinstance(detail, str):
+        detail_text = detail[:800]
+    else:
+        try:
+            detail_text = json.dumps(detail, ensure_ascii=False, default=str)[:800]
+        except TypeError:
+            detail_text = str(detail)[:800]
+    return {
+        "code": code,
+        "message": message,
+        "detail": detail_text,
+        "retryable": retryable,
+    }
+
+
+def _normalize_outline_job_payload(job: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "run_id": str(job.get("run_id") or ""),
+        "project_id": str(job.get("project_id") or ""),
+        "status": str(job.get("status") or "idle"),
+        "progress_stage": str(job.get("progress_stage") or job.get("status") or "idle"),
+        "progress_message": str(job.get("progress_message") or ""),
+        "started_at": job.get("started_at"),
+        "updated_at": job.get("updated_at"),
+        "project": job.get("project"),
+        "error": job.get("error"),
+    }
+
+
+def _serialize_outline_job(job: Dict[str, Any]) -> OutlineGenerationJobResponse:
+    return OutlineGenerationJobResponse(**_normalize_outline_job_payload(job))
+
+
+async def _set_outline_job_state(run_id: str, **updates: Any) -> Dict[str, Any]:
+    async with _OUTLINE_JOB_LOCK:
+        job = _OUTLINE_JOBS.get(run_id)
+        if not job:
+            job = {"run_id": run_id, "status": "idle", "progress_stage": "idle"}
+            _OUTLINE_JOBS[run_id] = job
+        job.update(updates)
+        job["updated_at"] = _outline_job_now_iso()
+        return dict(job)
+
+
+async def _run_outline_generation_job(
+    run_id: str,
+    project_id: str,
+    user_id: int,
+    request_payload: Dict[str, Any],
+) -> None:
+    async def heartbeat() -> None:
+        while True:
+            await asyncio.sleep(_OUTLINE_JOB_HEARTBEAT_SECONDS)
+            async with _OUTLINE_JOB_LOCK:
+                job = _OUTLINE_JOBS.get(run_id)
+                if not job or job.get("status") not in _OUTLINE_ACTIVE_STATUSES:
+                    return
+                stage = str(job.get("progress_stage") or "outline_chapter_skeleton")
+                message = str(job.get("progress_message") or "章节大纲生成中")
+            await _set_outline_job_state(
+                run_id,
+                status="generating",
+                progress_stage=stage,
+                progress_message=message,
+            )
+
+    heartbeat_task = asyncio.create_task(heartbeat())
+    try:
+        await _set_outline_job_state(
+            run_id,
+            status="generating",
+            progress_stage="outline_context",
+            progress_message="正在整理蓝图、已有章节和目标篇幅",
+        )
+        request = GenerateOutlineRequest(**request_payload)
+        current_user = UserInDB(id=user_id, username=f"outline-job-{user_id}", email=None, hashed_password="")
+        async with AsyncSessionLocal() as job_session:
+            await _set_outline_job_state(
+                run_id,
+                status="generating",
+                progress_stage="outline_chapter_skeleton",
+                progress_message="正在分批生成可执行章节大纲",
+            )
+            project_schema = await generate_chapters_outline(
+                project_id=project_id,
+                request=request,
+                session=job_session,
+                current_user=current_user,
+            )
+
+        async with _OUTLINE_JOB_LOCK:
+            current = _OUTLINE_JOBS.get(run_id)
+            if current and current.get("status") == "cancelled":
+                return
+
+        await _set_outline_job_state(
+            run_id,
+            status="successful",
+            progress_stage="successful",
+            progress_message="章节大纲生成完成",
+            project=project_schema,
+            error=None,
+        )
+    except HTTPException as exc:
+        logger.warning(
+            "章节大纲后台生成失败: project=%s run_id=%s status=%s detail=%s",
+            project_id,
+            run_id,
+            exc.status_code,
+            exc.detail,
+        )
+        await _set_outline_job_state(
+            run_id,
+            status="failed",
+            progress_stage="failed",
+            progress_message="章节大纲生成失败",
+            error=_outline_job_error(
+                "outline_generation_failed",
+                "章节大纲生成失败",
+                detail=exc.detail,
+                retryable=exc.status_code >= 500 or exc.status_code in {408, 409, 429},
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 - background task must surface failures
+        logger.exception("章节大纲后台生成异常: project=%s run_id=%s", project_id, run_id)
+        await _set_outline_job_state(
+            run_id,
+            status="failed",
+            progress_stage="failed",
+            progress_message="章节大纲生成失败",
+            error=_outline_job_error(
+                "outline_generation_failed",
+                "章节大纲生成失败",
+                detail=exc,
+                retryable=True,
+            ),
+        )
+    finally:
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except asyncio.CancelledError:
+            pass
 
 
 def _extract_tail_excerpt(text: Optional[str], limit: int = 500) -> str:
@@ -3150,7 +3314,116 @@ async def delete_chapters(
     return await _load_project_schema(novel_service, project_id, current_user.id)
 
 
-@router.post("/novels/{project_id}/chapters/outline", response_model=NovelProjectSchema)
+@router.post("/novels/{project_id}/chapters/outline/start", response_model=OutlineGenerationJobResponse)
+async def start_chapters_outline_generation(
+    project_id: str,
+    request: GenerateOutlineRequest,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> OutlineGenerationJobResponse:
+    novel_service = NovelService(session)
+    await novel_service.ensure_project_owner(project_id, current_user.id)
+
+    async with _OUTLINE_JOB_LOCK:
+        existing_run_id = _OUTLINE_PROJECT_RUNS.get(project_id)
+        existing = _OUTLINE_JOBS.get(existing_run_id or "")
+        if existing and existing.get("status") in _OUTLINE_ACTIVE_STATUSES:
+            return _serialize_outline_job(existing)
+
+        run_id = str(uuid.uuid4())
+        now = _outline_job_now_iso()
+        job = {
+            "run_id": run_id,
+            "project_id": project_id,
+            "status": "queued",
+            "progress_stage": "queued",
+            "progress_message": "章节大纲生成任务已入队",
+            "started_at": now,
+            "updated_at": now,
+            "project": None,
+            "error": None,
+            "request": request.model_dump(),
+        }
+        _OUTLINE_JOBS[run_id] = job
+        _OUTLINE_PROJECT_RUNS[project_id] = run_id
+
+    background_tasks.add_task(
+        _run_outline_generation_job,
+        run_id,
+        project_id,
+        int(current_user.id),
+        request.model_dump(),
+    )
+    return _serialize_outline_job(job)
+
+
+@router.get("/novels/{project_id}/chapters/outline/status", response_model=OutlineGenerationJobResponse)
+async def get_chapters_outline_generation_status(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> OutlineGenerationJobResponse:
+    novel_service = NovelService(session)
+    await novel_service.ensure_project_owner(project_id, current_user.id)
+
+    async with _OUTLINE_JOB_LOCK:
+        run_id = _OUTLINE_PROJECT_RUNS.get(project_id)
+        job = dict(_OUTLINE_JOBS.get(run_id or "") or {})
+        if job and job.get("status") not in _OUTLINE_ACTIVE_STATUSES:
+            _OUTLINE_JOBS.pop(str(job.get("run_id") or ""), None)
+            _OUTLINE_PROJECT_RUNS.pop(project_id, None)
+
+    if job:
+        return _serialize_outline_job(job)
+
+    return OutlineGenerationJobResponse(
+        run_id="",
+        project_id=project_id,
+        status="idle",
+        progress_stage="idle",
+        progress_message="暂无章节大纲生成任务",
+    )
+
+
+@router.post("/novels/{project_id}/chapters/outline/cancel", response_model=OutlineGenerationJobResponse)
+async def cancel_chapters_outline_generation(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> OutlineGenerationJobResponse:
+    novel_service = NovelService(session)
+    await novel_service.ensure_project_owner(project_id, current_user.id)
+
+    async with _OUTLINE_JOB_LOCK:
+        run_id = _OUTLINE_PROJECT_RUNS.get(project_id)
+        job = _OUTLINE_JOBS.get(run_id or "")
+        if not job:
+            return OutlineGenerationJobResponse(
+                run_id="",
+                project_id=project_id,
+                status="idle",
+                progress_stage="idle",
+                progress_message="暂无可取消的章节大纲生成任务",
+            )
+        if job.get("status") in _OUTLINE_ACTIVE_STATUSES:
+            job.update({
+                "status": "cancelled",
+                "progress_stage": "cancelled",
+                "progress_message": "章节大纲生成任务已取消",
+                "updated_at": _outline_job_now_iso(),
+                "error": _outline_job_error(
+                    "outline_generation_cancelled",
+                    "章节大纲生成任务已取消",
+                    retryable=True,
+                ),
+            })
+        snapshot = dict(job)
+
+    return _serialize_outline_job(snapshot)
+
+
+@router.post("/novels/{project_id}/chapters/outline", response_model=NovelProjectSchema, deprecated=True)
 async def generate_chapters_outline(
     project_id: str,
     request: GenerateOutlineRequest,

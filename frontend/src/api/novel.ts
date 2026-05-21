@@ -476,6 +476,18 @@ export interface BlueprintGenerationJobResponse {
   error?: BlueprintGenerationError | string | null
 }
 
+export interface OutlineGenerationJobResponse {
+  run_id: string
+  project_id: string
+  status: 'idle' | 'queued' | 'generating' | 'successful' | 'failed' | 'cancelled'
+  progress_stage: string
+  progress_message: string
+  started_at?: string | null
+  updated_at?: string | null
+  project?: NovelProject | null
+  error?: BlueprintGenerationError | string | null
+}
+
 export interface UIControl {
   type: 'single_choice' | 'multi_choice' | 'text_input'
   options?: Array<{ id: string; label: string }>

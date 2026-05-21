@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { deleteChapterVersion, evaluateChapter, selectChapterVersion } from './chapterWorkflow'
+import { deleteChapterVersion, evaluateChapter, generateChapterOutline, selectChapterVersion } from './chapterWorkflow'
 
 const projectPayload = {
   id: 'project-1',
@@ -60,5 +60,29 @@ describe('chapter workflow version selectors', () => {
     const body = parseFirstRequestBody(fetchMock)
     expect(body).toMatchObject({ chapter_number: 3, version_id: 77, evaluate_all: false })
     expect(body).not.toHaveProperty('version_index')
+  })
+
+  it('routes chapter outline generation through the background job entry', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({
+        run_id: 'outline-run-1',
+        project_id: 'project-1',
+        status: 'successful',
+        progress_stage: 'successful',
+        progress_message: '章节大纲生成完成',
+        project: projectPayload,
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await generateChapterOutline('project-1', 5, 8, { targetTotalChapters: 80 })
+
+    const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit?]
+    const body = parseFirstRequestBody(fetchMock)
+    expect(url).toContain('/chapters/outline/start')
+    expect(body).toMatchObject({ start_chapter: 5, num_chapters: 8, target_total_chapters: 80 })
+    expect(result.id).toBe('project-1')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
