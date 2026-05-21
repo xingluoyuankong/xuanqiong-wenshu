@@ -400,6 +400,7 @@ export interface GenerationRuntimeEvent {
   progress_percent?: number
   metrics?: Record<string, any>
   artifact_refs?: Record<string, any> | Array<Record<string, any>>
+  developer_detail?: Record<string, any>
   message?: string
   metadata?: Record<string, any>
 }
@@ -544,6 +545,17 @@ const NOVELS_BASE = `${API_BASE_URL}${API_PREFIX}/novels`
 const PATCH_DIFF_BASE = `${API_BASE_URL}${API_PREFIX}`
 const WRITER_PREFIX = '/api/writer'
 const WRITER_BASE = `${API_BASE_URL}${WRITER_PREFIX}/novels`
+const BLUEPRINT_LEGACY_POLL_INTERVAL_MS = 2000
+const BLUEPRINT_LEGACY_MAX_POLL_ATTEMPTS = 900
+
+const delay = (ms: number) => new Promise((resolve) => globalThis.setTimeout(resolve, ms))
+
+const readBlueprintJobError = (status: BlueprintGenerationJobResponse): string => {
+  const rawError = status.error
+  if (!rawError) return status.progress_message || '蓝图生成失败，请稍后重试'
+  if (typeof rawError === 'string') return rawError
+  return rawError.detail || rawError.message || status.progress_message || '蓝图生成失败，请稍后重试'
+}
 
 export class NovelAPI {
   static async createNovel(title: string, initialPrompt: string): Promise<NovelProject> {
@@ -601,9 +613,28 @@ export class NovelAPI {
   }
 
   static async generateBlueprint(projectId: string): Promise<BlueprintGenerationResponse> {
-    return request(`${NOVELS_BASE}/${projectId}/blueprint/generate`, {
-      method: 'POST'
-    })
+    const initialStatus = await NovelAPI.startBlueprintGeneration(projectId)
+    let status = initialStatus
+
+    for (let attempt = 0; attempt < BLUEPRINT_LEGACY_MAX_POLL_ATTEMPTS; attempt += 1) {
+      if (status.status === 'successful' && status.blueprint) {
+        return {
+          blueprint: status.blueprint,
+          ai_message: status.ai_message || '蓝图已生成，请确认后进入写作阶段。'
+        }
+      }
+      if (status.status === 'failed') {
+        throw new Error(readBlueprintJobError(status))
+      }
+      if (status.status === 'cancelled') {
+        throw new Error(status.progress_message || '蓝图生成已取消')
+      }
+
+      await delay(BLUEPRINT_LEGACY_POLL_INTERVAL_MS)
+      status = await NovelAPI.getBlueprintGenerationStatus(projectId)
+    }
+
+    throw new Error('蓝图后台任务等待超时，请稍后到生成状态中刷新结果。')
   }
 
   static async startBlueprintGeneration(

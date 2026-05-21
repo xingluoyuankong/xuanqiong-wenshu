@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -3518,12 +3518,21 @@ async def _generate_blueprint_impl(
     return BlueprintGenerationResponse(blueprint=blueprint, ai_message=ai_message)
 
 
-@router.post("/{project_id}/blueprint/generate", response_model=BlueprintGenerationResponse)
+@router.post("/{project_id}/blueprint/generate", response_model=BlueprintGenerationResponse, deprecated=True)
 async def generate_blueprint(
     project_id: str,
+    response: Response,
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> BlueprintGenerationResponse:
+    response.headers["Deprecation"] = "true"
+    response.headers["X-Xuanqiong-Legacy-Route"] = "blueprint-generate-sync"
+    response.headers["Link"] = f"</api/novels/{project_id}/blueprint/generate/start>; rel=\"successor-version\""
+    logger.warning(
+        "Legacy synchronous blueprint route called; prefer background job route: project=%s user=%s",
+        project_id,
+        current_user.id,
+    )
     with LLMService.daily_limit_scope(f"blueprint:{project_id}:full:{int(current_user.id)}"):
         return await _generate_blueprint_impl(
             project_id=project_id,

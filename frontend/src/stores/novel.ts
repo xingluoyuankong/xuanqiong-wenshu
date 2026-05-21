@@ -220,7 +220,8 @@ export const useNovelStore = defineStore('novel', () => {
   }
 
   async function generateBlueprint(): Promise<BlueprintGenerationResponse> {
-    // Generate blueprint from conversation history
+    // Legacy convenience entry: keep the store API stable, but route through the
+    // background blueprint job so old UI/tests do not bypass progress/cancel.
     isLoading.value = true
     error.value = null
     try {
@@ -385,13 +386,15 @@ export const useNovelStore = defineStore('novel', () => {
         throw new Error('版本内容为空')
       }
 
+      const versionSelector = typeof versionId === 'number'
+        ? { version_id: versionId }
+        : { version_index: versionIndex }
       const result = await OptimizerAPI.optimizeChapter({
         project_id: projectId,
         chapter_number: chapterNumber,
         dimension,
         additional_notes: additionalNotes?.trim() || undefined,
-        version_index: versionIndex,
-        version_id: versionId
+        ...versionSelector
       })
 
       if (!result.optimized_content?.trim()) {
@@ -669,4 +672,3 @@ export const useNovelStore = defineStore('novel', () => {
     setCurrentProject
   }
 })
-

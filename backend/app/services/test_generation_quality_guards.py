@@ -12,6 +12,24 @@ from app.services.ultimate_writing_flow import _resolve_direct_generation_contra
 
 
 class TestGenerationQualityGuards:
+    def test_runtime_event_keeps_developer_detail_separate_from_user_summary(self):
+        compact = PipelineOrchestrator._compact_runtime_event({
+            "at": "2026-05-21T00:00:00+00:00",
+            "stage": "quality_gate",
+            "level": "warning",
+            "message": "质量门发现需要局部补丁的问题",
+            "kind": "review",
+            "summary": "事件密度不足，建议补强对话攻防。",
+            "developer_detail": {
+                "raw_provider": "cpa",
+                "trace": "x" * 1200,
+            },
+        })
+
+        assert compact["summary"] == "事件密度不足，建议补强对话攻防。"
+        assert compact["developer_detail"]["raw_provider"] == "cpa"
+        assert len(compact["developer_detail"]["trace"]) < 1200
+
     def test_ultimate_direct_generation_contract_scales_long_chapters(self):
         standard = _resolve_direct_generation_contract(5000)
         long_chapter = _resolve_direct_generation_contract(10000)

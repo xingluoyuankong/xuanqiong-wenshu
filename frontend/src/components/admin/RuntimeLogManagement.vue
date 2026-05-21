@@ -457,7 +457,12 @@ function normalizeEvents(events: Array<Record<string, any>>): RuntimeLine[] {
       metrics: [],
       artifactRefs: normalizeArtifactRefs(event.artifact_refs),
       message: String(event.message || ''),
-      metadata: event.metadata && typeof event.metadata === 'object' ? event.metadata : {},
+      metadata: {
+        ...(event.metadata && typeof event.metadata === 'object' ? event.metadata : {}),
+        ...(event.developer_detail && typeof event.developer_detail === 'object'
+          ? { developer_detail: event.developer_detail }
+          : {}),
+      },
       stateLabel: event.level === 'warning' && /降级|跳过/i.test(String(event.message || ''))
         ? (/跳过/i.test(String(event.message || '')) ? '已跳过' : '降级失败')
         : '',

@@ -151,6 +151,15 @@ const requestChapter = async (url: string, options?: RequestInit): Promise<Chapt
   return normalizeChapter(chapter as Chapter)
 }
 
+const buildVersionSelectorPayload = (
+  versionIndex?: number,
+  versionId?: number,
+): { version_index?: number; version_id?: number } => {
+  if (typeof versionId === 'number') return { version_id: versionId }
+  if (typeof versionIndex === 'number') return { version_index: versionIndex }
+  return {}
+}
+
 export const getChapterGenerationStatus = (
   projectId: string,
   chapterNumber: number,
@@ -211,8 +220,7 @@ export const evaluateChapter = (
   method: 'POST',
   body: JSON.stringify({
     chapter_number: chapterNumber,
-    version_index: versionIndex,
-    version_id: versionId,
+    ...buildVersionSelectorPayload(versionIndex, versionId),
     evaluate_all: evaluateAll,
   }),
 })
@@ -226,8 +234,7 @@ export const selectChapterVersion = (
   method: 'POST',
   body: JSON.stringify({
     chapter_number: chapterNumber,
-    version_index: versionIndex,
-    version_id: versionId,
+    ...buildVersionSelectorPayload(versionIndex, versionId),
   }),
 })
 
@@ -240,8 +247,7 @@ export const deleteChapterVersion = (
   method: 'POST',
   body: JSON.stringify({
     chapter_number: chapterNumber,
-    version_index: versionIndex,
-    version_id: versionId,
+    ...buildVersionSelectorPayload(versionIndex, versionId),
   }),
 })
 

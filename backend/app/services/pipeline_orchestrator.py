@@ -1101,7 +1101,7 @@ class PipelineOrchestrator:
                 compact_event[key] = cls._truncate_runtime_text(value, 520 if key == "content_preview" else 220)
         if event.get("progress_percent") is not None:
             compact_event["progress_percent"] = event.get("progress_percent")
-        for key in ("metrics", "artifact_refs"):
+        for key in ("metrics", "artifact_refs", "developer_detail"):
             value = event.get(key)
             if isinstance(value, (dict, list)) and value:
                 compact_event[key] = cls._compact_runtime_value(value)
@@ -1539,6 +1539,7 @@ class PipelineOrchestrator:
         content_preview: Optional[str] = None,
         metrics: Optional[Dict[str, Any]] = None,
         artifact_refs: Optional[Dict[str, Any]] = None,
+        developer_detail: Optional[Dict[str, Any]] = None,
     ) -> None:
         if not generation_run_id:
             return
@@ -1570,6 +1571,8 @@ class PipelineOrchestrator:
             event["metrics"] = self._compact_runtime_value(metrics)
         if artifact_refs:
             event["artifact_refs"] = self._compact_runtime_value(artifact_refs)
+        if developer_detail:
+            event["developer_detail"] = self._compact_runtime_value(developer_detail)
         if extra:
             compact_extra = {key: value for key, value in extra.items() if value is not None}
             if compact_extra:
