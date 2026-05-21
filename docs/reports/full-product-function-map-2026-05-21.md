@@ -87,3 +87,8 @@
 - `TokenBudgetService` 新增 `record_generation_call_metrics()`，把候选版本 metadata 里的估算 token、尝试次数、max_tokens 和 Provider 错误归因转成现有 `TokenUsage` 记录，不新增平行预算表。
 - `PipelineOrchestrator` 在候选版本落库后记录正文生成预算用量，并把 `token_budget_usage` 写入 runtime metadata；预算记录失败只产生 warning，不阻断章节生成。
 - 修复影响：Token 预算页不再只靠手工或外部调用记录，正文首稿生成产生的估算消耗会进入项目预算统计，用户能把“生成了什么”和“消耗了多少”对上。
+
+## 2026-05-21 继续收口：LLM 健康检查可解释性
+- `LLMSettings.vue` 复用现有健康检查返回的 `keys/status_code/latency_ms/detail/model_count`，在配置页展示 Key 级别状态、HTTP 状态、耗时、失败归因和重试/切换建议。
+- 修复影响：Provider 抖动、429 限流、401/403 鉴权失败、5xx 服务异常和 base_url 不可达不再只显示“配置组不可用”，用户能直接判断是等、换 Key、切备用 Provider，还是修 URL。
+- 架构边界：没有新增 Provider 调度器，也没有改写健康检查接口，只把后端已有诊断字段接到前端工作界面。

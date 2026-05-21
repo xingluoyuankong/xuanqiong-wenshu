@@ -96,3 +96,8 @@
 - 定向验证：`python -m pytest backend/app/services/test_token_budget_service.py -q` 通过（2 passed）。
 - 编译验证：`python -m compileall backend/app/services/token_budget_service.py backend/app/services/pipeline_orchestrator.py backend/app/services/test_token_budget_service.py` 通过。
 - 后端全量验证：`python -m pytest backend -q` 通过（249 passed），`python -m compileall backend/app` 通过。
+
+## 2026-05-21 LLM 健康检查前端验证
+- 代码收口：`LLMSettings.vue` 展示 Key 级健康明细，包括 base_url、HTTP 状态、延迟、Provider 失败归因和修复/重试建议。
+- 定向验证：`cd frontend; npm run test:run -- src/components/LLMSettings.spec.ts` 通过（1 passed）。
+- 前端全量验证：`cd frontend; npm run test:run` 通过（126 passed），`cd frontend; npm run build` 通过。
