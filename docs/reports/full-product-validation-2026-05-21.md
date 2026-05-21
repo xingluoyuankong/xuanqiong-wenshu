@@ -11,19 +11,21 @@
 - 章节候选版本选择、删除、评审、优化改为 `version_id` 优先；没有稳定 ID 时才发送 `version_index`。
 - `GenerationRuntimeEvent` 支持 `developer_detail`，日志页会把它折进“开发者详情”，不污染用户看的生成状态摘要。
 - 文风画像生成新增 `/style/profiles/start/status/cancel` 后台任务入口；前端 `OptimizerAPI.createStyleProfile()` 改为启动任务并轮询状态，失败、取消、超时都有可读提示。
+- 旧稿导入新增 `/import/start/status/cancel` 后台任务入口；前端 `NovelAPI.importNovel()` 改为启动任务并轮询状态，后端在读取、分章、采样、角色筛选、蓝图抽取和保存阶段回报进度。
 
 ## 自动化验证
 
 - `python -m compileall backend/app`：通过。
 - `python -m pytest backend/app/services/test_generation_quality_guards.py -q`：57 passed。
-- `python -m pytest backend -q`：240 passed。
-- `cd frontend; npm run test:run`：122 passed。
+- `python -m pytest backend -q`：241 passed。
+- `cd frontend; npm run test:run`：123 passed。
 - `cd frontend; npm run build`：通过。
 - `python -m pytest backend/app/api/routers/test_blueprint_legacy_route.py backend/app/api/routers/test_outline_generation_job.py -q`：2 passed。
 - `python -m pytest backend/app/services/test_export_service.py -q`：4 passed。
 - `cd frontend; npm run test:run -- src/api/modules/chapterWorkflow.spec.ts`：4 passed。
 - `python -m pytest backend/app/api/routers/test_style_profile_job.py -q`：1 passed。
-- `cd frontend; npm run test:run -- src/api/novel.spec.ts`：3 passed。
+- `python -m pytest backend/app/api/routers/test_import_novel_job.py backend/app/services/test_daily_limit_scopes.py::test_import_service_scope_reuses_outer_logical_run -q`：2 passed。
+- `cd frontend; npm run test:run -- src/api/novel.spec.ts`：4 passed。
 
 ## 项目本体启动验证
 
@@ -42,9 +44,10 @@
 - 系统稳定性视角：旧同步后端路由暂不删除，先 deprecated/兼容转发，避免破坏外部旧客户端。
 - UI 可用性视角：本轮未大改布局，只把会影响操作稳定性的入口与日志字段先收口。
 - 风格工作流视角：画像生成原本可能被长素材和 LLM 抽取卡在同步请求中，已改为后台任务，下一步需要把素材导入本身也拆成可观察批次。
+- 导入工作流视角：旧稿导入原本把分章、角色普查、蓝图抽取、保存全塞进同步请求，已改为可轮询任务；下一步要把导入后的账本重建阶段继续接细。
 
 ## 保留风险
 
 - 尚未完成 2-3 轮完整 AI 生成实跑；本轮完成了项目本体健康检查、自动化测试和接口级验证。
-- 风格画像生成已任务化；风格素材导入、旧稿导入任务化仍是下一批 P1。章节大纲已完成首轮后台任务化，但还需要接入更细粒度进度事件持久化。
+- 风格画像生成和旧稿导入已任务化；风格素材导入、导入后账本重建仍是下一批 P1。章节大纲已完成首轮后台任务化，但还需要接入更细粒度进度事件持久化。
 - 历史数据库旧数据存在乱码样本，需要单独做数据清理/迁移，不能混进本轮代码重构。

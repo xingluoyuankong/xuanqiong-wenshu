@@ -99,4 +99,43 @@ describe('NovelAPI normalization', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(response.profile.id).toBe('profile-1')
   })
+
+  it('routes novel import through the background job endpoint', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/import/start')) {
+        return new Response(JSON.stringify({
+          run_id: 'import-run-1',
+          status: 'queued',
+          progress_stage: 'queued',
+          progress_message: '旧稿导入任务已入队',
+          filename: 'old.txt',
+        }), {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/import/status')) {
+        expect(url).toContain('run_id=import-run-1')
+        return new Response(JSON.stringify({
+          run_id: 'import-run-1',
+          status: 'successful',
+          progress_stage: 'successful',
+          progress_message: '旧稿导入完成',
+          filename: 'old.txt',
+          project_id: 'project-imported',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      throw new Error(`unexpected url ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await NovelAPI.importNovel(new File(['第一章 旧稿'], 'old.txt', { type: 'text/plain' }))
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(response.id).toBe('project-imported')
+  })
 })

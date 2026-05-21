@@ -285,6 +285,19 @@ class OutlineGenerationJobResponse(BaseModel):
     error: Optional[BlueprintGenerationError] = None
 
 
+class ImportNovelJobResponse(BaseModel):
+    run_id: str
+    status: str
+    progress_stage: str = "queued"
+    progress_message: str = ""
+    started_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    filename: Optional[str] = None
+    project_id: Optional[str] = None
+    metrics: Dict[str, Any] = Field(default_factory=dict)
+    error: Optional[BlueprintGenerationError] = None
+
+
 class ChapterGenerationResponse(BaseModel):
     ai_message: str
     chapter_versions: List[Dict[str, Any]]

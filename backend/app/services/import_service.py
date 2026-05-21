@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +19,13 @@ from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwra
 
 logger = logging.getLogger(__name__)
 
+ImportProgressCallback = Callable[[str, str, Optional[Dict[str, Any]]], Awaitable[None]]
+ImportCancelChecker = Callable[[], Awaitable[bool]]
+
+
+class ImportCancelledError(Exception):
+    """Raised when a background import job is cancelled before persistence starts."""
+
 
 class ImportService:
     """处理小说文件导入、分章与AI分析的服务。"""
@@ -29,21 +36,41 @@ class ImportService:
         self.llm_service = LLMService(session)
         self.prompt_service = PromptService(session)
 
-    async def import_novel_from_file(self, user_id: int, file: UploadFile) -> str:
+    async def import_novel_from_file(
+        self,
+        user_id: int,
+        file: UploadFile,
+        progress_callback: Optional[ImportProgressCallback] = None,
+        should_cancel: Optional[ImportCancelChecker] = None,
+    ) -> str:
         """
         导入小说文件，执行分章、分析并创建项目。
         返回新创建的项目ID。
         """
         with LLMService.daily_limit_scope(f"import_novel:{user_id}:{getattr(file, 'filename', 'unknown')}"):
+            await self._emit_import_progress(
+                progress_callback,
+                "import_reading",
+                "正在读取旧稿文件",
+                {"filename": getattr(file, "filename", "")},
+            )
             content = await self._read_file_content(file)
             if not content:
                 raise HTTPException(status_code=400, detail="文件内容为空")
+            await self._raise_if_import_cancelled(should_cancel)
 
             # 1. 智能分段（分章）
+            await self._emit_import_progress(
+                progress_callback,
+                "import_splitting",
+                "正在识别章节边界",
+                {"characters": len(content)},
+            )
             chapters = self._split_into_chapters(content)
             if not chapters:
                 # 如果无法分章，将整个文件作为一个章节
                 chapters = [("第一章 全文", content)]
+            await self._raise_if_import_cancelled(should_cancel)
 
             # 2. 准备分析用的文本样本
             # 策略改进：混合采样 (均匀剧情采样 + 角色高光采样)
@@ -58,6 +85,15 @@ class ImportService:
 
             # 预提取人名 (基于全文)
             potential_characters = self._extract_potential_characters(content, top_n=150) # 扩大到150，广撒网
+            await self._emit_import_progress(
+                progress_callback,
+                "import_sampling",
+                "正在抽取剧情样本和角色高光片段",
+                {
+                    "chapter_count": len(chapters),
+                    "potential_character_count": len(potential_characters),
+                },
+            )
 
             # 确定要采样的章节索引 (均匀分布)
             indices = []
@@ -96,10 +132,27 @@ class ImportService:
 
             # 3. 分阶段分析
             # 阶段一：先筛选出确定的角色名单 (Stable Census)
+            await self._raise_if_import_cancelled(should_cancel)
+            await self._emit_import_progress(
+                progress_callback,
+                "import_character_verify",
+                "正在筛选真实角色名单",
+                {"potential_character_count": len(potential_characters)},
+            )
             verified_characters = await self._filter_characters_only(user_id, potential_characters, char_highlights_text)
             logger.info(f"角色筛选完成，潜在 {len(potential_characters)} -> 确认 {len(verified_characters)}")
 
             # 阶段二：详细分析 (Deep Profiling)
+            await self._raise_if_import_cancelled(should_cancel)
+            await self._emit_import_progress(
+                progress_callback,
+                "import_blueprint_extract",
+                "正在抽取故事蓝图、角色和章节大纲",
+                {
+                    "chapter_count": len(chapters),
+                    "verified_character_count": len(verified_characters),
+                },
+            )
             blueprint_data = await self._analyze_content(
                 user_id,
                 plot_sample_text,
@@ -110,6 +163,13 @@ class ImportService:
             )
 
             # 4. 创建项目
+            await self._raise_if_import_cancelled(should_cancel)
+            await self._emit_import_progress(
+                progress_callback,
+                "import_saving",
+                "正在写入项目、蓝图和章节正文",
+                {"chapter_count": len(chapters)},
+            )
             title = blueprint_data.title or file.filename.rsplit('.', 1)[0]
             initial_prompt = f"导入自文件: {file.filename}"
             project = await self.novel_service.create_project(user_id, title, initial_prompt)
@@ -154,6 +214,20 @@ class ImportService:
             await self.session.commit()
 
             return project.id
+
+    async def _emit_import_progress(
+        self,
+        callback: Optional[ImportProgressCallback],
+        stage: str,
+        message: str,
+        metrics: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if callback is not None:
+            await callback(stage, message, metrics or {})
+
+    async def _raise_if_import_cancelled(self, should_cancel: Optional[ImportCancelChecker]) -> None:
+        if should_cancel is not None and await should_cancel():
+            raise ImportCancelledError("import job cancelled")
 
     async def _read_file_content(self, file: UploadFile) -> str:
         content_bytes = await file.read()

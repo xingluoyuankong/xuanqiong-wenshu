@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,7 @@ from ...schemas.novel import (
     Chapter as ChapterSchema,
     ConverseRequest,
     ConverseResponse,
+    ImportNovelJobResponse,
     NovelProject as NovelProjectSchema,
     NovelProjectSummary,
     NovelSectionResponse,
@@ -31,7 +32,7 @@ from ...schemas.novel import (
 from ...schemas.user import User as UserSchema, UserInDB
 from ...models import BlueprintGenerationJob, NovelProject
 from ...services.export_service import ExportService
-from ...services.import_service import ImportService
+from ...services.import_service import ImportCancelledError, ImportService
 from ...services.generation_call_service import GenerationCallPolicy, GenerationJSONDecodeError, call_generation_json, call_generation_text, is_retryable_http_exception
 from ...services.llm_service import LLMService
 from ...services.novel_service import NovelService
@@ -58,6 +59,20 @@ _BLUEPRINT_ACTIVE_STATUSES = {
     "blueprint_foreshadowing",
     "blueprint_chapter_plan",
 }
+
+_IMPORT_JOBS: Dict[str, Dict[str, Any]] = {}
+_IMPORT_USER_RUNS: Dict[int, str] = {}
+_IMPORT_JOB_LOCK = asyncio.Lock()
+_IMPORT_RUNNING_STATUSES = {
+    "queued",
+    "import_reading",
+    "import_splitting",
+    "import_sampling",
+    "import_character_verify",
+    "import_blueprint_extract",
+    "import_saving",
+}
+_IMPORT_CANCELABLE_STATUSES = _IMPORT_RUNNING_STATUSES - {"import_saving"}
 
 JSON_RESPONSE_INSTRUCTION = """
 IMPORTANT: 你的回复必须是合法的 JSON 对象，并严格包含以下字段：
@@ -2407,6 +2422,131 @@ async def _polish_chapter_outline_quality(
     return blueprint_data
 
 
+def _import_job_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _import_job_error(code: str, message: str, *, detail: Any = None, retryable: bool = True) -> Dict[str, Any]:
+    if detail is None:
+        detail_text = None
+    elif isinstance(detail, str):
+        detail_text = detail[:800]
+    else:
+        try:
+            detail_text = json.dumps(detail, ensure_ascii=False, default=str)[:800]
+        except TypeError:
+            detail_text = str(detail)[:800]
+    return {"code": code, "message": message, "detail": detail_text, "retryable": retryable}
+
+
+def _serialize_import_job(job: Dict[str, Any]) -> ImportNovelJobResponse:
+    return ImportNovelJobResponse(
+        run_id=str(job.get("run_id") or ""),
+        status=str(job.get("status") or "idle"),
+        progress_stage=str(job.get("progress_stage") or job.get("status") or "idle"),
+        progress_message=str(job.get("progress_message") or ""),
+        started_at=job.get("started_at"),
+        updated_at=job.get("updated_at"),
+        filename=job.get("filename"),
+        project_id=job.get("project_id"),
+        metrics=dict(job.get("metrics") or {}),
+        error=job.get("error"),
+    )
+
+
+async def _set_import_job_state(run_id: str, **updates: Any) -> Dict[str, Any]:
+    async with _IMPORT_JOB_LOCK:
+        job = _IMPORT_JOBS.get(run_id)
+        if not job:
+            job = {"run_id": run_id, "status": "idle", "progress_stage": "idle"}
+            _IMPORT_JOBS[run_id] = job
+        if job.get("status") == "cancelled" and updates.get("status") != "cancelled":
+            return dict(job)
+        if "metrics" in updates:
+            merged_metrics = dict(job.get("metrics") or {})
+            merged_metrics.update(updates.pop("metrics") or {})
+            updates["metrics"] = merged_metrics
+        job.update(updates)
+        job["updated_at"] = _import_job_now_iso()
+        return dict(job)
+
+
+async def _is_import_job_cancelled(run_id: str) -> bool:
+    async with _IMPORT_JOB_LOCK:
+        return (_IMPORT_JOBS.get(run_id) or {}).get("status") == "cancelled"
+
+
+class _BufferedImportUpload:
+    def __init__(self, filename: str, content: bytes):
+        self.filename = filename
+        self._content = content
+
+    async def read(self) -> bytes:
+        return self._content
+
+
+async def _run_import_novel_job(run_id: str, user_id: int, filename: str, content: bytes) -> None:
+    async def progress(stage: str, message: str, metrics: Optional[Dict[str, Any]] = None) -> None:
+        await _set_import_job_state(
+            run_id,
+            status=stage,
+            progress_stage=stage,
+            progress_message=message,
+            metrics=metrics or {},
+        )
+
+    try:
+        if await _is_import_job_cancelled(run_id):
+            return
+        await progress("import_reading", "正在读取旧稿文件", {"filename": filename, "bytes": len(content)})
+        async with AsyncSessionLocal() as job_session:
+            import_service = ImportService(job_session)
+            project_id = await import_service.import_novel_from_file(
+                user_id,
+                _BufferedImportUpload(filename, content),  # type: ignore[arg-type]
+                progress_callback=progress,
+                should_cancel=lambda: _is_import_job_cancelled(run_id),
+            )
+        await _set_import_job_state(
+            run_id,
+            status="successful",
+            progress_stage="successful",
+            progress_message="旧稿导入完成，已创建项目",
+            project_id=project_id,
+            error=None,
+        )
+    except ImportCancelledError:
+        await _set_import_job_state(
+            run_id,
+            status="cancelled",
+            progress_stage="cancelled",
+            progress_message="旧稿导入任务已取消",
+            error=_import_job_error("import_cancelled", "旧稿导入任务已取消", retryable=True),
+        )
+    except HTTPException as exc:
+        await _set_import_job_state(
+            run_id,
+            status="failed",
+            progress_stage="failed",
+            progress_message="旧稿导入失败",
+            error=_import_job_error(
+                "import_failed",
+                "旧稿导入失败",
+                detail=exc.detail,
+                retryable=exc.status_code >= 500,
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 - background job must expose failures
+        logger.exception("旧稿导入后台任务失败: run_id=%s filename=%s", run_id, filename)
+        await _set_import_job_state(
+            run_id,
+            status="failed",
+            progress_stage="failed",
+            progress_message="旧稿导入失败",
+            error=_import_job_error("import_failed", "旧稿导入失败", detail=exc, retryable=True),
+        )
+
+
 @router.post("", response_model=NovelProjectSchema, status_code=status.HTTP_201_CREATED)
 async def create_novel(
     title: str = Body(...),
@@ -2422,7 +2562,112 @@ async def create_novel(
     return await novel_service.get_project_schema(project.id, user_id)
 
 
-@router.post("/import", response_model=Dict[str, str], status_code=status.HTTP_201_CREATED)
+@router.post("/import/start", response_model=ImportNovelJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def start_import_novel(
+    background_tasks: BackgroundTasks,
+    file: UploadFile,
+    current_user: UserInDB = Depends(get_current_user),
+) -> ImportNovelJobResponse:
+    """启动旧稿导入后台任务。"""
+    user_id = int(current_user.id)
+    filename = file.filename or "import.txt"
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="文件内容为空")
+
+    async with _IMPORT_JOB_LOCK:
+        existing_run_id = _IMPORT_USER_RUNS.get(user_id)
+        existing = _IMPORT_JOBS.get(existing_run_id or "")
+        if existing and existing.get("status") in _IMPORT_RUNNING_STATUSES:
+            return _serialize_import_job(existing)
+
+        run_id = str(uuid.uuid4())
+        now = _import_job_now_iso()
+        job = {
+            "run_id": run_id,
+            "user_id": user_id,
+            "status": "queued",
+            "progress_stage": "queued",
+            "progress_message": "旧稿导入任务已入队",
+            "started_at": now,
+            "updated_at": now,
+            "filename": filename,
+            "project_id": None,
+            "metrics": {"bytes": len(content)},
+            "error": None,
+        }
+        _IMPORT_JOBS[run_id] = job
+        _IMPORT_USER_RUNS[user_id] = run_id
+
+    background_tasks.add_task(_run_import_novel_job, run_id, user_id, filename, content)
+    return _serialize_import_job(job)
+
+
+@router.get("/import/status", response_model=ImportNovelJobResponse)
+async def get_import_novel_status(
+    run_id: Optional[str] = Query(default=None),
+    current_user: UserInDB = Depends(get_current_user),
+) -> ImportNovelJobResponse:
+    """读取当前用户最近一次旧稿导入任务状态。"""
+    user_id = int(current_user.id)
+    async with _IMPORT_JOB_LOCK:
+        resolved_run_id = run_id or _IMPORT_USER_RUNS.get(user_id)
+        job = dict(_IMPORT_JOBS.get(resolved_run_id or "") or {})
+        if job and job.get("user_id") not in {None, user_id}:
+            job = {}
+        if job and job.get("status") not in _IMPORT_RUNNING_STATUSES:
+            _IMPORT_JOBS.pop(str(job.get("run_id") or ""), None)
+            if _IMPORT_USER_RUNS.get(user_id) == job.get("run_id"):
+                _IMPORT_USER_RUNS.pop(user_id, None)
+
+    if job:
+        return _serialize_import_job(job)
+    return ImportNovelJobResponse(
+        run_id=run_id or "",
+        status="idle",
+        progress_stage="idle",
+        progress_message="暂无旧稿导入任务",
+    )
+
+
+@router.post("/import/cancel", response_model=ImportNovelJobResponse)
+async def cancel_import_novel(
+    run_id: Optional[str] = Query(default=None),
+    current_user: UserInDB = Depends(get_current_user),
+) -> ImportNovelJobResponse:
+    """取消当前用户最近一次旧稿导入任务。"""
+    user_id = int(current_user.id)
+    async with _IMPORT_JOB_LOCK:
+        resolved_run_id = run_id or _IMPORT_USER_RUNS.get(user_id)
+        job = _IMPORT_JOBS.get(resolved_run_id or "")
+        if not job:
+            return ImportNovelJobResponse(
+                run_id=run_id or "",
+                status="idle",
+                progress_stage="idle",
+                progress_message="暂无可取消的旧稿导入任务",
+            )
+        if job.get("user_id") not in {None, user_id}:
+            raise HTTPException(status_code=404, detail="导入任务不存在")
+        if job.get("status") in _IMPORT_CANCELABLE_STATUSES:
+            job.update({
+                "status": "cancelled",
+                "progress_stage": "cancelled",
+                "progress_message": "旧稿导入任务已取消",
+                "updated_at": _import_job_now_iso(),
+                "error": _import_job_error("import_cancelled", "旧稿导入任务已取消", retryable=True),
+            })
+        elif job.get("status") == "import_saving":
+            job.update({
+                "progress_message": "正在安全写入项目，保存阶段不能中途取消",
+                "updated_at": _import_job_now_iso(),
+            })
+        snapshot = dict(job)
+
+    return _serialize_import_job(snapshot)
+
+
+@router.post("/import", response_model=Dict[str, str], status_code=status.HTTP_201_CREATED, deprecated=True)
 async def import_novel(
     file: UploadFile,
     session: AsyncSession = Depends(get_session),

@@ -500,6 +500,30 @@ export interface StyleProfileJobResponse {
   error?: BlueprintGenerationError | string | null
 }
 
+export interface NovelImportJobResponse {
+  run_id: string
+  status:
+    | 'idle'
+    | 'queued'
+    | 'import_reading'
+    | 'import_splitting'
+    | 'import_sampling'
+    | 'import_character_verify'
+    | 'import_blueprint_extract'
+    | 'import_saving'
+    | 'successful'
+    | 'failed'
+    | 'cancelled'
+  progress_stage: string
+  progress_message: string
+  started_at?: string | null
+  updated_at?: string | null
+  filename?: string | null
+  project_id?: string | null
+  metrics?: Record<string, any>
+  error?: BlueprintGenerationError | string | null
+}
+
 export interface UIControl {
   type: 'single_choice' | 'multi_choice' | 'text_input'
   options?: Array<{ id: string; label: string }>
@@ -573,6 +597,8 @@ const BLUEPRINT_LEGACY_POLL_INTERVAL_MS = 2000
 const BLUEPRINT_LEGACY_MAX_POLL_ATTEMPTS = 900
 const STYLE_PROFILE_POLL_INTERVAL_MS = 2000
 const STYLE_PROFILE_MAX_POLL_ATTEMPTS = 900
+const NOVEL_IMPORT_POLL_INTERVAL_MS = 2000
+const NOVEL_IMPORT_MAX_POLL_ATTEMPTS = 900
 
 const delay = (ms: number) => new Promise((resolve) => globalThis.setTimeout(resolve, ms))
 
@@ -590,6 +616,13 @@ const readStyleProfileJobError = (status: StyleProfileJobResponse): string => {
   return rawError.detail || rawError.message || status.progress_message || '文风画像生成失败，请稍后重试'
 }
 
+const readNovelImportJobError = (status: NovelImportJobResponse): string => {
+  const rawError = status.error
+  if (!rawError) return status.progress_message || '旧稿导入失败，请稍后重试'
+  if (typeof rawError === 'string') return rawError
+  return rawError.detail || rawError.message || status.progress_message || '旧稿导入失败，请稍后重试'
+}
+
 export class NovelAPI {
   static async createNovel(title: string, initialPrompt: string): Promise<NovelProject> {
     return requestProject(NOVELS_BASE, {
@@ -599,15 +632,46 @@ export class NovelAPI {
   }
 
   static async importNovel(file: File): Promise<{ id: string }> {
+    let status = await NovelAPI.startNovelImport(file)
+
+    for (let attempt = 0; attempt < NOVEL_IMPORT_MAX_POLL_ATTEMPTS; attempt += 1) {
+      if (status.status === 'successful' && status.project_id) {
+        return { id: status.project_id }
+      }
+      if (status.status === 'failed') {
+        throw new Error(readNovelImportJobError(status))
+      }
+      if (status.status === 'cancelled') {
+        throw new Error(status.progress_message || '旧稿导入已取消')
+      }
+
+      await delay(NOVEL_IMPORT_POLL_INTERVAL_MS)
+      status = await NovelAPI.getNovelImportStatus(status.run_id)
+    }
+
+    throw new Error('旧稿导入后台任务等待超时，请稍后刷新项目列表查看结果。')
+  }
+
+  static async startNovelImport(file: File): Promise<NovelImportJobResponse> {
     const formData = new FormData()
     formData.append('file', file)
-    return request(`${NOVELS_BASE}/import`, {
+    return request(`${NOVELS_BASE}/import/start`, {
       method: 'POST',
       body: formData,
       headers: {
         // 让 browser 自动设置 Content-Type 为 multipart/form-data，不手动设置
       }
     })
+  }
+
+  static async getNovelImportStatus(runId?: string): Promise<NovelImportJobResponse> {
+    const query = runId ? `?run_id=${encodeURIComponent(runId)}` : ''
+    return request(`${NOVELS_BASE}/import/status${query}`)
+  }
+
+  static async cancelNovelImport(runId?: string): Promise<NovelImportJobResponse> {
+    const query = runId ? `?run_id=${encodeURIComponent(runId)}` : ''
+    return request(`${NOVELS_BASE}/import/cancel${query}`, { method: 'POST' })
   }
 
   static async getNovel(projectId: string): Promise<NovelProject> {
