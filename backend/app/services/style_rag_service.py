@@ -86,6 +86,27 @@ STYLE_EXTRACTION_PROMPT = """\
 """
 
 
+STYLE_MERGE_PROMPT = """\
+你是一位文风分析专家。以下是从同一部参考作品的不同批次中分别提取的写作风格特征。
+请将它们合并为一份统一的风格画像，保留各批次中反复出现的核心特征，去除矛盾或偶发细节。
+
+## 各批次风格特征：
+{batch_features}
+
+## 要求：
+请从以下6个维度合并写作风格，返回JSON格式，格式与各批次相同：
+- vocabulary_preference: 词汇偏好
+- sentence_pattern: 句式特点
+- narrative_voice: 叙事视角
+- dialogue_style: 对话风格
+- description_technique: 描写技巧
+- rhythm_pacing: 节奏特点
+
+每个维度的 description 字段请用 50 字以内概括合并后的结论。
+请仅返回JSON，不要其他内容。
+"""
+
+
 STYLE_INJECTION_PROMPT = """\
 你是一位文风控制专家。请根据以下写作风格特征，以相近的表达气质续写小说。
 
@@ -636,6 +657,110 @@ class StyleRAGService:
             profile.active = profile.id == global_active_id
         return profiles
 
+    # 每批最大字符数，超过此长度的文本会被拆分
+    _BATCH_CHAR_LIMIT = 10000
+    # 单次生成最多拆多少批（防止超长文本导致过多 LLM 调用）
+    _MAX_BATCHES = 8
+
+    def _split_text_into_batches(self, text: str) -> List[str]:
+        """将大文本按自然段落拆分成多个批次，每批不超过 _BATCH_CHAR_LIMIT 字。"""
+        if len(text) <= self._BATCH_CHAR_LIMIT:
+            return [text]
+
+        batches: List[str] = []
+        paragraphs = text.split('\n\n')
+        current_batch = ""
+
+        for para in paragraphs:
+            para = para.strip()
+            if not para:
+                continue
+            if len(current_batch) + len(para) + 2 <= self._BATCH_CHAR_LIMIT:
+                current_batch = f"{current_batch}\n\n{para}" if current_batch else para
+            else:
+                if current_batch:
+                    batches.append(current_batch)
+                # 如果单个段落超过批次限制，强制按字符切分
+                if len(para) > self._BATCH_CHAR_LIMIT:
+                    for i in range(0, len(para), self._BATCH_CHAR_LIMIT):
+                        batches.append(para[i:i + self._BATCH_CHAR_LIMIT])
+                    current_batch = ""
+                else:
+                    current_batch = para
+
+        if current_batch:
+            batches.append(current_batch)
+
+        # 限制最大批次数
+        if len(batches) > self._MAX_BATCHES:
+            # 取前 N-1 批 + 最后一批（合并尾部内容截取）
+            kept = batches[:self._MAX_BATCHES - 1]
+            tail = '\n\n'.join(batches[self._MAX_BATCHES - 1:])[:self._BATCH_CHAR_LIMIT]
+            kept.append(tail)
+            batches = kept
+
+        return batches
+
+    async def _extract_style_from_batch(
+        self,
+        text: str,
+        user_id: int,
+        batch_index: int,
+        total_batches: int,
+    ) -> Dict[str, Any]:
+        """对单个文本批次调用 LLM 提取风格特征。"""
+        prompt = STYLE_EXTRACTION_PROMPT.format(text_content=text)
+        result = await call_generation_json(
+            llm_service=self.llm_service,
+            system_prompt="你是小说文风分析助手，请忽略情节事实，只输出 JSON 风格特征。",
+            conversation_history=[{"role": "user", "content": prompt}],
+            user_id=user_id,
+            timeout=120.0,
+            temperature=0.3,
+            policy=GenerationCallPolicy(
+                stage_label=f"文风RAG-分批提取({batch_index + 1}/{total_batches})",
+                progress_stage="style_profile_extract",
+                retry_attempts=2,
+                max_tokens=2000,
+                json_repair_attempts=1,
+            ),
+        )
+        if not result.data:
+            raise ValueError(f"第 {batch_index + 1} 批风格提取失败")
+        return result.data
+
+    async def _merge_batch_features(self, batch_features: List[Dict[str, Any]], user_id: int) -> Dict[str, Any]:
+        """将多批风格特征合并为统一画像。"""
+        if len(batch_features) == 1:
+            return batch_features[0]
+
+        import json as _json
+        formatted = "\n\n".join(
+            f"### 批次 {i + 1}\n{_json.dumps(feat, ensure_ascii=False, indent=2)}"
+            for i, feat in enumerate(batch_features)
+        )
+        prompt = STYLE_MERGE_PROMPT.format(batch_features=formatted)
+        result = await call_generation_json(
+            llm_service=self.llm_service,
+            system_prompt="你是小说文风分析助手，请合并多批风格特征，只输出 JSON。",
+            conversation_history=[{"role": "user", "content": prompt}],
+            user_id=user_id,
+            timeout=120.0,
+            temperature=0.3,
+            policy=GenerationCallPolicy(
+                stage_label="文风RAG-分批合并",
+                progress_stage="style_profile_merge",
+                retry_attempts=2,
+                max_tokens=2000,
+                json_repair_attempts=1,
+            ),
+        )
+        if not result.data:
+            # 合并失败时回退到第一批结果
+            logger.warning("文风分批合并失败，回退到第一批结果")
+            return batch_features[0]
+        return result.data
+
     async def create_profile_from_sources(
         self,
         user_id: int,
@@ -665,23 +790,18 @@ class StyleRAGService:
             if len(combined_text) < min_chars:
                 raise ValueError("参考文本内容不足，无法提取文风")
 
-            prompt = STYLE_EXTRACTION_PROMPT.format(text_content=combined_text[:12000])
-            result = await call_generation_json(
-                llm_service=self.llm_service,
-                system_prompt="你是小说文风分析助手，请忽略情节事实，只输出 JSON 风格特征。",
-                conversation_history=[{"role": "user", "content": prompt}],
-                user_id=user_id,
-                timeout=120.0,
-                temperature=0.3,
-                policy=GenerationCallPolicy(
-                    stage_label="文风RAG-外部文风画像",
-                    progress_stage="style_profile_extract",
-                    retry_attempts=2,
-                    max_tokens=2000,
-                    json_repair_attempts=1,
-                ),
-            )
-            style_data = result.data
+            # 大文本分批学习：拆分文本为多个批次，逐批提取后合并
+            batches = self._split_text_into_batches(combined_text)
+            batch_features: List[Dict[str, Any]] = []
+            for i, batch_text in enumerate(batches):
+                feat = await self._extract_style_from_batch(batch_text, user_id, i, len(batches))
+                batch_features.append(feat)
+
+            if len(batch_features) > 1:
+                style_data = await self._merge_batch_features(batch_features, user_id)
+            else:
+                style_data = batch_features[0]
+
             if not style_data:
                 raise ValueError("外部参考文风提取失败")
 
@@ -703,6 +823,7 @@ class StyleRAGService:
                     "source_count": len(merged_source_ids),
                     "total_chars": previous_chars + sum(source.char_count for source in selected),
                     "merge_rounds": int((existing_profile.quality_metrics or {}).get("merge_rounds") or 0) + 1,
+                    "batch_count": len(batches),
                 }
                 existing_profile.extra = {
                     **(existing_profile.extra or {}),
@@ -724,6 +845,7 @@ class StyleRAGService:
                     "source_count": len(selected),
                     "total_chars": sum(source.char_count for source in selected),
                     "merge_rounds": 1,
+                    "batch_count": len(batches),
                 },
                 "created_at": now,
                 "updated_at": now,

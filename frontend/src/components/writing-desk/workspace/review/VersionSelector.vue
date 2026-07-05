@@ -111,6 +111,7 @@
               </div>
               <div class="version-card__tags">
                 <span class="vs-chip">约 {{ card.approxWordCount }} 字</span>
+                <span v-if="card.isAiRecommended" class="vs-chip vs-chip--recommend">AI 推荐</span>
                 <span v-if="card.isCurrent" class="vs-chip vs-chip--success">当前正文</span>
                 <span v-else-if="selectedVersionIndex === card.index" class="vs-chip vs-chip--accent">当前查看</span>
                 <span v-if="compareVersionIndex === card.index" class="vs-chip vs-chip--warn">对比对象</span>
@@ -163,6 +164,7 @@
           </p>
         </div>
         <div class="version-preview__tags">
+          <span v-if="activeVersionCard?.isAiRecommended" class="vs-chip vs-chip--recommend">AI 推荐采用</span>
           <span v-if="isCurrentVersion(selectedVersionIndex)" class="vs-chip vs-chip--success">这就是当前正文</span>
           <span v-else class="vs-chip vs-chip--accent">待确认候选版本</span>
           <span v-if="compareVersionIndex !== null && compareVersionIndex !== undefined" class="vs-chip">
@@ -283,6 +285,7 @@ interface VersionCardModel {
   preview: string
   approxWordCount: number
   isCurrent: boolean
+  isAiRecommended: boolean
   qualitySummary: ChapterQualitySummary | null
 }
 
@@ -301,6 +304,7 @@ const versionCardModels = computed<VersionCardModel[]>(() => props.availableVers
     preview: buildChapterPreview(version.content || '', 280),
     approxWordCount: Math.max(1, Math.round(normalizedContent.length / 100)) * 100,
     isCurrent,
+    isAiRecommended: Boolean(version.metadata?.ai_review?.is_best),
     qualitySummary: buildChapterQualitySummary({
       ...(props.selectedChapter || {
         chapter_number: 0,
@@ -542,6 +546,14 @@ watch(() => props.selectedVersionIndex, index => { void scrollCardIntoView(index
   background: #eff6ff;
   border-color: rgba(249, 115, 22, 0.24);
   color: #c2410c;
+}
+
+.vs-chip--recommend {
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #92400e;
+  font-weight: 850;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.15);
 }
 
 .version-selector-progress {

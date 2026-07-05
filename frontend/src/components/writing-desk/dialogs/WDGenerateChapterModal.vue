@@ -90,6 +90,32 @@
                   </div>
                 </div>
 
+                <!-- 质量档位选择 -->
+                <div class="mt-5">
+                  <label class="md-text-field-label mb-2 block">质量档位（可选）</label>
+                  <div class="flex flex-wrap gap-2">
+                    <button
+                      v-for="opt in presetOptions"
+                      :key="opt.value"
+                      type="button"
+                      :class="['md-btn md-ripple text-xs', selectedPreset === opt.value ? 'md-btn-filled' : 'md-btn-outlined']"
+                      @click="selectedPreset = opt.value"
+                    >
+                      {{ opt.label }}
+                    </button>
+                    <button
+                      type="button"
+                      :class="['md-btn md-ripple text-xs', selectedPreset === '' ? 'md-btn-filled' : 'md-btn-outlined']"
+                      @click="selectedPreset = ''"
+                    >
+                      自动（按字数推断）
+                    </button>
+                  </div>
+                  <p class="mt-1 text-xs text-gray-500">
+                    basic=快速生成 / enhanced=增强质量 / longform=长篇深度 / ultimate=最高质量。留空则由目标字数自动推断。
+                  </p>
+                </div>
+
                 <div class="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label class="md-text-field-label">最低字数（强约束目标）</label>
@@ -187,6 +213,7 @@ interface GenerateChapterPayload {
   qualityRequirements?: string
   minWordCount: number
   targetWordCount: number
+  preset?: 'basic' | 'enhanced' | 'longform' | 'ultimate'
 }
 
 const GLOBAL_GENERATION_STORAGE_KEY = 'xuanqiong_wenshu:chapter_generation:global'
@@ -278,6 +305,14 @@ const writingNotes = ref('')
 const qualityRequirements = ref('')
 const minWordCount = ref<number | null>(DEFAULT_MIN_WORD_COUNT)
 const targetWordCount = ref<number | null>(DEFAULT_TARGET_WORD_COUNT)
+const selectedPreset = ref<'' | 'basic' | 'enhanced' | 'longform' | 'ultimate'>('')
+
+const presetOptions = [
+  { value: 'basic' as const, label: 'basic · 快速' },
+  { value: 'enhanced' as const, label: 'enhanced · 增强' },
+  { value: 'longform' as const, label: 'longform · 长篇' },
+  { value: 'ultimate' as const, label: 'ultimate · 最高' },
+]
 const targetWordCountMin = computed(() => minWordCount.value ?? DEFAULT_MIN_WORD_COUNT)
 
 // UI state for save config
@@ -529,7 +564,8 @@ const handleGenerate = () => {
     writingNotes: writingNotes.value.trim() || undefined,
     qualityRequirements: qualityRequirements.value.trim() || undefined,
     minWordCount: minValue,
-    targetWordCount: targetValue
+    targetWordCount: targetValue,
+    preset: (selectedPreset.value || undefined) as GenerateChapterPayload['preset']
   })
   emit('close')
 }

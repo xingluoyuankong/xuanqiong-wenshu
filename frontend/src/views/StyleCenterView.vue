@@ -144,7 +144,7 @@
           <p v-if="selectedFileName" class="selected-file-copy">已载入文件：{{ selectedFileName }} <span v-if="selectedFileChars">· {{ selectedFileChars }} 字</span></p>
 
           <div class="style-card__footer">
-            <span class="style-hint">当前实现先兼容现有接口：把“导入说明 / 当前批次摘要”保存为素材记录，UI 已明确转成大文本分批学习语义。</span>
+            <span class="style-hint">已支持大文本分批学习：超长文本会自动拆分为多个批次逐批提取风格特征，再合并为统一画像。</span>
             <button class="primary-btn" :disabled="savingSource || !canCreateSource" @click="createSource">保存素材记录</button>
           </div>
         </article>
@@ -563,7 +563,7 @@ const sourcePlaceholder = computed(() => {
   }
 
   if (importMode.value === 'hybrid') {
-    return '填写“文件来源 + 当前补录批次”的组合说明，例如：原书为 txt，这里补录高密度对白段作为第二批学习样本。'
+    return '填写"文件来源 + 当前补录批次"的组合说明，例如：原书为 txt，这里补录高密度对白段作为第二批学习样本。'
   }
 
   return '填写本次学习批次的摘要，而不是整本硬贴进去。例如：第 21-35 章，重点观察叙事节奏、对白推进和场景描写。'

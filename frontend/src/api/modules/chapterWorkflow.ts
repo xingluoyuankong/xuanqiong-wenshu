@@ -197,6 +197,9 @@ export const generateChapter = (
   if (options.targetWordCount && options.targetWordCount > 0) {
     payload.target_word_count = options.targetWordCount
   }
+  if (options.preset) {
+    payload.preset = options.preset
+  }
 
   return requestProject(`${WRITER_BASE}/${projectId}/chapters/generate`, {
     method: 'POST',

@@ -337,10 +337,30 @@ def test_failed_runtime_can_keep_confirm_actions_for_blocked_candidates():
             run_id="run-1",
             reason="质量门拦截，但候选稿已保存。",
             allowed_actions=["refresh_status", "confirm_version", "review_versions", "retry_generation", "view_error"],
+            stage="evaluation_failed",
+        )
+    )
+
+    runtime = payload["generation_runtime"]
+    assert runtime["progress_stage"] == "evaluation_failed"
+    assert "confirm_version" in runtime["allowed_actions"]
+    assert "review_versions" in runtime["allowed_actions"]
+
+
+def test_failed_runtime_defaults_to_failed_stage_without_explicit_stage():
+    chapter = types.SimpleNamespace(
+        real_summary=json.dumps({"generation_runtime": {"run_id": "run-2", "events": []}}, ensure_ascii=False),
+        chapter_number=5,
+    )
+
+    payload = json.loads(
+        writer._build_failed_generation_runtime_state(
+            chapter,
+            run_id="run-2",
+            reason="生成超时，未产出任何候选版本。",
         )
     )
 
     runtime = payload["generation_runtime"]
     assert runtime["progress_stage"] == "failed"
-    assert "confirm_version" in runtime["allowed_actions"]
-    assert "review_versions" in runtime["allowed_actions"]
+    assert runtime["allowed_actions"] == ["refresh_status", "retry_generation"]

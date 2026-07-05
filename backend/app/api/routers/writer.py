@@ -546,14 +546,17 @@ def _build_failed_generation_runtime_state(
     cancel_requested: bool = False,
     level: str = "error",
     allowed_actions: Optional[List[str]] = None,
+    stage: str = "failed",
 ) -> str:
     payload = _load_generation_runtime_state(chapter)
     runtime = payload.get("generation_runtime") if isinstance(payload.get("generation_runtime"), dict) else {}
     now_iso = datetime.now(timezone.utc).isoformat()
     events = runtime.get("events") if isinstance(runtime.get("events"), list) else []
+    # 质量门拦截但候选已保存时用 evaluation_failed 语义，前端可区分"可恢复评审"与"彻底失败"
+    normalized_stage = stage if stage in {"failed", "evaluation_failed"} else "failed"
     event = {
         "at": now_iso,
-        "stage": "failed",
+        "stage": normalized_stage,
         "level": level,
         "message": reason,
     }
@@ -562,7 +565,7 @@ def _build_failed_generation_runtime_state(
         "run_id": run_id,
         "cancel_requested": cancel_requested,
         "reason": reason,
-        "progress_stage": "failed",
+        "progress_stage": normalized_stage,
         "progress_message": reason,
         "progress_percent": 100,
         "allowed_actions": allowed_actions or ["refresh_status", "retry_generation"],
@@ -835,6 +838,7 @@ async def _mark_busy_chapter_evaluation_failed(
             if version_count > 0
             else ["refresh_status", "retry_generation", "view_error"]
         ),
+        stage="evaluation_failed",
     )
     session.add(
         ChapterEvaluation(
@@ -867,14 +871,29 @@ async def _bounded_task_slot(semaphore: asyncio.Semaphore):
 def _resolve_quality_candidate_version_count(*, preset: str, target_word_count: int) -> int:
     normalized_preset = str(preset or "basic").strip() or "basic"
     target = max(500, int(target_word_count or 0))
+
+    # basic 预设：快速优先，始终 1 个版本
+    if normalized_preset == "basic":
+        return 1
+
+    # ultimate 预设：质量优先，至少 2 个版本
+    if normalized_preset == "ultimate":
+        if target >= 10000:
+            return 4
+        if target >= 6500:
+            return 3
+        return 2
+
+    # longform / enhanced 预设：按字数推断，但不少于 2
     if target >= 10000:
         return 4
     if target >= 6500:
         return 3
-    if normalized_preset in {"ultimate", "longform", "enhanced"} and target >= 4500:
+    if target >= 4500:
         return 2
     if target >= 2800:
         return 2
+    # 短章节但非 basic：仍给 1 版本，避免短文本多版本浪费
     return COMPAT_GENERATE_VERSION_COUNT
 
 
@@ -1022,9 +1041,13 @@ def _build_compat_generate_flow_config(request: GenerateChapterRequest) -> Dict[
     else:
         enrich_iterations = 1
 
+    # 尊重前端显式传入的 preset；未传时保持原有字数自动推断逻辑
+    explicit_preset = str(getattr(request, "preset", None) or "").strip()
     is_short_chapter = requested_target < 1200
     high_quality_longform = requested_target >= 4500
-    if is_short_chapter:
+    if explicit_preset in {"basic", "enhanced", "longform", "ultimate"}:
+        preset = explicit_preset
+    elif is_short_chapter:
         preset = "basic"
     else:
         preset = "ultimate" if high_quality_longform else "longform"

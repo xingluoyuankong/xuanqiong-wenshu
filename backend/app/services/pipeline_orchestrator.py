@@ -1673,6 +1673,35 @@ class PipelineOrchestrator:
                 "error": str(exc)[:180],
             }
 
+    async def _check_token_budget_before_generation(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """Check token budget before generation; return warning dict if budget is near or over threshold."""
+        try:
+            budget_service = TokenBudgetService(self.session)
+            stats = await budget_service.get_usage_stats(project_id)
+            usage_percent = stats.get("usage_percent", 0)
+            budget_remaining = stats.get("budget_remaining", 0)
+            total_budget = stats.get("total_budget", 0)
+            if usage_percent >= 100:
+                return {
+                    "level": "exceeded",
+                    "message": "项目 Token 预算已用尽，本次生成可能产生额外费用。",
+                    "usage_percent": round(usage_percent, 1),
+                    "budget_remaining": round(budget_remaining, 4),
+                    "total_budget": total_budget,
+                }
+            if usage_percent >= 80:
+                return {
+                    "level": "warning",
+                    "message": f"项目 Token 预算已使用 {usage_percent:.1f}%，接近上限。",
+                    "usage_percent": round(usage_percent, 1),
+                    "budget_remaining": round(budget_remaining, 4),
+                    "total_budget": total_budget,
+                }
+            return None
+        except Exception as exc:  # noqa: BLE001 - budget check must not block generation
+            logger.warning("Token 预算预检失败：project=%s error=%s", project_id, exc)
+            return None
+
     async def _persist_quality_gate_blocked_versions(
         self,
         *,
@@ -1829,11 +1858,16 @@ class PipelineOrchestrator:
 
         pipeline_started_at = time.perf_counter()
         config = await self._resolve_config(flow_config)
+        requested_preset = str((flow_config or {}).get("preset", "") or "").strip() or config.preset
         runtime_metadata: Dict[str, Any] = {
             "provider_preflight": {},
             "degraded_stages": [],
             "generation_mode": "quality",
             "stable_retry_used": False,
+            "requested_preset": requested_preset,
+            "actual_preset": config.preset,
+            "preset_downgraded": False,
+            "downgraded_capabilities": [],
             "target_word_count": 0,
             "min_word_count": 0,
             "actual_word_count": 0,
@@ -1861,6 +1895,22 @@ class PipelineOrchestrator:
             "mission_max_tokens": self._resolve_chapter_mission_max_tokens(config.target_word_count),
         }
         project = await self.novel_service.ensure_project_owner(project_id, user_id)
+
+        token_budget_warning = await self._check_token_budget_before_generation(project_id)
+        if token_budget_warning:
+            runtime_metadata["token_budget_warning"] = token_budget_warning
+
+        # 长篇项目（大纲超过 10 章）自动启用 memory，保障跨章连续性
+        # 仅在 preset 非 basic 且 memory 尚未显式启用时自动开启
+        outline_count = len(project.outlines) if hasattr(project, "outlines") and project.outlines else 0
+        if outline_count > 10 and config.preset != "basic" and not config.enable_memory:
+            config.enable_memory = True
+            logger.info(
+                "Auto-enabled memory layer for long-form project: project=%s outlines=%s preset=%s",
+                project_id,
+                outline_count,
+                config.preset,
+            )
 
         outline = await self.novel_service.get_outline(project_id, chapter_number)
         if not outline:
@@ -2413,6 +2463,35 @@ class PipelineOrchestrator:
             if should_stable_retry:
                 runtime_metadata["stable_retry_used"] = True
                 runtime_metadata["generation_mode"] = "stable"
+                runtime_metadata["actual_preset"] = "stable"
+                runtime_metadata["preset_downgraded"] = True
+                # 记录降级时被关闭的高级能力，让前端可见
+                downgraded = []
+                if config.enable_preview:
+                    downgraded.append("preview")
+                if config.enable_optimizer:
+                    downgraded.append("optimizer")
+                if config.enable_consistency:
+                    downgraded.append("consistency")
+                if config.enable_enrichment:
+                    downgraded.append("enrichment")
+                if config.enable_reader_sim:
+                    downgraded.append("reader_sim")
+                if config.enable_self_critique:
+                    downgraded.append("self_critique")
+                if config.enable_six_dimension:
+                    downgraded.append("six_dimension")
+                if config.enable_memory:
+                    downgraded.append("memory")
+                if config.enable_constitution:
+                    downgraded.append("constitution")
+                if config.enable_persona:
+                    downgraded.append("persona")
+                if config.enable_foreshadowing:
+                    downgraded.append("foreshadowing")
+                if config.enable_faction:
+                    downgraded.append("faction")
+                runtime_metadata["downgraded_capabilities"] = downgraded
                 runtime_metadata["quality_gates"]["stable_retry_reason"] = (
                     "transient_failures" if self._should_retry_with_stable_config(attempt_errors) else "insufficient_successful_candidates"
                 )
@@ -2426,6 +2505,8 @@ class PipelineOrchestrator:
                     extra={
                         "stable_retry_used": True,
                         "generation_mode": "stable",
+                        "preset_downgraded": True,
+                        "downgraded_capabilities": downgraded,
                         "successful_versions": success_count,
                         "required_success_count": attempt_required_success_count,
                         "original_required_success_count": required_success_count,
@@ -2912,6 +2993,17 @@ class PipelineOrchestrator:
                             review_summaries["consistency_repair"] = repaired_report
                     await mark_stage("consistency", consistency_started_at, detail="一致性校验阶段完成")
                     runtime_metadata["consistency_status"] = consistency_report.get("status", "unknown")
+                    unresolved_for_warning = self._collect_unresolved_consistency_violations(consistency_report)
+                    if unresolved_for_warning:
+                        runtime_metadata["consistency_violation_count"] = len(unresolved_for_warning)
+                        runtime_metadata["consistency_violation_summary"] = [
+                            {
+                                "severity": str(item.get("severity") or "minor"),
+                                "category": str(item.get("category") or ""),
+                                "description": str(item.get("description") or "")[:200],
+                            }
+                            for item in unresolved_for_warning[:5]
+                        ]
                     review_summaries["consistency"] = consistency_report
                     repair_attempts = consistency_report.get("repair_attempts")
                     if not isinstance(repair_attempts, list):
@@ -3478,6 +3570,7 @@ class PipelineOrchestrator:
 
         if preset == "enhanced":
             config.enable_six_dimension = True
+            config.enable_consistency = True
 
         if preset == "ultimate":
             config.enable_memory = True
@@ -3498,6 +3591,7 @@ class PipelineOrchestrator:
             config.enable_consistency = True
             config.enable_self_critique = True
             config.enable_optimizer = True
+            config.enable_reader_sim = True
             config.enable_preview = False
             config.allow_truncated_response = False
             if flow_config.get("target_word_count") is None:

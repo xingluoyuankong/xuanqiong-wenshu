@@ -442,6 +442,7 @@ interface GenerateChapterPayload {
   qualityRequirements?: string
   minWordCount: number
   targetWordCount: number
+  preset?: 'basic' | 'enhanced' | 'longform' | 'ultimate'
 }
 
 interface VersionOption {
@@ -1018,7 +1019,27 @@ const scheduleStatusPolling = () => {
   const stage = normalizeRuntimeStage(
     busyChapter?.progress_stage || runtime?.progress_stage || busyChapter?.generation_status || runtime?.status
   )
-  const delay = stage === 'generating' ? 1800 : stage === 'evaluating' || stage === 'selecting' ? 1200 : 2500
+  const baseDelay = stage === 'generating' ? 1800 : stage === 'evaluating' || stage === 'selecting' ? 1200 : 2500
+  const estimatedRemaining = runtime?.estimated_remaining_seconds
+  const progressPercent = runtime?.progress_percent
+  let delay = baseDelay
+  if (typeof estimatedRemaining === 'number' && estimatedRemaining > 0) {
+    if (estimatedRemaining > 120) {
+      delay = Math.min(5000, baseDelay + 2000)
+    } else if (estimatedRemaining > 60) {
+      delay = Math.min(3500, baseDelay + 800)
+    } else if (estimatedRemaining < 15) {
+      delay = Math.max(800, baseDelay - 600)
+    }
+  } else if (typeof progressPercent === 'number' && progressPercent > 0) {
+    if (progressPercent >= 85) {
+      delay = Math.max(800, baseDelay - 600)
+    } else if (progressPercent >= 60) {
+      delay = Math.max(1200, baseDelay - 300)
+    } else if (progressPercent < 25) {
+      delay = Math.min(4000, baseDelay + 1200)
+    }
+  }
   statusPollingTimer.value = window.setTimeout(() => {
     statusPollingTimer.value = null
     void fetchChapterStatus()
@@ -1173,7 +1194,8 @@ const generateChapter = async (
       writingNotes: options?.writingNotes,
       qualityRequirements: options?.qualityRequirements,
       minWordCount: options?.minWordCount ?? DEFAULT_MIN_WORD_COUNT,
-      targetWordCount: options?.targetWordCount ?? DEFAULT_TARGET_WORD_COUNT
+      targetWordCount: options?.targetWordCount ?? DEFAULT_TARGET_WORD_COUNT,
+      preset: options?.preset
     })
 
     clearLatestDiagnostics()
@@ -1298,7 +1320,8 @@ const handleGenerateChapter = async (payload: GenerateChapterPayload) => {
     writingNotes: payload.writingNotes,
     qualityRequirements: payload.qualityRequirements,
     minWordCount: payload.minWordCount,
-    targetWordCount: payload.targetWordCount
+    targetWordCount: payload.targetWordCount,
+    preset: payload.preset
   })
 }
 

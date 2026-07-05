@@ -86,7 +86,8 @@
       <article class="cg-card">
         <p class="cg-card__title">任务摘要</p>
         <div class="cg-metadata">
-          <span v-if="runtime.preset">预设：{{ runtime.preset }}</span>
+          <span v-if="runtime.requested_preset">请求预设：{{ runtime.requested_preset }}</span>
+          <span v-if="runtime.actual_preset">实际预设：{{ runtime.actual_preset }}</span>
           <span v-if="runtime.generation_mode">模式：{{ runtime.generation_mode }}</span>
           <span v-if="runtime.version_count">候选版本：{{ runtime.version_count }}</span>
           <span v-if="runtime.target_word_count">目标字数：{{ runtime.target_word_count }}</span>
@@ -98,6 +99,36 @@
           <span v-if="runtime.optimization_dimensions?.length">当前维度：{{ runtime.optimization_dimensions.join('、') }}</span>
           <span v-if="taskUiModel.critiqueSummary">批判摘要：{{ taskUiModel.critiqueSummary }}</span>
           <span v-if="runtimeQueued">状态：已排队执行</span>
+        </div>
+
+        <div v-if="runtime.preset_downgraded && runtime.downgraded_capabilities?.length" class="cg-preset-downgrade">
+          <p class="cg-preset-downgrade__title">质量降级提示</p>
+          <p class="cg-preset-downgrade__desc">
+            生成遇到不稳定，已从「{{ runtime.requested_preset || '未知' }}」降级到「{{ runtime.actual_preset || 'stable' }}」。
+            以下能力被临时关闭以保障基础生成：
+          </p>
+          <div class="cg-preset-downgrade__tags">
+            <span v-for="cap in runtime.downgraded_capabilities" :key="cap" class="cg-preset-downgrade__tag">{{ cap }}</span>
+          </div>
+        </div>
+
+        <div v-if="runtime.consistency_violation_count" class="cg-consistency-warning">
+          <p class="cg-consistency-warning__title">一致性校验警告</p>
+          <p class="cg-consistency-warning__desc">
+            一致性校验发现 {{ runtime.consistency_violation_count }} 项未解决问题，可能影响剧情连贯性。
+          </p>
+          <ul v-if="runtime.consistency_violation_summary?.length" class="cg-consistency-warning__list">
+            <li v-for="(item, idx) in runtime.consistency_violation_summary" :key="idx">
+              <span :class="['cg-consistency-warning__badge', `cg-consistency-warning__badge--${item.severity}`]">{{ item.severity }}</span>
+              <span v-if="item.category" class="cg-consistency-warning__category">{{ item.category }}</span>
+              <span class="cg-consistency-warning__text">{{ item.description }}</span>
+            </li>
+          </ul>
+        </div>
+
+        <div v-if="runtime.token_budget_warning" :class="['cg-budget-warning', `cg-budget-warning--${runtime.token_budget_warning.level}`]">
+          <p class="cg-budget-warning__title">Token 预算提示</p>
+          <p class="cg-budget-warning__desc">{{ runtime.token_budget_warning.message }}</p>
         </div>
 
         <div v-if="taskUiModel.critiqueHighlights.length || taskUiModel.degradedSummary || optimizationLogs.length" class="cg-critique-panel">
@@ -623,6 +654,10 @@ const metadataLabelMap: Record<string, string> = {
   generated_version_count: '候选版本数',
   version_count: '请求版本数',
   stable_retry_used: '是否切换稳定模式',
+  requested_preset: '请求预设',
+  actual_preset: '实际预设',
+  preset_downgraded: '预设已降级',
+  downgraded_capabilities: '降级关闭的能力',
   introduced_character_count: '已登场角色数',
   allowed_new_character_count: '允许新角色数',
   best_version_index: '推荐版本序号',
@@ -654,6 +689,9 @@ const metadataLabelMap: Record<string, string> = {
   auto_fix_accepted: '自动局部修复已采纳',
   repair_attempts: '修复尝试记录',
   full_chapter_fallback_deferred: '整章兜底已延后',
+  consistency_violation_count: '一致性违规数',
+  consistency_violation_summary: '一致性违规摘要',
+  token_budget_warning: 'Token 预算提示',
   stagewide_requested: '请求整章候选',
   stagewide_allowed: '允许整章候选',
   stagewide_deferred_count: '延后整章候选数',
@@ -1236,6 +1274,153 @@ onUnmounted(() => {
   margin: 8px 0 0;
   color: #1d4ed8;
   font-weight: 600;
+}
+
+.cg-preset-downgrade {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(234, 88, 12, 0.08);
+  border: 1px solid rgba(234, 88, 12, 0.25);
+}
+
+.cg-preset-downgrade__title {
+  margin: 0 0 4px;
+  color: #c2410c;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.cg-preset-downgrade__desc {
+  margin: 0 0 8px;
+  color: #9a3412;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.cg-preset-downgrade__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cg-preset-downgrade__tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(234, 88, 12, 0.12);
+  color: #9a3412;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.cg-consistency-warning {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(220, 38, 38, 0.2);
+  background: linear-gradient(180deg, rgba(254, 242, 242, 0.96), rgba(255, 255, 255, 0.94));
+}
+
+.cg-consistency-warning__title {
+  margin: 0 0 4px;
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: #b91c1c;
+}
+
+.cg-consistency-warning__desc {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  color: #475569;
+  line-height: 1.5;
+}
+
+.cg-consistency-warning__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.cg-consistency-warning__list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #334155;
+}
+
+.cg-consistency-warning__badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.cg-consistency-warning__badge--critical {
+  background: rgba(220, 38, 38, 0.14);
+  color: #b91c1c;
+}
+
+.cg-consistency-warning__badge--major {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+.cg-consistency-warning__badge--minor {
+  background: rgba(148, 163, 184, 0.14);
+  color: #475569;
+}
+
+.cg-consistency-warning__category {
+  flex-shrink: 0;
+  font-weight: 700;
+  color: #6366f1;
+}
+
+.cg-consistency-warning__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.cg-budget-warning {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  background: linear-gradient(180deg, rgba(255, 251, 235, 0.96), rgba(255, 255, 255, 0.94));
+}
+
+.cg-budget-warning--exceeded {
+  border-color: rgba(220, 38, 38, 0.24);
+  background: linear-gradient(180deg, rgba(254, 242, 242, 0.96), rgba(255, 255, 255, 0.94));
+}
+
+.cg-budget-warning__title {
+  margin: 0 0 4px;
+  font-size: 0.86rem;
+  font-weight: 800;
+  color: #b45309;
+}
+
+.cg-budget-warning--exceeded .cg-budget-warning__title {
+  color: #b91c1c;
+}
+
+.cg-budget-warning__desc {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #475569;
+  line-height: 1.5;
 }
 
 .cg-metadata span {

@@ -325,6 +325,7 @@ class GenerateChapterRequest(BaseModel):
     quality_requirements: Optional[str] = Field(default=None, description="章节质量偏好与方向")
     target_word_count: Optional[int] = Field(default=None, description="章节目标字数")
     min_word_count: Optional[int] = Field(default=None, description="章节最低字数")
+    preset: Optional[str] = Field(default=None, description="质量档位：basic|enhanced|longform|ultimate。留空则由字数自动推断")
 
 
 class FlowConfig(BaseModel):

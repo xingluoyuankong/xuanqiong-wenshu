@@ -115,7 +115,7 @@ const STAGE_LABEL_MAP: Record<string, string> = {
   ready: '已就绪',
   successful: '已完成',
   failed: '失败',
-  evaluation_failed: '评审失败',
+  evaluation_failed: '评审未通过',
 }
 
 type BackendStageDefinition = {
@@ -168,7 +168,8 @@ const BACKEND_STAGE_DEFINITIONS: BackendStageDefinition[] = [
   { key: 'ledger_graph', label: '线索/图谱同步', milestone: 100 },
   { key: 'finalized', label: '定稿完成', milestone: 100 },
   { key: 'successful', label: '已完成', milestone: 100, aliases: ['ready'] },
-  { key: 'failed', label: '失败', milestone: 100, aliases: ['evaluation_failed'] },
+  { key: 'failed', label: '失败', milestone: 100, aliases: [] },
+  { key: 'evaluation_failed', label: '评审未通过', milestone: 97, aliases: [] },
 ]
 
 const DEFAULT_PIPELINE_SEQUENCE = [
