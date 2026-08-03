@@ -7,66 +7,19 @@
       </div>
 
       <nav class="nav-links" aria-label="全局导航">
-        <button :class="linkClass('workspace-entry')" @click="goHome">主页</button>
-        <button :class="linkClass('novel-workspace')" @click="goProjects">小说项目</button>
-        <button :class="linkClass('inspiration-mode')" @click="goInspiration">灵感模式</button>
-        <button :class="linkClass('style-center')" @click="goStyleCenter">文风中心</button>
-        <button :class="linkClass('admin')" @click="goAdmin">管理台</button>
-        <button :class="linkClass('settings')" @click="goSystemSettings">系统配置</button>
-        <button :class="linkClass('llm-settings')" @click="goLLMSettings">LLM 配置</button>
+        <span class="nav-brand-text">玄穹文枢 — AI 小说创作平台</span>
       </nav>
 
-      <div class="right-actions">
+<div class="right-actions">
         <button class="locale-btn" :title="switchLabel" @click="toggleLocale">{{ languageLabel }}</button>
         <button v-if="lastProjectId" class="continue-btn" @click="continueWriting">继续写作</button>
       </div>
     </div>
 
-    <div v-if="globalTaskVisible" class="global-task-band">
-      <div class="global-task-band__head">
-        <div class="global-task-band__meta">
-          <span class="task-chip task-chip--primary">章节处理中心</span>
-          <span class="task-chip">{{ currentTaskProjectTitle }}</span>
-          <span class="task-chip">第 {{ currentTaskChapterNumber }} 章</span>
-          <span class="task-chip">{{ currentTaskStageLabel }}</span>
-          <span class="task-chip">第 {{ taskUiModel.currentStep }}/{{ taskUiModel.totalSteps }} 步</span>
-          <span v-if="currentTaskEta" class="task-chip">预计剩余 {{ currentTaskEta }}</span>
-          <span v-else-if="currentTaskWarning" class="task-chip task-chip--warn">{{ currentTaskWarning }}</span>
-        </div>
-        <div class="global-task-band__actions">
-          <button class="task-btn task-btn--ghost" @click="openRuntimeLogs">运行日志</button>
-          <button class="task-btn" @click="continueWriting">回到写作页</button>
-        </div>
-      </div>
-
-      <div class="global-task-band__body">
-        <div class="global-task-band__summary">
-          <strong>{{ currentTaskTitle }}</strong>
-          <p>{{ currentTaskMessage }}</p>
-        </div>
-
-        <div class="global-task-band__progress">
-          <div>
-            <div class="progress-row">
-              <span>{{ currentTaskStageProgressLabel }}</span>
-              <strong>{{ currentTaskStageProgress }}%</strong>
-            </div>
-            <div class="progress-track" aria-label="stage-progress">
-              <div class="progress-bar progress-bar--phase" :style="{ width: `${currentTaskStageProgress}%` }"></div>
-            </div>
-          </div>
-
-          <div>
-            <div class="progress-row progress-row--secondary">
-              <span>{{ currentTaskTotalProgressLabel }}</span>
-              <strong>{{ currentTaskProgress }}%</strong>
-            </div>
-            <div class="progress-track" aria-label="total-progress">
-              <div class="progress-bar" :style="{ width: `${currentTaskProgress}%` }"></div>
-            </div>
-          </div>
-        </div>
-      </div>
+        <div v-if="globalTaskVisible" class="global-task-mini">
+      <span class="global-task-mini__icon">⚡</span>
+      <span class="global-task-mini__text">后台任务进行中</span>
+      <button class="global-task-mini__btn" @click="continueWriting">回到写作页</button>
     </div>
   </header>
 </template>
@@ -88,7 +41,7 @@ const { languageLabel, switchLabel, toggleLocale } = useLocale()
 const lastProjectId = ref<string | null>(null)
 const pollingTimer = ref<number | null>(null)
 const LAST_PROJECT_KEY = 'xuanqiong_wenshu_last_project_id'
-const PROJECT_POLLING_INTERVAL = 12000
+const PROJECT_POLLING_INTERVAL = 60000
 let loadingProjectId: string | null = null
 let loadingProjectPromise: Promise<void> | null = null
 
@@ -290,114 +243,31 @@ function openRuntimeLogs() {
 .left-actions,
 .nav-links,
 .right-actions,
-.global-task-band__head,
-.global-task-band__meta,
-.global-task-band__actions,
-.progress-row {
+
+/* 极简任务通知条 */
+.global-task-mini {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-.global-nav-main {
-  max-width: 1380px;
-  margin: 0 auto;
-  min-height: 44px;
-  width: 100%;
-  justify-content: space-between;
-  padding: 0 10px;
-}
-.nav-links,
-.right-actions,
-.global-task-band__meta,
-.global-task-band__actions {
-  flex-wrap: wrap;
-}
-.brand,
-.nav-btn,
-.nav-link,
-.continue-btn,
-.locale-btn,
-.task-btn {
-  border: 0;
-  cursor: pointer;
-  font-weight: 700;
-  border-radius: 8px;
-}
-.brand { background: #111827; color: #fff; padding: 6px 12px; font-size: 0.86rem; }
-.nav-btn,
-.locale-btn,
-.nav-link,
-.task-btn--ghost {
-  background: #fff;
-  color: #334155;
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  padding: 5px 10px;
-  font-size: 0.8rem;
-}
-.nav-link--active,
-.nav-link:hover { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
-.continue-btn,
-.task-btn { background: #0f172a; color: #fff; padding: 6px 12px; font-size: 0.8rem; }
-.global-task-band {
-  border-top: 1px solid rgba(226, 232, 240, 0.9);
-  background: linear-gradient(180deg, rgba(247, 250, 255, 0.98), rgba(240, 247, 255, 0.96));
-  padding: 6px 10px 8px;
-}
-.global-task-band__head,
-.global-task-band__body {
-  max-width: 1380px;
-  margin: 0 auto;
-}
-.global-task-band__body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 520px);
   gap: 10px;
-  align-items: center;
-  margin-top: 6px;
+  padding: 6px 16px;
+  background: linear-gradient(135deg, #fff7ed, #fef3c7);
+  border-bottom: 1px solid #fcd34d;
+  font-size: 0.82rem;
+  color: #92400e;
 }
-.global-task-band__summary strong { color: #0f172a; font-size: 0.88rem; }
-.global-task-band__summary p { margin: 4px 0 0; color: #475569; font-size: 0.78rem; line-height: 1.35; }
-.global-task-band__progress { display: grid; gap: 6px; }
-.task-chip {
-  display: inline-flex;
-  align-items: center;
-  min-height: 22px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.75);
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  color: #334155;
-  font-size: 0.68rem;
-  font-weight: 700;
+.global-task-mini__icon { font-size: 1.1rem; }
+.global-task-mini__text { flex: 1; }
+.global-task-mini__btn {
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid #f59e0b;
+  background: #fff;
+  color: #92400e;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: all 0.15s;
 }
-.task-chip--primary { background: #111827; color: #fff; border-color: #111827; }
-.task-chip--warn { background: rgba(254, 242, 242, 0.9); color: #b91c1c; border-color: rgba(248, 113, 113, 0.24); }
-.progress-row { justify-content: space-between; font-size: 0.72rem; color: #475569; }
-.progress-track { height: 6px; }
-.progress-row strong { color: #0f172a; }
-.progress-row--secondary { color: #64748b; }
-.progress-track { height: 8px; border-radius: 999px; background: rgba(203, 213, 225, 0.6); overflow: hidden; }
-.progress-bar { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2563eb, #06b6d4); }
-.progress-bar--phase { background: linear-gradient(90deg, #0f766e, #14b8a6); }
-@media (max-width: 1100px) {
-  .global-task-band__body { grid-template-columns: 1fr; }
-}
-@media (max-width: 768px) {
-  .global-nav-main { min-height: auto; padding: 10px 12px; align-items: flex-start; }
-  .left-actions, .nav-links, .right-actions { flex-wrap: wrap; }
-  .global-nav-shell--writing .global-nav-main {
-    align-items: center;
-    min-height: 52px;
-    padding: 8px 10px;
-  }
-  .global-nav-shell--writing .nav-links {
-    display: none;
-  }
-  .global-nav-shell--writing .right-actions {
-    margin-left: auto;
-  }
-  .global-nav-shell--writing .continue-btn {
-    display: none;
-  }
+.global-task-mini__btn:hover {
+  background: #fef3c7;
 }
 </style>
