@@ -149,6 +149,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NAlert, NButton, NCard, NEmpty, NSpace, NSpin, NTag } from 'naive-ui'
 import { AdminAPI, type ChapterRuntimeLogItem, type NovelRuntimeLogItem } from '@/api/admin'
+// SSE ready: import { connectSSE } from '@/utils/sseStream'
 
 type RuntimeLine = {
   at?: string | null
@@ -779,7 +780,7 @@ function startAutoRefresh() {
   if (refreshTimer) return
   refreshTimer = window.setInterval(() => {
     if (autoRefresh.value && !loading.value && !refreshing.value) void fetchLogs({ silent: true })
-  }, 5000)
+  }, 15000)  // 降低轮询频率，减轻后端压力
 }
 
 function stopAutoRefresh() {
