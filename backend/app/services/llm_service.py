@@ -589,6 +589,35 @@ class LLMService:
                         full_response += part["content"]
                     if part.get("finish_reason"):
                         finish_reason = part["finish_reason"]
+                # [PATCH] Empty response fallback for glm-5.2 intermittent empty streaming
+                if not full_response:
+                    logger.warning(
+                        "LLM stream returned empty response (model=%s), attempting non-stream fallback",
+                        model_name,
+                    )
+                    try:
+                        non_stream_resp = await client.chat(
+                            messages=chat_messages,
+                            model=model_name,
+                            temperature=temperature,
+                            timeout=int(timeout),
+                            response_format=stream_response_format,
+                            max_tokens=max_tokens,
+                            top_p=top_p,
+                        )
+                        if non_stream_resp.get("content"):
+                            logger.debug(
+                                "Non-stream fallback succeeded: model=%s len=%d",
+                                model_name,
+                                len(non_stream_resp["content"]),
+                            )
+                            return non_stream_resp["content"], non_stream_resp.get("finish_reason")
+                    except Exception as fallback_exc:
+                        logger.warning(
+                            "Non-stream fallback exception: model=%s error=%s",
+                            model_name,
+                            fallback_exc,
+                        )
                 return full_response, finish_reason
             except RateLimitError as exc:
                 detail = self._extract_provider_error_detail(exc, "AI 服务当前限流，请稍后重试或切换模型")
