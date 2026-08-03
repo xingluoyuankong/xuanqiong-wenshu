@@ -47,6 +47,7 @@ class ChapterGenerationStatus(str, Enum):
     EVALUATION_FAILED = "evaluation_failed"
     WAITING_FOR_CONFIRM = "waiting_for_confirm"
     SUCCESSFUL = "successful"
+    DRAFT = "draft"
 
 
 class ChapterOutline(BaseModel):
