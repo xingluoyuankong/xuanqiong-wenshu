@@ -288,7 +288,11 @@ def _normalize_chapter_status(status: Any) -> str:
     normalized = str(status).strip().lower()
     if not normalized:
         return ChapterGenerationStatus.NOT_GENERATED.value
-    return _LEGACY_CHAPTER_STATUS_MAP.get(normalized, normalized)
+    mapped = _LEGACY_CHAPTER_STATUS_MAP.get(normalized)
+    if mapped:
+        return mapped
+    known = {e.value for e in ChapterGenerationStatus}
+    return normalized if normalized in known else ChapterGenerationStatus.NOT_GENERATED.value
 
 
 def _blocks_sequential_generation(status: Any) -> bool:

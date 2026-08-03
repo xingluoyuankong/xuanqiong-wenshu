@@ -455,6 +455,55 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# === Request timeout middleware ===
+from starlette.middleware.base import BaseHTTPMiddleware
+import asyncio
+
+_REQUEST_TIMEOUT_SECONDS = 90
+
+class RequestTimeoutMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        try:
+            return await asyncio.wait_for(call_next(request), timeout=_REQUEST_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=503,
+                content={"detail": {"message": "Request timeout, please retry", "code": "HTTP_503"}},
+            )
+
+app.add_middleware(RequestTimeoutMiddleware)
+
+
+@app.on_event("startup")
+async def cleanup_stuck_chapters_on_startup():
+    """在服务启动时自动清理所有卡在generating状态的章节。
+    这确保服务重启后用户可以立即重新生成之前卡住的章节。"""
+    try:
+        from .db.session import AsyncSessionLocal
+        from .models.novel import Chapter
+        from sqlalchemy import select, update
+        import logging
+        logger = logging.getLogger("startup_cleanup")
+        
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Chapter).where(Chapter.status == "generating")
+            )
+            stuck = result.scalars().all()
+            if stuck:
+                logger.warning("发现 %d 个卡在generating状态的章节，正在重置...", len(stuck))
+                for ch in stuck:
+                    logger.warning("  重置: project=%s chapter=%s", ch.project_id[:20], ch.chapter_number)
+                    ch.status = "draft"
+                    session.add(ch)
+                await session.commit()
+                logger.warning("已重置 %d 个卡住的章节为draft状态", len(stuck))
+            else:
+                logger.info("未发现卡住的章节，启动清理完毕")
+    except Exception as exc:
+        logging.getLogger("startup_cleanup").warning("启动清理busy章节失败: %s", exc)
+
 app.include_router(api_router)
 
 
