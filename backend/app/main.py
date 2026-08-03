@@ -461,10 +461,18 @@ import asyncio
 
 _REQUEST_TIMEOUT_SECONDS = 90
 
+# 长时运行的端点路径（生成、大纲、研究等），超时设为10分钟
+_LONG_RUNNING_PATH_PREFIXES = ("/api/writer", "/api/projects/", "/api/novels/")
+
 class RequestTimeoutMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
+        timeout = _REQUEST_TIMEOUT_SECONDS
+        for prefix in _LONG_RUNNING_PATH_PREFIXES:
+            if request.url.path.startswith(prefix):
+                timeout = 600  # 10 minutes for long-running operations
+                break
         try:
-            return await asyncio.wait_for(call_next(request), timeout=_REQUEST_TIMEOUT_SECONDS)
+            return await asyncio.wait_for(call_next(request), timeout=timeout)
         except asyncio.TimeoutError:
             from fastapi.responses import JSONResponse
             return JSONResponse(
