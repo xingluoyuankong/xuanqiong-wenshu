@@ -34,6 +34,7 @@ from ..services.admin_setting_service import AdminSettingService
 from ..services.prompt_service import PromptService
 from ..services.usage_service import UsageService
 from ..utils.llm_tool import ChatMessage, LLMClient
+from .config_sync_manager import get_config_sync_manager
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +270,7 @@ class LLMService:
         *,
         temperature: float = 0.7,
         user_id: Optional[int] = None,
-        timeout: float = 180.0,  # 默认3分钟超时
+        timeout: float = 100.0,  # 默认100秒超时（比Cloudflare 120s短以快速fallback）
         response_format: Optional[Any] = "json_object",
         max_tokens: Optional[int] = None,
         top_p: Optional[float] = None,
@@ -320,7 +321,7 @@ class LLMService:
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
         user_id: Optional[int] = None,
-        timeout: float = 300.0,
+        timeout: float = 180.0,  # 非流式超时180秒
         max_tokens: Optional[int] = None,
         response_format: Optional[Any] = None,
         top_p: Optional[float] = None,
