@@ -1,4 +1,5 @@
 # AIMETA P=数据库会话_异步会话工厂|R=异步会话_连接池|NR=不含查询逻辑|E=AsyncSessionLocal_get_db|X=internal|A=会话工厂|D=sqlalchemy|S=db|RD=./README.ai
+import os
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import event
@@ -16,7 +17,7 @@ if settings.is_sqlite_backend:
         pool_pre_ping=False,
         connect_args={
             "check_same_thread": False,
-            "timeout": 30,  # 等待锁释放的超时时间（秒）
+            "timeout": 300,  # 等待锁释放的超时时间（秒）- 适应长生成
         },
         poolclass=NullPool,
     )
@@ -33,15 +34,34 @@ else:
 
 engine = create_async_engine(settings.sqlalchemy_database_uri, **engine_kwargs)
 
-# SQLite 启用 WAL 模式，支持并发读写
+# SQLite 启用 WAL + 直接PRAGMA设置，支持并发读写
 if settings.is_sqlite_backend:
+    import sqlite3 as _sqlite_pragma
+    _db_path = settings.sqlalchemy_database_uri.replace("sqlite+aiosqlite:///", "")
+    if os.path.isfile(_db_path):
+        try:
+            _conn = _sqlite_pragma.connect(_db_path)
+            _conn.execute("PRAGMA journal_mode=WAL")
+            _conn.execute("PRAGMA synchronous=NORMAL")
+            _conn.execute("PRAGMA busy_timeout=300000")
+            _conn.close()
+        except Exception:
+            pass
 
     @event.listens_for(engine.sync_engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
-        cursor.execute("PRAGMA busy_timeout=30000")  # 30秒超时
+        cursor.execute("PRAGMA busy_timeout=300000")
+        cursor.close()
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=300000")  # 5分钟超时（适应长生成）
         cursor.close()
 
 # 统一的 Session 工厂，禁用 expire_on_commit 方便返回模型对象
