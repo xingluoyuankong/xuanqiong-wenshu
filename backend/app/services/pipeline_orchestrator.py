@@ -64,8 +64,9 @@ CHAPTER_DRAFT_SUPPORTED_RANGE = {
     "min": 500,
     "standard_high_quality_min": 2500,
     "standard_high_quality_max": 7000,
-    "long_chapter_max": 12000,
-    "experimental_max": 15000,
+    "long_chapter_max": 15000,
+    "experimental_max": 30000,
+    "supported_max": 50000,
 }
 
 
@@ -95,11 +96,15 @@ class PipelineConfig:
     rag_mode: str = "simple"
     enable_foreshadowing: bool = False
     enable_faction: bool = False
-    target_word_count: int = 5000
-    min_word_count: int = 4500
+    target_word_count: int = 2500
+    min_word_count: int = 500
     max_enrich_iterations: int = 2
-    allow_truncated_response: bool = False
-    enforce_min_word_count: bool = False
+    allow_truncated_response: bool = True
+    enforce_min_word_count: bool = True
+    # 长章节多轮补充策略：当单轮生成字数不足时，自动触发续写
+    enable_multi_round_fallback: bool = True
+    multi_round_max_rounds: int = 5
+    multi_round_min_increment: int = 400  # 每轮最低增量字数
 
 
 class PipelineOrchestrator:
@@ -123,7 +128,7 @@ class PipelineOrchestrator:
         self.cache_service = CacheService(getattr(settings, "redis_url", "redis://localhost:6379/0"))
         if PipelineOrchestrator._generation_semaphore is None:
             limit = max(1, int(getattr(settings, "writer_chapter_versions", 1) or 1))
-            PipelineOrchestrator._generation_semaphore = asyncio.Semaphore(min(2, limit))
+            PipelineOrchestrator._generation_semaphore = asyncio.Semaphore(max(2, min(8, limit)))
 
     def _create_llm_config_service(self) -> LLMConfigService:
         return LLMConfigService(self.session)
@@ -401,12 +406,16 @@ class PipelineOrchestrator:
         violations: Optional[List[Dict[str, Any]]],
         chapter_mission: Optional[dict],
         story_guard_key: str = "story_progression_guard",
+        target_word_count: int = 3000,
+        min_word_count: int = 2000,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         summaries = dict(review_summaries or {})
         story_guard = cls._score_story_quality_candidate(
             content=content,
             violations=list(violations or []),
             chapter_mission=chapter_mission,
+            target_word_count=target_word_count,
+            min_word_count=min_word_count,
         )
         summaries[story_guard_key] = story_guard
         gate_input = dict(summaries)
@@ -673,6 +682,12 @@ class PipelineOrchestrator:
                     "source": "story_progression_guard",
                     "code": "static_description_risk",
                     "message": "章节主体缺少有效对话/动作承压，存在大段静态描写硬撑篇幅的风险。",
+                })
+            if story_guard.get("chapter_artifact_markers"):
+                blockers.append({
+                    "source": "story_progression_guard",
+                    "code": "chapter_artifact_markers",
+                    "message": "章节正文含有提纲/标记残留，不能作为成品章节放行。",
                 })
             if story_guard.get("expected_dialogue") and story_word_count >= 1500 and story_dialogue_markers < 4:
                 blockers.append({
@@ -1148,7 +1163,7 @@ class PipelineOrchestrator:
     @staticmethod
     def _resolve_chapter_draft_contract(target_word_count: int, min_word_count: Optional[int] = None) -> Dict[str, Any]:
         target = max(CHAPTER_DRAFT_SUPPORTED_RANGE["min"], int(target_word_count or 0))
-        minimum = max(200, int(min_word_count if min_word_count is not None else int(target * 0.9)))
+        minimum = max(200, int(min_word_count if min_word_count is not None else int(target * 0.5)))
         if minimum > target:
             minimum = target
 
@@ -1172,10 +1187,18 @@ class PipelineOrchestrator:
             tier = "long"
             strategy = "single_pass_grouped_scenes_with_fusion_check"
             scene_min, scene_max = 5, 7
-        else:
+        elif target < 20000:
             tier = "extra_long"
             strategy = "single_pass_grouped_scenes_with_strict_fusion_check"
             scene_min, scene_max = 6, 8
+        elif target < 35000:
+            tier = "ultra_long"
+            strategy = "multi_pass_segmented_with_bridge_continuity"
+            scene_min, scene_max = 8, 14
+        else:
+            tier = "mega_long"
+            strategy = "multi_pass_segmented_with_dedicated_continuity_gates"
+            scene_min, scene_max = 12, 20
 
         return {
             "target_word_count": target,
@@ -1218,9 +1241,9 @@ class PipelineOrchestrator:
         """
         words = max(500, int(target_word_count or 0))
         if words < 1200:
-            return 180.0
+            return 120.0
         if words < 2500:
-            return 300.0
+            return 200.0
         if words < 4000:
             return 600.0
         if words < 5500:
@@ -1258,9 +1281,9 @@ class PipelineOrchestrator:
         """
         words = max(500, int(target_word_count or 0))
         if words < 1200:
-            return 45.0
+            return 30.0
         if words < 2500:
-            return 60.0
+            return 45.0
         if words < 4000:
             return 90.0
         if words < 5500:
@@ -1272,16 +1295,16 @@ class PipelineOrchestrator:
         return 300.0
 
     @staticmethod
+    @staticmethod
     def _resolve_chapter_mission_max_tokens(target_word_count: int) -> int:
         words = max(500, int(target_word_count or 0))
         if words < 2500:
-            return 2400
-        if words < 5500:
             return 3200
+        if words < 5500:
+            return 4800
         if words < 9000:
-            return 4200
-        return 5200
-
+            return 6400
+        return 8000
     @staticmethod
     def _build_chapter_mission_schema() -> Dict[str, Any]:
         string_array = {"type": "array", "items": {"type": "string"}}
@@ -1463,24 +1486,28 @@ class PipelineOrchestrator:
         return normalized
 
     @staticmethod
+    @staticmethod
     def _resolve_chapter_generation_max_tokens(target_word_count: int) -> int:
         words = max(500, int(target_word_count or 0))
         if words < 1200:
-            return 2800
+            return 3200
         if words < 2500:
-            return 5200
+            return 6400
         if words < 4000:
-            return 7800
+            return 9600
         if words < 5500:
-            return 11000
+            return 18000
         if words < 7500:
-            return max(14000, int(words * 2.25))
+            return max(24000, int(words * 3.8))
         if words < 10000:
-            return max(18000, int(words * 2.3))
+            return max(32000, int(words * 3.9))
         if words < 12500:
-            return max(24000, int(words * 2.35))
-        return min(32000, max(28000, int(words * 2.4)))
-
+            return max(42000, int(words * 4.0))
+        if words < 20000:
+            return max(56000, int(words * 3.5))
+        if words < 35000:
+            return max(72000, int(words * 3.0))
+        return min(100000, max(96000, int(words * 2.8)))
     @staticmethod
     def _estimate_remaining_seconds(stage: str, target_word_count: int) -> int:
         target_word_count = max(1200, int(target_word_count or 0))
@@ -2200,6 +2227,7 @@ class PipelineOrchestrator:
             raise HTTPException(status_code=500, detail="缺少写作提示词，请联系管理员配置")
 
         prompt_sections = self._build_prompt_sections(
+            preset=requested_preset,
             writer_blueprint=writer_blueprint,
             previous_summary=history_context["previous_summary"],
             previous_tail=history_context["previous_tail"],
@@ -2338,6 +2366,10 @@ class PipelineOrchestrator:
                     )
                 )
 
+            # 在LLM调用前强制提交并释放数据库session锁，允许其他请求在生成期间读取
+            await self.session.commit()
+            await self.session.flush()
+            self.session.expire_all()
             generation_results = await asyncio.gather(*generation_tasks, return_exceptions=True)
             generation_attempt_duration_ms = round((time.perf_counter() - generation_attempt_started_at) * 1000, 2)
             await self._assert_generation_active(
@@ -2601,6 +2633,85 @@ class PipelineOrchestrator:
                     "attempts": runtime_metadata.get("generation_attempts", []),
                 },
             )
+
+        # ── Multi-round continuation for long chapters (free API workaround) ──
+        if config.enable_multi_round_fallback and versions:
+            best_initial = max(
+                versions,
+                key=lambda v: len(v.get("content") or ""),
+            )
+            best_content_initial = best_initial.get("content") or ""
+            initial_words = len(best_content_initial.replace(chr(10), ""))
+            target_words = config.target_word_count
+
+            continuation_rounds = 0
+            while (initial_words < target_words * 0.6
+                   and continuation_rounds < config.multi_round_max_rounds):
+                continuation_rounds += 1
+                await self._update_generation_runtime(
+                    chapter,
+                    generation_run_id=generation_run_id,
+                    stage="multi_round_continuation",
+                    message=f"字数不足（{initial_words}/{target_words}），启动第{continuation_rounds}轮续写...",
+                    progress_percent=min(62 + continuation_rounds * 3, 68),
+                    event_kind="progress",
+                    title=f"多轮续写 第{continuation_rounds}轮",
+                )
+
+                continuation_prompt = (
+                    f"【续写指令】请紧接着上面的内容继续写下去，保持同样的风格、视角和节奏。"
+                    f"当前已写{initial_words}字，目标{target_words}字，还需要至少{int(target_words * 0.6) - initial_words}字。"
+                    f"不要重复已写内容，直接接续结尾继续推进剧情。"
+                )
+
+                try:
+                    cont_result = await call_generation_text(
+                        llm_service=self.llm_service,
+                        system_prompt=writer_prompt,
+                        conversation_history=[
+                            {"role": "user", "content": prompt_input},
+                            {"role": "assistant", "content": best_content_initial[-800:]},
+                            {"role": "user", "content": continuation_prompt},
+                        ],
+                        temperature=0.75,
+                        user_id=user_id,
+                        timeout=self._resolve_chapter_generation_timeout(config.target_word_count),
+                        policy=GenerationCallPolicy(
+                            stage_label=f"续写轮{continuation_rounds}",
+                            progress_stage="multi_round_continuation",
+                            retry_attempts=1,
+                            max_tokens=self._resolve_chapter_generation_max_tokens(target_words),
+                            allow_truncated_response=True,
+                        ),
+                    )
+                    if cont_result and cont_result.text:
+                        new_content = best_content_initial + "\n\n" + cont_result.text
+                        best_initial["content"] = new_content
+                        best_initial["word_count"] = len(new_content.replace(chr(10), ""))
+                        best_content_initial = new_content
+                        initial_words = best_initial["word_count"]
+                        logger.info(
+                            "Continuation round %s: words -> %s",
+                            continuation_rounds,
+                            initial_words,
+                        )
+                    else:
+                        logger.warning("Continuation round %s returned empty", continuation_rounds)
+                        break
+                except Exception as exc:
+                    logger.warning("Continuation round %s failed: %s", continuation_rounds, exc)
+                    runtime_metadata["degraded_stages"].append({
+                        "stage": f"multi_round_continuation_{continuation_rounds}",
+                        "reason": str(exc),
+                    })
+                    break
+
+            if continuation_rounds > 0:
+                runtime_metadata["continuation"] = {
+                    "rounds": continuation_rounds,
+                    "final_words": initial_words,
+                    "target_words": target_words,
+                }
 
         review_started_at = time.perf_counter()
         review_chapter_mission = self._build_ai_review_mission(
@@ -3597,7 +3708,7 @@ class PipelineOrchestrator:
             if flow_config.get("target_word_count") is None:
                 config.target_word_count = 5000
             if flow_config.get("min_word_count") is None:
-                config.min_word_count = max(4500, int(config.target_word_count * 0.9))
+                config.min_word_count = max(800, int(config.target_word_count * 0.9))
 
         if preset == "basic":
             config.enable_rag = True
@@ -3654,19 +3765,9 @@ class PipelineOrchestrator:
                 return metadata
 
             enabled_profiles = [profile for profile in user_config.llm_provider_profiles if getattr(profile, "enabled", True)]
-            if len(enabled_profiles) == 1:
-                active_profile = enabled_profiles[0]
-                metadata["checked"] = False
-                metadata["reason"] = "single_profile_locked_skip_preflight"
-                metadata["current_profile_id"] = active_profile.id
-                metadata["current_profile_name"] = active_profile.name
-                metadata["active_profile_id"] = active_profile.id
-                metadata["active_profile_name"] = active_profile.name
-                metadata["has_usable_profile"] = True
-                metadata["recommended_profile_id"] = active_profile.id
-                metadata["recommended_profile_name"] = active_profile.name
+            if not enabled_profiles:
+                metadata["reason"] = "no_enabled_profiles"
                 return metadata
-
             health = await config_service.run_health_check(user_id=user_id, include_disabled=True)
             metadata["checked"] = True
             metadata["current_profile_id"] = health.current_profile_id
@@ -4123,7 +4224,7 @@ class PipelineOrchestrator:
                 policy=GenerationCallPolicy(
                     stage_label="章节导演脚本",
                     progress_stage="generate_mission",
-                    retry_attempts=2,
+                    retry_attempts=1,
                     response_format="json_object",
                     json_schema=self._build_chapter_mission_schema(),
                     json_schema_name="chapter_mission",
@@ -4588,6 +4689,7 @@ class PipelineOrchestrator:
     @staticmethod
     def _build_prompt_sections(
         *,
+        preset: str = "quality",
         writer_blueprint: Dict[str, Any],
         previous_summary: str,
         previous_tail: str,
@@ -4682,6 +4784,15 @@ class PipelineOrchestrator:
             sections.append(("[检索到的剧情上下文](Markdown)", rag_chunks_text))
 
         sections.append(("[世界蓝图](JSON，已裁剪)", blueprint_text))
+
+        # lightweight/basic preset: strip non-essential sections to reduce prompt size for constrained APIs
+        if preset in ("basic", "lightweight", "fast"):
+            essential_keys = {
+                "[当前章节目标]", "[章节导演脚本](JSON)", "[上一章摘要]",
+                "[上一章结尾]", "[连续性硬性约束]", "[章节长度约束]", "[禁止角色](本章不允许提及)",
+                "[世界蓝图](JSON，已裁剪)",
+            }
+            sections = [(k, v) for k, v in sections if k in essential_keys]
         return sections
 
     @staticmethod
@@ -5795,6 +5906,15 @@ class PipelineOrchestrator:
         text = str(content or "")
         condensed = "".join(text.split())
         word_count = len(condensed)
+        target_floor = max(0, int(target_word_count or 0))
+        minimum_floor = max(0, int(min_word_count or 0))
+        if target_floor and minimum_floor > target_floor:
+            minimum_floor = target_floor
+        preferred_floor = max(minimum_floor, int(target_floor * 0.92)) if target_floor else minimum_floor
+        word_count_below_min = bool(minimum_floor and word_count < minimum_floor)
+        word_count_far_below_target = bool(preferred_floor and word_count < preferred_floor)
+        upper_target = int(target_floor * 1.25) if target_floor else 0
+        word_count_far_above_target = bool(upper_target and word_count > upper_target)
         paragraphs = [segment for segment in text.splitlines() if segment.strip()]
         paragraph_count = len(paragraphs)
         dialogue_markers = sum(text.count(marker) for marker in ("“", "”", "「", "」", "『", "』", '"'))
@@ -5828,6 +5948,43 @@ class PipelineOrchestrator:
             "static_description_risk": static_description_risk,
         }
 
+    @staticmethod
+    def _detect_chapter_artifact_markers(text):
+        """Detect chapter artifact markers in content."""
+        if not text:
+            return {"chapter_artifact_markers": False, "chapter_artifact_marker_count": 0, "chapter_artifact_marker_examples": []}
+        
+        import re
+        patterns = [
+            re.compile(r'^\s*#{1,6}\s*(?:场景|scene|扩写|修订|完整章节正文|本章正文|章节大纲|章节导演)\s*\d*\s*[|\uff5c:\uff1a\u3011]?\s*\S*', re.IGNORECASE | re.MULTILINE),
+            re.compile(r'^\s*(?:【|\*\*【)?\s*场景\s*\d+\s*(?:[|\uff5c:\uff1a\u3011]|$)', re.MULTILINE),
+            re.compile(r'^\s*(?:【|\*\*【)?\s*扩写部分\s*\d*\s*(?:[|\uff5c:\uff1a\u3011]|$)', re.MULTILINE),
+            re.compile(r'^\s*(?:修改说明|修订说明|以下是|本章正文|完整章节正文)\s*[:\uff1a]', re.MULTILINE),
+            re.compile(r'(?:写作指令|写作要求|质量方向|基础质量底线|首稿执行要求)\s*[:\uff1a]'),
+            re.compile(r'约\s*\d+\s*字'),
+        ]
+        
+        examples = []
+        for p in patterns:
+            for m in p.finditer(text):
+                example = m.group(0).strip()
+                if example and len(example) <= 100:
+                    examples.append(example)
+                    if len(examples) >= 5:
+                        break
+            if len(examples) >= 5:
+                break
+        
+        # Also check for structural bold headings
+        for m in re.finditer(r'\*\*(.+?)\*\*', text):
+            s = m.group(1)
+            if any(kw in s for kw in ['场景', '章节', '扩写', '修订']):
+                examples.append(m.group(0).strip())
+                if len(examples) >= 5:
+                    break
+        
+        return {"chapter_artifact_markers": len(examples) > 0, "chapter_artifact_marker_count": len(examples), "chapter_artifact_marker_examples": examples[:5]}
+
     @classmethod
     def _score_story_quality_candidate(
         cls,
@@ -5835,6 +5992,8 @@ class PipelineOrchestrator:
         content: str,
         violations: List[Dict[str, Any]],
         chapter_mission: Optional[dict],
+        target_word_count: Optional[int] = None,
+        min_word_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         text = str(content or "")
         condensed = "".join(text.split())
@@ -5855,6 +6014,7 @@ class PipelineOrchestrator:
         ending_hook = bool(ending_pressure.get("ending_pressure_passed"))
         static_runs = cls._estimate_static_description_runs(paragraphs)
         event_density = cls._evaluate_event_density(text, word_count=word_count)
+        artifact_markers = cls._detect_chapter_artifact_markers(text)
         static_description_risk = bool(
             (dialogue_markers == 0 and paragraph_count <= 4 and word_count >= 1800)
             or (word_count >= 1500 and static_runs.get("max_static_run", 0) >= 3)
@@ -5896,6 +6056,8 @@ class PipelineOrchestrator:
             "static_paragraph_count": static_runs.get("static_paragraph_count", 0),
             "max_static_run": static_runs.get("max_static_run", 0),
             "event_density_passed": bool(event_density.get("event_density_passed")),
+            "chapter_artifact_markers": artifact_markers.get("chapter_artifact_markers"),
+            "chapter_artifact_marker_examples": artifact_markers.get("chapter_artifact_marker_examples", []),
             "long_chapter_density_passed": bool(event_density.get("long_chapter_density_passed")),
             "state_change_interval_passed": bool(event_density.get("state_change_interval_passed")),
             "progression_unit_count": event_density.get("progression_unit_count", 0),
@@ -5943,6 +6105,7 @@ class PipelineOrchestrator:
             "quality_issue_codes": quality_issue_summary.get("codes", []),
             "quality_issue_labels": quality_issue_summary.get("labels", []),
             "quality_metric_snapshot": quality_metric_snapshot,
+            **artifact_markers,
         }
 
     @classmethod
@@ -6079,6 +6242,28 @@ class PipelineOrchestrator:
         chapter_mission: Optional[dict],
         user_id: int,
     ) -> Tuple[int, Optional[Dict[str, Any]]]:
+        if len(versions) <= 1:
+            candidate = versions[0] if versions else {}
+            candidate.setdefault("metadata", {})["ai_review"] = {
+                "is_best": True,
+                "scores": {},
+                "evaluation": None,
+                "flaws": [],
+                "suggestions": "",
+                "status": "single_candidate_rule_review",
+                "skip_reason": "single_candidate_no_selection_needed",
+            }
+            return 0, {
+                "best_version_index": 0,
+                "scores": {},
+                "evaluation": "单候选直接采用，无需 AI 评审选择。",
+                "flaws": [],
+                "suggestions": "",
+                "status": "single_candidate_rule_review",
+                "skip_reason": "single_candidate_no_selection_needed",
+                "fallback_summary": None,
+            }
+
         contents = [v.get("content", "") for v in versions]
         fallback_index, fallback_summary = self._fallback_select_best_version(
             versions,
@@ -6809,3 +6994,5 @@ class PipelineOrchestrator:
 
 
 __all__ = ["PipelineOrchestrator", "PipelineConfig"]
+
+# force reload

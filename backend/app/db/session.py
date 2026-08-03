@@ -14,12 +14,16 @@ if settings.is_sqlite_backend:
     # SQLite 场景下禁用连接池并放宽线程检查，避免多协程读写冲突
     # 启用 WAL 模式支持并发读写，增加超时避免锁定
     engine_kwargs.update(
-        pool_pre_ping=False,
+        pool_pre_ping=True,
         connect_args={
             "check_same_thread": False,
             "timeout": 300,  # 等待锁释放的超时时间（秒）- 适应长生成
         },
-        poolclass=NullPool,
+        pool_size=10,
+        max_overflow=20,
+        pool_timeout=60,
+        pool_recycle=1800,
+        # poolclass=NullPool 已禁用：NullPool导致生成期间所有读请求阻塞
     )
 else:
     # MySQL 场景保持健康检查与连接复用，并为后台任务并发写提供稳定连接池
