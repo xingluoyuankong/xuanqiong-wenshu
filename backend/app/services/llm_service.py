@@ -62,7 +62,7 @@ class LLMService:
         self.admin_setting_service = AdminSettingService(session)
         self.usage_service = UsageService(session)
         self._embedding_dimensions: Dict[str, int] = {}
-        self._resolved_llm_config_cache: Dict[tuple[int, bool, bool], Dict[str, Any]] = {}
+        self._resolved_llm_config_cache: Dict[tuple, Dict[str, Any]] = {}
 
     async def _recover_from_stale_session(self, operation: str, exc: OperationalError) -> None:
         logger.warning("LLM 服务在 %s 阶段检测到陈旧数据库会话：%s", operation, exc)
@@ -1208,7 +1208,15 @@ class LLMService:
         enforce_daily_limit: bool = True,
         require_primary_api_key: bool = True,
     ) -> Dict[str, Any]:
-        cache_key = (int(user_id or 0), bool(enforce_daily_limit), bool(require_primary_api_key))
+        # 获取当前配置版本号，确保配置更新后缓存自动失效
+        config_version = 0
+        try:
+            from .config_sync_manager import get_config_sync_manager
+            sync_mgr = get_config_sync_manager()
+            config_version = await sync_mgr.get_version(int(user_id or 0))
+        except Exception:
+            pass
+        cache_key = (int(user_id or 0), bool(enforce_daily_limit), bool(require_primary_api_key), config_version)
         cached = self._resolved_llm_config_cache.get(cache_key)
         if cached is not None:
             return dict(cached)

@@ -25,6 +25,8 @@ from ..schemas.llm_config import (
     LLMAutoSwitchResponse,
 )
 
+from .config_sync_manager import get_config_sync_manager
+
 
 logger = logging.getLogger(__name__)
 
@@ -330,6 +332,12 @@ class LLMConfigService:
             instance = LLMConfig(user_id=user_id, **data)
             await self.repo.add(instance)
         await self.session.commit()
+        try:
+            sync_manager = get_config_sync_manager()
+            await sync_manager.bump_version(user_id)
+
+        except Exception:
+            pass
         return (await self.get_config(user_id)) or LLMConfigRead(
             user_id=user_id,
             llm_provider_url=data.get("llm_provider_url"),
@@ -757,6 +765,11 @@ class LLMConfigService:
             return False
         await self.repo.delete(instance)
         await self.session.commit()
+        try:
+            sync_manager = get_config_sync_manager()
+            await sync_manager.bump_version(user_id)
+        except Exception:
+            pass
         return True
 
     async def get_available_models(
@@ -1062,3 +1075,4 @@ class LLMConfigService:
         except Exception as e:
             logger.error("获取 Ollama 模型列表失败: %s", str(e), exc_info=True)
             return []
+
