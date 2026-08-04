@@ -1500,14 +1500,14 @@ class PipelineOrchestrator:
         if words < 7500:
             return max(24000, int(words * 3.8))
         if words < 10000:
-            return max(32000, int(words * 3.9))
+            return max(32000, int(words * 3.2))
         if words < 12500:
-            return max(42000, int(words * 4.0))
+            return max(40000, int(words * 3.5))
         if words < 20000:
-            return max(56000, int(words * 3.5))
+            return max(56000, int(words * 2.8))
         if words < 35000:
-            return max(72000, int(words * 3.0))
-        return min(100000, max(96000, int(words * 2.8)))
+            return max(72000, int(words * 2.5))
+        return min(100000, max(80000, int(words * 2.3)))
     @staticmethod
     def _estimate_remaining_seconds(stage: str, target_word_count: int) -> int:
         target_word_count = max(1200, int(target_word_count or 0))

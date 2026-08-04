@@ -90,8 +90,8 @@ BACKGROUND_GENERATION_TIMEOUT_MIN_SECONDS = 15 * 60  # 最小15分钟
 BACKGROUND_GENERATION_TIMEOUT_MAX_SECONDS = 4 * 60 * 60  # 最大4小时
 GENERATION_HEARTBEAT_GRACE_SECONDS = 8 * 60
 BACKGROUND_GENERATION_TIMEOUT_DISABLED = os.getenv("XUANQIONG_WENSHU_DISABLE_GENERATION_TIMEOUT", "0").strip().lower() in {"1", "true", "yes", "on"}
-_GENERATION_TASK_SEMAPHORE = asyncio.Semaphore(2)
-_FINALIZE_TASK_SEMAPHORE = asyncio.Semaphore(1)
+_GENERATION_TASK_SEMAPHORE = asyncio.Semaphore(8)
+_FINALIZE_TASK_SEMAPHORE = asyncio.Semaphore(4)
 _OUTLINE_JOBS: Dict[str, Dict[str, Any]] = {}
 _OUTLINE_PROJECT_RUNS: Dict[str, str] = {}
 _OUTLINE_JOB_LOCK = asyncio.Lock()
@@ -1220,8 +1220,11 @@ async def _run_outline_generation_job(
     request_payload: Dict[str, Any],
 ) -> None:
     async def heartbeat() -> None:
-        while True:
+        max_beats = 720  # 6 hours max (720 beats * 30s = 21600s)
+        beat_count = 0
+        while beat_count < max_beats:
             await asyncio.sleep(_OUTLINE_JOB_HEARTBEAT_SECONDS)
+            beat_count += 1
             async with _OUTLINE_JOB_LOCK:
                 job = _OUTLINE_JOBS.get(run_id)
                 if not job or job.get("status") not in _OUTLINE_ACTIVE_STATUSES:
@@ -1234,6 +1237,7 @@ async def _run_outline_generation_job(
                 progress_stage=stage,
                 progress_message=message,
             )
+        logger.warning("Outline job heartbeat maxed out: run_id=%s, job assumed timed out", run_id)
 
     heartbeat_task = asyncio.create_task(heartbeat())
     try:
@@ -1941,6 +1945,8 @@ async def _refresh_chapter_runtime_state(session: AsyncSession, chapter: Optiona
         logger.debug("刷新章节运行态失败，继续使用当前内存值", exc_info=True)
 
 
+
+
 async def _run_finalize_pipeline(
     *,
     session: AsyncSession,
@@ -2332,6 +2338,35 @@ async def _generate_chapter_async(
                     project_id,
                     chapter_number,
                 )
+                # ---- auto-select best version ----
+                try:
+                    async with AsyncSessionLocal() as auto_sess:
+                        from sqlalchemy import select as sql_select
+                        from sqlalchemy.orm import selectinload
+                        stmt = sql_select(Chapter).options(selectinload(Chapter.versions)).where(
+                            Chapter.project_id == project_id,
+                            Chapter.chapter_number == chapter_number,
+                        )
+                        result = await auto_sess.execute(stmt)
+                        chapter_obj = result.scalars().first()
+                        if chapter_obj and chapter_obj.versions:
+                            best = max(
+                                (v for v in chapter_obj.versions if v.content),
+                                key=lambda v: len(v.content or ""),
+                                default=None,
+                            )
+                            if best:
+                                chapter_obj.selected_version_id = best.id
+                                chapter_obj.status = "successful"
+                                chapter_obj.word_count = len(best.content or "")
+                                await auto_sess.commit()
+                                logger.info(
+                                    "Auto-selected best version %s: project=%s chapter=%s words=%s",
+                                    best.id, project_id, chapter_number, chapter_obj.word_count,
+                                )
+                except Exception as _e:
+                    logger.debug("Auto-select skipped: %s", _e)
+                # -----------------------------------
             except asyncio.TimeoutError:
                 timeout_minutes = max(1, round(timeout_seconds / 60))
                 reason = (
@@ -2461,7 +2496,17 @@ async def advanced_generate_chapter(
     await novel_service.ensure_project_owner(request.project_id, current_user.id)
     outline = await novel_service.get_outline(request.project_id, request.chapter_number)
     if not outline:
-        raise HTTPException(status_code=404, detail="蓝图中未找到对应章节纲要")
+        logger.warning("章节纲要缺失，自动创建基础纲要: project=%s chapter=%s", project_id, request.chapter_number)
+        try:
+            outline = await novel_service.update_or_create_outline(
+                project_id,
+                request.chapter_number,
+                f"第{request.chapter_number}章",
+                "自动生成章节纲要",
+            )
+        except Exception as exc:
+            logger.error("自动创建章节纲要失败: project=%s chapter=%s error=%s", project_id, request.chapter_number, exc)
+            raise HTTPException(status_code=404, detail="蓝图中未找到对应章节纲要且自动创建失败")
 
     flow_config = _build_advanced_background_flow_config(request)
     chapter = await novel_service.get_or_create_chapter(request.project_id, request.chapter_number)
@@ -2710,7 +2755,17 @@ async def generate_chapter(
     )
     outline = await novel_service.get_outline(project_id, request.chapter_number)
     if not outline:
-        raise HTTPException(status_code=404, detail="蓝图中未找到对应章节纲要")
+        logger.warning("章节纲要缺失，自动创建基础纲要: project=%s chapter=%s", project_id, request.chapter_number)
+        try:
+            outline = await novel_service.update_or_create_outline(
+                project_id,
+                request.chapter_number,
+                f"第{request.chapter_number}章",
+                "自动生成章节纲要",
+            )
+        except Exception as exc:
+            logger.error("自动创建章节纲要失败: project=%s chapter=%s error=%s", project_id, request.chapter_number, exc)
+            raise HTTPException(status_code=404, detail="蓝图中未找到对应章节纲要且自动创建失败")
 
     chapter = await novel_service.get_or_create_chapter(project_id, request.chapter_number)
     if chapter.status in _BUSY_CHAPTER_STATUSES:
@@ -4133,3 +4188,67 @@ async def edit_chapter_content_fast(
     )
 
     return await novel_service.get_chapter_schema_for_admin(project_id, request.chapter_number)
+
+
+# ==================== SSE Streaming Endpoint ====================
+import asyncio
+import hashlib
+import json as json_module
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select
+from ...db.session import AsyncSessionLocal
+from ...models.novel import Chapter
+
+@router.get("/novels/{project_id}/chapters/{chapter_number}/stream")
+async def stream_chapter_progress(
+    project_id: str,
+    chapter_number: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+):
+    """Stream real-time chapter generation progress via SSE."""
+    novel_service = NovelService(session)
+    await novel_service.ensure_project_owner(project_id, current_user.id)
+
+    async def event_generator():
+        last_status = None
+        last_hash = None
+        max_iter = 900  # 30 minutes at 2s intervals
+        for _ in range(max_iter):
+            try:
+                async with AsyncSessionLocal() as s:
+                    result = await s.execute(
+                        select(Chapter).where(
+                            Chapter.project_id == project_id,
+                            Chapter.chapter_number == chapter_number,
+                        )
+                    )
+                    ch = result.scalars().first()
+                    if not ch:
+                        yield f"event: error\ndata: {json_module.dumps({'message': 'Chapter not found'})}\n\n"
+                        return
+
+                    status = ch.status or "not_generated"
+                    rs = ch.real_summary or ""
+                    try:
+                        payload = json_module.loads(rs) if rs.startswith("{") else {}
+                    except Exception:
+                        payload = {}
+                    runtime = payload.get("generation_runtime", {})
+
+                    h = hashlib.md5(json_module.dumps(runtime, sort_keys=True, default=str).encode()).hexdigest()
+                    if status != last_status or h != last_hash:
+                        last_status = status
+                        last_hash = h
+                        yield f"event: status_update\ndata: {json_module.dumps({'status': status, 'progress_message': runtime.get('progress_message', ''), 'progress_stage': runtime.get('progress_stage', ''), 'word_count': ch.word_count or 0, 'updated_at': ch.updated_at.isoformat() if ch.updated_at else None, 'runtime': runtime})}\n\n"
+
+                    if status in ("successful", "failed", "waiting_for_confirm", "evaluation_failed"):
+                        yield f"event: complete\ndata: {json_module.dumps({'status': status, 'word_count': ch.word_count or 0})}\n\n"
+                        return
+            except Exception as e:
+                yield f"event: error\ndata: {json_module.dumps({'message': str(e)})}\n\n"
+                return
+            await asyncio.sleep(2)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
