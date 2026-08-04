@@ -1,6 +1,6 @@
 <!-- AIMETA P=根组件_应用根节点|R=全局布局_RouterView|NR=不含页面逻辑|E=component:App|X=ui|A=RouterView|D=vue-router|S=dom|RD=./README.ai -->
 <script setup lang="ts">
-import { defineAsyncComponent } from 'vue'
+import { defineAsyncComponent, onErrorCaptured, ref } from 'vue'
 import { NConfigProvider } from 'naive-ui'
 import { RouterView } from 'vue-router'
 import { globalAlert } from '@/composables/useAlert'
@@ -8,6 +8,8 @@ import { globalAlert } from '@/composables/useAlert'
 const CustomAlert = defineAsyncComponent(() => import('@/components/CustomAlert.vue'))
 const GlobalNavBar = defineAsyncComponent(() => import('@/components/GlobalNavBar.vue'))
 const GlobalNotification = defineAsyncComponent(() => import('@/components/shared/GlobalNotification.vue'))
+const fatalError = ref<string|null>(null)
+onErrorCaptured((err: unknown) => { console.error("Global error captured:", err); fatalError.value = String(err).slice(0, 300) || "未知错误"; return false })
 </script>
 
 <template>
