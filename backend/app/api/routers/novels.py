@@ -35,6 +35,7 @@ from ...services.export_service import ExportService
 from ...services.import_service import ImportCancelledError, ImportService
 from ...services.generation_call_service import GenerationCallPolicy, GenerationJSONDecodeError, call_generation_json, call_generation_text, is_retryable_http_exception
 from ...services.llm_service import LLMService
+from ...services.long_novel_outline_generator import LongNovelOutlineGenerator
 from ...services.novel_service import NovelService
 from ...services.prompt_service import PromptService
 from ...utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
@@ -1881,6 +1882,35 @@ async def _generate_novel_outline(
     else:
         outline_stage_requirement = "输出 8-12 个阶段节点"
         chapter_range_example = "1-60章"
+
+
+    # 长篇检测：如果目标超过30章或20万字，切换到长篇大纲生成器
+    total_chapters = int(blueprint_data.get("total_chapters") or 0)
+    total_word_count = int(blueprint_data.get("total_word_count") or int(length_contract.get("target_total_words") or 0))
+    if total_chapters > 30 or total_word_count > 200000:
+        logger.info("检测到长篇项目（%s章/%s字），尝试使用 LongNovelOutlineGenerator", total_chapters, total_word_count)
+        generator = LongNovelOutlineGenerator(llm_service)
+        volume_count = max(2, total_chapters // 15) if total_chapters > 0 else 6
+        chapters_per_volume = max(8, total_chapters // max(volume_count, 1)) if total_chapters > 0 else 15
+        try:
+            blueprint_data = await generator.generate_outline(
+                blueprint_data=blueprint_data,
+                llm_service=llm_service,
+                user_id=user_id,
+                volume_count=volume_count,
+                chapters_per_volume=chapters_per_volume,
+                progress_callback=progress_callback,
+            )
+            if blueprint_data and blueprint_data.get("novel_outline"):
+                _validate_novel_outline_coherence(
+                    blueprint_data["novel_outline"],
+                    min_stage_count=_resolve_novel_outline_min_stage_count(blueprint_data),
+                )
+                _validate_novel_outline_depth(blueprint_data["novel_outline"])
+                return blueprint_data
+        except Exception as e:
+            logger.warning("LongNovelOutlineGenerator 失败，回退到标准流程: %s", str(e))
+
 
     outline_system_prompt = (
         "你是资深长篇网文总策划，擅长把小说蓝图整理成完整的全书大纲与分卷路线。"

@@ -572,6 +572,26 @@ class EnrichmentService:
         """Reject expansions that look like a fresh rewrite instead of anchored supplementation."""
         original_clean = (original or "").strip()
         enriched_clean = (enriched or "").strip()
+        artifact_markers = (
+            "【扩写部分",
+            "扩写部分",
+            "约120字",
+            "约 120 字",
+            "【修订",
+            "【修改",
+            "【场景",
+            "章节大纲",
+            "写作指令",
+            "写作要求",
+        )
+        for marker in artifact_markers:
+            if marker in enriched_clean:
+                return "enrichment_artifact_marker"
+        if re.search(r'【.*(?:扩写|修订|修改|场景).*】', enriched_clean):
+            return "enrichment_artifact_marker"
+        if re.search(r'^\s*(?:场景|scene)\s*\d+', enriched_clean, re.MULTILINE):
+            return "enrichment_artifact_marker"
+
         if not original_clean or not enriched_clean:
             return "empty_content"
         if self._count_words(enriched_clean) < max(1, int(self._count_words(original_clean) * 0.9)):
