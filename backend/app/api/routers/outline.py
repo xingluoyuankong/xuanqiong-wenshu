@@ -8,7 +8,7 @@
 - GET /api/projects/{id}/outline/alternatives - 获取当前章节的所有可能走向
 """
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -19,9 +19,57 @@ from ...db.session import get_session
 from ...schemas.user import UserInDB
 from ...services.llm_service import LLMService
 from ...services.outline_evolution_service import OutlineEvolutionService
+
+from ...services.long_novel_outline_generator import LongNovelOutlineGenerator
 from ...services.novel_service import NovelService
 
 logger = logging.getLogger(__name__)
+
+
+class LongNovelOutlineRequest(BaseModel):
+    """长篇小说大纲生成请求"""
+    target_word_count: int = Field(default=200000, ge=10000, le=2000000, description="目标总字数")
+    volume_count: Optional[int] = Field(default=None, ge=1, le=50, description="指定卷数（可选，自动估算）")
+    chapters_per_volume: Optional[int] = Field(default=None, ge=3, le=30, description="每卷章节数（可选，自动估算）")
+    protagonist: str = Field(default="", description="主角设定")
+    central_conflict: str = Field(default="", description="核心冲突")
+    worldview: str = Field(default="", description="世界观")
+    regenerate: bool = Field(default=False, description="是否覆盖已有大纲")
+
+
+class VolumeOutline(BaseModel):
+    """卷大纲"""
+    volume_number: int
+    volume_title: str
+    volume_summary: str
+    theme: str
+    chapter_count: int
+
+
+class ChapterOutlineItem(BaseModel):
+    """章节大纲条目"""
+    chapter_number: int
+    volume_number: int
+    volume_title: str = ""
+    title: str
+    summary: str
+    key_events: List[str] = Field(default_factory=list)
+    character_focus: List[str] = Field(default_factory=list)
+    emotional_tone: str = ""
+    word_count_estimate: int = 5000
+
+
+class LongNovelOutlineResponse(BaseModel):
+    """长篇小说大纲响应"""
+    project_id: str
+    novel_title: str
+    target_word_count: int
+    structure: Dict[str, Any]
+    volumes: List[VolumeOutline]
+    chapters: List[ChapterOutlineItem]
+    total_chapters: int
+    generated_at: str
+
 
 router = APIRouter(prefix="/outline", tags=["outline-evolution"])
 
@@ -206,6 +254,184 @@ async def get_alternatives(
     ]
 
     return AlternativesResponse(alternatives=alt_list, chapter_number=chapter_number, total=len(alt_list))
+
+
+
+@router.post("/generate-long", response_model=LongNovelOutlineResponse)
+async def generate_long_novel_outline(
+    project_id: str,
+    request: LongNovelOutlineRequest = Body(...),
+    current_user: UserInDB = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """生成完整的长篇小说大纲（多卷多章节结构）"""
+    novel_service = NovelService(session)
+    await novel_service.ensure_project_owner(project_id, current_user.id)
+
+    novel = await novel_service.get_project_schema(project_id, current_user.id)
+    if not novel:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="项目不存在"
+        )
+
+    # 获取项目角色信息
+    characters = await novel_service.get_characters(project_id) if hasattr(novel_service, 'get_characters') else []
+    character_dicts = [
+        {"name": getattr(c, "name", ""), "identity": getattr(c, "identity", ""), "description": getattr(c, "description", "")}
+        for c in characters
+    ] if characters else []
+
+    generator = LongNovelOutlineGenerator()
+    prompt = generator.build_prompt(
+        title=novel.title,
+        genre=getattr(novel, "genre", ""),
+        style=getattr(novel, "style", ""),
+        target_word_count=request.target_word_count,
+        protagonist=request.protagonist,
+        central_conflict=request.central_conflict,
+        worldview=request.worldview,
+        characters=character_dicts,
+        volume_count=request.volume_count,
+        chapters_per_volume=request.chapters_per_volume,
+    )
+
+    # 调用 LLM 生成
+    llm_service = LLMService(session)
+    try:
+        response = await llm_service.generate(
+            prompt=prompt,
+            user_id=current_user.id,
+            temperature=0.8,
+            max_tokens=16000,
+        )
+        outline_data = generator.parse_outline_response(response)
+    except Exception as e:
+        logger.warning("LLM 大纲生成失败，使用兜底结构: %s", e)
+        outline_data = None
+
+    if not outline_data:
+        outline_data = generator.generate_fallback_outline(
+            title=novel.title,
+            genre=getattr(novel, "genre", ""),
+            target_word_count=request.target_word_count,
+            protagonist=request.protagonist or "主角",
+        )
+
+    # 验证结构
+    issues = generator.validate_outline_structure(outline_data)
+    if issues:
+        logger.warning("大纲结构验证问题: %s", "; ".join(issues))
+
+    # 展平章节列表
+    chapters = generator.flatten_outline(outline_data)
+
+    # 构建响应
+    volumes = []
+    for vol in outline_data.get("volumes", []):
+        volumes.append(VolumeOutline(
+            volume_number=vol.get("volume_number", 0),
+            volume_title=vol.get("volume_title", ""),
+            volume_summary=vol.get("volume_summary", ""),
+            theme=vol.get("theme", ""),
+            chapter_count=len(vol.get("chapters", [])),
+        ))
+
+    structure = generator.estimate_structure(request.target_word_count, getattr(novel, "genre", ""))
+
+    # 持久化大纲到数据库
+    try:
+        from ...models.novel import ChapterOutline
+        from sqlalchemy import select
+        for ch in chapters:
+            cn = ch.get("chapter_number", 0)
+            stmt = select(ChapterOutline).where(
+                ChapterOutline.project_id == project_id,
+                ChapterOutline.chapter_number == cn
+            )
+            result = await session.execute(stmt)
+            existing = result.scalar_one_or_none()
+            extra = {
+                "key_events": ch.get("key_events", []),
+                "character_focus": ch.get("character_focus", []),
+                "emotional_tone": ch.get("emotional_tone", ""),
+                "word_count_estimate": ch.get("word_count_estimate", 0),
+                "volume_number": ch.get("volume_number", 1),
+                "volume_title": ch.get("volume_title", ""),
+            }
+            if existing:
+                existing.title = ch.get("title", "")
+                existing.summary = ch.get("summary", "")
+                existing.metadata_ = extra
+            else:
+                session.add(ChapterOutline(
+                    project_id=project_id,
+                    chapter_number=cn,
+                    title=ch.get("title", ""),
+                    summary=ch.get("summary", ""),
+                    metadata_=extra,
+                ))
+        await session.commit()
+    except Exception as e:
+        logger.warning("大纲持久化失败: %s", e)
+        await session.rollback()
+
+    from datetime import datetime
+    return LongNovelOutlineResponse(
+        project_id=project_id,
+        novel_title=outline_data.get("novel_title", novel.title),
+        target_word_count=request.target_word_count,
+        structure=structure,
+        volumes=volumes,
+        chapters=[ChapterOutlineItem(**ch) for ch in chapters],
+        total_chapters=len(chapters),
+        generated_at=datetime.utcnow().isoformat(),
+    )
+
+
+@router.get("/structure")
+async def get_outline_structure(
+    project_id: str,
+    current_user: UserInDB = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """获取当前小说的卷-章结构统计"""
+    novel_service = NovelService(session)
+    await novel_service.ensure_project_owner(project_id, current_user.id)
+
+    # 获取所有章节大纲
+    from ...models.novel import ChapterOutline
+    from sqlalchemy import select
+    stmt = select(ChapterOutline).where(
+        ChapterOutline.project_id == project_id
+    ).order_by(ChapterOutline.chapter_number)
+    result = await session.execute(stmt)
+    outlines = list(result.scalars().all())
+
+    if not outlines:
+        return {
+            "project_id": project_id,
+            "total_chapters": 0,
+            "volumes": [],
+            "chapters": [],
+        }
+
+    chapters = []
+    for o in outlines:
+        chapters.append({
+            "chapter_number": o.chapter_number,
+            "title": o.title,
+            "summary": o.summary,
+            "word_count": len(o.summary) if o.summary else 0,
+        })
+
+    return {
+        "project_id": project_id,
+        "total_chapters": len(chapters),
+        "estimated_word_count": sum(c.get("word_count", 0) for c in chapters),
+        "chapters": chapters,
+    }
+
 
 
 @router.get("/history")
