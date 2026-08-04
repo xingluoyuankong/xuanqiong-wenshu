@@ -73,7 +73,7 @@
         </div>
 
         <!-- Navigation Items -->
-        <nav class="px-3 py-4 space-y-1 overflow-y-auto h-[calc(100%-5rem)]">
+        <nav class="px-2 py-2 space-y-0.5 overflow-y-auto h-[calc(100%-5rem)]">
           <button
             v-for="section in sections"
             :key="section.key"
@@ -83,7 +83,7 @@
             :class="{ 'active': activeSection === section.key }"
           >
             <span
-              class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-all duration-200"
+              class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full transition-all duration-200"
               :style="activeSection === section.key
                 ? 'background-color: var(--md-primary); color: var(--md-on-primary);'
                 : 'background-color: var(--md-surface-container); color: var(--md-on-surface-variant);'"
@@ -115,7 +115,7 @@
 
       <!-- Main Content Area -->
       <div class="flex-1 lg:ml-80 min-h-0 flex flex-col h-full">
-        <div class="flex-1 min-h-0 h-full p-4 sm:p-6 lg:p-8 flex flex-col overflow-hidden box-border">
+        <div class="flex-1 min-h-0 h-full p-3 sm:p-4 lg:p-5 flex flex-col overflow-hidden box-border">
           <div class="flex-1 flex flex-col min-h-0 h-full">
             <!-- Material 3 Card -->
             <div 

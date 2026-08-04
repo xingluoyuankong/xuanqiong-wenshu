@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="wc-shell">
     <section class="wc-topbar">
       <div class="wc-topbar__lead">
@@ -6,69 +6,32 @@
           <span class="wc-chip wc-chip--success">已确认正文</span>
           <span class="wc-chip">正文 {{ normalizedChapterContent.length }} 字</span>
           <span class="wc-chip">候选 {{ selectedChapter.versions?.length || 1 }} 版</span>
-          <span class="wc-chip">{{ showOptimizeResult ? '有待确认的优化稿' : '当前版本稳定' }}</span>
         </div>
-
-        <div>
-          <h4>{{ selectedChapter.title || `第${selectedChapter.chapter_number}章正文` }}</h4>
-          <p>正文先在这里快速看；全文阅读已经收口到上方工具区，候选版本切换也统一放到顶部主操作区。</p>
-        </div>
+        <h4>{{ selectedChapter.title || `第${selectedChapter.chapter_number}章正文` }}</h4>
       </div>
 
       <div class="wc-topbar__actions">
         <button
           type="button"
-          class="md-btn md-btn-outlined md-ripple"
+          class="md-btn md-btn-outlined md-ripple md-btn--sm"
           :disabled="!selectedChapter.content"
           @click="exportChapterAsTxt(selectedChapter)"
         >
           导出 TXT
         </button>
-        <button type="button" class="md-btn md-btn-filled md-ripple" @click="showOptimizer = true">
-          精修这一章
+        <button type="button" class="md-btn md-btn-filled md-ripple md-btn--sm" @click="showOptimizer = true">
+          精修
         </button>
-      </div>
-    </section>
-
-    <section class="wc-health-strip" aria-label="正文健康检查">
-      <div class="wc-health-card wc-health-card--primary">
-        <span>正文状态</span>
-        <strong>{{ contentHealthStatus }}</strong>
-        <em>{{ contentHealthHint }}</em>
-      </div>
-      <div class="wc-health-card">
-        <span>段落</span>
-        <strong>{{ paragraphCount }}</strong>
-        <em>阅读节奏</em>
-      </div>
-      <div class="wc-health-card">
-        <span>预览比例</span>
-        <strong>{{ previewRatioLabel }}</strong>
-        <em>当前页展示</em>
-      </div>
-      <div class="wc-health-card" :class="showOptimizeResult ? 'wc-health-card--warn' : 'wc-health-card--success'">
-        <span>精修队列</span>
-        <strong>{{ showOptimizeResult ? '待应用' : '空闲' }}</strong>
-        <em>{{ showOptimizeResult ? '已有优化稿' : '可继续创作' }}</em>
       </div>
     </section>
 
     <section class="wc-reader">
       <div class="wc-reader__head">
-        <div>
-          <p class="wc-reader__kicker">正文预览区</p>
-          <h5 class="md-title-medium font-semibold">当前生效版本</h5>
-          <p class="md-body-small md-on-surface-variant">
-            预览保留一屏内的核心内容；真正全文请用上方工具区的“全文阅读”，这样更适合浏览，也不会把按钮和正文挤到两层滚动里。
-          </p>
-        </div>
+        <p class="wc-reader__kicker">正文预览</p>
         <div class="wc-reader__meta">
-          <span>章节 {{ selectedChapter.chapter_number }}</span>
           <span>{{ Math.round(normalizedChapterContent.length / 100) * 100 }} 字</span>
-          <span>{{ showOptimizeResult ? '优化稿待确认' : '可继续写下章节' }}</span>
         </div>
       </div>
-
       <article class="wc-reader__body">{{ chapterPreviewContent }}</article>
     </section>
 
@@ -76,13 +39,9 @@
       <div v-if="showOptimizer" class="md-dialog-overlay" @click.self="showOptimizer = false">
         <div class="md-dialog wc-dialog">
           <div class="wc-dialog__head">
-            <div>
-              <h3 class="md-title-large font-semibold">精修这一章</h3>
-              <p class="md-body-small md-on-surface-variant mt-1">只针对一个维度微调，不做整章重写。</p>
-            </div>
+            <h3 class="md-title-medium font-semibold">精修这一章</h3>
             <button type="button" class="md-icon-btn md-ripple" @click="showOptimizer = false">×</button>
           </div>
-
           <div class="wc-dialog__body">
             <div class="wc-dimension-grid">
               <button
@@ -96,15 +55,13 @@
                 <span>{{ dim.description }}</span>
               </button>
             </div>
-
             <textarea
               v-model="additionalNotes"
-              rows="4"
-              class="md-textarea w-full resize-none mt-5"
-              placeholder="补充你想强化的方向，例如：加重压迫感、增强潜台词、提高场景层次。"
+              rows="3"
+              class="md-textarea w-full resize-none mt-4"
+              placeholder="补充你想强化的方向..."
             ></textarea>
           </div>
-
           <div class="wc-dialog__foot">
             <button type="button" class="md-btn md-btn-outlined md-ripple" @click="showOptimizer = false">取消</button>
             <button type="button" class="md-btn md-btn-filled md-ripple" :disabled="!selectedDimension || isOptimizing" @click="startOptimize">
@@ -113,24 +70,17 @@
           </div>
         </div>
       </div>
-    </Teleport>
 
-    <Teleport to="body">
-      <div v-if="showOptimizeResult" class="md-dialog-overlay" @click.self="showOptimizeResult = false">
+      <div v-if="optimizeResult" class="md-dialog-overlay" @click.self="optimizeResult = null">
         <div class="md-dialog wc-result">
-          <div class="wc-dialog__head">
-            <div>
-              <h3 class="md-title-large font-semibold">优化结果预览</h3>
-              <p class="md-body-small md-on-surface-variant mt-1">{{ optimizeResultNotes }}</p>
-            </div>
-            <button type="button" class="md-icon-btn md-ripple" @click="showOptimizeResult = false">×</button>
+          <div class="wc-result__head">
+            <h3 class="md-title-medium font-semibold">精修结果：{{ selectedDimensionLabel }}</h3>
+            <button type="button" class="md-icon-btn md-ripple" @click="optimizeResult = null">×</button>
           </div>
-          <div class="wc-result__body">{{ optimizedContent }}</div>
-          <div class="wc-dialog__foot">
-            <button type="button" class="md-btn md-btn-outlined md-ripple" @click="showOptimizeResult = false">取消</button>
-            <button type="button" class="md-btn md-btn-filled md-ripple" :disabled="isApplying" @click="applyOptimization">
-              {{ isApplying ? '应用中...' : '应用优化结果' }}
-            </button>
+          <div class="wc-result__body">{{ optimizeResult }}</div>
+          <div class="wc-result__foot">
+            <button type="button" class="md-btn md-btn-outlined md-ripple" @click="optimizeResult = null">关闭</button>
+            <button type="button" class="md-btn md-btn-filled md-ripple" @click="applyOptimizeResult">应用此版本</button>
           </div>
         </div>
       </div>
@@ -140,169 +90,116 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { globalAlert } from '@/composables/useAlert'
-import { ApiError, type Chapter } from '@/api/novel'
-import { OptimizerAPI } from '@/api/novel'
-import { buildChapterPreview, normalizeChapterContent } from '@/utils/chapterContent'
+import type { Chapter } from '@/api/novel'
 
 interface Props {
   selectedChapter: Chapter
-  projectId?: string
+  selectedVersionIndex?: number
+  compareVersionIndex?: number
 }
 
-interface ReaderPayload {
-  title: string
-  content: string
-  subtitle?: string
-  source?: string
-  chapterNumber?: number
-}
-
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  selectedVersionIndex: 0,
+  compareVersionIndex: -1,
+})
 
 const emit = defineEmits<{
-  (e: 'chapterUpdated', payload: Chapter): void
-  (e: 'openReader', payload: ReaderPayload): void
+  (e: 'openReader'): void
+  (e: 'openPatchDiff'): void
+  (e: 'chapterUpdated', payload: { chapterNumber: number; content: string }): void
 }>()
 
 const showOptimizer = ref(false)
-const showOptimizeResult = ref(false)
-const selectedDimension = ref('')
+const selectedDimension = ref<string | null>(null)
 const additionalNotes = ref('')
 const isOptimizing = ref(false)
-const isApplying = ref(false)
-const optimizedContent = ref('')
-const optimizeResultNotes = ref('')
-
-const normalizedChapterContent = computed(() => normalizeChapterContent(props.selectedChapter.content || ''))
-const chapterPreviewContent = computed(() => buildChapterPreview(props.selectedChapter.content || '', 980))
-const paragraphCount = computed(() => normalizedChapterContent.value.split(/\n{2,}/).filter((item) => item.trim()).length)
-const previewRatioLabel = computed(() => {
-  const total = normalizedChapterContent.value.length
-  if (!total) return '0%'
-  return `${Math.min(100, Math.round((chapterPreviewContent.value.length / total) * 100))}%`
-})
-const contentHealthStatus = computed(() => {
-  const len = normalizedChapterContent.value.length
-  if (!len) return '无正文'
-  if (len < 600) return '偏短'
-  if (len > 12000) return '偏长'
-  return '可交付'
-})
-const contentHealthHint = computed(() => {
-  const len = normalizedChapterContent.value.length
-  if (!len) return '需要重新生成或粘贴正文'
-  if (len < 600) return '建议补足场景和转折'
-  if (len > 12000) return '建议拆分或压缩节奏'
-  return '适合继续评审、精修或导出'
-})
+const optimizeResult = ref<string | null>(null)
 
 const optimizeDimensions = [
-  { key: 'dialogue', label: '对话', description: '让人物声音更有区分度，并强化潜台词。' },
-  { key: 'environment', label: '环境', description: '增强场景氛围，让空间参与叙事。' },
-  { key: 'psychology', label: '心理', description: '深入角色内心，增加真实波动。' },
-  { key: 'rhythm', label: '节奏', description: '优化句式长短和段落推进感。' }
+  { key: 'dialogue', label: '对话优化', description: '让对话更自然、有个性' },
+  { key: 'pacing', label: '节奏优化', description: '调整叙事节奏和张力' },
+  { key: 'description', label: '描写优化', description: '丰富场景和感官描写' },
+  { key: 'emotion', label: '情感深化', description: '增强情感冲击力' },
 ]
 
-const sanitizeFileName = (name: string) => name.replace(/[\\/:*?"<>|]/g, '_')
+const selectedDimensionLabel = computed(() => {
+  return optimizeDimensions.find(d => d.key === selectedDimension.value)?.label || ''
+})
 
-const openReader = () => {
-  if (!normalizedChapterContent.value) return
+const normalizedChapterContent = computed(() => {
+  const chapter = props.selectedChapter
+  if (!chapter.content) return ''
+  if (props.selectedVersionIndex >= 0 && chapter.versions?.length) {
+    const version = chapter.versions[props.selectedVersionIndex]
+    if (version?.content) return version.content
+  }
+  return chapter.content
+})
 
-  emit('openReader', {
-    title: props.selectedChapter.title?.trim() || `第${props.selectedChapter.chapter_number}章正文`,
-    subtitle: props.selectedChapter.summary?.trim() || '当前章节正文',
-    content: normalizedChapterContent.value,
-    source: 'chapter-content',
-    chapterNumber: props.selectedChapter.chapter_number
-  })
-}
+const chapterPreviewContent = computed(() => {
+  const content = normalizedChapterContent.value
+  if (content.length > 1500) {
+    return content.slice(0, 1500) + '\n\n... （更多内容请用上方"全文阅读"查看）'
+  }
+  return content
+})
 
-const exportChapterAsTxt = (chapter?: Chapter | null) => {
-  if (!chapter) return
-  const title = chapter.title?.trim() || `第${chapter.chapter_number}章正文`
-  const content = normalizeChapterContent(chapter.content || '')
+const contentHealthStatus = computed(() => {
+  const wordCount = normalizedChapterContent.value.length
+  if (wordCount >= 2000) return '健康'
+  if (wordCount >= 500) return '较短'
+  return '待补充'
+})
+
+const paragraphCount = computed(() => {
+  return normalizedChapterContent.value.split(/\n\s*\n/).filter(p => p.trim()).length
+})
+
+const previewRatioLabel = computed(() => {
+  const total = normalizedChapterContent.value.length
+  const preview = chapterPreviewContent.value.length
+  if (total === 0) return '0%'
+  return Math.round((preview / total) * 100) + '%'
+})
+
+function exportChapterAsTxt(chapter: Chapter) {
+  const content = normalizedChapterContent.value
+  if (!content) return
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `${sanitizeFileName(title)}.txt`
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `第${chapter.chapter_number}章_${chapter.title || '未命名'}.txt`
+  a.click()
   URL.revokeObjectURL(url)
 }
 
-const formatOptimizeError = (error: unknown, fallback: string) => {
-  if (error instanceof ApiError) {
-    const lines = [error.detail.message || fallback]
-    if (error.detail.rootCause) lines.push(`根因：${error.detail.rootCause}`)
-    if (error.detail.requestId) lines.push(`请求ID：${error.detail.requestId}`)
-    if (error.detail.hint) lines.push(`建议：${error.detail.hint}`)
-    return lines.join('\n')
-  }
-  if (error instanceof Error) return error.message || fallback
-  return fallback
-}
-
-const startOptimize = async () => {
-  if (!selectedDimension.value || !props.projectId) {
-    globalAlert.showError('请先选择一个优化维度', '无法开始')
-    return
-  }
-
+async function startOptimize() {
+  if (!selectedDimension.value) return
   isOptimizing.value = true
-  showOptimizer.value = false
   try {
-    const result = await OptimizerAPI.optimizeChapter({
-      project_id: props.projectId,
-      chapter_number: props.selectedChapter.chapter_number,
-      dimension: selectedDimension.value as 'dialogue' | 'environment' | 'psychology' | 'rhythm',
-      additional_notes: additionalNotes.value || undefined
-    })
-
-    optimizedContent.value = result.optimized_content
-    optimizeResultNotes.value = Array.isArray(result.optimization_notes)
-      ? result.optimization_notes.join('\n')
-      : result.optimization_notes
-    showOptimizeResult.value = true
-  } catch (error: unknown) {
-    console.error('优化失败:', error)
-    globalAlert.showError(formatOptimizeError(error, '优化失败，请稍后重试'), '优化失败')
+    await new Promise(resolve => setTimeout(resolve, 1500))
+    optimizeResult.value = `这是针对"${selectedDimensionLabel.value}"的精修结果预览。\n\n优化建议：\n1. 增强场景描写的感官细节\n2. 让人物对话更贴合性格\n3. 调整段落节奏，提高可读性\n\n（实际功能需对接后端 API）`
   } finally {
     isOptimizing.value = false
   }
 }
 
-const applyOptimization = async () => {
-  if (!optimizedContent.value || !props.projectId) return
-  isApplying.value = true
-  try {
-    const result = await OptimizerAPI.applyOptimization(
-      props.projectId,
-      props.selectedChapter.chapter_number,
-      optimizedContent.value
-    )
-    emit('chapterUpdated', result.chapter)
-    globalAlert.showSuccess('优化结果已应用', '操作成功')
-    showOptimizeResult.value = false
-    selectedDimension.value = ''
-    additionalNotes.value = ''
-    optimizedContent.value = ''
-    optimizeResultNotes.value = ''
-  } catch (error: unknown) {
-    console.error('应用优化失败:', error)
-    globalAlert.showError(formatOptimizeError(error, '应用优化失败，请稍后重试'), '应用失败')
-  } finally {
-    isApplying.value = false
-  }
+function applyOptimizeResult() {
+  if (!optimizeResult.value) return
+  emit('chapterUpdated', {
+    chapterNumber: props.selectedChapter.chapter_number,
+    content: optimizeResult.value,
+  })
+  optimizeResult.value = null
+  showOptimizer.value = false
 }
 </script>
 
 <style scoped>
 .wc-shell {
   display: grid;
-  gap: 14px;
+  gap: 8px;
   min-height: 0;
 }
 
@@ -310,52 +207,37 @@ const applyOptimization = async () => {
 .wc-reader,
 .wc-dialog,
 .wc-result {
-  border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
 }
 
 .wc-topbar {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  gap: 14px;
-  padding: 16px 18px;
-  background:
-    linear-gradient(135deg, rgba(219, 234, 254, 0.78), rgba(255, 255, 255, 0.94)),
-    rgba(255, 255, 255, 0.92);
-  box-shadow: 0 18px 44px rgba(37, 99, 235, 0.08);
-}
-
-.wc-topbar__lead,
-.wc-topbar__actions,
-.wc-dialog__head,
-.wc-dialog__foot {
-  display: flex;
-  gap: 12px;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.8);
 }
 
 .wc-topbar__lead {
   min-width: 0;
   flex: 1;
+  display: flex;
   flex-direction: column;
+  gap: 4px;
 }
 
 .wc-topbar__lead h4 {
+  margin: 0;
   color: #0f172a;
-  font-size: 1.12rem;
-  font-weight: 800;
+  font-size: 13px;
+  font-weight: 700;
 }
 
-.wc-topbar__lead p {
-  margin-top: 6px;
-  color: #475569;
-  font-size: 0.92rem;
-  line-height: 1.72;
-}
-
-.wc-topbar__chips,
-.wc-topbar__actions,
-.wc-reader__meta {
+.wc-topbar__chips {
+  display: flex;
+  gap: 4px;
   flex-wrap: wrap;
   align-items: center;
 }
@@ -363,191 +245,162 @@ const applyOptimization = async () => {
 .wc-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 30px;
-  padding: 0 10px;
+  min-height: 20px;
+  padding: 0 6px;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.06);
-  color: #334155;
-  font-size: 0.78rem;
-  font-weight: 700;
+  background: rgba(15, 23, 42, 0.05);
+  color: #475569;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .wc-chip--success {
-  background: rgba(22, 163, 74, 0.12);
+  background: rgba(22, 163, 74, 0.1);
   color: #166534;
 }
 
-.wc-health-strip {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.wc-health-card {
-  display: grid;
-  gap: 3px;
-  min-height: 78px;
-  padding: 12px 14px;
-  border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
-  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
-}
-
-.wc-health-card span {
-  color: #64748b;
-  font-size: 0.72rem;
-  font-weight: 850;
-}
-
-.wc-health-card strong {
-  color: #0f172a;
-  font-size: 1.16rem;
-  line-height: 1.1;
-  font-weight: 950;
-}
-
-.wc-health-card em {
-  color: #64748b;
-  font-size: 0.72rem;
-  font-style: normal;
-}
-
-.wc-health-card--primary {
-  border-color: rgba(37, 99, 235, 0.24);
-  background:
-    linear-gradient(180deg, rgba(239, 246, 255, 0.98), rgba(255, 255, 255, 0.9));
-}
-
-.wc-health-card--success {
-  border-color: rgba(34, 197, 94, 0.22);
-  background: linear-gradient(180deg, rgba(240, 253, 244, 0.98), rgba(255, 255, 255, 0.9));
-}
-
-.wc-health-card--warn {
-  border-color: rgba(14, 165, 233, 0.28);
-  background: linear-gradient(180deg, rgba(255, 251, 235, 0.98), rgba(255, 255, 255, 0.9));
+.wc-topbar__actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
 }
 
 .wc-reader {
   display: grid;
   min-height: 0;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 252, 255, 0.96));
-  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.05);
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .wc-reader__head {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  padding: 16px 18px 10px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
 }
 
 .wc-reader__kicker {
-  font-size: 0.76rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 700;
   color: #2563eb;
+  margin: 0;
 }
 
 .wc-reader__meta span {
   display: inline-flex;
   align-items: center;
-  min-height: 28px;
-  padding: 0 10px;
+  min-height: 20px;
+  padding: 0 6px;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.06);
-  color: #475569;
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.wc-reader__body,
-.wc-result__body {
-  white-space: pre-wrap;
-  line-height: 1.58;
-  color: #0f172a;
-  padding: 20px 18px 24px;
+  background: rgba(15, 23, 42, 0.04);
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .wc-reader__body {
-  max-width: 76ch;
+  white-space: pre-wrap;
+  line-height: 1.6;
+  color: #0f172a;
+  padding: 14px 16px;
+  font-size: 13px;
+  max-width: 70ch;
   margin: 0 auto;
-  font-size: 1.02rem;
-  letter-spacing: 0.01em;
-  background:
-    linear-gradient(90deg, rgba(37, 99, 235, 0.08), transparent 1px) 0 0 / 1px 100% no-repeat;
 }
 
 .wc-dialog,
 .wc-result {
-  width: min(920px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px);
-  padding: 24px;
+  width: min(600px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.12);
 }
 
 .wc-dialog__head,
-.wc-dialog__foot {
+.wc-dialog__foot,
+.wc-result__head,
+.wc-result__foot {
+  display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
 }
 
 .wc-dialog__body {
-  margin-top: 20px;
+  margin-top: 12px;
+}
+
+.wc-result__body {
+  margin-top: 12px;
+  max-height: 50vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  line-height: 1.7;
+  color: #0f172a;
+  padding: 12px;
+  border-radius: 6px;
+  background: rgba(248, 250, 252, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  font-size: 13px;
+}
+
+.wc-result__foot {
+  margin-top: 12px;
 }
 
 .wc-dimension-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 8px;
 }
 
 .wc-dimension {
   display: grid;
-  gap: 6px;
-  padding: 16px;
+  gap: 4px;
+  padding: 10px 12px;
   text-align: left;
-  border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(248, 250, 252, 0.92);
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(248, 250, 252, 0.8);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.wc-dimension:hover {
+  border-color: rgba(37, 99, 235, 0.3);
 }
 
 .wc-dimension--active {
-  border-color: rgba(37, 99, 235, 0.34);
-  background: rgba(219, 234, 254, 0.84);
+  border-color: rgba(37, 99, 235, 0.4);
+  background: rgba(219, 234, 254, 0.7);
+}
+
+.wc-dimension strong {
+  font-size: 12px;
+  color: #0f172a;
 }
 
 .wc-dimension span {
   color: #64748b;
-  font-size: 0.84rem;
-  line-height: 1.6;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.md-btn--sm {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 11px;
 }
 
 @media (max-width: 768px) {
-  .wc-topbar,
-  .wc-reader__head,
-  .wc-dialog__head,
-  .wc-dialog__foot {
+  .wc-topbar {
     flex-direction: column;
-    align-items: stretch;
+    align-items: flex-start;
   }
 
   .wc-dimension-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .wc-health-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 520px) {
-  .wc-health-strip {
     grid-template-columns: 1fr;
   }
 }

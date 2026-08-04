@@ -2187,6 +2187,33 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
   window.removeEventListener('resize', handleWindowResize)
 })
+
+// ===== SSE helpers =====
+const sseController = ref<SSEController | null>(null)
+const _ensureSSEConnected = () => {
+  if (sseController.value || !props.id) return
+  const busyCh = project.value?.chapters?.find((ch: any) =>
+    isBusyTask(ch, resolveChapterRuntime(ch, project.value?.generation_runtime || null))
+  )
+  if (!busyCh?.chapter_number) return
+  const url = '/api/writer/novels/' + props.id + '/chapters/' + busyCh.chapter_number + '/stream'
+  sseController.value = connectSSE(url, {
+    onStatusUpdate(data) {
+      if (!project.value) return
+      const idx = project.value.chapters.findIndex((c: any) => c.chapter_number === busyCh.chapter_number)
+      if (idx < 0) return
+      const ch = { ...project.value.chapters[idx] }
+      if (data.runtime) ch.real_summary = JSON.stringify({ generation_runtime: data.runtime })
+      ch.generation_status = data.status
+      ch.word_count = data.word_count || ch.word_count
+      project.value.chapters[idx] = ch
+    },
+    onComplete() { sseController.value?.close(); sseController.value = null; void fetchChapterStatus() },
+    onError() { sseController.value?.close(); sseController.value = null },
+  })
+}
+const _closeSSE = () => { sseController.value?.close(); sseController.value = null }
+
 </script>
 
 <style scoped>

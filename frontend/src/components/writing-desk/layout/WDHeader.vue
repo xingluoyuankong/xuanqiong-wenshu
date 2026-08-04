@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <header class="wd-header-shell xq-topbar xq-topbar--desk">
     <template v-if="props.headerCollapsed">
       <div class="wd-header-collapsed-bar">
@@ -6,25 +6,8 @@
           <strong>{{ collapsedTitle }}</strong>
           <span>{{ collapsedSubtitle }}</span>
         </div>
-        <div class="wd-header-collapsed-bar__progress">
-          <div class="progress-row">
-            <span>{{ currentTaskStageProgressLabel }}</span>
-            <strong>{{ currentTaskStageProgress }}%</strong>
-          </div>
-          <div class="progress-track">
-            <div class="progress-bar progress-bar--phase" :style="{ width: `${currentTaskStageProgress}%` }"></div>
-          </div>
-          <div class="progress-row progress-row--secondary">
-            <span>{{ currentTaskTotalProgressLabel }}</span>
-            <strong>{{ currentTaskProgress }}%</strong>
-          </div>
-          <div class="progress-track">
-            <div class="progress-bar" :style="{ width: `${currentTaskProgress}%` }"></div>
-          </div>
-        </div>
         <button type="button" class="wd-utility-btn wd-utility-btn--accent" @click="$emit('toggleHeaderCollapse')">展开顶部</button>
-      </div>
-    </template>
+      </div></template>
 
     <template v-else>
       <div class="wd-header-main">
@@ -98,27 +81,7 @@
             <span v-else-if="currentTaskWarning" class="wd-meta-pill wd-meta-pill--warn">{{ currentTaskWarning }}</span>
           </div>
         </div>
-        <div class="wd-task-panel__progress-grid">
-          <div>
-            <div class="progress-row">
-              <span>{{ currentTaskStageProgressLabel }}</span>
-              <strong>{{ currentTaskStageProgress }}%</strong>
-            </div>
-            <div class="progress-track" aria-label="current-stage-progress">
-              <div class="progress-bar progress-bar--phase" :style="{ width: `${currentTaskStageProgress}%` }"></div>
-            </div>
-          </div>
-          <div>
-            <div class="progress-row progress-row--secondary">
-              <span>{{ currentTaskTotalProgressLabel }}</span>
-              <strong>{{ currentTaskProgress }}%</strong>
-            </div>
-            <div class="progress-track" aria-label="current-total-progress">
-              <div class="progress-bar" :style="{ width: `${currentTaskProgress}%` }"></div>
-            </div>
-          </div>
         </div>
-      </div>
 
       <div class="wd-command-bar">
         <div class="wd-command-copy">
@@ -375,20 +338,12 @@ const collapsedSubtitle = computed(() => {
 .wd-command-actions,
 .wd-task-panel__head,
 .wd-task-panel__chips,
-.progress-row,
-.wd-header-collapsed-bar {
-  display: flex;
-  gap: 8px;
-}
+
 
 .wd-header-main,
 .wd-command-bar,
 .wd-task-panel__head,
 .wd-header-collapsed-bar,
-.progress-row {
-  justify-content: space-between;
-  align-items: center;
-}
 
 .wd-header-main,
 .wd-header-actions,
@@ -577,28 +532,22 @@ const collapsedSubtitle = computed(() => {
 }
 
 .wd-task-panel,
-.wd-header-collapsed-bar {
-  border: 1px solid rgba(99, 102, 241, 0.15);
-  border-radius: 8px;
-  background: linear-gradient(180deg, rgba(245, 247, 255, 0.98), rgba(238, 244, 255, 0.95));
-  padding: 8px 10px;
-}
+
 
 .wd-task-panel__head { align-items: flex-start; gap: 12px; }
 .wd-task-panel__head strong,
-.wd-header-collapsed-bar__summary strong { display: block; color: #0f172a; font-size: 0.84rem; }
+
 .wd-task-panel__message,
 .wd-header-collapsed-bar__summary span { margin: 3px 0 0; color: #475569; font-size: 0.75rem; line-height: 1.4; }
-.wd-task-panel__progress-grid,
-.wd-header-collapsed-bar__progress { display: grid; gap: 8px; flex: 1; min-width: 0; }
-.wd-header-collapsed-bar { gap: 16px; align-items: center; }
-.wd-header-collapsed-bar__summary { min-width: 220px; }
 
-.progress-row { color: #334155; font-size: 0.72rem; font-weight: 700; }
-.progress-row--secondary { margin-top: 2px; }
-.progress-track { width: 100%; height: 6px; overflow: hidden; border-radius: 999px; background: rgba(148, 163, 184, 0.2); }
-.progress-bar { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #3b82f6, #6366f1, #10b981); transition: width 0.25s ease; }
-.progress-bar--phase { background: linear-gradient(90deg, #8b5cf6, #3b82f6); }
+
+
+
+
+
+
+
+
 
 .wd-command-copy__item { display: grid; gap: 3px; min-width: 120px; }
 .wd-command-copy__label { width: fit-content; }
@@ -621,7 +570,7 @@ const collapsedSubtitle = computed(() => {
   .wd-header-main,
   .wd-command-bar,
   .wd-task-panel__head,
-  .wd-header-collapsed-bar { align-items: stretch; flex-direction: column; }
+  
   .wd-header-collapsed-bar__summary { min-width: 0; }
   .wd-command-group--core { flex: none; }
   .wd-header-actions { justify-content: flex-start; }
@@ -630,6 +579,7 @@ const collapsedSubtitle = computed(() => {
   .wd-utility-menu__panel { left: 0; right: 0; min-width: 0; }
 }
 </style>
+
 
 
 

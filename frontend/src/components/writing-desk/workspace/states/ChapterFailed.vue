@@ -1,37 +1,21 @@
-﻿<!-- AIMETA P=生成失败_生成错误状态|R=错误提示_重试|NR=不含生成逻辑|E=component:ChapterFailed|X=internal|A=错误状态|D=vue|S=dom|RD=./README.ai -->
 <template>
   <div class="cf-shell">
     <section class="cf-panel">
-      <div class="cf-visual" aria-hidden="true">
-        <span class="cf-visual__ring"></span>
-        <span class="cf-visual__icon">!</span>
-      </div>
-
-      <div class="cf-copy">
-        <p class="cf-kicker">章节异常恢复</p>
-        <h3>第 {{ chapterNumber }} 章处理失败</h3>
-        <p>
-          当前章节没有形成可交付正文。系统不会再把空正文伪装成成功状态；
-          刷新状态确认原因后，请用顶部主操作栏重新生成，避免这里再放一颗重复按钮。
-        </p>
-      </div>
-
-      <div class="cf-checklist">
-        <div>
-          <strong>先确认</strong>
-          <span>查看后台日志、错误摘要或最近一次运行记录。</span>
+      <div class="cf-header">
+        <div class="cf-visual" aria-hidden="true">
+          <span class="cf-visual__ring"></span>
+          <span class="cf-visual__icon">!</span>
         </div>
-        <div>
-          <strong>再恢复</strong>
-          <span>重新生成后会重新进入候选版本与评审流程。</span>
-        </div>
-        <div>
-          <strong>导出保护</strong>
-          <span>失败章节会阻断 TXT/DOCX 导出，避免交付半成品。</span>
+        <div class="cf-copy">
+          <p class="cf-kicker">章节异常恢复</p>
+          <h3>第 {{ chapterNumber }} 章处理失败</h3>
         </div>
       </div>
+      <p class="cf-desc">
+        当前章节没有形成可交付正文。刷新状态确认原因后，请用顶部主操作栏重新生成。
+      </p>
 
-      <section v-if="failureSummary || diagnosticRows.length || latestErrorEvent" class="cf-diagnostics">
+      <div v-if="failureSummary || diagnosticRows.length" class="cf-diagnostics">
         <div v-if="failureSummary" class="cf-diagnostics__summary">
           <strong>后端错误摘要</strong>
           <p>{{ failureSummary }}</p>
@@ -42,20 +26,11 @@
             <strong>{{ item.value }}</strong>
           </div>
         </div>
-        <details v-if="latestErrorEvent" class="cf-diagnostics__event">
-          <summary>最近错误事件 metadata</summary>
-          <pre>{{ latestErrorEvent }}</pre>
-        </details>
-      </section>
+      </div>
 
-      <div class="cf-primary-hint" :class="generatingChapter === chapterNumber ? 'cf-primary-hint--busy' : ''">
-        <div>
-          <strong>{{ generatingChapter === chapterNumber ? '顶部主操作执行中' : '主操作已收口到顶部' }}</strong>
-          <p>
-            {{ generatingChapter === chapterNumber ? '当前章已经在重新生成，先等待顶部任务栏推进。' : '需要恢复时，请直接使用顶部命令栏里的“重新生成”。' }}
-          </p>
-        </div>
-        <span>{{ generatingChapter === chapterNumber ? '处理中' : '去顶部操作' }}</span>
+      <div class="cf-hint" :class="generatingChapter === chapterNumber ? 'cf-hint--busy' : ''">
+        <strong>{{ generatingChapter === chapterNumber ? '顶部主操作执行中' : '主操作已收口到顶部' }}</strong>
+        <span>{{ generatingChapter === chapterNumber ? '处理中...' : '去顶部操作' }}</span>
       </div>
     </section>
   </div>
@@ -96,49 +71,43 @@ const diagnosticRows = computed(() => {
     diagnostics.value.status ? { label: '状态码', value: String(diagnostics.value.status) } : null,
     diagnostics.value.requestId ? { label: '请求ID', value: String(diagnostics.value.requestId) } : null,
     diagnostics.value.hint ? { label: '建议', value: String(diagnostics.value.hint) } : null,
-    diagnostics.value.retryable === true ? { label: '重试判断', value: '可重试' } : null,
-    diagnostics.value.retryable === false ? { label: '重试判断', value: '先处理原因' } : null,
   ]
   return rows.filter(Boolean) as Array<{ label: string; value: string }>
-})
-const latestErrorEvent = computed(() => {
-  const events = Array.isArray(runtime.value?.events) ? runtime.value.events : []
-  const event = [...events].reverse().find((item) =>
-    item && typeof item === 'object' && (item.level === 'error' || item.metadata)
-  )
-  if (!event) return ''
-  return JSON.stringify(event.metadata || event, null, 2)
 })
 </script>
 
 <style scoped>
 .cf-shell {
-  min-height: 360px;
+  min-height: 240px;
   display: grid;
   place-items: center;
-  padding: 18px;
+  padding: 12px;
 }
 
 .cf-panel {
-  position: relative;
-  width: min(760px, 100%);
-  overflow: hidden;
+  width: min(520px, 100%);
   display: grid;
-  gap: 18px;
-  padding: clamp(24px, 4vw, 36px);
+  gap: 12px;
+  padding: 20px;
   border-radius: 8px;
-  border: 1px solid rgba(248, 113, 113, 0.25);
-  background:
-    linear-gradient(135deg, rgba(255, 247, 247, 0.98), rgba(255, 255, 255, 0.94));
-  box-shadow: 0 26px 72px rgba(127, 29, 29, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.2);
+  background: linear-gradient(135deg, rgba(255, 247, 247, 0.95), rgba(255, 255, 255, 0.9));
+  box-shadow: 0 8px 24px rgba(127, 29, 29, 0.06);
+}
+
+.cf-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .cf-visual {
   position: relative;
-  width: 74px;
-  height: 74px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
+  flex-shrink: 0;
 }
 
 .cf-visual__ring {
@@ -146,199 +115,148 @@ const latestErrorEvent = computed(() => {
   inset: 0;
   border-radius: 8px;
   background: linear-gradient(135deg, #ef4444, #f97316);
-  opacity: 0.14;
+  opacity: 0.12;
 }
 
 .cf-visual__icon {
   position: relative;
-  width: 52px;
-  height: 52px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
+  border-radius: 6px;
   color: #b91c1c;
   background: #fff;
-  font-size: 1.8rem;
-  font-weight: 950;
-  box-shadow: 0 12px 28px rgba(185, 28, 28, 0.16);
+  font-size: 14px;
+  font-weight: 900;
+  box-shadow: 0 4px 12px rgba(185, 28, 28, 0.12);
 }
 
 .cf-copy {
   display: grid;
-  gap: 8px;
+  gap: 2px;
 }
 
 .cf-kicker {
   margin: 0;
   color: #dc2626;
-  font-size: 0.76rem;
-  font-weight: 900;
-  letter-spacing: 0.12em;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
 }
 
 .cf-copy h3 {
   margin: 0;
   color: #111827;
-  font-size: clamp(1.35rem, 2.2vw, 2rem);
-  font-weight: 900;
+  font-size: 16px;
+  font-weight: 700;
 }
 
-.cf-copy p {
-  max-width: 62ch;
+.cf-desc {
   margin: 0;
-  color: #5b6472;
-  line-height: 1.8;
-}
-
-.cf-checklist {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.cf-checklist div {
-  display: grid;
-  gap: 5px;
-  padding: 14px;
-  border-radius: 8px;
-  border: 1px solid rgba(248, 113, 113, 0.18);
-  background: rgba(255, 255, 255, 0.72);
-}
-
-.cf-checklist strong {
-  color: #991b1b;
-  font-size: 0.88rem;
-}
-
-.cf-checklist span {
   color: #64748b;
-  font-size: 0.78rem;
+  font-size: 12px;
   line-height: 1.6;
-}
-
-.cf-primary-hint {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 14px 16px;
-  border-radius: 8px;
-  border: 1px solid rgba(248, 113, 113, 0.2);
-  background: linear-gradient(135deg, rgba(254, 242, 242, 0.96), rgba(255, 255, 255, 0.92));
 }
 
 .cf-diagnostics {
   display: grid;
-  gap: 12px;
-  padding: 16px;
-  border-radius: 8px;
-  border: 1px solid rgba(185, 28, 28, 0.18);
-  background: rgba(255, 255, 255, 0.78);
+  gap: 8px;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(185, 28, 28, 0.15);
+  background: rgba(255, 255, 255, 0.7);
 }
 
 .cf-diagnostics__summary strong {
   color: #991b1b;
-  font-size: 0.9rem;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .cf-diagnostics__summary p {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   color: #4b5563;
-  line-height: 1.7;
+  line-height: 1.5;
+  font-size: 11px;
   white-space: pre-wrap;
 }
 
 .cf-diagnostics__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px;
 }
 
 .cf-diagnostics__grid div {
   display: grid;
-  gap: 4px;
-  min-width: 0;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: rgba(254, 242, 242, 0.72);
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(254, 242, 242, 0.7);
 }
 
 .cf-diagnostics__grid span {
   color: #991b1b;
-  font-size: 0.76rem;
-  font-weight: 800;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .cf-diagnostics__grid strong {
-  overflow-wrap: anywhere;
   color: #374151;
-  font-size: 0.82rem;
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
-.cf-diagnostics__event summary {
-  cursor: pointer;
+.cf-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(248, 113, 113, 0.15);
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.9), rgba(255, 255, 255, 0.85));
+}
+
+.cf-hint strong {
   color: #991b1b;
-  font-size: 0.82rem;
-  font-weight: 850;
+  font-size: 11px;
+  font-weight: 700;
 }
 
-.cf-diagnostics__event pre {
-  overflow: auto;
-  max-height: 220px;
-  margin: 10px 0 0;
-  padding: 12px;
-  border-radius: 8px;
-  background: #111827;
-  color: #f9fafb;
-  font-size: 0.76rem;
-  line-height: 1.55;
-}
-
-.cf-primary-hint strong {
-  display: block;
-  color: #991b1b;
-  font-size: 0.92rem;
-}
-
-.cf-primary-hint p {
-  margin: 6px 0 0;
-  color: #64748b;
-  font-size: 0.82rem;
-  line-height: 1.65;
-}
-
-.cf-primary-hint span {
+.cf-hint span {
   display: inline-flex;
   align-items: center;
-  min-height: 32px;
-  padding: 0 12px;
+  min-height: 22px;
+  padding: 0 8px;
   border-radius: 999px;
-  background: rgba(239, 68, 68, 0.12);
+  background: rgba(239, 68, 68, 0.1);
   color: #b91c1c;
-  font-size: 0.78rem;
-  font-weight: 850;
+  font-size: 10px;
+  font-weight: 700;
   white-space: nowrap;
 }
 
-.cf-primary-hint--busy {
-  border-color: rgba(249, 115, 22, 0.22);
-  background: linear-gradient(135deg, rgba(255, 247, 237, 0.98), rgba(255, 255, 255, 0.92));
+.cf-hint--busy {
+  border-color: rgba(249, 115, 22, 0.2);
+  background: linear-gradient(135deg, rgba(255, 247, 237, 0.9), rgba(255, 255, 255, 0.85));
 }
 
-.cf-primary-hint--busy strong,
-.cf-primary-hint--busy span {
+.cf-hint--busy strong,
+.cf-hint--busy span {
   color: #c2410c;
 }
 
 @media (max-width: 720px) {
-  .cf-checklist {
-    grid-template-columns: 1fr;
+  .cf-panel {
+    padding: 16px;
   }
 
-  .cf-primary-hint {
+  .cf-hint {
     flex-direction: column;
     align-items: flex-start;
+    gap: 4px;
   }
 }
 </style>

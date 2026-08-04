@@ -1,5 +1,14 @@
 <template>
   <div class="wd-workspace-root">
+    <FloatingProgressCard
+      :visible="showFloatingProgress"
+      :title="floatingProgressTitle"
+      :stage="floatingProgressStage"
+      :progress-percent="floatingProgressPercent"
+      :word-count="floatingProgressWordCount"
+      :status="floatingProgressStatus"
+      @close="showFloatingProgress = false"
+    />
     <div class="wd-workspace-card">
       <header v-if="selectedChapterNumber" class="wd-workspace-head">
         <div class="wd-workspace-head__main">
@@ -210,6 +219,7 @@ import {
   resolveChapterRuntime,
 } from '@/utils/chapterGeneration'
 import { buildChapterQualitySummary } from '@/utils/chapterQuality'
+import FloatingProgressCard from '../widgets/FloatingProgressCard.vue'
 
 const WorkspaceInitial = defineAsyncComponent(() => import('../workspace/states/WorkspaceInitial.vue'))
 const ChapterGenerating = defineAsyncComponent(() => import('../workspace/states/ChapterGenerating.vue'))
@@ -277,6 +287,9 @@ const emit = defineEmits<{
   (e: 'optimizeVersion', value: number): void
   (e: 'openPatchDiff'): void
 }>()
+
+// 浮动进度卡片状态
+const showFloatingProgress = ref(false)
 
 const showEditModal = ref(false)
 const editingContent = ref('')
@@ -435,6 +448,26 @@ const hasPreviewableVersions = computed(() => {
   if (!props.availableVersions?.length) return false
   return props.availableVersions.some((version) => normalizeChapterContent(version.content).length > 0)
 })
+
+const floatingProgressVisible = computed(() => {
+  const status = selectedChapter.value?.generation_status
+  return status === 'generating' || status === 'evaluating' || status === 'selecting'
+})
+const floatingProgressTitle = computed(() => `第 ${selectedChapterNumber.value} 章`)
+const floatingProgressStage = computed(() => generationRuntime.value?.progress_stage || selectedChapter.value?.generation_status || '')
+const floatingProgressPercent = computed(() => {
+  const pct = generationRuntime.value?.progress_percent
+  if (typeof pct === 'number') return pct
+  const stage = floatingProgressStage.value
+  const stageMap: Record<string, number> = {
+    queued: 5, prepare_context: 15, generate_mission: 25,
+    generating: 45, evaluating: 70, selecting: 85,
+    finalize: 95, successful: 100, waiting_for_confirm: 90
+  }
+  return stageMap[stage] ?? 30
+})
+const floatingProgressWordCount = computed(() => selectedChapter.value?.word_count || 0)
+const floatingProgressStatus = computed(() => selectedChapter.value?.generation_status || '')
 const chapterIsBusy = computed(() => isBusyChapterStatus(selectedChapter.value?.generation_status))
 const isTerminatingCurrent = computed(
   () => props.selectedChapterNumber !== null && props.terminatingChapter === props.selectedChapterNumber
@@ -729,6 +762,11 @@ watch(
   { flush: 'post' }
 )
 
+// 浮动进度卡片可见性
+watch(floatingProgressVisible, (val) => {
+  showFloatingProgress.value = val
+}, { immediate: true })
+
 onUnmounted(() => {
   workspaceBodyRef.value?.removeEventListener('scroll', handleWorkspaceScroll)
   if (workspaceScrollRafId.value !== null) {
@@ -807,372 +845,332 @@ defineExpose({
 
 <style scoped>
 .wd-workspace-root {
-  min-width: 0;
   min-height: 0;
-  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .wd-workspace-card {
-  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 248, 254, 0.96)),
-    rgba(250, 253, 255, 0.96);
-  border: 1px solid rgba(148, 175, 220, 0.15);
-  box-shadow: 0 8px 24px rgba(107, 155, 235, 0.08);
-  overflow: hidden;
+  background: rgba(255, 255, 255, 0.6);
   border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  overflow: hidden;
 }
 
 .wd-workspace-head {
   display: flex;
-  flex-wrap: wrap;
-  align-items: start;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 6px;
-  padding: 4px 8px 2px;
-  border-bottom: 1px solid rgba(161, 186, 220, 0.2);
-  background:
-    linear-gradient(135deg, rgba(252, 254, 255, 0.96), rgba(237, 245, 255, 0.94)),
-    rgba(248, 252, 255, 0.95);
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  background: rgba(248, 250, 252, 0.5);
 }
 
 .wd-workspace-head__main {
   min-width: 0;
   flex: 1;
-  display: grid;
-  gap: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .wd-workspace-head__eyebrow {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
   align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
-.wd-workspace-head__number,
-.wd-workspace-head__state,
-.wd-workspace-head__tag,
-.wd-workspace-head__meta span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: rgba(107, 155, 235, 0.15);
-  color: #4A7DD4;
-  font-size: 0.74rem;
+.wd-workspace-head__number {
+  font-size: 11px;
   font-weight: 700;
+  color: #6366f1;
+  letter-spacing: 0.02em;
+}
+
+.wd-workspace-head__state {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.1);
+  color: #64748b;
 }
 
 .wd-workspace-head__state--success {
-  background: rgba(22, 163, 74, 0.12);
-  color: #166534;
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
 }
 
-.wd-workspace-head__state--warning {
-  background: rgba(171, 202, 243, 0.34);
-  color: #355e93;
+.wd-workspace-head__state--active {
+  background: rgba(59, 130, 246, 0.1);
+  color: #2563eb;
 }
 
-.wd-workspace-head__state--danger {
-  background: rgba(239, 68, 68, 0.12);
-  color: #b91c1c;
+.wd-workspace-head__state--error {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
 }
 
-.wd-workspace-head__state--neutral {
-  background: rgba(154, 194, 245, 0.34);
-  color: #315f9d;
-}
-
-.wd-workspace-head__meta-pill--success {
-  background: rgba(22, 163, 74, 0.12) !important;
-  color: #166534 !important;
-}
-
-.wd-workspace-head__meta-pill--warning {
-  background: rgba(14, 165, 233, 0.16) !important;
-  color: #1d4ed8 !important;
-}
-
-.wd-workspace-head__meta-pill--danger {
-  background: rgba(239, 68, 68, 0.12) !important;
-  color: #b91c1c !important;
+.wd-workspace-head__tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
 }
 
 .wd-workspace-head__tag--warning {
-  background: rgba(171, 202, 243, 0.34);
-  color: #355e93;
-}
-
-.wd-workspace-head__title {
-  display: grid;
-  gap: 0;
+  background: rgba(245, 158, 11, 0.1);
+  color: #d97706;
 }
 
 .wd-workspace-head__title h2 {
-  color: #0f172a;
-  font-size: clamp(0.96rem, 1.2vw, 1.34rem);
-  font-weight: 800;
-  line-height: 1.1;
   margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.3;
 }
 
 .wd-workspace-head__side {
-  min-width: min(100%, 220px);
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
-  align-content: start;
+  align-items: flex-end;
 }
 
-.wd-workspace-head__meta,
-.wd-workspace-head__actions {
+.wd-workspace-head__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.wd-workspace-head__meta span {
+  font-size: 10px;
+  color: #64748b;
+  padding: 1px 5px;
+  background: rgba(148, 163, 184, 0.06);
+  border-radius: 4px;
+}
+
+.wd-workspace-head__meta-pill {
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+}
+
+.wd-workspace-head__meta-pill--success {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+
+.wd-workspace-head__meta-pill--warning {
+  background: rgba(245, 158, 11, 0.1);
+  color: #d97706;
+}
+
+.wd-workspace-head__meta-pill--danger {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
 }
 
 .wd-workspace-head__actions {
+  display: flex;
   align-items: center;
-}
-
-.wd-btn-icon {
-  width: 16px;
-  height: 16px;
-  flex: 0 0 auto;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .wd-workspace-tool-label {
-  display: inline-flex;
-  align-items: center;
-  min-height: 30px;
-  padding: 0 10px;
-  border-radius: 999px;
-  background: rgba(79, 70, 229, 0.1);
-  color: #4338ca;
-  font-size: 0.76rem;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-}
-
-.m3-action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-height: 40px;
-  padding: 0 16px;
-  border-radius: 8px;
-  font-size: 0.86rem;
-  font-weight: 850;
-}
-
-.m3-action-btn--quiet {
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(148, 163, 184, 0.22);
-}
-
-.m3-action-btn--strong {
-  box-shadow: 0 12px 24px rgba(79, 70, 229, 0.12);
+  font-size: 10px;
+  color: #94a3b8;
+  margin-right: 2px;
 }
 
 .wd-workspace-body {
-  position: relative;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 8px;
 }
 
+/* Health Panel */
 .wd-health-panel {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
-  padding: 8px;
-  border-bottom: 1px solid rgba(161, 186, 220, 0.16);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(240, 247, 255, 0.9));
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  background: rgba(248, 250, 252, 0.4);
 }
 
 .wd-health-panel__lead {
-  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.1);
 }
 
 .wd-health-panel__lead h3 {
-  margin: 2px 0 4px;
+  margin: 0;
   color: #0f172a;
-  font-size: 0.98rem;
-  font-weight: 850;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .wd-health-panel__lead p {
   margin: 0;
-  color: #52627a;
-  font-size: 0.78rem;
-  line-height: 1.5;
+  color: #64748b;
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 .wd-health-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 30px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.24);
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
   background: #fff;
   color: #334155;
-  font-size: 0.78rem;
-  font-weight: 800;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .wd-health-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(72px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(6, minmax(60px, 1fr));
+  gap: 6px;
 }
 
 .wd-health-item {
   display: grid;
-  gap: 2px;
-  min-height: 74px;
-  padding: 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(255, 255, 255, 0.8);
-  box-shadow: 0 10px 24px rgba(107, 155, 235, 0.08);
+  gap: 1px;
+  min-height: 48px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  background: rgba(255, 255, 255, 0.7);
 }
 
 .wd-health-item span {
-  color: #64748b;
-  font-size: 0.72rem;
-  font-weight: 800;
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .wd-health-item strong {
   color: #0f172a;
-  font-size: 1.24rem;
+  font-size: 14px;
   line-height: 1;
-  font-weight: 900;
+  font-weight: 800;
 }
 
 .wd-health-item em {
-  color: #64748b;
-  font-size: 0.68rem;
+  color: #94a3b8;
+  font-size: 9px;
   font-style: normal;
 }
 
 .wd-health-item--success {
-  border-color: rgba(34, 197, 94, 0.22);
-  background: linear-gradient(180deg, rgba(240, 253, 244, 0.92), rgba(255, 255, 255, 0.84));
+  border-color: rgba(34, 197, 94, 0.2);
+  background: linear-gradient(180deg, rgba(240, 253, 244, 0.8), rgba(255, 255, 255, 0.7));
 }
 
 .wd-health-item--warn {
-  border-color: rgba(14, 165, 233, 0.28);
-  background: linear-gradient(180deg, rgba(255, 251, 235, 0.94), rgba(255, 255, 255, 0.84));
+  border-color: rgba(14, 165, 233, 0.25);
+  background: linear-gradient(180deg, rgba(255, 251, 235, 0.8), rgba(255, 255, 255, 0.7));
 }
 
 .wd-health-item--danger {
-  border-color: rgba(239, 68, 68, 0.24);
-  background: linear-gradient(180deg, rgba(254, 242, 242, 0.94), rgba(255, 255, 255, 0.84));
+  border-color: rgba(239, 68, 68, 0.2);
+  background: linear-gradient(180deg, rgba(254, 242, 242, 0.8), rgba(255, 255, 255, 0.7));
 }
 
+/* Chapter Strip */
 .wd-chapter-strip {
   display: grid;
-  gap: 6px;
-  padding: 6px 8px 0;
-  border-bottom: 1px solid rgba(161, 186, 220, 0.16);
-  background: rgba(247, 250, 255, 0.88);
-}
-
-@media (max-width: 1024px) {
-  .wd-health-panel {
-    grid-template-columns: 1fr;
-  }
-
-  .wd-health-grid {
-    grid-template-columns: repeat(3, minmax(90px, 1fr));
-  }
-}
-
-@media (max-width: 640px) {
-  .wd-health-grid {
-    grid-template-columns: repeat(2, minmax(90px, 1fr));
-  }
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  background: rgba(248, 250, 252, 0.4);
 }
 
 .wd-strip-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .wd-strip-kicker {
-  margin: 0 0 2px;
-  font-size: 0.68rem;
-  letter-spacing: 0.08em;
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: #4f46e5;
-  font-weight: 800;
+  color: #6366f1;
+  font-weight: 700;
 }
 
 .wd-strip-head h3 {
   margin: 0;
-  font-size: 0.9rem;
-  font-weight: 800;
+  font-size: 11px;
+  font-weight: 700;
   color: #0f172a;
 }
 
 .wd-strip-note {
-  margin: 4px 0 0;
-  color: #64748b;
-  font-size: 0.78rem;
-  line-height: 1.55;
+  margin: 0;
+  color: #94a3b8;
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 .wd-strip-scroll {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(160px, 200px);
-  gap: 8px;
+  grid-auto-columns: minmax(120px, 160px);
+  gap: 6px;
   overflow-x: auto;
-  padding-bottom: 10px;
+  padding-bottom: 6px;
 }
 
 .wd-strip-chip {
   display: grid;
-  gap: 4px;
-  min-height: 68px;
-  padding: 10px 12px;
+  gap: 2px;
+  min-height: 44px;
+  padding: 6px 10px;
   text-align: left;
-  border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.15);
   background: #fff;
   cursor: pointer;
-  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .wd-strip-chip strong {
   color: #0f172a;
-  font-size: 0.92rem;
+  font-size: 11px;
 }
 
 .wd-strip-chip span {
-  color: #64748b;
-  font-size: 0.8rem;
-  line-height: 1.45;
+  color: #94a3b8;
+  font-size: 10px;
+  line-height: 1.3;
   display: -webkit-box;
   overflow: hidden;
   -webkit-line-clamp: 2;
@@ -1184,51 +1182,86 @@ defineExpose({
 }
 
 .wd-strip-chip--active {
-  border-color: rgba(79, 70, 229, 0.45);
-  box-shadow: 0 12px 28px rgba(79, 70, 229, 0.12);
-  background: rgba(238, 242, 255, 0.9);
+  border-color: rgba(79, 70, 229, 0.4);
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.1);
+  background: rgba(238, 242, 255, 0.8);
 }
 
 .wd-strip-chip--success {
-  border-left: 4px solid rgba(22, 163, 74, 0.72);
+  border-left: 3px solid rgba(22, 163, 74, 0.6);
 }
 
 .wd-strip-chip--warning {
-  border-left: 4px solid rgba(14, 165, 233, 0.72);
+  border-left: 3px solid rgba(14, 165, 233, 0.6);
 }
 
 .wd-strip-chip--danger {
-  border-left: 4px solid rgba(239, 68, 68, 0.72);
+  border-left: 3px solid rgba(239, 68, 68, 0.6);
 }
 
+/* Scroll to top button */
 .wd-workspace-scroll-top {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
-  min-height: 42px;
-  padding: 0 14px;
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 8px;
-  background: rgba(53, 94, 147, 0.94);
+  right: 10px;
+  bottom: 10px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 6px;
+  background: rgba(53, 94, 147, 0.9);
   color: #fff;
-  font-size: 0.82rem;
-  font-weight: 700;
-  box-shadow: 0 8px 20px rgba(53, 94, 147, 0.18);
+  font-size: 11px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(53, 94, 147, 0.15);
   cursor: pointer;
   z-index: 4;
 }
 
+/* Icon Button */
+.wd-btn-icon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+
+/* Editor Dialog */
 .m3-editor-dialog {
-  max-height: min(90vh, 900px);
+  max-height: min(90vh, 800px);
+}
+
+@media (max-width: 1024px) {
+  .wd-health-grid {
+    grid-template-columns: repeat(3, minmax(70px, 1fr));
+  }
 }
 
 @media (max-width: 768px) {
   .wd-workspace-head {
-    padding: 12px;
+    padding: 8px 10px;
   }
 
   .wd-workspace-body {
-    padding: 12px;
+    padding: 6px;
+  }
+
+  .wd-health-grid {
+    grid-template-columns: repeat(3, minmax(60px, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .wd-health-grid {
+    grid-template-columns: repeat(2, minmax(60px, 1fr));
+  }
+
+  .wd-strip-scroll {
+    grid-auto-columns: minmax(100px, 140px);
   }
 }
 </style>
+
+
+
+
+
+
