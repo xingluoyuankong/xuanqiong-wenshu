@@ -64,7 +64,7 @@ class ConfigSyncManager:
         """获取用户当前配置版本号"""
         return self._user_versions.get(user_id, 0)
 
-    async def subscribe(self, user_id: str) -> asyncio.Queue:
+    async def subscribe(self, user_id: int) -> asyncio.Queue:
         """订阅某个用户的配置变更事件"""
         queue: asyncio.Queue = asyncio.Queue(maxsize=10)
         async with self._lock:

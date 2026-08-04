@@ -574,7 +574,13 @@ const loadShortcutConfig = (): ShortcutConfig => {
     const raw = localStorage.getItem(shortcutConfigStorageKey)
     if (!raw) return { ...DEFAULT_SHORTCUT_CONFIG }
     return normalizeShortcutConfig({ ...DEFAULT_SHORTCUT_CONFIG, ...JSON.parse(raw) })
-  } catch {
+  } catch (err: unknown) {
+        if (err instanceof TypeError || (err as any)?.code === 'ECONNREFUSED') {
+          // Backend disconnected - show friendly message
+          console.warn('[WritingDesk] Backend connection lost, will retry...')
+          scheduleStatusPolling()  // Retry silently
+          return
+        }
     return { ...DEFAULT_SHORTCUT_CONFIG }
   }
 }
@@ -585,7 +591,13 @@ const saveShortcutConfig = (config: ShortcutConfig) => {
   try {
     localStorage.setItem(shortcutConfigStorageKey, JSON.stringify(normalized))
     globalAlert.showSuccess('快捷键显示配置已保存', '保存成功')
-  } catch {
+  } catch (err: unknown) {
+        if (err instanceof TypeError || (err as any)?.code === 'ECONNREFUSED') {
+          // Backend disconnected - show friendly message
+          console.warn('[WritingDesk] Backend connection lost, will retry...')
+          scheduleStatusPolling()  // Retry silently
+          return
+        }
     globalAlert.showError('保存快捷键配置失败，请检查浏览器存储权限', '保存失败')
   }
 }
