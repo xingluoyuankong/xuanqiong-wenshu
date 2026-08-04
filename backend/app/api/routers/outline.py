@@ -303,7 +303,7 @@ async def generate_long_novel_outline(
             prompt=prompt,
             user_id=current_user.id,
             temperature=0.8,
-            max_tokens=16000,
+            max_tokens=40000,
         )
         outline_data = generator.parse_outline_response(response)
     except Exception as e:
