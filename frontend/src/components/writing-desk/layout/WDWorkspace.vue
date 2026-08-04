@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="wd-workspace-root">
     <FloatingProgressCard
       :visible="showFloatingProgress"
@@ -8,6 +8,8 @@
       :word-count="floatingProgressWordCount"
       :status="floatingProgressStatus"
       @close="showFloatingProgress = false"
+    
+      :detail-message="floatingProgressDetail"
     />
     <div class="wd-workspace-card">
       <header v-if="selectedChapterNumber" class="wd-workspace-head">
@@ -468,6 +470,7 @@ const floatingProgressPercent = computed(() => {
 })
 const floatingProgressWordCount = computed(() => selectedChapter.value?.word_count || 0)
 const floatingProgressStatus = computed(() => selectedChapter.value?.generation_status || '')
+const floatingProgressDetail = computed(() => generationRuntime.value?.progress_message || '')
 const chapterIsBusy = computed(() => isBusyChapterStatus(selectedChapter.value?.generation_status))
 const isTerminatingCurrent = computed(
   () => props.selectedChapterNumber !== null && props.terminatingChapter === props.selectedChapterNumber

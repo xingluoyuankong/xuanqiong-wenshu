@@ -50,6 +50,10 @@
       <div v-if="funMessage" class="floating-progress-card__fun">
         <span class="floating-progress-card__fun-text">{{ funMessage }}</span>
       </div>
+
+      <div v-if="detailMessage && !isComplete && !isError" class="floating-progress-card__detail">
+        <span class="floating-progress-card__detail-text">{{ detailMessage }}</span>
+      </div>
     </div>
   </Transition>
 </template>
@@ -64,6 +68,7 @@ const props = defineProps<{
   progressPercent?: number
   wordCount?: number
   status?: string
+  detailMessage?: string
 }>()
 
 defineEmits<{
