@@ -2320,7 +2320,6 @@ async def _generate_chapter_async(
                 if project_obj and (not hasattr(project_obj, "blueprint") or not project_obj.blueprint or not getattr(project_obj.blueprint, "title", None)):
                     logger.info("Auto-generating blueprint for project=%s before chapter generation", project_id)
                     from ..services.blueprint_service import BlueprintService
-                    from ..services.llm_service import LLMService
                     llm_svc = LLMService(session)
                     blueprint_svc = BlueprintService(session, llm_svc)
                     await blueprint_svc.generate_all_blueprints(project_id, user_id=user_id)
