@@ -1,4 +1,4 @@
-// AIMETA P=小说类型定义|R=类型导出|NR=不含API逻辑|E=types:novel|X=internal|D=none|S=none|RD=./README.ai
+﻿// AIMETA P=小说类型定义|R=类型导出|NR=不含API逻辑|E=types:novel|X=internal|D=none|S=none|RD=./README.ai
 // Phase 5.2 重构：从 novel.ts 提取的所有 TypeScript 类型定义
 // 此文件只包含 interface/type/class ApiError，不包含任何 API 调用逻辑
 
@@ -633,4 +633,43 @@ export interface ForeshadowingReminderItem {
   status: string
   suggested_chapter_range?: { start?: number; end?: number } | null
   created_at: string
+}
+
+
+// ===== Research Types =====
+export interface ResearchConfig {
+  mode: "auto" | "manual"
+  enabled: boolean
+  search_provider: string
+  reuse_writing_llm: boolean
+  local_model_enabled: boolean
+  local_model_name?: string
+  local_model_base_url?: string
+  local_model_api_key?: string
+  max_sources: number
+  category_preferences: string[]
+}
+
+export interface ResearchArtifact {
+  id: string
+  project_id: string
+  run_id?: string
+  title: string
+  url?: string
+  notes?: string
+  source_type: string
+  status: "pending" | "completed" | "cancelled" | "interrupted"
+  content_preview?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ResearchRunStatus {
+  run_id: string
+  status: "running" | "completed" | "failed" | "cancelled"
+  progress_percent: number
+  message?: string
+  artifacts_count: number
+  started_at?: string
+  completed_at?: string
 }

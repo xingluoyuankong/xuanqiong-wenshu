@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <Transition name="float-card">
     <div
       v-if="visible"
@@ -55,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue"
+import { computed, ref, onMounted, onUnmounted } from "vue"
 
 const props = defineProps<{
   visible: boolean
@@ -184,10 +184,25 @@ const funMessages = [
   "场景画面正在渲染...",
 ]
 
+// Use a reactive counter that updates every 3 seconds for smoother rotation
+import { ref, onMounted, onUnmounted } from "vue"
+
+const messageIndex = ref(0)
+let messageTimer: ReturnType<typeof setInterval> | null = null
+
+onMounted(() => {
+  messageTimer = setInterval(() => {
+    messageIndex.value = (messageIndex.value + 1) % funMessages.length
+  }, 3000)
+})
+
+onUnmounted(() => {
+  if (messageTimer) clearInterval(messageTimer)
+})
+
 const funMessage = computed(() => {
   if (isComplete.value || isError.value) return ""
-  const index = Math.floor(Date.now() / 5000) % funMessages.length
-  return funMessages[index]
+  return funMessages[messageIndex.value] || funMessages[0]
 })
 </script>
 

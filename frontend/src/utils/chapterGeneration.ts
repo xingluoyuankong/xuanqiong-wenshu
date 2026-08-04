@@ -170,6 +170,9 @@ const BACKEND_STAGE_DEFINITIONS: BackendStageDefinition[] = [
   { key: 'successful', label: '已完成', milestone: 100, aliases: ['ready'] },
   { key: 'failed', label: '失败', milestone: 100, aliases: [] },
   { key: 'evaluation_failed', label: '评审未通过', milestone: 97, aliases: [] },
+  { key: "enhanced_context", label: "增强上下文装配", milestone: 19 },
+  { key: "multi_round_continuation", label: "多轮续写补充", milestone: 60 },
+  { key: "reader_simulation", label: "读者视角模拟", milestone: 65 },
 ]
 
 const DEFAULT_PIPELINE_SEQUENCE = [

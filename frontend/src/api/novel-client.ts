@@ -1,4 +1,4 @@
-// AIMETA P=小说API客户端_小说和章节接口|R=小说CRUD_章节管理_生成|NR=不含UI逻辑|E=api:novel-client|X=internal|A=novelApi对象|D=fetch|S=net|RD=./README.ai
+﻿// AIMETA P=小说API客户端_小说和章节接口|R=小说CRUD_章节管理_生成|NR=不含UI逻辑|E=api:novel-client|X=internal|A=novelApi对象|D=fetch|S=net|RD=./README.ai
 // Phase 5.2 重构：从 novel.ts 提取的 API 客户端代码（工具函数 + API 类）
 // 类型定义从 @/api/types/novel 导入
 
@@ -32,7 +32,9 @@ import type {
   CreativeGuidanceAnalysis,
   ComprehensiveAnalysis,
   ForeshadowingItem,
-} from '@/api/types/novel'
+  ResearchConfig,
+  ResearchArtifact,
+  ResearchRunStatus} from '@/api/types/novel'
 
 // ============================================================================
 // 错误处理
@@ -219,6 +221,7 @@ const requestChapter = async (url: string, options?: RequestInit): Promise<Chapt
 // ============================================================================
 
 const NOVELS_BASE = `${API_BASE_URL}${API_PREFIX}/novels`
+const PROJECTS_BASE = `${API_BASE_URL}${API_PREFIX}/projects`
 const PATCH_DIFF_BASE = `${API_BASE_URL}${API_PREFIX}`
 const WRITER_PREFIX = '/api/writer'
 const WRITER_BASE = `${API_BASE_URL}${WRITER_PREFIX}/novels`
@@ -1220,6 +1223,46 @@ export class TokenBudgetAPI {
     return request(`${TOKEN_BUDGET_BASE}/${projectId}/token-budget/allocate`, {
       method: 'POST',
       body: JSON.stringify(allocations)
+    })
+  }
+
+  // ===== Research APIs =====
+  static async getResearchConfig(projectId: string): Promise<ResearchConfig> {
+    return request(`${PROJECTS_BASE}/${projectId}/research/config`)
+  }
+  
+  static async updateResearchConfig(projectId: string, config: ResearchConfig): Promise<ResearchConfig> {
+    return request(`${PROJECTS_BASE}/${projectId}/research/config`, {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    })
+  }
+  
+  static async startResearchRun(projectId: string, payload: { scope: string; chapter_number?: number }): Promise<{ run_id: string; status: string }> {
+    return request(`${PROJECTS_BASE}/${projectId}/research/run/start`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  }
+  
+  static async getResearchJobStatus(projectId: string, runId: string): Promise<ResearchRunStatus> {
+    return request(`${PROJECTS_BASE}/${projectId}/research/run/${runId}/status`)
+  }
+  
+  static async cancelResearchRun(projectId: string, runId: string): Promise<void> {
+    return request(`${PROJECTS_BASE}/${projectId}/research/run/${runId}/cancel`, {
+      method: 'POST',
+    })
+  }
+  
+  static async listResearchArtifacts(projectId: string): Promise<ResearchArtifact[]> {
+    return request(`${PROJECTS_BASE}/${projectId}/research/artifacts`)
+  }
+  
+  static async createResearchPendingArtifact(projectId: string, payload: { title: string; url?: string; notes?: string }): Promise<ResearchArtifact> {
+    return request(`${PROJECTS_BASE}/${projectId}/research/artifacts`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
     })
   }
 }
