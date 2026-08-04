@@ -452,7 +452,7 @@ export type AnalysisSectionType =
   | 'comprehensive_analysis'
   | 'clue_tracker'
 
-export type FeatureEntryType = 'style_learning' | 'memory_management' | 'token_budget'
+export type FeatureEntryType = 'style_learning' | 'memory_management' | 'token_budget' | 'research' | 'clue_tracker' | 'knowledge_graph' | 'foreshadowing'
 
 export type AllSectionType = NovelSectionType | AnalysisSectionType | FeatureEntryType
 

@@ -276,6 +276,7 @@ import CharactersSection from '@/components/novel-detail/CharactersSection.vue'
 import RelationshipsSection from '@/components/novel-detail/RelationshipsSection.vue'
 import ChapterOutlineSection from '@/components/novel-detail/ChapterOutlineSection.vue'
 import AnalysisWorkbench from '@/components/novel-detail/AnalysisWorkbench.vue'
+import ResearchCenterSection from '@/components/novel-detail/ResearchCenterSection.vue'
 
 const BlueprintEditModal = defineAsyncComponent(() => import('@/components/BlueprintEditModal.vue'))
 const ChaptersSection = defineAsyncComponent(() => import('@/components/novel-detail/ChaptersSection.vue'))
