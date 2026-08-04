@@ -121,7 +121,10 @@ const formatApiErrorMessage = (detail: ApiErrorDetail): string => {
   return lines.join('\n')
 }
 
-const request = async (url: string, options: RequestInit = {}) => {
+const request = async (url: string, options: RequestInit = {}, retryCount = 0): Promise<any> => {
+  const MAX_RETRIES = 2
+  const RETRY_DELAYS = [800, 2000, 4000]
+  
   const headers = new Headers({
     'Content-Type': 'application/json',
     ...options.headers
@@ -135,13 +138,27 @@ const request = async (url: string, options: RequestInit = {}) => {
   try {
     response = await fetch(url, { ...options, headers })
   } catch {
-    throw new Error('网络连接失败，请检查网络后重试')
+    if (retryCount < MAX_RETRIES) {
+      const delay = RETRY_DELAYS[retryCount] || 2000
+      await new Promise(resolve => setTimeout(resolve, delay))
+      return request(url, options, retryCount + 1)
+    }
+    throw new Error('网络连接失败，请检查后端是否已启动后重试')
+  }
+
+  // Retry on 502/503/504 (backend temporarily unavailable)
+  if (!response.ok && (response.status === 502 || response.status === 503 || response.status === 504)) {
+    if (retryCount < MAX_RETRIES) {
+      const delay = RETRY_DELAYS[retryCount] || 2000
+      await new Promise(resolve => setTimeout(resolve, delay))
+      return request(url, options, retryCount + 1)
+    }
   }
 
   if (!response.ok) {
     const requestIdFromHeader = response.headers.get('X-Request-ID') || undefined
     const rawText = await response.text().catch(() => '')
-    let errorData: unknown = {}
+    let errorData: unknown = undefined
     let responseSnippet: string | undefined
     try {
       errorData = rawText ? JSON.parse(rawText) : {}
