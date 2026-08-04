@@ -4384,7 +4384,7 @@ class PipelineOrchestrator:
             return cached
 
         project_schema = await self.novel_service._serialize_project(project)
-        blueprint = self._normalize_blueprint(project_schema.blueprint.model_dump())
+        blueprint = self._normalize_blueprint(project_schema.blueprint.model_dump() if project_schema.blueprint else {})
         await self._cache_set(cache_key, blueprint, expire=300)
         return blueprint
 
