@@ -2310,6 +2310,24 @@ async def _generate_chapter_async(
             novel_service = NovelService(session)
             timeout_seconds = _calculate_generation_timeout_seconds(flow_config)
             timeout_enabled = timeout_seconds > 0
+            
+            # Auto-generate blueprint if project has none (critical for generation quality)
+            try:
+                from sqlalchemy import select as sa_select
+                from ..models.novel import NovelProject as NP
+                result = await session.execute(sa_select(NP).where(NP.id == project_id))
+                project_obj = result.scalars().first()
+                if project_obj and (not hasattr(project_obj, "blueprint") or not project_obj.blueprint or not getattr(project_obj.blueprint, "title", None)):
+                    logger.info("Auto-generating blueprint for project=%s before chapter generation", project_id)
+                    from ..services.blueprint_service import BlueprintService
+                    from ..services.llm_service import LLMService
+                    llm_svc = LLMService(session)
+                    blueprint_svc = BlueprintService(session, llm_svc)
+                    await blueprint_svc.generate_all_blueprints(project_id, user_id=user_id)
+                    logger.info("Auto-generated blueprint for project=%s", project_id)
+            except Exception as bp_exc:
+                logger.warning("Could not auto-generate blueprint: %s - continuing without", bp_exc)
+            
             try:
                 logger.info(
                     "Background chapter generation started: user=%s project=%s chapter=%s preset=%s timeout=%s",

@@ -434,4 +434,37 @@ const funMessage = computed(() => {
   opacity: 0;
   transform: translateX(20px);
 }
+
+/* Enhanced animations */
+@keyframes bar-shimmer {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes bar-shimmer-active {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.floating-progress-card__bar--active {
+  background: linear-gradient(90deg, #3b82f6, #60a5fa, #93c5fd, #60a5fa, #3b82f6) !important;
+  background-size: 300% 100% !important;
+  animation: bar-shimmer-active 1.5s ease-in-out infinite;
+}
+
+.floating-progress-card__runner {
+  transition: left 0.3s ease-out;
+}
+
+@keyframes runner-bounce {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50% { transform: translateX(-50%) translateY(-5px); }
+}
+
+.floating-progress-card__runner {
+  animation: runner-bounce 0.8s ease-in-out infinite;
+}
+
 </style>
