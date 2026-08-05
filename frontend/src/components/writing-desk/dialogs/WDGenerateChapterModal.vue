@@ -169,6 +169,24 @@
                 </p>
               </div>
 
+                              <!-- 绠€绾ч??缃?寮€? -->
+                <div class="mt-5 pt-4 border-t border-gray-100">
+                  <button type="button" class="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900" @click="showAdvanced = !showAdvanced">
+                    <span class="text-lg">{{ showAdvanced ? '▼' : '▶' }}</span>
+                    高级质量配置
+                    <span class="text-xs text-slate-400 ml-1">(连续性、充实度、自我审查)</span>
+                  </button>
+                  <div v-if="showAdvanced" class="mt-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    <label class="flex items-center gap-2 p-2 rounded-xl hover:bg-white cursor-pointer"><input type="checkbox" v-model="enableConsistency" class="accent-indigo-600 w-4 h-4"><span class="text-sm font-medium text-slate-700">一致性检查</span></label>
+                    <label class="flex items-center gap-2 p-2 rounded-xl hover:bg-white cursor-pointer"><input type="checkbox" v-model="enableEnrichment" class="accent-indigo-600 w-4 h-4"><span class="text-sm font-medium text-slate-700">内容充实</span></label>
+                    <label class="flex items-center gap-2 p-2 rounded-xl hover:bg-white cursor-pointer"><input type="checkbox" v-model="enableSelfCritique" class="accent-indigo-600 w-4 h-4"><span class="text-sm font-medium text-slate-700">自我审查</span></label>
+                    <label class="flex items-center gap-2 p-2 rounded-xl hover:bg-white cursor-pointer"><input type="checkbox" v-model="enableReaderSim" class="accent-indigo-600 w-4 h-4"><span class="text-sm font-medium text-slate-700">读者模拟</span></label>
+                    <label class="flex items-center gap-2 p-2 rounded-xl hover:bg-white cursor-pointer"><input type="checkbox" v-model="enableMemory" class="accent-indigo-600 w-4 h-4"><span class="text-sm font-medium text-slate-700">记忆层</span></label>
+                    <label class="flex items-center gap-2 p-2 rounded-xl hover:bg-white cursor-pointer"><input type="checkbox" v-model="enableForeshadowing" class="accent-indigo-600 w-4 h-4"><span class="text-sm font-medium text-slate-700">伏笔计划</span></label>
+                  </div>
+                </div>
+
+
               <div class="xq-dialog-footer">
                 <button
                   type="button"
@@ -214,6 +232,12 @@ interface GenerateChapterPayload {
   minWordCount: number
   targetWordCount: number
   preset?: 'basic' | 'enhanced' | 'longform' | 'ultimate'
+  enableConsistency?: boolean
+  enableEnrichment?: boolean
+  enableSelfCritique?: boolean
+  enableReaderSim?: boolean
+  enableMemory?: boolean
+  enableForeshadowing?: boolean
 }
 
 const GLOBAL_GENERATION_STORAGE_KEY = 'xuanqiong_wenshu:chapter_generation:global'
@@ -306,6 +330,13 @@ const qualityRequirements = ref('')
 const minWordCount = ref<number | null>(DEFAULT_MIN_WORD_COUNT)
 const targetWordCount = ref<number | null>(DEFAULT_TARGET_WORD_COUNT)
 const selectedPreset = ref<'' | 'basic' | 'enhanced' | 'longform' | 'ultimate'>('')
+const showAdvanced = ref(false)
+const enableConsistency = ref(true)
+const enableEnrichment = ref(false)
+const enableSelfCritique = ref(true)
+const enableReaderSim = ref(false)
+const enableMemory = ref(false)
+const enableForeshadowing = ref(true)
 
 const presetOptions = [
   { value: 'basic' as const, label: 'basic · 快速' },
@@ -565,7 +596,13 @@ const handleGenerate = () => {
     qualityRequirements: qualityRequirements.value.trim() || undefined,
     minWordCount: minValue,
     targetWordCount: targetValue,
-    preset: (selectedPreset.value || undefined) as GenerateChapterPayload['preset']
+    preset: (selectedPreset.value || undefined) as GenerateChapterPayload['preset'],
+    enableConsistency: enableConsistency.value,
+    enableEnrichment: enableEnrichment.value,
+    enableSelfCritique: enableSelfCritique.value,
+    enableReaderSim: enableReaderSim.value,
+    enableMemory: enableMemory.value,
+    enableForeshadowing: enableForeshadowing.value
   })
   emit('close')
 }

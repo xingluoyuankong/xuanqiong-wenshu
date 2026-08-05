@@ -86,19 +86,12 @@ const isComplete = computed(() => props.status === "successful")
 const isError = computed(() => props.status === "failed" || props.status === "evaluation_failed")
 
 const runnerEmoji = computed(() => {
-  const stage = props.stage || ""
-  if (stage.includes("generate")) return "✍️"
-  if (stage.includes("diagnose") || stage.includes("review") || stage.includes("evaluat")) return "🔍"
-  if (stage.includes("optimize") || stage.includes("enrichment")) return "✨"
-  if (stage.includes("consistency")) return "🔗"
-  if (stage.includes("context") || stage.includes("prepare") || stage.includes("audit")) return "📚"
-  if (stage.includes("mission")) return "📝"
-  if (stage.includes("cast") || stage.includes("character")) return "👥"
-  if (stage.includes("foreshadow") || stage.includes("clue")) return "🔮"
-  if (stage.includes("save") || stage.includes("persist")) return "💾"
-  if (stage.includes("reader")) return "👓"
-  return "🏃"
-})
+  const emojis = ['bicycle', 'rocket', 'sparkles', 'zap', 'fire']
+  const chars = {bicycle:'bike', rocket:'rocket', sparkles:'sparkle', zap:'bolt', fire:'flame'}
+  // Cycle through emojis based on progress
+  const idx = Math.floor((props.progressPercent || 0) / 20) % emojis.length
+  return chars[emojis[idx]] || 'runner'
+}))
 
 const statusToneClass = computed(() => {
   return "floating-progress-card--" + statusTone.value

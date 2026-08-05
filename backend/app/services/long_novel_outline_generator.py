@@ -18,75 +18,98 @@ logger = logging.getLogger(__name__)
 # ==================== 提示词模板 ====================
 
 LONG_NOVEL_OUTLINE_PROMPT = '''
-你是一位拥有多年创作经验的长篇小说架构师，专精于百万字级网络小说的结构设计。
+你是一位顶级的百万字级网络小说架构师，专精于超长篇多卷本作品的结构设计。
 
-请根据以下信息，为这部小说设计完整的多卷多章节结构。
+请为以下小说创建完整的多卷多章详细大纲。这个大纲是长篇创作的"圣经"，必须足够深入。
 
-## 小说核心信息：
+## 小说核心信息
 - 标题：{title}
 - 类型：{genre}
 - 风格：{style}
 - 目标总字数：{target_word_count}字
 - 总卷数：{volume_count}卷
-- 每卷章节数：{chapters_per_volume}章左右
+- 每卷章节数：{chapters_per_volume}章
 
-## 核心设定：
+## 核心设定
 - 主角：{protagonist}
 - 核心冲突：{central_conflict}
 - 世界观：{worldview}
-- 核心配角：{characters}
+- 核心角色：{characters}
 
-## 设计原则（必须严格遵守）：
-1. **主线和暗线**：每个卷必须有一条明确的"主线"和一条"暗线/支线"推进。
-2. **人物弧光**：主角在每卷末尾必须有明显的成长/变化/抉择。标注角色阶段性目标。
-3. **节奏控制**：开卷钩子(2-3章)→中段深化(冲突升级)→卷末高潮(1-2章铺垫下一卷)。
-4. **伏笔系统**：每卷埋设2+个跨卷伏笔，每卷回收1+个旧伏笔。标注铺设和回收章节。
-5. **情感曲线**：每章标注情感基调，卷间情绪波动有节奏感。
-6. **字数分布**：转折章节5000-8000字，过渡章节3000-5000字。
+## 严格设计原则
+### 多卷骨架
+1. 各卷独立但有递进关系的主题和目标
+2. 每卷3个阶段：开局钩子(2-3章)、中段深化(主体章节)、卷末高潮(2-3章)
+3. 卷末必须带"下一卷钩子"，刺激读者继续
+4. 每卷必须推进总体剧情至少1个大转折
 
-## 输出格式（纯JSON）：
+### 主线与暗线
+1. 总主线贯穿全书，每个卷有该卷的"阶段性目标"
+2. 每卷至少1条暗线(势力博弈、身世秘密、能力成长等)并行推进
+3. 暗线在该卷结尾给出实质性推进，不能空悬
+
+### 人物设计
+1. 主角每卷末尾必须有清晰的变化(实力/认知/关系/地位)
+2. 每卷提出1-2个阶段性"配角锚"（该卷重点描述的配角）
+3. 禁止配角一次性出场完毕——每卷有新的"卷入人物"
+
+### 伏笔系统
+1. 每卷埋设3+个跨卷伏笔——必须在本卷内写清埋设章号
+2. 每卷回收1-2个前卷伏笔——必须写清回收章号和来源卷
+3. 伏笔类型分类：势力伏笔、身份伏笔、物品伏笔、剧情反转
+
+### 节奏控制
+1. 凡有转折章 5000-12000字，过渡章 3000-6000字
+2. 避免3章以上纯过渡——读者必须持续有事件发生
+3. 卷末3章节奏必须收紧——冲突升级→结局→下一卷钩子
+
+## 输出格式（纯JSON，严格遵守）
+```json
 {{
   "novel_title": "标题",
-  "total_chapters_estimate": 预估章数,
-  "main_plot_line": "主线描述",
+  "total_chapters_estimate": 总章数,
+  "main_plot_line": "一百字的主线描述",
   "sub_plot_lines": [
-    {{"name": "暗线名", "description": "描述", "planted_at_volume": 卷号, "resolved_at_volume": 卷号}}
+    {{"name": "暗线名", "description": "描述", "planted_at_volume": 起始卷号, "resolved_at_volume": 预期终结卷号}}
   ],
   "character_arcs": [
-    {{"name": "角色名", "starting_position": "起点", "growth_goal": "目标", "key_turning_volumes": [卷号]}}
+    {{"name": "角色名", "arc_description": "角色弧线描述", "key_turning_volumes": [关键转折卷号], "volume_focus": [重点该角色的卷号]}}
   ],
   "foreshadowing_system": [
-    {{"id": 1, "description": "描述", "planted_chapter": 章号, "expected_reveal_chapter": 章号, "type": "势力/秘密/物品/世界观"}}
+    {{"id": 1, "type": "势力/身份/世界观/感情", "description": "伏笔描述", "planted_chapter": 埋设章号, "expected_reveal_chapter": 预期回收章号, "forecasting_volume": 埋设卷号, "resolution_volume": 回收卷号}}"
   ],
   "volumes": [
     {{
       "volume_number": 1,
-      "volume_title": "卷标题",
-      "volume_theme": "核心主题",
-      "volume_summary": "卷摘要(150-300字)",
-      "main_line": "本卷主线",
-      "sub_line": "本卷暗线",
-      "emotional_arc": "开卷→中段→卷末情绪变化",
-      "foreshadowing_planted": [伏笔ID],
-      "foreshadowing_revealed": [伏笔ID],
+      "volume_title": "卷名",
+      "volume_theme": "本卷核心主题",
+      "volume_main_line": "本卷主线目标",
+      "volume_sub_line": "本卷暗线推进",
+      "emotional_arc": "本卷情绪曲线：开卷→发展→高潮→尾音",
+      "volume_word_count_estimate": "预估本卷总字数",
+      "next_volume_hint": "给下一卷的钩子",
+      "protagonist_progress": "主角在本卷的成长/变化",
+      "foreshadowing_planted_this_volume": [本卷埋设的伏笔ID],
+      "foreshadowing_revealed_this_volume": [本卷回收的前卷伏笔ID],
       "chapters": [
         {{
           "chapter_number": 全局章号,
-          "volume_number": 卷号,
-          "title": "章标题",
-          "summary": "章节摘要(80-150字)",
-          "key_events": ["事件1","事件2","事件3"],
+          "volume_number": 本卷号,
+          "title": "章标题（有吸引力）",
+          "summary": "70-150字章节摘要",
+          "key_events": ["事件1", "事件2", "事件3"],
           "character_focus": ["主要角色"],
-          "emotional_tone": "情绪基调",
-          "pacing_role": "开卷钩子|中段推进|卷末高潮|过渡衔接",
-          "word_count_estimate": 5000
+          "emotional_tone": "开场紧张 | 发展铺垫 | 冲突升级 | 高潮对决 | 结局过渡 | 反转揭晓",
+          "pacing_role": "卷首钩子 | 中段推进 | 核心事件 | 卷末高潮 | 过渡衔接",
+          "word_count_estimate": 章节字数预测
         }}
       ]
     }}
   ]
 }}
 
-仅输出完整JSON，不添加额外内容。'''
+仅输出完整有效JSON。'''
+
 
 
 
@@ -102,8 +125,8 @@ class LongNovelOutlineGenerator:
         blueprint_data: Dict,
         llm_service,
         user_id: int,
-        volume_count: int = 6,
-        chapters_per_volume: int = 15,
+        volume_count: int = 8,
+        chapters_per_volume: int = 25,
         progress_callback=None,
     ) -> Optional[Dict]:
         """生成长篇小说的完整大纲"""
@@ -146,8 +169,8 @@ class LongNovelOutlineGenerator:
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 user_id=user_id,
-                timeout=180.0,
-                max_tokens=8000,
+                timeout=300.0,
+                max_tokens=16000,
                 response_format="json_object",
             )
             response_text = result if isinstance(result, str) else str(result)
@@ -195,21 +218,21 @@ class LongNovelOutlineGenerator:
         """
         # 根据字数确定规模
         if target_word_count <= 50000:
-            # 短篇：1-2卷，每卷5-8章
+            # 短篇：1-2卷，每卷8-15章
             volume_count = 1
-            chapters_per_volume = min(8, max(5, target_word_count // 5000))
+            chapters_per_volume = min(15, max(8, target_word_count // 4000))
         elif target_word_count <= 200000:
-            # 中篇：2-4卷，每卷8-12章
-            volume_count = min(4, max(2, target_word_count // 80000))
-            chapters_per_volume = min(12, max(8, target_word_count // (volume_count * 6000)))
+            # 中篇：3-5卷，每卷15-25章
+            volume_count = min(5, max(3, target_word_count // 50000))
+            chapters_per_volume = min(25, max(12, target_word_count // (volume_count * 5000)))
         elif target_word_count <= 500000:
-            # 长篇：3-6卷，每卷10-15章
-            volume_count = min(6, max(3, target_word_count // 120000))
-            chapters_per_volume = min(15, max(10, target_word_count // (volume_count * 7000)))
+            # 长篇：5-8卷，每卷20-35章
+            volume_count = min(8, max(5, target_word_count // 80000))
+            chapters_per_volume = min(35, max(20, target_word_count // (volume_count * 5000)))
         else:
-            # 超长篇：5-10卷，每章12-20章
-            volume_count = min(10, max(5, target_word_count // 200000))
-            chapters_per_volume = min(20, max(12, target_word_count // (volume_count * 8000)))
+            # 超长篇：8-15卷，每卷25-50章
+            volume_count = min(15, max(8, target_word_count // 120000))
+            chapters_per_volume = min(50, max(25, target_word_count // (volume_count * 5000)))
 
         total_chapters = volume_count * chapters_per_volume
         words_per_chapter = target_word_count // total_chapters if total_chapters > 0 else 5000

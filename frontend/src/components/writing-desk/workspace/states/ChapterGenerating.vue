@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="cg-shell">
     <section class="cg-hero">
       <div class="cg-hero__main">
@@ -752,6 +752,29 @@ const formatEventMetadata = (metadata: unknown) => {
 }
 
 onMounted(() => {
+  // SSE stream for real-time token output
+  const projectId = props.projectId
+  const chapterNum = props.chapterNumber
+  if (projectId && chapterNum) {
+    const streamUrl = `/api/novels/${projectId}/chapters/${chapterNum}/stream`
+    const eventSource = new EventSource(streamUrl)
+    eventSource.onmessage = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.type === 'token') {
+          streamingText.value += data.content || ''
+        } else if (data.type === 'progress') {
+          progressPercent.value = data.percent ?? progressPercent.value
+          stageMessage.value = data.message ?? stageMessage.value
+        } else if (data.type === 'complete') {
+          eventSource.close()
+        }
+      } catch {}
+    }
+    eventSource.onerror = () => eventSource.close()
+    onUnmounted(() => eventSource.close())
+  }
+
   timer = window.setInterval(() => {
     now.value = Date.now()
   }, 1000)

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div>
     <aside
       :class="[
@@ -6,18 +6,18 @@
         sidebarOpen ? 'wd-sidebar--open' : 'wd-sidebar--closed',
       ]"
     >
-      <div class="wd-sidebar__panel">
+      <div class="wd-sidebar wd-sidebar--left__panel">
         <!-- Compact Brand Row -->
-        <div class="wd-sidebar__brand">
-          <span class="wd-sidebar__brand-icon">📖</span>
-          <span class="wd-sidebar__brand-text">玄穹文枢</span>
-          <button type="button" class="wd-sidebar__close lg:hidden" @click="$emit('closeSidebar')">
+        <div class="wd-sidebar wd-sidebar--left__brand">
+          <span class="wd-sidebar wd-sidebar--left__brand-icon">📖</span>
+          <span class="wd-sidebar wd-sidebar--left__brand-text">玄穹文枢</span>
+          <button type="button" class="wd-sidebar wd-sidebar--left__close lg:hidden" @click="$emit('closeSidebar')">
             <X class="wd-btn-icon" aria-hidden="true" />
           </button>
         </div>
 
         <!-- Tab Navigation -->
-        <nav class="wd-sidebar__nav">
+        <nav class="wd-sidebar wd-sidebar--left__nav">
           <template v-for="tab in navTabs" :key="tab.key">
             <div v-if="tab.type === 'divider'" class="wd-nav-divider" />
             <a v-else-if="tab.href" :href="tab.href" class="wd-nav-item">
@@ -219,6 +219,39 @@ const currentActionGuidance = computed(() => {
 </script>
 
 <style scoped>
+/* --- LEFT SIDEBAR LAYOUT --- */
+.wd-sidebar--left {
+  position: fixed;
+  left: 0;
+  top: 55px;
+  bottom: 0;
+  width: 220px;
+  z-index: 40;
+  background: rgba(255,255,255,0.97);
+  border-right: 1px solid rgba(148,163,184,0.12);
+  overflow-y: auto;
+  padding: 12px 8px;
+}
+
+.wd-sidebar__fixed {
+  position: fixed;
+  left: 0;
+  top: 55px;
+  bottom: 0;
+  width: 220px;
+  z-index: 40;
+  background: rgba(255,255,255,0.98);
+  backdrop-filter: blur(12px);
+  border-right: 1px solid rgba(148,163,184,0.10);
+  overflow-y: auto;
+  padding: 10px 6px;
+  transition: transform 0.3s ease;
+}
+
+.wd-sidebar__fixed.collapsed {
+  transform: translateX(-180px);
+}
+
 .wd-sidebar {
   flex: none;
   min-width: 200px;

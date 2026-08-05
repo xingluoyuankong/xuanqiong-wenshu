@@ -487,6 +487,12 @@ const generateChapterSeed = ref<{
   qualityRequirements?: string
   minWordCount?: number
   targetWordCount?: number
+  enableConsistency?: boolean
+  enableEnrichment?: boolean
+  enableSelfCritique?: boolean
+  enableReaderSim?: boolean
+  enableMemory?: boolean
+  enableForeshadowing?: boolean
 }>({})
 const optimizerSuggestionNotes = ref('')
 const lastStatusSyncAt = ref<string | null>(null)
@@ -1333,7 +1339,13 @@ const handleGenerateChapter = async (payload: GenerateChapterPayload) => {
     qualityRequirements: payload.qualityRequirements,
     minWordCount: payload.minWordCount,
     targetWordCount: payload.targetWordCount,
-    preset: payload.preset
+    preset: payload.preset,
+    enableConsistency: payload.enableConsistency,
+    enableEnrichment: payload.enableEnrichment,
+    enableSelfCritique: payload.enableSelfCritique,
+    enableReaderSim: payload.enableReaderSim,
+    enableMemory: payload.enableMemory,
+    enableForeshadowing: payload.enableForeshadowing
   })
 }
 

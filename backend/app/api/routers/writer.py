@@ -1091,6 +1091,25 @@ def _build_compat_generate_flow_config(request: GenerateChapterRequest) -> Dict[
             }
         )
 
+# Merge user-provided flow_config (JSON string from frontend advanced options)
+    user_flow = getattr(request, "flow_config", None)
+    if user_flow and isinstance(user_flow, str) and user_flow.strip():
+        try:
+            parsed = json_module.loads(user_flow)
+            if isinstance(parsed, dict):
+                valid_keys = {
+                    "enable_consistency", "enable_enrichment", "enable_self_critique",
+                    "enable_reader_sim", "enable_memory", "enable_foreshadowing",
+                    "enable_optimizer", "enable_constitution", "enable_persona",
+                    "enable_six_dimension", "enable_rag", "async_finalize"
+                }
+                for k, v in parsed.items():
+                    if k in valid_keys and isinstance(v, bool):
+                        config[k] = v
+            logger.debug("Merged flow_config from frontend: %s", {k: config.get(k) for k in valid_keys if k in config})
+        except (json_module.JSONDecodeError, TypeError, ValueError) as e:
+            logger.warning("Failed to parse flow_config from frontend: %s", e)
+
     return config
 
 

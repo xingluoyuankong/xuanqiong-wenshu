@@ -52,12 +52,17 @@ from ..services.token_budget_service import TokenBudgetService
 from ..services.vector_store_service import VectorStoreService
 from ..services.writer_context_builder import WriterContextBuilder
 from ..utils.json_utils import remove_think_tags, unwrap_markdown_json
+from .config_sync_manager import get_config_sync_manager
 
 logger = logging.getLogger(__name__)
 DEFAULT_GENERATED_VERSION_COUNT = 1  # 默认生成1个版本
 MIN_GENERATED_VERSION_COUNT = 1
 MAX_GENERATED_VERSION_COUNT = 4  # 最多生成4个版本
 MAX_STORED_CHAPTER_VERSIONS = 4  # 最多保存4个版本
+
+# Config sync tracking
+_ACTIVE_CONFIG_VERSIONS: Dict[int, int] = {}
+_CONFIG_POLL_INTERVAL = 3
 
 
 CHAPTER_DRAFT_SUPPORTED_RANGE = {
@@ -129,9 +134,6 @@ class PipelineOrchestrator:
         if PipelineOrchestrator._generation_semaphore is None:
             limit = max(1, int(getattr(settings, "writer_chapter_versions", 1) or 1))
             PipelineOrchestrator._generation_semaphore = asyncio.Semaphore(max(2, min(8, limit)))
-        self._config_sync_queue = None
-        self._config_sync_task = None
-        self._config_subscribed_user_id = None
 
     def _create_llm_config_service(self) -> LLMConfigService:
         return LLMConfigService(self.session)
@@ -507,7 +509,7 @@ class PipelineOrchestrator:
                 add("insufficient_dialogue_pressure")
             if (
                 int(guard.get("word_count") or 0) >= 1500
-                and int(guard.get("mission_hit_count") or 0) < 2
+                and int(guard.get("mission_hit_count") or 0) < (2 if int(guard.get("word_count") or 0) >= 3000 else 1)
                 and not rich_progression_evidence
             ):
                 add("chapter_progression_weak")
@@ -634,13 +636,13 @@ class PipelineOrchestrator:
                 "code": "critical_issues_remaining",
                 "message": f"自检后仍残留 {critique_critical} 个 critical 问题，不能静默放行。",
             })
-        if critique_score is not None and critique_score < 42:
+        if critique_score is not None and critique_score < 60:
             blockers.append({
                 "source": "self_critique",
                 "code": "score_below_floor",
                 "message": f"自检最终分仅 {critique_score:.1f}，低于结构质量底线。",
             })
-        if critique_major >= 12:
+        if critique_major >= 8:
             blockers.append({
                 "source": "self_critique",
                 "code": "too_many_major_issues",
@@ -1887,6 +1889,7 @@ class PipelineOrchestrator:
             )
 
         pipeline_started_at = time.perf_counter()
+        await self._init_config_subscription(user_id)
         config = await self._resolve_config(flow_config)
         requested_preset = str((flow_config or {}).get("preset", "") or "").strip() or config.preset
         runtime_metadata: Dict[str, Any] = {
@@ -6433,8 +6436,8 @@ class PipelineOrchestrator:
 
         critique = await service.critique_and_revise_loop(
             chapter_content=chapter_content,
-            max_iterations=1,
-            target_score=60.0,
+            max_iterations=2,
+            target_score=82.0,
             dimensions=[
                 CritiqueDimension.LOGIC,
                 CritiqueDimension.CONTINUITY,
@@ -6921,6 +6924,29 @@ class PipelineOrchestrator:
     @staticmethod
     def _count_words(text: str) -> int:
         return len("".join((text or "").split()))
+
+    async def _check_config_changed(self) -> bool:
+        """Check if frontend config has been modified through config_sync_manager."""
+        if self._user_id is None:
+            return False
+        try:
+            sync_mgr = get_config_sync_manager()
+            latest = await sync_mgr.get_version(self._user_id)
+            if latest != self._config_version:
+                logger.info("config_version_changed user=%s old=%s new=%s", self._user_id, self._config_version, latest)
+                self._config_version = latest
+                return True
+        except Exception:
+            pass
+        return False
+
+    async def _init_config_subscription(self, user_id: int) -> None:
+        """Initialize config subscription for this pipeline instance."""
+        sync_mgr = get_config_sync_manager()
+        self._user_id = user_id
+        self._config_version = await sync_mgr.get_version(user_id)
+        logger.info("pipeline_config_subscribed user=%s version=%s", user_id, self._config_version)
+
 
     @classmethod
     def _preserve_non_regressive_content(

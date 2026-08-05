@@ -1,14 +1,14 @@
-<!-- AIMETA P=项目卡片_小说项目展示|R=项目信息卡片|NR=不含编辑功能|E=component:ProjectCard|X=internal|A=卡片组件|D=vue|S=dom|RD=./README.ai -->
+﻿<!-- AIMETA P=项目卡片_小说项目展示|R=项目信息卡片|NR=不含编辑功能|E=component:ProjectCard|X=internal|A=卡片组件|D=vue|S=dom|RD=./README.ai -->
 <template>
   <div
-    class="md-card md-card-elevated group p-5 flex flex-col justify-between transition-all duration-300 hover:scale-[1.01]"
-    style="border-radius: var(--md-radius-lg);"
+    class="md-card md-card-elevated group p-3 flex flex-col justify-between transition-all duration-300 hover:scale-[1.01]" style="max-height:160px; border-radius: var(--md-radius-lg);"
+    
   >
     <div>
       <!-- Header: Icon + Title -->
-      <div class="flex items-center gap-4 mb-4">
+      <div class="flex items-center gap-2 mb-2">
         <div 
-          class="w-12 h-12 rounded-full flex items-center justify-center"
+          class="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
           :style="{ backgroundColor: themeColors.container, color: themeColors.onContainer }"
         >
           <svg

@@ -1,4 +1,5 @@
 # AIMETA P=配置服务_系统配置业务逻辑|R=配置读写|NR=不含数据访问|E=ConfigService|X=internal|A=服务类|D=sqlalchemy|S=db|RD=./README.ai
+from .config_sync_manager import get_config_sync_manager
 from typing import Iterable, Optional
 
 HIDDEN_CONFIG_PREFIXES = ("auth.", "linuxdo.")
@@ -49,6 +50,12 @@ class ConfigService:
             instance = SystemConfig(**payload.model_dump())
             await self.repo.add(instance)
         await self.session.commit()
+        try:
+            sync_mgr = get_config_sync_manager()
+            await sync_mgr.bump_version(user_id)
+        except Exception:
+            pass
+
         return SystemConfigRead.model_validate(instance)
 
     async def patch_config(self, key: str, payload: SystemConfigUpdate) -> Optional[SystemConfigRead]:
@@ -59,6 +66,12 @@ class ConfigService:
             return None
         await self.repo.update_fields(instance, **payload.model_dump(exclude_unset=True))
         await self.session.commit()
+        try:
+            sync_mgr = get_config_sync_manager()
+            await sync_mgr.bump_version(user_id)
+        except Exception:
+            pass
+
         return SystemConfigRead.model_validate(instance)
 
     async def remove_config(self, key: str) -> bool:

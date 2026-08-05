@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <header :class="['global-nav-shell xq-topbar xq-topbar--global', { 'global-nav-shell--writing': isWritingDeskRoute }]">
     <div class="global-nav-main">
       <div class="left-actions">
@@ -230,6 +230,15 @@ function openRuntimeLogs() {
 </script>
 
 <style scoped>
+/* Slim global nav */
+.xq-topbar--global {
+  height: 55px !important;
+  min-height: 55px !important;
+}
+.global-nav-shell {
+  height: 55px;
+}
+
 .global-nav-shell {
   position: sticky;
   top: 0;

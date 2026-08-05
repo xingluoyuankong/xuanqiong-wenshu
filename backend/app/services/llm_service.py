@@ -64,6 +64,13 @@ class LLMService:
         self._embedding_dimensions: Dict[str, int] = {}
         self._resolved_llm_config_cache: Dict[tuple, Dict[str, Any]] = {}
 
+    async def reconfigure(self, user_id: int) -> None:
+        """Clear cached configs so the next generation picks up frontend LLM changes."""
+        stale_keys = [k for k in self._resolved_llm_config_cache if k[0] == user_id]
+        for k in stale_keys:
+            self._resolved_llm_config_cache.pop(k, None)
+        logger.info("llm_reconfigured user=%s cleared=%d cache_entries", user_id, len(stale_keys))
+
     async def _recover_from_stale_session(self, operation: str, exc: OperationalError) -> None:
         logger.warning("LLM 服务在 %s 阶段检测到陈旧数据库会话：%s", operation, exc)
         try:

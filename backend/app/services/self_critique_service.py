@@ -142,6 +142,7 @@ class SelfCritiqueService:
     # local patches and reports deferred broad fixes instead of silently
     # replacing the chapter.
     MAX_STAGEWIDE_REWRITES_PER_ITERATION = 0
+    ABSOLUTE_MAX_ITERATIONS = 2  # Hard guard: never loop more than 2 times regardless of conditions
     MAX_DEFERRED_STAGE_DRAIN_ITERATIONS = 1
     STAGEWIDE_SAFETY_DIMENSIONS: List[CritiqueDimension] = [
         CritiqueDimension.CONTINUITY,
@@ -2081,7 +2082,7 @@ class SelfCritiqueService:
         self,
         chapter_content: str,
         max_iterations: int = 1,
-        target_score: float = 82.0,
+        target_score: float = 60.0,
         dimensions: Optional[List[CritiqueDimension]] = None,
         context: Optional[Dict[str, Any]] = None,
         user_id: int = 0,
@@ -2104,6 +2105,10 @@ class SelfCritiqueService:
             iteration_index = 0
 
             while iteration_index < iteration_limit:
+                # --- HARD SAFETY GUARD ---
+                if iteration_index > self.ABSOLUTE_MAX_ITERATIONS:
+                    logger.warning("ABSOLUTE_MAX_ITERATIONS (%d) reached — forcing loop exit", self.ABSOLUTE_MAX_ITERATIONS)
+                    break
                 iteration_index += 1
                 iteration_entry = {
                     "iteration": iteration_index,

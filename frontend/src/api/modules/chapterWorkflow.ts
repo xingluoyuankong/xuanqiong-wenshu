@@ -200,6 +200,17 @@ export const generateChapter = (
   if (options.preset) {
     payload.preset = options.preset
   }
+  // Advanced quality flags - injected as flow_config
+  const flowConfig: Record<string, unknown> = {}
+  if (options.enableConsistency !== undefined) flowConfig.enable_consistency = options.enableConsistency
+  if (options.enableEnrichment !== undefined) flowConfig.enable_enrichment = options.enableEnrichment
+  if (options.enableSelfCritique !== undefined) flowConfig.enable_self_critique = options.enableSelfCritique
+  if (options.enableReaderSim !== undefined) flowConfig.enable_reader_sim = options.enableReaderSim
+  if (options.enableMemory !== undefined) flowConfig.enable_memory = options.enableMemory
+  if (options.enableForeshadowing !== undefined) flowConfig.enable_foreshadowing = options.enableForeshadowing
+  if (Object.keys(flowConfig).length > 0) {
+    payload.flow_config = JSON.stringify(flowConfig)
+  }
 
   return requestProject(`${WRITER_BASE}/${projectId}/chapters/generate`, {
     method: 'POST',
