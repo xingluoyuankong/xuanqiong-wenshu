@@ -422,6 +422,11 @@ const handleSave = async () => {
     const saved = await createOrUpdateLLMConfig(buildSavePayload())
     hydrateFromConfig(saved)
     setNotice('success', 'LLM 配置已保存')
+    // Trigger backend config sync so pipeline picks up new settings
+    try {
+      await fetch('/api/llm-config/bump', { method: 'POST' })
+    } catch {}
+
   } catch (error) {
     setNotice('error', error instanceof Error ? error.message : '保存 LLM 配置失败')
   } finally {

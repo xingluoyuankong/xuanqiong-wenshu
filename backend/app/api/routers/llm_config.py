@@ -160,3 +160,15 @@ async def auto_switch_llm_provider(
 ) -> LLMAutoSwitchResponse:
     logger.info("正在执行用户 %s 的 LLM 自动切换", current_user.id)
     return await service.auto_switch_provider(user_id=current_user.id)
+
+
+# --- Config sync bump ---
+from ...services.config_sync_manager import get_config_sync_manager
+from ..dependencies import get_current_user
+
+@router.post("/bump")
+async def bump_config_version(user=Depends(get_current_user)):
+    """Notify backend that frontend config has changed. Triggers PipelineOrchestrator reconfigure."""
+    sync_mgr = get_config_sync_manager()
+    new_version = await sync_mgr.bump_version(user.id)
+    return {"version": new_version, "message": f"Config sync bumped to v{new_version}"}

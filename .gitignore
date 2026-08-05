@@ -61,3 +61,10 @@ __pycache__/
 /docs/reports/e2e-*.json
 /优化计划.txt
 **/README.ai
+# Temp generation artifacts (never commit)
+tmp_*.json
+tmp_*.log
+*.backup
+*.backup2
+backend/.pytest_cache/
+backend/__pycache__/
