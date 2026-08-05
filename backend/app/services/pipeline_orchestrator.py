@@ -54,7 +54,7 @@ from ..services.writer_context_builder import WriterContextBuilder
 from ..utils.json_utils import remove_think_tags, unwrap_markdown_json
 
 logger = logging.getLogger(__name__)
-DEFAULT_GENERATED_VERSION_COUNT = 1  # 默认生成1个版本
+DEFAULT_GENERATED_VERSION_COUNT = 3  # 默认生成3个并行版本
 MIN_GENERATED_VERSION_COUNT = 1
 MAX_GENERATED_VERSION_COUNT = 4  # 最多生成4个版本
 MAX_STORED_CHAPTER_VERSIONS = 4  # 最多保存4个版本
@@ -128,7 +128,7 @@ class PipelineOrchestrator:
         self.cache_service = CacheService(getattr(settings, "redis_url", "redis://localhost:6379/0"))
         if PipelineOrchestrator._generation_semaphore is None:
             limit = max(1, int(getattr(settings, "writer_chapter_versions", 1) or 1))
-            PipelineOrchestrator._generation_semaphore = asyncio.Semaphore(max(2, min(8, limit)))
+            PipelineOrchestrator._generation_semaphore = asyncio.Semaphore(max(3, min(12, limit)))
         self._config_sync_queue = None
         self._config_sync_task = None
         self._config_subscribed_user_id = None

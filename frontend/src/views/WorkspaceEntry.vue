@@ -39,7 +39,7 @@
       <div v-if="bootstrapLoading" class="entry-empty">正在加载项目列表……</div>
       <div v-else-if="bootstrapError" class="entry-empty entry-empty--error">{{ bootstrapError }}</div>
       <div v-else-if="!recentProjects.length" class="entry-empty">还没有项目。先进入灵感模式，创建你的第一部小说。</div>
-      <div v-else class="project-list">
+      <div v-else class="project-list grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         <article v-for="project in recentProjects" :key="project.id" class="project-row">
           <button type="button" class="project-main" @click="enterProject(project)">
             <strong>{{ project.title || '未命名项目' }}</strong>
@@ -129,6 +129,50 @@ async function reloadProjects() {
 onMounted(reloadProjects)
 </script>
 <style scoped>
+/* Compact project grid */
+.project-list {
+  display: grid;
+}
+.project-row {
+  background: rgba(255,255,255,0.85);
+  border-radius: 10px;
+  border: 1px solid rgba(148,163,184,0.12);
+  padding: 12px 14px;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  max-height: 100px;
+}
+.project-row:hover {
+  background: rgba(255,255,255,0.98);
+  border-color: rgba(99,102,241,0.2);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+}
+.project-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+.project-main strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-main span {
+  font-size: 11px;
+  color: #64748b;
+}
+
 .entry-page {
   min-height: calc(100vh - 64px);
   padding: 1.75rem;

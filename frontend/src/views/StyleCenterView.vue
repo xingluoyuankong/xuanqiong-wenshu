@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="style-center-page">
     <section class="style-center-hero xq-page-topbar xq-page-topbar--style">
       <div>
@@ -1914,5 +1914,34 @@ onMounted(async () => {
     width: 100%;
     justify-content: center;
   }
+}
+
+/* --- Compact style cards --- */
+.style-card {
+  padding: 10px 14px !important;
+  margin-bottom: 6px !important;
+  border-radius: 8px !important;
+}
+.style-card__header {
+  font-size: 12px !important;
+  gap: 4px !important;
+}
+.style-card__body {
+  font-size: 11px !important;
+}
+.style-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  padding: 8px 0 4px 0;
+  border-bottom: 1px solid rgba(148,163,184,0.12);
+  margin-bottom: 6px;
+}
+.style-center-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
 }
 </style>

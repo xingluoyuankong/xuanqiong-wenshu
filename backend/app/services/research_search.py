@@ -53,6 +53,46 @@ class ResearchSearchClient:
     @classmethod
     def _is_preferred(cls, url: str, preferred: Iterable[str]) -> bool:
         return cls._domain_matches(url, preferred)
+    @staticmethod
+    async def web_fetch(url, timeout=30.0, max_bytes=500000):
+        """Fetch and extract text from a public URL."""
+        await ResearchSearchClient._validate_outbound_url(url)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            response = await client.get(url, headers={
+                "User-Agent": "XuanqiongWenshu-Research/1.0",
+                "Accept": "text/html,application/xhtml+xml"
+            })
+            response.raise_for_status()
+            raw = response.text[:max_bytes]
+            import re as _re
+            text = _re.sub(r"<[^>]+>", " ", raw)
+            text = _re.sub(r"\\s+", " ", text).strip()
+            return {"url": url, "status": response.status_code, "text_length": len(text), "text_preview": text[:3000]}
+
+    @staticmethod
+    async def search_tavily(query, api_key, max_results=5, timeout=30.0):
+        """Search via Tavily API."""
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(
+                "https://api.tavily.com/search",
+                json={"api_key": api_key, "query": query, "max_results": max_results, "search_depth": "advanced"},
+            )
+            response.raise_for_status()
+            return response.json().get("results", [])
+
+    @staticmethod
+    async def search_and_summarize(query, tavily_api_key=None, max_results=5, fetch_timeout=30.0):
+        """Search and fetch content from top results."""
+        sources = []
+        if tavily_api_key:
+            try:
+                results = await ResearchSearchClient.search_tavily(query, api_key=tavily_api_key, max_results=max_results)
+                for sr in results[:max_results]:
+                    sources.append({"title": sr.get("title",""), "url": sr.get("url",""), "content": sr.get("content",""), "score": sr.get("score",0)})
+            except Exception:
+                pass
+        return {"query": query, "sources": sources, "source_count": len(sources)}
+
 
     async def search_one(self, config: ProjectResearchConfig, item: Dict[str, Any]) -> Dict[str, Any]:
         api_key = decrypt_secret(config.search_api_key_encrypted)
