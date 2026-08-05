@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest"
 
-describe("InspirationMode", () => {
+describe("NovelWorkspace", () => {
   it("exists", async () => {
-    const m = await import("@/views/InspirationMode.vue")
+    const m = await import("@/views/NovelWorkspace.vue")
     expect(m.default).toBeDefined()
   })
 })
