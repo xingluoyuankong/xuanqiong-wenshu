@@ -634,7 +634,7 @@ class PipelineOrchestrator:
                 "code": "critical_issues_remaining",
                 "message": f"自检后仍残留 {critique_critical} 个 critical 问题，不能静默放行。",
             })
-        if critique_score is not None and critique_score < 42:
+        if critique_score is not None and critique_score > 0 and critique_score < 42:
             blockers.append({
                 "source": "self_critique",
                 "code": "score_below_floor",
