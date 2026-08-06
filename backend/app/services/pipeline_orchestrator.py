@@ -2930,11 +2930,14 @@ class PipelineOrchestrator:
 
             if active_config.enable_reader_sim:
                 try:
-                    reader_feedback = await self._run_reader_simulation(
+                    reader_feedback = await asyncio.wait_for(
+                        self._run_reader_simulation(
                         best_content,
                         chapter_number=chapter_number,
                         previous_summary=history_context["previous_summary"],
                         user_id=user_id,
+                    ),
+                    timeout=300.0,
                     )
                     review_summaries["reader_simulator"] = reader_feedback
                     reader_fix_issues = self._normalize_reader_issues_for_local_fix(reader_feedback)
