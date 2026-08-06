@@ -112,3 +112,33 @@
 | 清理 | 20 tmp文件 7 backup |
 
 编译/测试: compileall PASS, vue-tsc PASS, build PASS
+
+
+## 历史报告归档索引
+
+共 24 份审计报告已归档至 `docs/reports/archive/`。
+
+- `CODE_AUDIT_REPORT.md` — unknown
+- `CODE_REVIEW_20260329.md` — unknown
+- `DEEP_OPTIMIZATION_REPORT.md` — unknown
+- `INTEGRATION_REPORT.md` — unknown
+- `NOVEL_KIT_FUSION_REPORT.md` — unknown
+- `OPTIMIZATION_REPORT_20260329.md` — unknown
+- `blueprint-async-unification-plan-2026-05-01.md` — 2026-05-01
+- `final-closure-2026-05-21.md` — 2026-05-21
+- `frontend-generation-audit-2026-04-28.md` — 2026-04-28
+- `full-function-generation-audit-2026-05-01.md` — 2026-05-01
+- `full-product-function-map-2026-05-21.md` — 2026-05-21
+- `full-product-validation-2026-05-21.md` — 2026-05-21
+- `function-tree-managed-2026-04-29.md` — 2026-04-29
+- `generated-novel-literary-audit-2026-05-01.md` — 2026-05-01
+- `generated-novel-quality-audit-2026-04-29.md` — 2026-04-29
+- `generation-function-map-2026-05-20.md` — 2026-05-20
+- `generation-quality-rerun-2026-05-20.md` — 2026-05-20
+- `generation-rewrite-final-validation-2026-05-21.md` — 2026-05-21
+- `integration_design.md` — unknown
+- `longform-generation-refactor-2026-05-20.md` — 2026-05-20
+- `managed-progress-2026-04-29.md` — 2026-04-29
+- `mysql-environment-2026-04-29.md` — 2026-04-29
+- `remaining-task-closure-2026-05-21.md` — 2026-05-21
+- `version-id-migration-plan-2026-05-01.md` — 2026-05-01

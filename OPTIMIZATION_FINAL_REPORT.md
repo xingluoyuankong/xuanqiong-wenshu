@@ -46,3 +46,40 @@ cd frontend; npm run test:run                   # 127/127
 cd frontend; npx vue-tsc --noEmit               # 0 errors
 npm run build-only                               # success
 ```
+
+
+---
+
+## 2026-08-07 Session 2
+
+### 新增
+
+1. **novel_service.py 6个核心测试** — `test_novel_service_core.py`
+   - create_project, ensure_project_owner, get_outline, get_or_create_chapter (new + existing), delete_chapters
+   - pytest: 301 passed (+6)
+
+2. **代码清理**
+   - 24份审计报告归档至 `docs/reports/archive/`
+   - `.gitignore` 新增 `*.backup*`, `docs/reports/archive/`
+   - `AUDIT_HISTORY.md` 新增归档索引
+
+3. **全量回归**
+   - 301 pytest pass, 0 fail, 34 skip
+   - 127/127 前端测试通过
+   - vue-tsc 0 errors
+   - 前端构建成功
+   - 后端 /health 200 OK
+
+### 累计指标
+
+| 指标 | 优化前 | 优化后 |
+|------|--------|--------|
+| pytest | 288P/52F | **301P/0F** |
+| 前端测试 | 118/127 | **127/127** |
+| TypeScript errors | 15 | **0** |
+| 前端构建 | 失败 | **通过** |
+| 知识图谱集成 | 0引用 | **Pipeline** |
+| 线索追踪集成 | 0引用 | **Pipeline** |
+| 长篇大纲 | 单卷 | **多卷** |
+| 并行生成 | 无 | **3版本** |
+| novel_service测试 | 0 | **6** |

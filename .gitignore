@@ -68,3 +68,7 @@ tmp_*.log
 *.backup2
 backend/.pytest_cache/
 backend/__pycache__/
+
+# Optimization cleanup
+*.backup*
+docs/reports/archive/
