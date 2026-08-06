@@ -145,6 +145,27 @@
 </template>
 
 <script setup lang="ts">
+
+const stageLabelMap: Record<string, string> = {
+  'provider_preflight': 'Provider预检',
+  'provider_switch': 'Provider自动切换',
+  'context_building': '上下文构建中',
+  'chapter_mission': '章节任务分析',
+  'generating_draft': '正文生成中',
+  'guardrails': '质量门检查',
+  'self_critique': '自动评审',
+  'optimizing': '优化中',
+  'consistency': '一致性检查',
+  'finalizing': '定稿入库',
+  'diagnose_structural': '结构诊断',
+  'diagnose_character': '人物诊断',
+  'diagnose_delivery': '表达诊断',
+  'optimize_structural': '结构优化',
+  'optimize_character': '人物优化', 
+  'optimize_delivery': '表达优化',
+}
+const stageToZh = (stage: string) => STAGE_LABEL_MAP[stage] || stage
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NAlert, NButton, NCard, NEmpty, NSpace, NSpin, NTag } from 'naive-ui'

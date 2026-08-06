@@ -22,25 +22,22 @@ ProgressCallback = Callable[[str, str], Awaitable[None]]
 
 @dataclass(frozen=True)
 class GenerationCallPolicy:
-    stage_label: str
-    progress_stage: str = "generating"
-    retry_attempts: int = 2
+    """Reliable generation call policy with exponential backoff.
+    
+    Defaults: retry_attempts=3, backoff_base=2.0s, soft_timeout=600s.
+    """
+    retry_attempts: int = 3
+    retry_same_model_once: bool = False
     response_format: Optional[str] = "json_object"
-    json_schema: Optional[Dict[str, Any]] = None
-    json_schema_name: Optional[str] = None
-    json_schema_strict: bool = True
-    prompt_cache_key: Optional[str] = None
-    runtime_event_kind: Optional[str] = None
+    json_schema: Optional[Any] = None
     max_tokens: Optional[int] = None
     top_p: Optional[float] = None
     allow_truncated_response: bool = False
-    retry_same_model_once: bool = True
-    json_repair_attempts: int = 1
-    backoff_base_seconds: float = 1.0
-    backoff_max_seconds: float = 12.0
-    heartbeat_interval_seconds: Optional[float] = None
-    soft_timeout_seconds: Optional[float] = None
-
+    prompt_cache_key: Optional[str] = None
+    backoff_base_seconds: float = 2.0
+    backoff_max_seconds: float = 30.0
+    heartbeat_interval_seconds: Optional[float] = 3.0
+    soft_timeout_seconds: Optional[float] = 600.0
 
 @dataclass(frozen=True)
 class GenerationTextResult:
