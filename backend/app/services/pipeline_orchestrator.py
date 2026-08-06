@@ -819,6 +819,7 @@ class PipelineOrchestrator:
                 story_word_count >= 1800
                 and story_guard.get("event_density_passed") is False
                 and not density_soft_pass
+                and (critique_score is None or critique_score < 70)
             ):
                 blockers.append({
                     "source": "story_progression_guard",
