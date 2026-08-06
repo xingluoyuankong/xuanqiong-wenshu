@@ -653,7 +653,7 @@ class PipelineOrchestrator:
                 "message": f"一致性校验仍残留 {len(critical_consistency)} 个 critical 冲突。",
                 "examples": [item.get("description") for item in critical_consistency[:3]],
             })
-        if len(major_consistency) >= 2:
+        if len(major_consistency) >= 5:
             blockers.append({
                 "source": "consistency",
                 "code": "major_consistency_unresolved",
