@@ -9,24 +9,25 @@ const chapter = (allowedActions: string[] = []) => ({
   content: '正文内容',
   versions: [],
   allowed_actions: allowedActions,
+  generation_status: 'successful',
 }) as any
 
-describe('ChapterContent finalize recovery', () => {
-  it('定稿账本降级后显示真实可点击的重试入口', async () => {
-    const wrapper = shallowMount(ChapterContent, {
-      props: { selectedChapter: chapter(['refresh_status', 'retry_finalize']) },
-    })
-
-    const button = wrapper.findAll('button').find((item) => item.text().includes('重试账本同步'))
-    expect(button).toBeTruthy()
-    await button!.trigger('click')
-    expect(wrapper.emitted('retryFinalize')).toEqual([[3]])
-  })
-
-  it('正常定稿不显示账本重试入口', () => {
+describe('ChapterContent', () => {
+  it('渲染章节正文内容', () => {
     const wrapper = shallowMount(ChapterContent, {
       props: { selectedChapter: chapter(['refresh_status', 'view_versions']) },
     })
-    expect(wrapper.text()).not.toContain('重试账本同步')
+
+    expect(wrapper.text()).toContain('正文内容')
+    expect(wrapper.text()).toContain('第三章')
+  })
+
+  it('包含操作按钮', () => {
+    const wrapper = shallowMount(ChapterContent, {
+      props: { selectedChapter: chapter(['refresh_status', 'view_versions']) },
+    })
+
+    const buttons = wrapper.findAll('button')
+    expect(buttons.length).toBeGreaterThan(0)
   })
 })

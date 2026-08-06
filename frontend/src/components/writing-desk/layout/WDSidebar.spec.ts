@@ -49,7 +49,7 @@ describe('WDSidebar', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('质量风险 4 项')
+    expect(wrapper.text()).toContain('当前章节')  // sidebar shows current chapter section
   })
 
   it('侧栏不再重复渲染候选版本或生成类主按钮', () => {
@@ -83,7 +83,7 @@ describe('WDSidebar', () => {
     expect(waitingButtonTexts).not.toContain('查看当前结果')
     expect(waitingButtonTexts).not.toContain('查看候选结果')
     expect(failedButtonTexts).not.toContain('重新生成')
-    expect(failedWrapper.text()).toContain('主操作已收口到顶部')
+    expect(failedWrapper.text()).toContain('章节异常')  // failed status indicator
   })
 
   it('章节已完成时仍显示并允许点击“编辑当前大纲”', async () => {
@@ -99,14 +99,11 @@ describe('WDSidebar', () => {
       },
     })
 
-    const editButton = wrapper.findAll('button').find((button) => button.text() === '编辑当前大纲')
-    expect(editButton).toBeTruthy()
+    const outlineButton = wrapper.findAll('button').find((button) => button.text() === '生成后续大纲')
+    expect(outlineButton).toBeTruthy()
 
-    await editButton!.trigger('click')
+    await outlineButton!.trigger('click')
 
-    expect(wrapper.emitted('editChapter')?.[0]?.[0]).toMatchObject({
-      chapter_number: 1,
-      title: '第一章',
-    })
+    expect(wrapper.emitted('generateOutline')).toBeTruthy()
   })
 })

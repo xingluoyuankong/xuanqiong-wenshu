@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import ChapterFailed from './ChapterFailed.vue'
 
 describe('ChapterFailed', () => {
-  it('展示导出保护说明并提示主操作已收口到顶部', () => {
+  it('展示章节失败状态并提示主操作已收口到顶部', () => {
     const wrapper = mount(ChapterFailed, {
       props: {
         chapterNumber: 2,
@@ -12,10 +12,10 @@ describe('ChapterFailed', () => {
     })
 
     expect(wrapper.text()).toContain('第 2 章处理失败')
-    expect(wrapper.text()).toContain('导出保护')
+    expect(wrapper.text()).toContain('章节异常恢复')
     expect(wrapper.text()).toContain('主操作已收口到顶部')
     expect(wrapper.text()).toContain('去顶部操作')
-    expect(wrapper.find('button').exists()).toBe(false)
+    expect(wrapper.get('.cf-hint').classes()).not.toContain('cf-hint--busy')
   })
 
   it('当前章节正在重试时展示顶部处理中提示', () => {
@@ -28,8 +28,9 @@ describe('ChapterFailed', () => {
 
     expect(wrapper.text()).toContain('顶部主操作执行中')
     expect(wrapper.text()).toContain('处理中')
-    expect(wrapper.get('.cf-primary-hint').classes()).toContain('cf-primary-hint--busy')
+    expect(wrapper.get('.cf-hint').classes()).toContain('cf-hint--busy')
   })
+
   it('展示后端失败摘要和诊断 metadata', () => {
     const wrapper = mount(ChapterFailed, {
       props: {
@@ -61,6 +62,7 @@ describe('ChapterFailed', () => {
     expect(wrapper.text()).toContain('大纲硬筛未通过')
     expect(wrapper.text()).toContain('OUTLINE_GENERATION_QUALITY_REJECTED')
     expect(wrapper.text()).toContain('req-123')
-    expect(wrapper.text()).toContain('最近错误事件 metadata')
+    expect(wrapper.text()).toContain('章节缺少目标')
+    expect(wrapper.text()).toContain('重写章节导演脚本')
   })
 })
