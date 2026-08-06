@@ -6431,29 +6431,43 @@ class PipelineOrchestrator:
                 },
             )
 
-        critique = await service.critique_and_revise_loop(
-            chapter_content=chapter_content,
-            max_iterations=1,
-            target_score=60.0,
-            dimensions=[
-                CritiqueDimension.LOGIC,
-                CritiqueDimension.CONTINUITY,
-                CritiqueDimension.POV,
-                CritiqueDimension.CHARACTER,
-                CritiqueDimension.RELATIONSHIP,
-                CritiqueDimension.EMOTION,
-                CritiqueDimension.DIALOGUE,
-                CritiqueDimension.PACING,
-                CritiqueDimension.SCENE,
-                CritiqueDimension.SUSPENSE,
-                CritiqueDimension.WRITING,
-            ],
-            context=context,
-            user_id=user_id,
-            progress_callback=_report_diagnosis_progress,
-            stage_optimize_callback=_report_stage_optimization,
-            strategy_optimize_callback=_report_strategy_optimization,
-        )
+        try:
+            critique = await asyncio.wait_for(
+                service.critique_and_revise_loop(
+                    chapter_content=chapter_content,
+                    max_iterations=1,
+                    target_score=60.0,
+                    dimensions=[
+                        CritiqueDimension.LOGIC,
+                        CritiqueDimension.CONTINUITY,
+                        CritiqueDimension.POV,
+                        CritiqueDimension.CHARACTER,
+                        CritiqueDimension.RELATIONSHIP,
+                        CritiqueDimension.EMOTION,
+                        CritiqueDimension.DIALOGUE,
+                        CritiqueDimension.PACING,
+                        CritiqueDimension.SCENE,
+                        CritiqueDimension.SUSPENSE,
+                        CritiqueDimension.WRITING,
+                    ],
+                    context=context,
+                    user_id=user_id,
+                    progress_callback=_report_diagnosis_progress,
+                    stage_optimize_callback=_report_stage_optimization,
+                    strategy_optimize_callback=_report_strategy_optimization,
+                ),
+                timeout=540.0,
+            )
+        except asyncio.TimeoutError:
+            logger.error('Self-critique timed out after 540s, using original content')
+            critique = {
+                'final_content': chapter_content,
+                'final_critique': {'weighted_score': 0, 'critical_count': 0, 'major_count': 0, 'minor_count': 0, 'needs_revision': False},
+                'iterations': [],
+                'status': 'timeout_skipped',
+                'improvement': 0,
+                'optimization_logs': [],
+            }
         final_content = critique.get("final_content", chapter_content)
         final_critique = critique.get("final_critique") or {}
         candidate_content = final_content
