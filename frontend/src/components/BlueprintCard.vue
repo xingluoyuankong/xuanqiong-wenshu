@@ -1,3 +1,4 @@
+<!-- [DEPRECATED] This component has 0 runtime references as of 2026-08-07 audit. Retained for backward compatibility. -->
 <!-- AIMETA P=蓝图卡片_小说蓝图展示|R=蓝图信息展示|NR=不含编辑功能|E=component:BlueprintCard|X=internal|A=卡片组件|D=vue|S=dom|RD=./README.ai -->
 <template>
   <div class="bg-white rounded-lg shadow-sm p-6">
