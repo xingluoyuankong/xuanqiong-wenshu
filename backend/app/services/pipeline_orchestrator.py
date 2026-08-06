@@ -801,6 +801,7 @@ class PipelineOrchestrator:
                 story_word_count >= 1200
                 and ("ending_pressure_passed" in story_guard or "ending_hook_detected" in story_guard)
                 and not story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected"))
+                and (critique_score is None or critique_score < 75)
             ):
                 blockers.append({
                     "source": "story_progression_guard",
