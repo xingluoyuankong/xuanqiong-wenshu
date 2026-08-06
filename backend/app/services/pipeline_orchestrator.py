@@ -41,6 +41,7 @@ from ..services.llm_config_service import LLMConfigService
 from ..services.llm_service import LLMService
 from ..services.knowledge_retrieval_service import KnowledgeRetrievalService, FilteredContext
 from ..services.memory_layer_service import MemoryLayerService
+from ..services.knowledge_graph_service import KnowledgeGraphService
 from ..services.novel_service import NovelService
 from ..services.longform_context_service import LongformContextPackage, LongformContextService
 from ..services.preview_generation_service import PreviewGenerationService
@@ -94,6 +95,7 @@ class PipelineConfig:
     enable_memory: bool = False
     enable_rag: bool = True
     rag_mode: str = "simple"
+    enable_knowledge_graph: bool = False
     enable_foreshadowing: bool = False
     enable_faction: bool = False
     target_word_count: int = 2500
@@ -122,6 +124,7 @@ class PipelineOrchestrator:
         self.llm_service = LLMService(session)
         self.prompt_service = PromptService(session)
         self.novel_service = NovelService(session)
+        self._knowledge_graph_service: Optional[KnowledgeGraphService] = None
         self.longform_context_service = LongformContextService(session)
         self.context_builder = WriterContextBuilder()
         self.guardrails = ChapterGuardrails()
@@ -132,6 +135,13 @@ class PipelineOrchestrator:
         self._config_sync_queue = None
         self._config_sync_task = None
         self._config_subscribed_user_id = None
+
+
+    @property
+    def knowledge_graph_service(self) -> KnowledgeGraphService:
+        if self._knowledge_graph_service is None:
+            self._knowledge_graph_service = KnowledgeGraphService(self.session)
+        return self._knowledge_graph_service
 
     def _create_llm_config_service(self) -> LLMConfigService:
         return LLMConfigService(self.session)
@@ -3359,6 +3369,48 @@ class PipelineOrchestrator:
                     )
                     logger.warning("章节扩写已降级：project=%s chapter=%s error=%s", project_id, chapter_number, exc)
 
+
+            # ============================================================
+            # 知识图谱与线索追踪 — 章节生成后同步（非阻塞、降级容错）
+            # ============================================================
+            if active_config.enable_knowledge_graph:
+                try:
+                    kg_started_at = time.perf_counter()
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="knowledge_graph",
+                        message="正在同步知识图谱 — 提取角色/势力/位置节点",
+                        progress_percent=92,
+                    )
+                    kg_result = await self.knowledge_graph_service.sync_from_story_memory(project_id)
+                    if kg_result:
+                        runtime_metadata["knowledge_graph_sync"] = kg_result
+                        await mark_stage("knowledge_graph", kg_started_at, detail="知识图谱已同步最新章节节点和关系")
+                    else:
+                        runtime_metadata["knowledge_graph_sync"] = {"status": "empty", "note": "无新节点产生"}
+                except Exception as kg_exc:
+                    runtime_metadata.setdefault("degraded_stages", []).append(
+                        {"stage": "knowledge_graph", "reason": str(kg_exc)}
+                    )
+                    logger.warning("知识图谱同步降级：project=%s chapter=%s error=%s", project_id, chapter_number, kg_exc)
+
+            if active_config.enable_foreshadowing:
+                try:
+                    await self._sync_chapter_clues(
+                        project_id=project_id,
+                        chapter_number=chapter_number,
+                        user_id=user_id,
+                        content=best_content,
+                        chapter_mission=chapter_mission,
+                        runtime_metadata=runtime_metadata,
+                    )
+                except Exception as clue_exc:
+                    runtime_metadata.setdefault("degraded_stages", []).append(
+                        {"stage": "clue_tracker_sync", "reason": str(clue_exc)}
+                    )
+                    logger.warning("线索同步失败：project=%s chapter=%s error=%s", project_id, chapter_number, clue_exc)
+
             review_summaries, structural_quality_gate = self._evaluate_structural_quality_gate_for_content(
                 review_summaries=review_summaries,
                 content=best_content,
@@ -3660,6 +3712,118 @@ class PipelineOrchestrator:
             },
             "runtime_metadata": runtime_metadata,
         }
+
+    async def _sync_chapter_clues(
+        self,
+        *,
+        project_id: str,
+        chapter_number: int,
+        user_id: int,
+        content: str,
+        chapter_mission: str,
+        runtime_metadata: Dict[str, Any],
+    ) -> None:
+        """从已生成的章节内容中提取线索并同步到 clue_tracker（非阻塞、降级容错）."""
+        try:
+            from ..models.clue_tracker import StoryClue, ClueChapterLink, ClueStatus, ClueType
+            from sqlalchemy import select
+            from ..services.generation_call_service import call_generation_json, GenerationCallPolicy
+        except ImportError:
+            logger.warning("Clue sync skipped: imports unavailable")
+            return
+
+        extraction_prompt = (
+            "你是一位推理小说编辑。请从以下章节中提取所有线索（伏笔、悬念、红鲱鱼等），"
+            "以JSON格式返回。每个线索提供：name、type(key_evidence/mysterious_event/character_secret/"
+            "timeline/red_herring/plot_hook)、description（简短描述）、importance（1-5）。"
+            "仅返回JSON数组，无其他文字。\n\n"
+            f"章节概要：{chapter_mission}\n\n"
+            f"章节内容：{content[:3000]}"
+        )
+
+        try:
+            clues_json = await call_generation_json(
+                prompt=extraction_prompt,
+                user_id=user_id,
+                policy=GenerationCallPolicy(
+                    json_schema_strict=True,
+                    max_tokens=1024,
+                    temperature=0.3,
+                ),
+                session=self.session,
+            )
+        except Exception:
+            return
+
+        if not isinstance(clues_json, list):
+            return
+
+        allowed_types = {e.value for e in ClueType}
+        extracted_count = 0
+
+        try:
+            for clue_data in clues_json[:8]:
+                clue_name = str(clue_data.get("name", "")).strip()
+                if not clue_name:
+                    continue
+
+                clue_type = str(clue_data.get("type", "plot_hook")).strip()
+                if clue_type not in allowed_types:
+                    clue_type = "plot_hook"
+
+                existing = await self.session.execute(
+                    select(StoryClue).where(
+                        StoryClue.project_id == project_id,
+                        StoryClue.name == clue_name,
+                    ),
+                )
+                existing_clue = existing.scalar_one_or_none()
+
+                if existing_clue:
+                    existing_clue.status = ClueStatus.ACTIVE.value
+                    link = ClueChapterLink(
+                        clue_id=existing_clue.id,
+                        chapter_number=chapter_number,
+                        appearance_type="mention",
+                    )
+                    self.session.add(link)
+                    extracted_count += 1
+                else:
+                    new_clue = StoryClue(
+                        project_id=project_id,
+                        name=clue_name,
+                        clue_type=clue_type,
+                        description=str(clue_data.get("description", "")).strip()[:500],
+                        importance=max(1, min(5, int(clue_data.get("importance", 3)))),
+                        status=ClueStatus.ACTIVE.value,
+                    )
+                    self.session.add(new_clue)
+                    await self.session.flush()
+                    link = ClueChapterLink(
+                        clue_id=new_clue.id,
+                        chapter_number=chapter_number,
+                        appearance_type="mention",
+                    )
+                    self.session.add(link)
+                    extracted_count += 1
+
+            await self.session.commit()
+            logger.info(
+                "Clue tracker synced: project=%s chapter=%s extracted=%d",
+                project_id,
+                chapter_number,
+                extracted_count,
+            )
+            runtime_metadata["clue_tracker_sync"] = {"extracted_count": extracted_count}
+
+        except Exception:
+            await self._safe_session_rollback("clue_tracker_sync")
+            logger.warning(
+                "Clue tracker sync failed (non-fatal): project=%s chapter=%s",
+                project_id,
+                chapter_number,
+            )
+
 
     async def _resolve_config(self, flow_config: Optional[Dict[str, Any]]) -> PipelineConfig:
         flow_config = flow_config or {}

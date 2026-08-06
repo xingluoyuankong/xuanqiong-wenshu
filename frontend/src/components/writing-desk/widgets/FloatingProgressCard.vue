@@ -90,10 +90,6 @@ const runnerEmoji = computed(() => {
   const idx = Math.floor((props.progressPercent || 0) / 16) % emojis.length
   return emojis[idx]
 })
-  // Cycle through emojis based on progress
-  const idx = Math.floor((props.progressPercent || 0) / 20) % emojis.length
-  return chars[emojis[idx]] || 'runner'
-}))
 
 const statusToneClass = computed(() => {
   return "floating-progress-card--" + statusTone.value

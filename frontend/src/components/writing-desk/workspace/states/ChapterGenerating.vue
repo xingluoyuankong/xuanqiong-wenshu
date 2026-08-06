@@ -270,6 +270,9 @@ const runtimeQueued = computed(() => Boolean(runtime.value.queued))
 const showAllRuntimeEvents = ref(false)
 type RuntimeLogTabKey = 'summary' | 'progress' | 'content' | 'review' | 'ledger' | 'diagnostics'
 const selectedRuntimeLogTab = ref<RuntimeLogTabKey>('summary')
+const progressPercent = ref(0)
+const stageMessage = ref('')
+
 const runtimeLogTabs: Array<{ key: RuntimeLogTabKey; label: string; icon: string }> = [
   { key: 'summary', label: '简略日志', icon: '✨' },
   { key: 'progress', label: '生成进展', icon: '⏳' },

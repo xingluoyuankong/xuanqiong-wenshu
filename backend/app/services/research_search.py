@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
+import time
 from typing import Any, Dict, Iterable, List
 from urllib.parse import urlparse
 
@@ -13,6 +14,37 @@ from ..models.research import ProjectResearchConfig
 
 
 class ResearchSearchClient:
+    """Web search client with rate-limiting, DNS validation, and multi-provider support."""
+    
+    # Rate limiting
+    _rate_limit_window_s = 60.0
+    _max_requests_per_window = 30
+    _request_log: list = []
+    
+    @classmethod
+    def _check_rate_limit(cls) -> bool:
+        now = __import__("time").time()
+        cls._request_log = [t for t in cls._request_log if now - t < cls._rate_limit_window_s]
+        return len(cls._request_log) < cls._max_requests_per_window
+    
+    @classmethod
+    def _record_request(cls) -> None:
+        cls._request_log.append(__import__("time").time())
+    
+    @staticmethod
+    def _is_safe_url(url: str) -> bool:
+        """Block private/internal IPs to prevent SSRF."""
+        try:
+            parsed = urlparse(url)
+            hostname = parsed.hostname
+            if not hostname:
+                return False
+            addr = ipaddress.ip_address(socket.gethostbyname(hostname))
+            return not (addr.is_private or addr.is_loopback or addr.is_link_local)
+        except Exception:
+            return False
+    
+    
     @staticmethod
     async def _validate_outbound_url(url: str) -> str:
         parsed = urlparse(url)

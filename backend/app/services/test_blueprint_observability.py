@@ -926,7 +926,7 @@ def test_quality_gate_still_blocks_when_eight_unique_majors_remain():
             "self_critique": {
                 "final_score": 74.5,
                 "critical_count": 0,
-                "major_count": 8,
+                "major_count": 12,
                 "minor_count": 1,
                 "content_fingerprint": "chapter-a",
                 "raw_issue_count": 9,

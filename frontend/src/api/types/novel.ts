@@ -422,6 +422,14 @@ export interface GenerateChapterOptions {
   minWordCount?: number
   targetWordCount?: number
   preset?: 'basic' | 'enhanced' | 'longform' | 'ultimate'
+  enableConsistency?: boolean
+  enableEnrichment?: boolean
+  enableSelfCritique?: boolean
+  enableReaderSim?: boolean
+  enableMemory?: boolean
+  enableForeshadowing?: boolean
+  versionCount?: number
+  force?: boolean
 }
 
 export interface CancelChapterOptions {

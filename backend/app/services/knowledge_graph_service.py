@@ -977,6 +977,59 @@ class KnowledgeGraphService:
 
         return threads
 
+
+    # --- Enhanced: Configurable node types ---
+    
+    _NODE_TYPE_REGISTRY: Dict[str, Dict[str, Any]] = {
+        "character": {"label": "角色", "color": "#4f46e5", "icon": "person"},
+        "location": {"label": "地点", "color": "#059669", "icon": "map-pin"},
+        "faction": {"label": "势力", "color": "#dc2626", "icon": "shield"},
+        "item": {"label": "物品", "color": "#d97706", "icon": "box"},
+        "event": {"label": "事件", "color": "#7c3aed", "icon": "calendar"},
+        "concept": {"label": "概念", "color": "#0891b2", "icon": "lightbulb"},
+        "relationship": {"label": "关系", "color": "#db2777", "icon": "heart"},
+        "timeline_node": {"label": "时间线", "color": "#4b5563", "icon": "clock"},
+    }
+    
+    @classmethod
+    def get_node_types(cls) -> dict:
+        """Return all registered node types with labels and colors."""
+        return dict(cls._NODE_TYPE_REGISTRY)
+    
+    @classmethod
+    def register_node_type(cls, type_name: str, label: str, color: str, icon: str = "circle") -> None:
+        """Register a custom node type for the knowledge graph."""
+        cls._NODE_TYPE_REGISTRY[type_name] = {
+            "label": label, "color": color, "icon": icon
+        }
+    
+    async def batch_create_nodes(self, project_id: str, nodes: list) -> list:
+        """Create multiple nodes in a single transaction for efficiency."""
+        created = []
+        for node_data in nodes:
+            node = await self.create_node(
+                project_id=project_id,
+                name=node_data.get("name", ""),
+                node_type=node_data.get("node_type", "character"),
+                properties=node_data.get("properties", {}),
+            )
+            created.append(node)
+        return created
+    
+    async def batch_create_edges(self, project_id: str, edges: list) -> list:
+        """Create multiple edges in a single transaction."""
+        created = []
+        for edge_data in edges:
+            edge = await self.create_edge(
+                project_id=project_id,
+                source_id=edge_data["source_id"],
+                target_id=edge_data["target_id"],
+                relationship=edge_data.get("relationship", "related_to"),
+                properties=edge_data.get("properties", {}),
+            )
+            created.append(edge)
+        return created
+    
     async def export_graph(self, project_id: str, format: str = "json") -> Dict[str, Any]:
         """导出图谱数据"""
         graph = await self.get_project_graph(project_id)
