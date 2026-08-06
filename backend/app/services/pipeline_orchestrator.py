@@ -713,6 +713,7 @@ class PipelineOrchestrator:
                 and story_mission_hits < 2
                 and not progression_soft_pass
                 and not rich_progression_evidence
+                and (critique_score is None or critique_score < 72)
             ):
                 blockers.append({
                     "source": "story_progression_guard",
