@@ -756,7 +756,7 @@ onMounted(() => {
   const projectId = props.projectId
   const chapterNum = props.chapterNumber
   if (projectId && chapterNum) {
-    const streamUrl = `/api/novels/${projectId}/chapters/${chapterNum}/stream`
+    const streamUrl = `/api/writer/novels/${projectId}/chapters/${chapterNum}/stream`
     const eventSource = new EventSource(streamUrl)
     eventSource.onmessage = (event: MessageEvent) => {
       try {
