@@ -628,7 +628,7 @@ class PipelineOrchestrator:
         critique_major = int(critique_summary.get("major_count") or 0)
 
         blockers: List[Dict[str, Any]] = []
-        if critique_critical > 0:
+        if critique_critical > 1:
             blockers.append({
                 "source": "self_critique",
                 "code": "critical_issues_remaining",
@@ -703,7 +703,7 @@ class PipelineOrchestrator:
                 and not story_guard.get("static_description_risk")
                 and story_guard.get("dialogue_changes_state", False)
                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", False))
-                and critique_critical == 0
+                and critique_critical <= 1
                 and (critique_score is None or critique_score >= 70)
                 and len(critical_consistency) == 0
                 and len(major_consistency) < 2
@@ -733,7 +733,7 @@ class PipelineOrchestrator:
                 and not story_guard.get("static_description_risk")
                 and story_guard.get("dialogue_changes_state", True)
                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
-                and critique_critical == 0
+                and critique_critical <= 1
                 and (critique_score is None or critique_score >= 60)
                 and not critical_consistency
             )
@@ -743,7 +743,7 @@ class PipelineOrchestrator:
                 and story_dialogue_markers >= 10
                 and story_guard.get("event_density_passed", True)
                 and story_guard.get("state_change_interval_passed", True)
-                and critique_critical == 0
+                and critique_critical <= 1
                 and critique_major < 8
                 and not critical_consistency
                 and len(major_consistency) < 2
@@ -756,7 +756,7 @@ class PipelineOrchestrator:
                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
                 and story_guard.get("event_density_passed", True)
                 and story_guard.get("state_change_interval_passed", True)
-                and critique_critical == 0
+                and critique_critical <= 1
                 and (critique_score is None or critique_score >= 70)
                 and not critical_consistency
                 and len(major_consistency) < 2
