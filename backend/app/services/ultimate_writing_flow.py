@@ -1,4 +1,10 @@
 """
+[DEPRECATED] ultimate_writing_flow.py
+Superseded or unused as of 2026-08-07 audit.
+Retained for backward compatibility only.
+"""
+
+"""
 终极写作流程服务
 
 集成所有优化功能的统一写作流程：

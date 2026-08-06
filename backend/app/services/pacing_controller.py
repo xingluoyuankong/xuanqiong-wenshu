@@ -1,5 +1,15 @@
 # AIMETA P=节奏控制器_情绪曲线规划|R=三幕结构_英雄之旅_曲线验证|NR=不含内容生成|E=PacingController|X=internal|A=控制器类|D=none|S=none|RD=./README.ai
 """
+[DEPRECATED] pacing_controller.py
+This module has zero runtime references as of 2026-08-07.
+Pacing logic has been integrated into pipeline_orchestrator and enrichment_service.
+This file is retained for reference only and should not be imported.
+"""
+import warnings
+warnings.warn("pacing_controller is deprecated and should not be imported", DeprecationWarning, stacklevel=2)
+
+
+"""
 节奏控制器和情绪曲线规划模块
 实现起伏有致的叙事节奏，避免持续高能或平淡
 """
