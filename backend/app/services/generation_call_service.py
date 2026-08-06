@@ -42,6 +42,7 @@ class GenerationCallPolicy:
     progress_stage: Optional[str] = None
     json_schema_name: Optional[str] = None
     json_repair_attempts: int = 2
+    json_schema_strict: bool = True
 
 @dataclass(frozen=True)
 class GenerationTextResult:
