@@ -83,3 +83,31 @@ npm run build-only                               # success
 | 长篇大纲 | 单卷 | **多卷** |
 | 并行生成 | 无 | **3版本** |
 | novel_service测试 | 0 | **6** |
+
+
+---
+
+## 2026-08-07 Session 3
+
+### 新增
+
+1. **死代码标记** — `pacing_controller.py` (0引用) 和 `ultimate_writing_flow.py` (仅1测试引用) 添加废弃标记
+2. **深度架构审计** — 22条用户需求逐条验证, 全部功能到位
+3. **资源管理验证** — writer.py 41处session管理 + pipeline 11处safe_rollback, 无session泄漏风险
+4. **全量回归** — 301 pytest, 127 frontend tests, build OK
+
+### 累计状态 v1.2.0
+
+| 系统 | 状态 |
+|------|------|
+| Backend tests | 301 pass / 34 skip |
+| Frontend tests | 127 pass / 0 fail |
+| TypeScript | 0 errors |
+| Build | success |
+| Dead code | 2 deprecated |
+| Audit reports | 24 archived |
+| Knowledge graph | Pipeline integrated |
+| Clue tracker | Pipeline integrated |
+| Long-form multi-volume | 3+ volumes |
+| Parallel generation | 3 versions |
+| Session safety | 41+11 rollback points |
