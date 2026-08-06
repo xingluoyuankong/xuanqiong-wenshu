@@ -2939,7 +2939,7 @@ class PipelineOrchestrator:
                         previous_summary=history_context["previous_summary"],
                         user_id=user_id,
                     ),
-                    timeout=300.0,
+                    timeout=180.0,
                     )
                     review_summaries["reader_simulator"] = reader_feedback
                     reader_fix_issues = self._normalize_reader_issues_for_local_fix(reader_feedback)
