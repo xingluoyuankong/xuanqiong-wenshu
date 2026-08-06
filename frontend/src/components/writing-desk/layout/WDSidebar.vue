@@ -85,6 +85,9 @@
 </template>
 
 <script setup lang="ts">
+const sidebarCollapsed = ref(false)
+const toggleSidebar = () => { sidebarCollapsed.value = !sidebarCollapsed.value }
+
 import { computed, ref } from 'vue'
 import { FilePlus, X } from 'lucide-vue-next'
 import { globalAlert } from '@/composables/useAlert'
@@ -219,6 +222,10 @@ const currentActionGuidance = computed(() => {
 </script>
 
 <style scoped>
+.wd-sidebar--left.collapsed { transform: translateX(-180px); }
+.wd-sidebar-toggle { position: fixed; left: 228px; top: 60px; z-index: 50; width: 20px; height: 20px; border-radius: 50%; background: white; border: 1px solid rgba(148,163,184,0.2); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; transition: all 0.3s; }
+.wd-sidebar--left.collapsed + .wd-sidebar-toggle { left: 8px; }
+
 /* --- LEFT SIDEBAR LAYOUT --- */
 .wd-sidebar--left {
   position: fixed;

@@ -13,7 +13,12 @@
 <div class="right-actions">
         <button class="locale-btn" :title="switchLabel" @click="toggleLocale">{{ languageLabel }}</button>
         <button v-if="lastProjectId" class="continue-btn" @click="continueWriting">继续写作</button>
-      </div>
+      
+      <router-link to="/inspiration" class="nav-btn nav-btn--new" title="快速新建小说">
+        <span class="nav-btn-icon">+</span>
+        <span class="nav-btn-label">新建</span>
+      </router-link>
+    </div>
     </div>
 
         <div v-if="globalTaskVisible" class="global-task-mini">
@@ -230,6 +235,9 @@ function openRuntimeLogs() {
 </script>
 
 <style scoped>
+.global-nav-shell--writing { opacity: 0.3; transition: opacity 0.4s; }
+.global-nav-shell--writing:hover { opacity: 1; }
+
 /* Slim global nav */
 .xq-topbar--global {
   height: 55px !important;

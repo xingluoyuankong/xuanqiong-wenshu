@@ -86,8 +86,10 @@ const isComplete = computed(() => props.status === "successful")
 const isError = computed(() => props.status === "failed" || props.status === "evaluation_failed")
 
 const runnerEmoji = computed(() => {
-  const emojis = ['bicycle', 'rocket', 'sparkles', 'zap', 'fire']
-  const chars = {bicycle:'bike', rocket:'rocket', sparkles:'sparkle', zap:'bolt', fire:'flame'}
+  const emojis = ['bike','rocket','sparkle','bolt','flame','star']
+  const idx = Math.floor((props.progressPercent || 0) / 16) % emojis.length
+  return emojis[idx]
+})
   // Cycle through emojis based on progress
   const idx = Math.floor((props.progressPercent || 0) / 20) % emojis.length
   return chars[emojis[idx]] || 'runner'
@@ -205,6 +207,12 @@ const funMessage = computed(() => {
 </script>
 
 <style scoped>
+/* Runner animations with 6 cycling characters */
+@keyframes runner-spin { 0%{transform:translateY(-50%) rotate(0deg)} 100%{transform:translateY(-50%) rotate(360deg)} }
+@keyframes runner-bounce { 0%,100%{transform:translateY(-50%) scale(1)} 50%{transform:translateY(-65%) scale(1.15)} }
+@keyframes runner-pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+@keyframes runner-wiggle { 0%,100%{transform:translateY(-50%) rotate(0deg)} 25%{transform:translateY(-60%) rotate(-5deg)} 75%{transform:translateY(-40%) rotate(5deg)} }
+
 .floating-progress-card {
   position: fixed;
   top: 68px;
