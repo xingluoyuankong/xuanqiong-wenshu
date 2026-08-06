@@ -164,7 +164,7 @@ async def auto_switch_llm_provider(
 
 # --- Config sync bump ---
 from ...services.config_sync_manager import get_config_sync_manager
-from ..dependencies import get_current_user
+from ...core.dependencies import get_current_user
 
 @router.post("/bump")
 async def bump_config_version(user=Depends(get_current_user)):
