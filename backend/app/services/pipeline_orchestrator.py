@@ -6827,7 +6827,7 @@ class PipelineOrchestrator:
                         conversation_history=[{"role": "user", "content": json.dumps(optimize_input, ensure_ascii=False)}],
                         temperature=0.55,
                         user_id=user_id,
-                        timeout=600.0,
+                        timeout=180.0,
                         policy=GenerationCallPolicy(
                             stage_label=f"局部优化维度 {dimension}",
                             progress_stage="optimize_content",
