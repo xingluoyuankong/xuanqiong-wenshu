@@ -2804,9 +2804,9 @@ async def preflight_export_novel(
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """导出前预检：告诉用户缺章、未定稿或空版本，而不是直接下载失败。"""
-    user_id = int(current_user.id)
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, user_id)
+
+
+    await get_project_owner_guard(project_id, session, current_user)
 
     export_service = ExportService(session)
     return await export_service.preflight_export(project_id)
@@ -2819,9 +2819,9 @@ async def export_novel_as_docx(
     current_user: UserInDB = Depends(get_current_user),
 ):
     """导出小说为 DOCX 格式"""
-    user_id = int(current_user.id)
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, user_id)
+
+
+    await get_project_owner_guard(project_id, session, current_user)
 
     export_service = ExportService(session)
     content = await export_service.export_novel_as_docx(project_id)
@@ -3359,7 +3359,7 @@ async def start_blueprint_generation(
     """Start blueprint generation as a background job; poll /status for result."""
     user_id = int(current_user.id)
     novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, user_id)
+    await get_project_owner_guard(project_id, session, current_user)
 
     force_stage_raw = payload.get("force_stage") if isinstance(payload, dict) else None
     force_stage = str(force_stage_raw).strip().lower() if isinstance(force_stage_raw, str) and force_stage_raw.strip() else None
@@ -3437,7 +3437,7 @@ async def get_blueprint_generation_status(
     """Return the latest blueprint generation job status for a project."""
     user_id = int(current_user.id)
     novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, user_id)
+    await get_project_owner_guard(project_id, session, current_user)
 
     persisted = await _load_latest_blueprint_job(project_id, session)
     if persisted:
@@ -3509,7 +3509,7 @@ async def cancel_blueprint_generation(
     """Cancel the latest queued/running blueprint generation job when possible."""
     user_id = int(current_user.id)
     novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, user_id)
+    await get_project_owner_guard(project_id, session, current_user)
 
     persisted = await _load_latest_blueprint_job(project_id, session)
     if not persisted:
