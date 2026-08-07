@@ -2,7 +2,7 @@
 import pytest
 from app.services.vector_store_service import RetrievedChunk, RetrievedSummary
 
-pytestmark = pytest.mark.asyncio
+
 
 def test_retrieved_chunk_fields():
     c = RetrievedChunk(

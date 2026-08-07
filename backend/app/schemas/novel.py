@@ -287,8 +287,7 @@ class OutlineGenerationJobResponse(BaseModel):
     events: List[Dict[str, Any]] = Field(default_factory=list)
     error: Optional[BlueprintGenerationError] = None
     metrics: Dict[str, Any] = Field(default_factory=dict)
-    class Config:
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")
 
 
 
