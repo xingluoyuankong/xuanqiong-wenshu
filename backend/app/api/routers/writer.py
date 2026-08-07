@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ...core.config import settings
-from ...core.dependencies import get_current_user
+from ...core.dependencies import get_current_user, get_project_owner_guard
 from ...db.session import AsyncSessionLocal, get_session
 from ...models.novel import Chapter, ChapterOutline, ChapterVersion, ChapterEvaluation, NovelProject
 from ...models.project_memory import ProjectMemory
