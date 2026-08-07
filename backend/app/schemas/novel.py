@@ -272,6 +272,7 @@ class BlueprintGenerationJobResponse(BaseModel):
     blueprint: Optional[Blueprint] = None
     ai_message: Optional[str] = None
     error: Optional[BlueprintGenerationError] = None
+    metrics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class OutlineGenerationJobResponse(BaseModel):
@@ -285,6 +286,10 @@ class OutlineGenerationJobResponse(BaseModel):
     project: Optional[NovelProject] = None
     events: List[Dict[str, Any]] = Field(default_factory=list)
     error: Optional[BlueprintGenerationError] = None
+    metrics: Dict[str, Any] = Field(default_factory=dict)
+    class Config:
+        extra = "allow"
+
 
 
 class ImportNovelJobResponse(BaseModel):

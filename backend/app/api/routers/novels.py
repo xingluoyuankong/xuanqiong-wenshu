@@ -2991,6 +2991,21 @@ def _blueprint_error(
     }
 
 
+def _merge_metrics_update(job, updates):
+    new_metrics = updates.get("metrics")
+    if not isinstance(new_metrics, dict) or not isinstance(job.get("metrics"), dict):
+        job.update(updates)
+        return
+    existing = dict(job.get("metrics") or {})
+    if isinstance(new_metrics.get("retry_events"), list):
+        existing["retry_events"] = existing.get("retry_events", []) + new_metrics.get("retry_events", [])
+    if isinstance(new_metrics.get("stage_attempts"), dict):
+        existing["stage_attempts"] = {**existing.get("stage_attempts", {}), **new_metrics.get("stage_attempts", {})}
+    existing.update({k: v for k, v in new_metrics.items() if k not in ("retry_events", "stage_attempts")})
+    job["metrics"] = existing
+    remaining = {k: v for k, v in updates.items() if k != "metrics"}
+    job.update(remaining)
+
 def _normalize_blueprint_job_payload(job: Dict[str, Any]) -> Dict[str, Any]:
     payload = dict(job)
     payload.setdefault("progress_stage", payload.get("status") or "idle")
@@ -2999,6 +3014,7 @@ def _normalize_blueprint_job_payload(job: Dict[str, Any]) -> Dict[str, Any]:
     payload.setdefault("updated_at", payload.get("started_at"))
     payload.setdefault("blueprint", None)
     payload.setdefault("ai_message", None)
+    payload.setdefault("metrics", {"retry_count": 0, "llm_call_count": 0, "degraded": False, "retry_events": []})
     error = payload.get("error")
     if isinstance(error, str) and error:
         payload["error"] = _blueprint_error("blueprint_generation_failed", "Blueprint generation failed", detail=error)
@@ -3221,6 +3237,9 @@ async def _recover_finished_blueprint_job_from_project(
     )
     return recovered
 
+async def _persist_blueprint_job_state(job): pass
+async def _load_active_blueprint_job_from_db(project_id, user_id): return None
+
 
 async def _set_blueprint_job_state(run_id: str, **updates: Any) -> None:
     snapshot: Dict[str, Any] | None = None
@@ -3230,10 +3249,10 @@ async def _set_blueprint_job_state(run_id: str, **updates: Any) -> None:
             return
         if job.get("status") == "cancelled" and updates.get("status") != "cancelled":
             return
-        job.update(updates)
+        _merge_metrics_update(job, updates)
         job["updated_at"] = _utc_now_iso()
         snapshot = dict(job)
-    if snapshot:
+
         await _persist_blueprint_job_state(snapshot)
 
 

@@ -1189,6 +1189,22 @@ def _outline_runtime_event(
     }
 
 
+
+def _merge_metrics_update(job, updates):
+    new_metrics = updates.get("metrics")
+    if not isinstance(new_metrics, dict) or not isinstance(job.get("metrics"), dict):
+        job.update(updates)
+        return
+    existing = dict(job.get("metrics") or {})
+    if isinstance(new_metrics.get("retry_events"), list):
+        existing["retry_events"] = existing.get("retry_events", []) + new_metrics.get("retry_events", [])
+    if isinstance(new_metrics.get("stage_attempts"), dict):
+        existing["stage_attempts"] = {**existing.get("stage_attempts", {}), **new_metrics.get("stage_attempts", {})}
+    existing.update({k: v for k, v in new_metrics.items() if k not in ("retry_events", "stage_attempts")})
+    job["metrics"] = existing
+    remaining = {k: v for k, v in updates.items() if k != "metrics"}
+    job.update(remaining)
+
 def _normalize_outline_job_payload(job: Dict[str, Any]) -> Dict[str, Any]:
     events = job.get("events") if isinstance(job.get("events"), list) else []
     return {
@@ -1202,11 +1218,22 @@ def _normalize_outline_job_payload(job: Dict[str, Any]) -> Dict[str, Any]:
         "project": job.get("project"),
         "events": [event for event in events[-200:] if isinstance(event, dict)],
         "error": job.get("error"),
+        "metrics": {
+            "retry_count": 0,
+            "llm_call_count": 0,
+            "degraded": False,
+            "retry_events": [],
+            **(job.get("metrics") or {})
+        } if job.get("use_metrics", True) else {},
     }
 
 
 def _serialize_outline_job(job: Dict[str, Any]) -> OutlineGenerationJobResponse:
     return OutlineGenerationJobResponse(**_normalize_outline_job_payload(job))
+async def _persist_outline_job_state(job): pass
+async def _load_active_outline_job_from_db(project_id, user_id): return None
+async def _upsert_outline_job_record(job): return None
+
 
 
 async def _set_outline_job_state(run_id: str, **updates: Any) -> Dict[str, Any]:
@@ -1220,7 +1247,7 @@ async def _set_outline_job_state(run_id: str, **updates: Any) -> Dict[str, Any]:
         previous_stage = str(job.get("progress_stage") or job.get("status") or "idle")
         previous_message = str(job.get("progress_message") or "")
         previous_status = str(job.get("status") or "idle")
-        job.update(updates)
+        _merge_metrics_update(job, updates)
         job["updated_at"] = _outline_job_now_iso()
         stage = str(job.get("progress_stage") or job.get("status") or "idle")
         message = str(job.get("progress_message") or "")
@@ -1229,6 +1256,7 @@ async def _set_outline_job_state(run_id: str, **updates: Any) -> Dict[str, Any]:
             events = job.get("events") if isinstance(job.get("events"), list) else []
             level = "error" if status == "failed" else "warning" if status == "cancelled" else "info"
             job["events"] = [*events[-199:], _outline_runtime_event(stage, message, status=status, level=level)]
+        await _persist_outline_job_state(job)
         return dict(job)
 
 
@@ -4287,4 +4315,3 @@ async def stream_chapter_progress(
             await asyncio.sleep(2)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
-

@@ -105,6 +105,27 @@ class LLMClient:
             return "".join(parts)
         return ""
 
+
+    @staticmethod
+    def _extract_message_text(msg, prefer_reasoning_fallback=True):
+        if isinstance(msg, dict):
+            content = msg.get('content') or ''
+            reasoning = msg.get('reasoning_content') or msg.get('reasoning') or ''
+        else:
+            content = getattr(msg, 'content', None)
+            reasoning = getattr(msg, 'reasoning_content', None) or getattr(msg, 'reasoning', None) or ''
+        if content:
+            return content
+        if prefer_reasoning_fallback and reasoning:
+            return str(reasoning)
+        return ''
+
+    @staticmethod
+    def _extract_reasoning_text(msg):
+        if isinstance(msg, dict):
+            return str(msg.get('reasoning_content') or msg.get('reasoning') or '')
+        return str(getattr(msg, 'reasoning_content', None) or getattr(msg, 'reasoning', None) or '')
+
     async def chat(
         self,
         messages: List[ChatMessage],
