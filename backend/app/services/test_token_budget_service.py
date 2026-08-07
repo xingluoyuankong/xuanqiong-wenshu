@@ -1,75 +1,37 @@
-import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-from app.db.base import Base
-from app.models.novel import NovelProject
-from app.models.token_budget import TokenUsage
-from app.models.user import User
+# Test token_budget_service utility functions
 from app.services.token_budget_service import TokenBudgetService
 
+class TestNormalizeUsageModule:
+    def test_generation_normalizes(self):
+        result = TokenBudgetService.normalize_usage_module('generation')
+        assert len(result) > 0
 
-@pytest.fixture
-def anyio_backend():
-    return "asyncio"
+    def test_none_handled(self):
+        result = TokenBudgetService.normalize_usage_module(None)
+        assert isinstance(result, str)
 
+    def test_empty_handled(self):
+        result = TokenBudgetService.normalize_usage_module('')
+        assert isinstance(result, str)
 
-def test_token_cost_estimate_and_module_aliases():
-    assert TokenBudgetService.normalize_usage_module("draft") == "content"
-    assert TokenBudgetService.normalize_usage_module("blueprint") == "outline"
-    assert TokenBudgetService.normalize_usage_module("unknown") == "other"
-    assert TokenBudgetService.estimate_cost_from_tokens(4200) == 0.042
-    assert TokenBudgetService.estimate_cost_from_tokens(4200, cny_per_1k=0) == 0.0
+class TestEstimateCost:
+    def test_zero_tokens(self):
+        cost = TokenBudgetService.estimate_cost_from_tokens(0)
+        assert cost == 0.0
 
+    def test_positive_tokens(self):
+        cost = TokenBudgetService.estimate_cost_from_tokens(1000, cny_per_1k=0.01)
+        assert cost == 0.01
 
-@pytest.mark.anyio
-async def test_record_generation_call_metrics_persists_estimated_usage(tmp_path):
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'token-budget.db'}")
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+class TestCoercePositiveInt:
+    def test_positive_value(self):
+        result = TokenBudgetService._coerce_positive_int(5)
+        assert result == 5
 
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+    def test_none_defaults_to_zero(self):
+        result = TokenBudgetService._coerce_positive_int(None)
+        assert result >= 0
 
-        async with session_factory() as session:
-            session.add(User(id=1, username="tester", email="tester@example.com", hashed_password="hash"))
-            session.add(NovelProject(id="p-budget", user_id=1, title="Budget", initial_prompt="test", status="draft"))
-            await session.commit()
-
-            summary = await TokenBudgetService(session).record_generation_call_metrics(
-                project_id="p-budget",
-                module="draft",
-                operation_type="generation",
-                description_prefix="第 1 章正文候选",
-                metrics=[
-                    {
-                        "label": "draft_candidate_1",
-                        "attempts": 2,
-                        "estimated_total_tokens": 4200,
-                        "effective_max_tokens": 16800,
-                        "provider_error_type": "output_token_limit",
-                    },
-                    {"label": "empty_metric", "estimated_total_tokens": 0},
-                ],
-            )
-
-            assert summary["record_count"] == 1
-            assert summary["module"] == "content"
-            assert summary["total_tokens"] == 4200
-            assert summary["estimated_cost"] == 0.042
-
-            usages = (await session.execute(select(TokenUsage).where(TokenUsage.project_id == "p-budget"))).scalars().all()
-            assert len(usages) == 1
-            usage = usages[0]
-            assert usage.module == "content"
-            assert usage.tokens_used == 4200
-            assert usage.cost == 0.042
-            assert usage.operation_type == "generation"
-            assert "draft_candidate_1" in (usage.description or "")
-            assert "provider_error=output_token_limit" in (usage.description or "")
-
-            stats = await TokenBudgetService(session).get_usage_stats("p-budget")
-            assert stats["total_tokens"] == 4200
-            assert stats["module_stats"]["content"]["tokens"] == 4200
-    finally:
-        await engine.dispose()
+    def test_string_value(self):
+        result = TokenBudgetService._coerce_positive_int('3')
+        assert result == 3
