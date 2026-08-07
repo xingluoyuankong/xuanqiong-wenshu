@@ -379,6 +379,7 @@ class PipelineOrchestrator:
 
     @staticmethod
     def _content_fingerprint(text: Optional[str]) -> str:
+    # ====== EXTRACTABLE: _pipeline_quality_gate.py (L381-L940) ======
         normalized = re.sub(r"\s+", " ", str(text or "")).strip()
         if not normalized:
             return ""
@@ -882,6 +883,8 @@ class PipelineOrchestrator:
             "consistency_unresolved_major_count": len(major_consistency),
             "story_progression_guard": story_guard,
         }
+
+    # ====== END _pipeline_quality_gate.py ======
 
     @staticmethod
     def _map_reader_problem_to_dimension(problem: Optional[str]) -> str:
@@ -5876,6 +5879,7 @@ class PipelineOrchestrator:
         "选择", "交换", "代价", "风险", "危险", "失控", "反转", "翻脸", "背叛", "线索",
         "证据", "期限", "后果", "付出", "受伤", "倒下", "失去", "得到", "夺回", "打开",
         "推开", "抓住", "按住", "拔出", "砸开", "冲进", "闯入", "逃出", "追上", "救下",
+    # ====== EXTRACTABLE: _pipeline_story_scoring.py (L5881-L6281, ~400 lines) ======
         "杀", "死", "活", "必须", "否则", "来不及", "下一步", "转而", "却", "但", "然而",
     )
 
@@ -6277,6 +6281,8 @@ class PipelineOrchestrator:
             "quality_issue_summary": quality_issue_summary,
             "quality_issue_codes": quality_issue_summary.get("codes", []),
             "quality_issue_labels": quality_issue_summary.get("labels", []),
+    # ====== END _pipeline_story_scoring.py ======
+
             "quality_metric_snapshot": quality_metric_snapshot,
             **artifact_markers,
         }
@@ -6498,6 +6504,7 @@ class PipelineOrchestrator:
             "scores": ai_review_result.scores,
             "evaluation": ai_review_result.overall_evaluation,
             "flaws": ai_review_result.critical_flaws,
+    # ====== EXTRACTABLE: _pipeline_self_critique.py (L6506-L6782, ~276 lines) ======
             "suggestions": ai_review_result.refinement_suggestions,
             "status": "ai_review_overridden_by_story_guard" if override_applied else ai_review_result.status,
             "skip_reason": None,
@@ -6777,6 +6784,8 @@ class PipelineOrchestrator:
             "final_critique": critique,
             "stage_summaries": critique.get("stage_summaries", []),
             "content_fingerprint": content_fingerprint,
+    # ====== END _pipeline_self_critique.py ======
+
             "raw_issue_count": critique.get("raw_issue_count"),
             "deduped_issue_count": critique.get("deduped_issue_count"),
             "merged_issue_count": critique.get("merged_issue_count"),
