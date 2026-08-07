@@ -4,7 +4,7 @@ from app.services.consistency_service import (
     ConsistencyCheckResult, ConsistencyViolation, ViolationSeverity
 )
 
-pytestmark = pytest.mark.asyncio
+
 
 def test_violation_severity_values():
     assert ViolationSeverity.CRITICAL == "critical"

@@ -103,3 +103,10 @@ async def get_current_admin(current_user: UserInDB = Depends(get_current_user)) 
             },
         )
     return current_user
+
+
+async def get_project_owner_guard(project_id: str, session=Depends(get_session), current_user=Depends(get_current_user)):
+    from ..services.novel_service import NovelService
+    svc=NovelService(session)
+    await svc.ensure_project_owner(project_id, current_user.id)
+    return current_user

@@ -12,7 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Qu
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...core.dependencies import get_current_user
+from ...core.dependencies import get_current_user, get_project_owner_guard
 from ...db.session import get_session
 from ...db.session import AsyncSessionLocal
 from ...schemas.novel import (
@@ -2781,9 +2781,9 @@ async def export_novel_as_txt(
     current_user: UserInDB = Depends(get_current_user),
 ):
     """导出小说为 TXT 格式"""
-    user_id = int(current_user.id)
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, user_id)
+    await get_project_owner_guard(project_id, session, current_user)
+
+
 
     export_service = ExportService(session)
     content = await export_service.export_novel_as_txt(project_id)
