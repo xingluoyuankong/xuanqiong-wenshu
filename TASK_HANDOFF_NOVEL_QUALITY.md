@@ -43,7 +43,7 @@
 
 > **第 1、3 条的状态已变**（2026-08-18，批 2-4 完成后）：第 3 条列的两个漏判**都已修复并被 `class TestBadSampleRegression` 锁住**（批 2 修章末压力、批 3 修事件密度、批 4 固化坏样本）。第 1 条的孤儿文件**还在**（T-19 排在批 10 最后）。**批 4 又暴露出一个同类问题：章末压力的 260 字尾窗会被正文钩子遮蔽（D-24），排进批 6。**
 
-同时纠正一条前序会话的错误结论：**坏样本回归测试并非「完全缺失」**。它们存在于 `test_generation_quality_guards.py`（当时 2151 行，批 5 后 2907 行），且针对的是生产路径。前序把「孤儿文件没有专属测试文件」误读成「坏样本测试没落地」。真正的缺口是**特定坏样本类型未被覆盖**（详见 4.6 与 D-05）。
+同时纠正一条前序会话的错误结论：**坏样本回归测试并非「完全缺失」**。它们存在于 `test_generation_quality_guards.py`（当时 2151 行，批 8 后 4438 行），且针对的是生产路径。前序把「孤儿文件没有专属测试文件」误读成「坏样本测试没落地」。真正的缺口是**特定坏样本类型未被覆盖**（详见 4.6 与 D-05）。
 
 ---
 
@@ -221,7 +221,7 @@ cmd1 2>&1; echo "===EXIT $?==="; cmd2 2>&1
 
 - 位置：`_evaluate_ending_pressure`(769)、`_count_dialogue_state_change_markers`(719)、`_evaluate_dialogue_changes_state`(746)、`_evaluate_event_density`(649)、`_story_units`(627)、`_unit_has_progression`(641)、以及 `_build_structural_quality_gate_result`(640-891) 调用这些。
 - 特征：直接在编排器类里实现，与生成流程紧耦合。
-- 测试：`test_generation_quality_guards.py`（**批 5 后 2907 行 / 116 个测试**；下文凡出现「2151 行 / 56 个测试」的都是批 1 之前的原始快照，保留以说明当时的判断依据）。
+- 测试：`test_generation_quality_guards.py`（**批 8 后 4438 行 / 188 收集（167 passed, 21 failed）**；下文凡出现「2151 行 / 56 个测试」的都是批 1 之前的原始快照，保留以说明当时的判断依据）。
 
 #### 两者漂移矩阵（本轮用 `inspect.getsource` + 去空白 SHA256 实测）
 
@@ -579,7 +579,7 @@ and (critique_score is None or critique_score < 70)     # self_critique 给 ≥7
 
 前序会话的任务定义是「`test_story_quality_scoring.py` 不存在 → 坏样本回归测试尚未落地」。**这个判断是错的。**
 
-实测 `test_generation_quality_guards.py`（当时 2151 行）已有 56 个测试，其中直接覆盖坏样本的至少包括（**下表行号是批 1 之前的快照，现已全部位移；批 5 后该文件 2907 行 / 116 测试**）：
+实测 `test_generation_quality_guards.py`（当时 2151 行）已有 56 个测试，其中直接覆盖坏样本的至少包括（**下表行号是批 1 之前的快照，现已全部位移；批 8 后该文件 4438 行 / 188 收集，见附录 A.2**）：
 
 | 行号 | 测试名 | 覆盖的坏样本类型 |
 |-----|-------|---------------|
@@ -1130,7 +1130,7 @@ and (critique_score is None or critique_score < 70)     # self_critique 给 ≥7
 
 ### D-18（P3）文档与提交信息里的测试基线数字过期
 
-- **实测本轮基线**（`PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -m pytest app -q`）：
+- **实测本轮基线**（**命令已作废，会假绿，D-26**；原文保留备查）：
   ```
   659 passed in 83.58s
   ```
@@ -1767,17 +1767,17 @@ E-07 → E-02 → E-09 → E-10 →（此时 T-22/T-16 已完成）→ E-11
 1. **先写失败测试**：新增能证明缺陷存在的测试，运行确认**红**（如果新测试一开始就绿，说明缺陷判断错了，停下来重新分析，不要改实现）。
 2. **实现修复**，跑定向测试确认**绿**。
 3. **反向验证**：临时把修复里的关键条件故意改坏（例如把新加的阈值改回原值），确认新增测试**必然变红**；恢复实现。这一步是防止「测试其实没测到修复」。
-4. **跑全量门禁**：`python -m pytest app -q`，与基线 `659 passed` 对比，记录数字。
+4. **跑全量门禁**：用 §2.3 的**四开关命令**（不是裸 `pytest app -q`，那会假绿，D-26），与基线 `727 passed, 36 failed` 对比；**并拿 `-rf` 清单和 D-27 的表逐条核对失败集合有没有变大或换人**。
 5. **记录证据**：命令、输出尾部（含 passed 数与耗时）、受影响测试清单。**不记录密钥、Prompt 正文、用户小说正文**（2.6）。
 
 **通用验证命令**（cwd 必须是 `backend`，`PYTHONIOENCODING=utf-8` 防 GBK 乱码）：
 
 ```bash
-cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m pytest app/services/test_generation_quality_guards.py -q
+cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m pytest app/services/test_generation_quality_guards.py -p no:randomly -p no:anyio -q
 ```
 
 ```bash
-cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m pytest app -q
+cd /d/小说写作/xuanqiong-wenshu/backend && python -m pytest app -p no:randomly -p no:anyio -p no:seleniumbase -p no:sb_manager -q --timeout=120 --timeout-method=thread -rf
 ```
 
 > **Windows/bash 环境注意**：`cd` **不跨 Bash 调用持久**（本轮已因此踩坑一次，见 4.x）。每条命令都要自带 `cd`，或全部用绝对路径。不要用 `&&` 串接长命令链（前序会话中多次因此被截断），改用 `;` 分隔并在末尾加 `echo "===EXIT $?==="` 确认退出码。
@@ -1819,7 +1819,8 @@ cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m 
 - **问题**：`32eafd3` 等提交信息写「401/401」，实际基线已是 659。历史提交信息不能改（会重写历史，违反 2.2），要改的是**往后的约定**。
 - **改动**：不是代码改动，是流程约定，写进 `CLAUDE.md` 的 Latest Progress 段（**只加一行，不要重写整个文件**）：
   ```
-  - 提交信息里的测试数必须是本次实测 `python -m pytest app -q` 的输出，不要沿用上一次的数字。
+  - 提交信息里的测试数必须是本次实测输出，写成 `N passed, M failed` 完整形态（不许只写 passed 数）。
+    全量命令必须带 `-p no:anyio -p no:seleniumbase -p no:sb_manager -p no:randomly`，裸跑会假绿（D-26）。
   ```
 - **另外**：`CLAUDE.md` 现有内容**不需要改**——它没有写具体测试数字，那部分是准确的（这一点前序文档写错过，见 4.1）。
 - **测试**：无（流程约定）。
@@ -2079,7 +2080,7 @@ cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m 
 
 #### 批 4 实际落地记录（2026-08-18 完成，基线 679 → 688）
 
-**门禁**：定向 `test_generation_quality_guards.py` **113 passed in 13.40s**（104 → 113，`--collect-only -q` 核对新增正好 9 条）；全量 `python -m pytest app -q` → **688 passed in 118.20s, exit 0**。
+**门禁**：定向 `test_generation_quality_guards.py` **113 passed in 13.40s**（104 → 113，`--collect-only -q` 核对新增正好 9 条）；全量 ~~688 passed in 118.20s~~ **（假绿，D-26；`exit 0` 本身就是 D-26 的症状）**。
 
 **改了两个文件**：
 1. `test_generation_quality_guards.py`：新增 `class TestBadSampleRegression`（9 个方法）+ 3 个样本常量（`BAD_ALL_DESCRIPTION` / `BAD_MUNDANE_SEQUENCE` / 两个结尾类样本）+ 1 个公用填充常量 `_FLAT_ENDING_FILLER` + 2 个分组元组（`BAD_SAMPLES_DENSITY_CLASS` / `BAD_SAMPLES_ENDING_CLASS`）。`BAD_FLAT_CHATTER` 与 `GOOD_DRAMATIC` 复用批 3 已固化的常量，评分入口复用既有 `_score_density_sample` 辅助函数。
@@ -2148,7 +2149,7 @@ cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m 
 
 #### 批 5 实际落地记录（2026-08-18 完成，基线 688 → 691）
 
-**门禁**：定向 `test_generation_quality_guards.py` **116 passed in 4.84s**（113 → 116，净增 3）；全量 `python -m pytest app -q` → **691 passed in 61.34s, exit 0**。
+**门禁**：定向 `test_generation_quality_guards.py` **116 passed in 4.84s**（113 → 116，净增 3）；全量 ~~691 passed in 61.34s~~ **（假绿，D-26）**。
 
 **改了两个文件**：
 
@@ -2243,7 +2244,7 @@ cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m 
 
 #### 批 6 实际落地记录（2026-08-19 完成，基线 691 → 718）
 
-**门禁**：定向 `test_generation_quality_guards.py` **143 passed in 3.68s**（116 → 143，净增 27）；全量 `python -m pytest app -q` → **718 passed in 55.80s, exit 0**（目标 696，实际 +27 而非 +5，原因见下面「与原方案的 4 处偏差」）。
+**门禁**：定向 `test_generation_quality_guards.py` **143 passed in 3.68s**（116 → 143，净增 27）；全量 ~~718 passed in 55.80s~~ **（假绿，D-26）**（目标 696，实际 +27 而非 +5，原因见下面「与原方案的 4 处偏差」）。
 
 **改了两个文件。`pipeline_orchestrator.py` 的落地行号（`grep -n` 实测）**：
 
@@ -2380,7 +2381,7 @@ cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m 
 
 #### 批 7 实际落地记录（2026-08-19 完成，基线 718 → 742）
 
-**全量实测**：`python -m pytest app -q` → **742 passed in 62.50s, 0 failed**。比 §6.3 表的目标 725 多 17 个。
+**全量实测**：~~742 passed in 62.50s, 0 failed~~ **（假绿，D-26。「0 failed」是插件冲突吞掉测试后的假象，真实值为 727 passed / 36 failed）**。
 
 **跑测试时踩到的一个环境坑（不是代码问题，但会浪费半小时）**：本批多次出现 `pytest app` 或 `pytest app/services` **跑到中途被 SIGTERM 杀掉（exit 143）**，而**把 62 个测试文件显式列在命令行上、或加 `-v`、或分片跑**，同样的集合就能全绿。两种方式收集数都是 646，逐片跑也全过——**不是某个测试挂起**。根因未查清（疑似本机 Windows 下长时间静默输出被外层判超时）。处理办法：遇到 143 先 `tasklist | grep python` 清掉残留进程再重跑，或改用显式文件列表 / `-v`。**exit 143 既不等于失败也不能当通过**——必须拿到 `N passed` 那一行才算。
 
@@ -2574,7 +2575,7 @@ cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m 
 
 ### 8.1 测试放在哪里（不要新建文件）
 
-- **全部加进 `backend/app/services/test_generation_quality_guards.py`**（**批 5 后 2907 行 / 116 个测试**；本行原写「2151 行 / 56 个测试」，是批 1 之前的数字）。新增内容按批次分组成 class：`TestBadSampleRegression`（批 4 已建）、`TestEventDensityCalibration`、`TestWordCountDimension` 等。
+- **全部加进 `backend/app/services/test_generation_quality_guards.py`**（**批 8 后 4438 行 / 188 收集（167 passed, 21 failed）**；本行原写「2151 行 / 56 个测试」，是批 1 之前的数字）。新增内容按批次分组成 class：`TestBadSampleRegression`（批 4 已建）、`TestEventDensityCalibration`、`TestWordCountDimension` 等。
 - **明确不要新建 `test_story_quality_scoring.py`**——给孤儿模块写测试等于给它续命，与 T-19（删除孤儿）直接冲突。这条已写进第 10 节「明确不做」。
 - 测试文件与被测模块同目录（`app/services/test_*.py`），这是本项目既有约定，不要改成 `tests/` 目录结构。
 
@@ -2658,7 +2659,7 @@ P._evaluate_repetition_risk(SAMPLE_TEXT.splitlines(), word_count=len(condensed))
 - **5 维评分**：场景达成度（`scene_fulfillment_rate` / `fulfilled_scene_count`）、对话改变状态（`dialogue_changes_state`）、章末压力（`ending_pressure_passed`）、静态描写风险（`static_description_risk`）、事件密度（`event_density_passed` 及 5 个子指标）。
 - **11 类 blocker + 6 条软放行**：软放行是 `progression_soft_pass` / `scene_soft_pass` / `semantic_scene_soft_pass` / `dense_scene_soft_pass` / `density_soft_pass` / `rich_progression_evidence`。软放行机制本身是合理设计（避免单一硬阈值误杀），问题在于它消费的是不可靠的指标（见 D-07/D-16）。
 - **质量指标快照**：`quality_metric_snapshot` 落进章节 `metadata["quality_metrics"]`（`pipeline_orchestrator.py:2001`）、`metadata["quality_gate"]`（1994）、SSE 事件、`runtime_metadata["quality_gates"]`（**批 5 后 2409 起**）。
-- **测试**：原始 56 个测试在 `test_generation_quality_guards.py`（2151 行），**当时绝大多数是「好样本应通过」方向**，缺坏样本方向。**批 4（T-07）已补上 `TestBadSampleRegression` 9 条双向测试；批 5 后全文件 2907 行 / 116 个测试。**
+- **测试**：原始 56 个测试在 `test_generation_quality_guards.py`（当时 2151 行，现 4438 行），**当时绝大多数是「好样本应通过」方向**，缺坏样本方向。**批 4（T-07）已补上 `TestBadSampleRegression` 9 条双向测试；批 8 后全文件 4438 行 / 188 收集（167 passed, 21 failed），各 class 行号见附录 A.2。**
 
 ### 9.2 前端质量展示（**已全部就绪，本轮实测确认文件都在**）
 
@@ -2944,15 +2945,12 @@ cd /d/小说写作/xuanqiong-wenshu && git status --short | head -20 ; git branc
 ```
 
 ```bash
-cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m pytest app -q 2>&1 | tail -5
+cd /d/小说写作/xuanqiong-wenshu/backend && python -m pytest app -p no:randomly -p no:anyio -p no:seleniumbase -p no:sb_manager -q --timeout=120 --timeout-method=thread -rf 2>&1 | tail -45
 ```
 
-> **⚠️ 上面这条命令是坏的，不要用。** 裸 `pytest app -q` 会触发 D-26 的假绿：进程猝死、
-> 输出丢失、退出码 0。**用 2.3 的四开关版本**：
->
-> ```bash
-> cd /d/小说写作/xuanqiong-wenshu/backend && python -m pytest app -p no:randomly -p no:anyio -p no:seleniumbase -p no:sb_manager -q --timeout=120 --timeout-method=thread -rf
-> ```
+> **⚠️ 四个 `-p no:` 一个都不能少。** 曾经写在这里的裸 `pytest app -q` 会触发 D-26 的假绿：
+> 进程猝死、输出丢失、退出码 0，看起来像"全绿跑完"。本文档历史上所有"全量全绿"结论都是
+> 这么来的。各开关的必要性见 §2.3 的表。
 
 期望看到 **`727 passed, 36 failed`**（2026-08-19 实测，唯一可信基线）。**看到失败不要慌**——
 那 36 个是先存欠账（D-27），不是有人改坏了。拿 `-rf` 的清单和 D-27 的表逐条对：**条目一致
@@ -3020,7 +3018,7 @@ cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m 
 > - **批 5 ✅**：T-22 修复闭环。新增类属性 `STRUCTURAL_GATE_REPAIR_MAX_ROUNDS = 2`（硬编码，成本闸门不是调参空间）与 `staticmethod _is_structural_repair_improvement`（严格子集收缩 `len(after) < len(before) and not (after - before)`）；`_attempt_structural_gate_repair` 重写为「总是返回诊断字典，采纳与否看 `adopted`」，四种跳过原因写进 `repair_skipped_reason`；两处调用点未采纳也把 `repair_summary` 追加进 `runtime_metadata["quality_gate_repairs"]`。定向 116 passed in 4.84s，全量 **691 passed in 61.34s**（比目标 690 多 1 条，原因是轮数上限要上下都卡、诊断保留分两条分支，净增 3 而非 2）。反向验证 **12/12 必红**、5 项复原确认全 True。
 > - **教训 3（判据类的通用陷阱）**：**blocker 数量下降不等于改善。** 实测反例 `"## 场景 1｜开场\n\n" + GOOD_DRAMATIC` 从 7 条掉到 1 条，但那 1 条是全新形态 `chapter_artifact_markers`，采纳它会让修复循环朝错误方向收敛。`not (after - before)` 是判据主体，不是防御性冗余。E-11 做分档时尤其要带上这半条。
 > - **教训 4（反向验证方法论）**：基于 `inspect.getsource` 文本断言的测试，改坏点必须落在 `inspect.getsource` 本身；替换被测函数对象只会抛 `TypeError`，那是**假必红**——变红原因与要证明的缺陷无关。
-> - **批 6 ✅**：T-08 静态描写第 4 条判定 + 第 2 条门槛按真实语料保持 `>= 3`（触发率 0.029 而非孤儿版 0.044）；T-09 重建 `STATIC_ACTION_MARKERS`（**根因是「看/却/但/发现」这类高频单字**，不只是自然现象动词）并把自然现象动词单列成 `AMBIENT_MOTION_MARKERS`（不参与判定，仅供护栏断言）；T-10 照搬 `_evaluate_repetition_risk`（阈值一个未动，真实触发率 0.000）+ 判罚 −420 + 第 12 类硬 blocker；D-24 改成**保留 260 尾窗 + 末段否决**（`ENDING_CORE_WEAK_ONLY_LIMIT = 2` / `ENDING_CORE_FLAT_CHARS = 150`），缩窗的 6 个变体在真实通过池上全部更差（0.475~0.782 vs 基线 0.812）；D-25 改成四条 or 各配一个**只命中自己**的样本。定向 143 passed in 3.68s，全量 **718 passed in 55.80s**（计划 +5，实际 +27）。反向验证 **16/16 必红**、恢复校验 True。
+> - **批 6 ✅**：T-08 静态描写第 4 条判定 + 第 2 条门槛按真实语料保持 `>= 3`（触发率 0.029 而非孤儿版 0.044）；T-09 重建 `STATIC_ACTION_MARKERS`（**根因是「看/却/但/发现」这类高频单字**，不只是自然现象动词）并把自然现象动词单列成 `AMBIENT_MOTION_MARKERS`（不参与判定，仅供护栏断言）；T-10 照搬 `_evaluate_repetition_risk`（阈值一个未动，真实触发率 0.000）+ 判罚 −420 + 第 12 类硬 blocker；D-24 改成**保留 260 尾窗 + 末段否决**（`ENDING_CORE_WEAK_ONLY_LIMIT = 2` / `ENDING_CORE_FLAT_CHARS = 150`），缩窗的 6 个变体在真实通过池上全部更差（0.475~0.782 vs 基线 0.812）；D-25 改成四条 or 各配一个**只命中自己**的样本。定向 143 passed in 3.68s，全量 ~~718 passed~~ **（假绿，D-26）**（计划 +5，实际 +27）。反向验证 **16/16 必红**、恢复校验 True。
 > - **批 6 的两条方法论**：① **凡是"测试里重算了一遍生产逻辑"的归因辅助，都必须另配一个卡在阈值边界上的哨兵样本**——第一轮反向验证里「第 2 条门槛松到 `>= 2`」全绿，就是因为归因函数在测试里重算，检测不到生产端阈值漂移。② **任何"复制样本凑字数"的测试辅助都要保证进入统计的单位唯一**——批 3 的 `_grow` 只替换首行占位符，导致 T-10 一落地就把正向对照自己判成重复灌水。
 > - **批 7 ✅**：T-11 焦点人物缺席进候选评分（判罚 −240，保持 warning 不加 blocker）；T-12 字数维度四层断链全修（三判罚 620/520/180、`upper` 系数 2.0/1.6、第 3 层删默认值改必填、第 4 层默认值取 0）。真实语料校准 n=99：`below_min` 触发 0.220（**实为真实字数不足，比值 p50 仅 0.608**，不调松）、`far_below` 0.024、`far_above` 0.012；1.25 系数会让 `far_above` 涨到 0.305。定向 167 passed in 3.73s，全量 **742 passed in 62.50s**（计划 +7，实际 +24）。反向验证 **14/14 必红**、写回校验一致。
 >
@@ -3038,76 +3036,65 @@ cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m 
 |---|---|---|
 | `PipelineConfig.min_word_count: int = 500` | 114 | D-15 |
 | `PipelineConfig.enforce_min_word_count: bool = True` | 117 | D-13 |
-| `_resolve_chapter_draft_contract` | 1201 | 9.4 / E-01 |
-| `_format_chapter_draft_contract_for_prompt` | 1254 | 9.4 |
-| `quality_policy` 字符串常量 | 1250 | 9.4 |
-| **⚠️ 本表行号最后校准于批 5（2026-08-18）**。批 5 在 2035 前后插入了约 130 行，**2035 之后的所有行号都比批 4 版本大了 100+**。下面的数字都是批 5 后 `grep -n` 实测值。| — | — |
-| 任务书 JSON Schema（`inherit_from_previous` 必填声明） | 1427-1429 | E-07 |
-| `_evaluate_structural_quality_gate_for_content` 定义 | 430 | D-20 |
-| ↳ 硬编码默认值 `target=3000, min=2000` | 438-439 | **D-20** |
-| ↳ 调用 `_score_story_quality_candidate`（唯一传字数的调用点） | 442 | D-13 |
-| `_build_quality_issue_summary` / `quality_gate_summary` 组装 | 492 / 585-612 | 9.1 |
-| `STRUCTURAL_GATE_REPAIR_MAX_ROUNDS = 2` | 2037 | **T-22 ✅**（硬编码成本闸门，不要改成配置项） |
-| `_is_structural_repair_improvement`（严格子集收缩判据） | 2040 | **T-22 ✅** |
-| `_attempt_structural_gate_repair` | 2054-2241 | **D-21 ✅ / T-22 ✅**（已重写；原 2035-2116） |
-| ↳ ~~`if not repaired_gate.get("passed"): return None`~~ → 采纳判定 | 2195 | **D-21 ✅ 已修** |
-| ↳ `enable_self_critique` 开关 → `_skip("self_critique_disabled")` | 2126 | D-21 ✅（第 4 条待 T-17 接线） |
-| ↳ 修复循环（`for _round in range(...)`） | 2148 | T-22 ✅ |
-| `runtime_metadata["quality_gate_repairs"]` 两处写入点 | 3878 / 4104 | **T-22 ✅**（未采纳也写） |
-| `quality_gate_blocked_persist` 落库 | 1971-2016 | 9.1 |
-| ↳ `metadata["quality_gate"]` / `metadata["quality_metrics"]` | 1994 / 2001 | 9.2 |
-| `generate_chapter` 主流程入口 | 2348 | 3.x |
-| `runtime_metadata` 初始化 / `"quality_gates": {}` | 2392 / 2409 | E-09 |
-| 写作提示词从 DB 取（`writing_v2` → `writing`） | 2736 | **E-01** |
-| 字数事后检查 / `enforce_min_word_count` | 4250 | D-13 |
-| flow_config 覆盖（`_resolve_config`） | 4547-4632 | — |
-| `continuity_anchor` 生成（从上一章锚点 `previous_anchor`） | 5230 / 5277 / 5290 | E-07 |
-| 承接/递交拼进提示词 | 5646-5652 | E-07 |
-| 场景执行清单拼装 | 5655-5670 | 9.4 |
-| `_build_prompt_sections` | 5744 | 9.4 |
-| `_resolve_style_hints`（3 条候选风格） | 5853 | E-06 |
-| `_evaluate_first_draft_retry` 定义 | 5874 | D-13 第 4 层 |
-| ↳ 漏传字数的评分调用 | 5883 | **D-13** |
-| ↳ 自己做的字数规范化（拿到手又扔掉） | 5888-5889 | **D-13** |
-| ↳ 软放行链（`get(..., True)` 恒真陷阱） | 5901-5910 | D-07 |
-| `_build_prose_only_system_prompt` | 6912 | 9.4 |
-| `_collect_fallback_mission_keywords` | 7096 | E-07 |
-| `_chapter_mission_expects_dialogue` | 7159 | D-07 / E-10 |
-| `STORY_PROGRESSION_MARKERS`（✅ 批 3 已剔纯连词与 `"活"`） | 7311 | **D-02 已修** |
-| ↳ EXTRACTABLE 注释（✅ 批 1 已移出元组） | 7310 | D-17 已修 |
-| `ENDING_WEAK_HOOK_MARKERS`（批 2 提为类属性，7 个） | 7329 | D-03 已修 |
-| `ENDING_SEMANTIC_HOOK_MARKERS`（批 2 去过拟合，56 个） | 7334 | D-06 已修 |
-| `ENDING_CLOSURE_MARKERS`（批 2 换完整短语，14 个） | 7345 | D-04 已修 |
-| `_story_units`（句子级切分，未改） | 7352 | D-16-a |
-| `_unit_has_progression`（✅ 批 3：引号必须同时带状态变化词） | 7366 | **D-02 已修** |
-| `WINDOW_PROGRESSION_RATIO_FLOOR = 0.05` / `MIN_HITS = 2` | 7381-7382 | **批 3 重定** |
-| `WINDOW_TAIL_MERGE_RATIO = 0.4`（尾窗合并，批 3 新增） | 7385 | T-05 |
-| `_window_has_state_change`（批 3 新增，窗口级判定） | 7388 | **D-16-c 已修** |
-| `_split_progression_windows`（批 3 新增） | 7401 | T-05 |
-| `_event_density_floors`（✅ 批 3 按真实语料重定四档） | 7411 | **D-16-a 已修** |
-| `_evaluate_event_density` 短路（`word_count < 800`） | 7439 | **D-15 未修** |
-| `_evaluate_ending_pressure` | 7542 | D-03/D-04 已修 |
-| ↳ **`ending_excerpt = condensed_text[-260:]`（尾窗遮蔽）** | **7543** | **D-24 未修** |
-| ↳ `flat_closure_markers` 产出点（`closure_hits[:4]`） | 7582 | ✅ T-07 |
-| `_estimate_static_description_runs` | 7586 | D-08 / **D-25** |
-| `_detect_chapter_artifact_markers`（只检测不清理） | 7603 | D-11 |
-| `_score_story_quality_candidate` 主体 | 7640-7768 | D-09 / D-13 |
-| ↳ 静态描写判定（缺第 4 条；三条 or 里只有第 1 条有测试覆盖） | 7669-7673 | **D-08 / D-25** |
-| `quality_metric_snapshot` 白名单起点（**新增字段必须加进来，唯一静默丢弃点**） | 7694 | 9.2 |
-| ↳ `flat_closure_markers`（✅ 批 4 补上，批 2 漏项） | 7710 | ✅ T-07 |
-| **批 6 新增（行号按批 6 落地实测）** | — | — |
-| `ENDING_CORE_WEAK_ONLY_LIMIT` / `ENDING_CORE_FLAT_CHARS` | 7569 / 7570 | ✅ D-24 |
-| `_evaluate_ending_pressure`（加 `raw_text` 形参，末段否决） | 7573 | ✅ D-24 |
-| `STATIC_ACTION_MARKERS`（34 项）/ `AMBIENT_MOTION_MARKERS`（10 项） | 7658 / 7670 | ✅ T-09 |
-| `_estimate_static_description_runs`（`staticmethod` → `classmethod`） | 7673 | ✅ T-09 |
-| `_evaluate_repetition_risk`（照搬孤儿版 949-980） | 7690 | ✅ T-10 |
-| `static_description_risk` 四条 or | 7815 | ✅ T-08 |
-| 重复判罚 `score -= 420` | 7846 | ✅ T-10 |
-| 第 12 类 blocker `repeated_paragraph_flood` | 730（label 456 / code 派发 534） | ✅ T-10 |
+| `_resolve_chapter_draft_contract` | **1235** | 9.4 / E-01 |
+| **⚠️ 本表行号已于 2026-08-19（批 8 收尾）全表重新校准**，方式是逐个符号 `grep -n` 实测，**不是**按插入量估算偏移。文件当前 **8077 行**（批 5 版本约 8267 行，**变短了**——所以旧表里「批 6 新增」那几行标的 7569-7846 全部偏大 1000+，已作废）。| — | — |
+| `_evaluate_structural_quality_gate_for_content` 定义 | **415** | D-20 |
+| ↳ ~~硬编码默认值 `target=3000, min=2000`~~ → **已改必填**（keyword-only 无默认） | **424** | **D-20 ✅ 批 7 已修** |
+| `_build_quality_issue_summary` | **486** | 9.1 |
+| ↳ `tone` 升级判据（`len(items) >= 2` 或含 danger 类 code） | **562** | 9.1 |
+| ↳ 第 12 类 blocker `repeated_paragraph_flood`（label / 说明 / 派发 / 消费） | **446 / 469 / 531 / 733** | ✅ T-10 |
+| `_build_structural_reader_polish_issues`（第 2 层定向修复清单） | **975** | T-22 / D-27 B |
+| `STRUCTURAL_GATE_REPAIR_MAX_ROUNDS = 2` | **1888** | **T-22 ✅**（硬编码成本闸门，不要改成配置项） |
+| `_is_structural_repair_improvement`（严格子集收缩判据） | **1891** | **T-22 ✅** |
+| `_attempt_structural_gate_repair` | **1905** | **D-21 ✅ / T-22 ✅** |
+| `runtime_metadata["quality_gate_repairs"]` 两处写入点 | **3582 / 3810** | **T-22 ✅**（未采纳也写） |
+| `quality_metric_snapshot` 消费点（落库 / gate / 快照组装） | **595 / 618 / 1852 / 3907** | 9.2 |
+| `generate_chapter` 主流程入口 | **2164** | 3.x |
+| `_resolve_config`（flow_config 覆盖） | **4255** | — |
+| `_build_stable_retry_config` | **4434** | **D-27 B 组**（短章/长章都该返回 `None`，实际都返回了配置） |
+| `_build_prompt_sections` | **5290** | 9.4 |
+| `_resolve_style_hints`（3 条候选风格） | **5399** | E-06 |
+| `_evaluate_first_draft_retry` 定义（第 3 层，✅ 批 7 已接字数） | **5420** | D-13 ✅ / D-07 ✅ |
+| `_chapter_mission_expects_dialogue` | **6160** | D-07 / E-10 |
+| `_collect_fallback_mission_keywords` | **6097** | E-07 |
+| `STORY_PROGRESSION_MARKERS`（✅ 批 3 已剔纯连词与 `"活"`） | **6312** | **D-02 已修** |
+| `ENDING_WEAK_HOOK_MARKERS`（批 2 提为类属性，7 个） | **6330** | D-03 已修 |
+| `ENDING_SEMANTIC_HOOK_MARKERS`（批 2 去过拟合，56 个） | **6335** | D-06 已修 |
+| `ENDING_CLOSURE_MARKERS`（批 2 换完整短语，14 个） | **6346** | D-04 已修 |
+| `_story_units`（句子级切分，未改） | **6353** | D-16-a |
+| `_unit_has_progression`（✅ 批 3：引号必须同时带状态变化词） | **6367** | **D-02 已修** |
+| `_window_has_state_change`（批 3 新增，窗口级判定） | **6389** | **D-16-c 已修** |
+| `_split_progression_windows`（批 3 新增） | **6402** | T-05 |
+| `_event_density_floors`（✅ 批 3 按真实语料重定四档） | **6412** | **D-16-a 已修** |
+| `EVENT_DENSITY_MIN_SAMPLE_CHARS = 800`（**不要下调，见批 8**） | **6442** | ✅ T-14 |
+| `_evaluate_event_density` | **6445** | **D-15 ✅ 批 8 已修** |
+| ↳ 短路分支三个 `passed` 返回 `None` + `event_density_evaluated: False` | **6461** | ✅ T-14 |
+| ↳ 正常路径 `event_density_evaluated: True` | **6528** | ✅ T-14 |
+| `_count_dialogue_state_change_markers` | **6544** | **D-27 B 组**（三类语义一个都认不出，归 T-26） |
+| `UNDECLARED_DIALOGUE_STATE_MARKER_FLOOR = 1` | **6562** | ✅ T-13 |
+| `_evaluate_dialogue_changes_state`（✅ 批 8 改三态） | **6565** | **D-07 ✅ 已修** |
+| ↳ `dialogue_state_applicable` 产出点 | **6598** | ✅ T-13 |
+| `ENDING_CORE_WEAK_ONLY_LIMIT` / `ENDING_CORE_FLAT_CHARS` | **6607 / 6615** | ✅ D-24 |
+| `_evaluate_ending_pressure`（含 `raw_text` 形参与末段否决） | **6619** | ✅ D-03 / D-04 / D-24 |
+| `STATIC_ACTION_MARKERS`（34 项）/ `AMBIENT_MOTION_MARKERS`（10 项） | **6704 / 6716** | ✅ T-09 |
+| `_estimate_static_description_runs`（`staticmethod` → `classmethod`） | **6777** | ✅ T-09 |
+| `_evaluate_repetition_risk`（照搬孤儿版 949-980） | **6794** | ✅ T-10 |
+| `_detect_chapter_artifact_markers`（只检测不清理） | **6842** | D-11 |
+| `_score_story_quality_candidate` 主体 | **6879** | D-09 / D-13 |
+| ↳ `static_description_risk` 四条 or（**第 2 条门槛 `>= 3` 不要放松，D-25 哨兵守着**） | **6952-6960** | ✅ T-08 |
+| ↳ 静态判罚 `score -= 260` / 重复判罚 `score -= 420` | **6998 / 7000** | ✅ T-08 / T-10 |
+| ↳ 密度三判定三分支计分（`is True` / `is False`，**不要改回真假判断**） | **7057** | ✅ T-14 |
+| ↳ `dialogue_changes_state` 三分支计分（±140） | **7037** | ✅ T-13 |
+| `quality_metric_snapshot` 白名单（**新增字段必须加进来，唯一静默丢弃点**） | **7115-7122** | 9.2 |
+| `_fallback_select_best_version`（第 4 层，默认值取 0 而非删除） | **7155** | D-13 ✅ |
+| `_should_override_ai_review_choice`（第 4 层 AI 复核覆盖） | **7207** | ✅ T-13 |
+| `_resolve_chapter_generation_soft_timeout` | **1331** | — |
+| `_resolve_chapter_mission_timeout` | **1345** | **D-27 B 组**（`(700)` 实际 30.0 / 测试要 20.0） |
+| `_resolve_chapter_generation_max_tokens` | **1561** | **D-27 B 组**（`(700)` 实际 3200 / 测试要 2200） |
+| **`_resolve_writer_prompt_budget`（不存在，待实现）** | — | **D-27 A 组 / T-24**（上面两个的缺失第三成员） |
 | ~~`_score_fallback_candidate`（必崩死代码）~~ | 已删 | ✅ D-19 / T-01 |
-| `_fallback_select_best_version`（调评分不传字数） | 7771 | D-13 |
-| EXTRACTABLE 注释三处（✅ 均在语句外） | 395 / 7310 / 7994 | D-17 已修 |
-| ↳ 对应 END 三处 | 905 / 7768 / 8267 | 批 3 顺带把 story_scoring 的 END 从 return 字面量里挪出来 |
+| EXTRACTABLE 注释三处（✅ 均在语句外） | **380 / 6311 / 7397** | D-17 已修 |
+| `PipelineConfig.min_word_count` / `enforce_min_word_count` | **102 / 105** | D-15 / D-13 |
 
 ### A.2 其它后端文件
 
@@ -3132,15 +3119,19 @@ cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m 
 | `prompt_service.py`（**仅 97 行**） | `get_prompt(name)` 走 DB | — | **E-01** |
 | `ai_review_service.py` | `_format_mission_checklist`（把 inherit 喂给 review） | 230-247 | E-07 |
 | `pipeline_chapter_mission.py` | 任务书生成 / Schema / 合并 | 130 / 208 / 382 / 659 | E-10 |
-| `test_generation_quality_guards.py`（**批 6 后 3414 行 / 143 测试**） | `deliver_to_next` 动态注入（机制正确，保留） | 901 | D-06 / T-15 |
-| ↳ | 防误杀锚点 `test_ending_pressure_still_accepts_semantic_hook_without_punctuation` | 2431 | 批 2 |
-| ↳ | 防误杀锚点 `test_event_density_still_accepts_dramatic_scene`（**调阈值唯一自动化防线**） | 2566 | T-04 / T-06 |
-| ↳ | `class TestBadSampleRegression`（批 4，9 条） | 见 8.3 | ✅ T-07 |
-| ↳ | 批 5 新增 4 条 + 1 条改名反转（结构门修复闭环） | 见 7 节批 5 记录 | ✅ T-22 |
-| ↳ | `class TestStaticActionMarkerTable`（批 6，5 条） | 3080 | ✅ T-09 |
-| ↳ | `class TestStaticDescriptionRiskBranches`（批 6，8 条） | 3130 | ✅ T-08 / D-25 |
-| ↳ | `class TestRepeatedParagraphFlood`（批 6，7 条） | 3232 | ✅ T-10 |
-| ↳ | `class TestEndingCoreWindow`（批 6，7 条） | 3317 | ✅ D-24 |
+| `test_generation_quality_guards.py`（**批 8 后 4438 行 / 188 收集 / 167 passed, 21 failed**） | `_SAMPLE_TARGET_WORDS` / `_SAMPLE_MIN_WORDS`（批 7 提到文件头，gate 类测试共用） | **23** | ✅ T-12 |
+| ↳ | `class TestBadSampleRegression`（批 4，9 条） | **3016** | ✅ T-07 |
+| ↳ | `class TestStaticActionMarkerTable`（批 6，5 条） | **3127** | ✅ T-09 |
+| ↳ | `class TestStaticDescriptionRiskBranches`（批 6，8 条） | **3177** | ✅ T-08 / D-25 |
+| ↳ | `class TestRepeatedParagraphFlood`（批 6，7 条） | **3279** | ✅ T-10 |
+| ↳ | `class TestEndingCoreWindow`（批 6，7 条） | **3366** | ✅ D-24 |
+| ↳ | `class TestFocusCharacterAbsence`（批 7） | **3494** | ✅ T-11 |
+| ↳ | `class TestWordCountPenalties`（批 7） | **3662** | ✅ T-12 |
+| ↳ | `class TestDialogueStateTriState`（批 8） | **3968** | ✅ T-13 |
+| ↳ | `class TestDialogueStateTriStateWiringAcrossLayers`（批 8，四层接线） | **4093** | ✅ T-13 |
+| ↳ | `class TestEventDensityNotEvaluated`（批 8） | **4222** | ✅ T-14 |
+| ↳ | `class TestEventDensityNotEvaluatedWiringAcrossLayers`（批 8，四层接线） | **4353** | ✅ T-14 |
+| ↳ | **21 个失败测试**（引用 9 个从未实现的方法） | 见 **D-27 A 组**表 | **T-24** |
 | `api/routers/writer.py`（5899 行） | `_resolve_quality_candidate_version_count` | 1137 | 成本 |
 | ↳ | `high_quality_longform = requested_target >= 4500` | 1318 | 成本 |
 | ↳ | 质量门失败 → `decision="quality_gate_failed"` | 3359 | D-21 |
@@ -3149,34 +3140,58 @@ cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m 
 
 | 文件 | 内容 | 参考行号 | 相关 |
 |---|---|---|---|
-| `frontend/src/utils/chapterQuality.ts` | 指标读取优先级链 | 38-61 | 9.2 |
-| ↳ | 本地兜底文案（**漏了 event_density**） | 79-87 | **D-22** |
-| ↳ | 后端 label 不二次翻译的约定 | 76 | 9.2 |
-| ↳ | tone 计算 | 106 | D-22 |
-| `frontend/src/utils/chapterQuality.spec.ts` | 92 行 | — | D-22 验收 |
+| `frontend/src/utils/chapterQuality.ts`（**批 8 后 129 行**） | 三态字段的 `=== false` 判据（**`null` 不得算失败**） | **21 / 23** | ✅ **D-22 / T-13 / T-14** |
+| ↳ | 本地兜底文案（✅ 批 8 补齐 3 条 event_density） | **104 / 106** | ✅ **D-22 已修** |
+| `frontend/src/utils/chapterQuality.spec.ts`（**批 8 后 160 行 / 5 测试全绿**） | `treats null tri-state metrics as not-applicable rather than failures`（**三态前端闭环**） | **127** | ✅ D-22 |
 | `WDSidebar.vue` / `WDWorkspace.vue` / `VersionSelector.vue` / `WDVersionDetailModal.vue` | 均有配套 `.spec.ts` | — | 9.2 |
 
 ---
 
 ## 附录 B：命令速查
 
-> **环境注意**（本轮全部踩过）：① `cd` **不跨 Bash 调用持久**，每条命令自带 `cd`；② 加 `PYTHONIOENCODING=utf-8` 防 GBK 乱码；③ 不要用长 `&&` 链，用 `;` 分隔并在末尾 `echo "===EXIT $?==="`；④ **不要在仓库根跑 `grep -r`**（`node_modules` 会让它超过 120s 被转后台），用 ripgrep 或限定 `backend/app` 范围。
+> **环境注意**（本轮全部踩过）：① `cd` **不跨 Bash 调用持久**，每条命令自带 `cd`；**后台命令尤其如此**，否则报 `file or directory not found: app`；② 加 `PYTHONIOENCODING=utf-8` 防 GBK 乱码；③ 不要用长 `&&` 链，用 `;` 分隔并在末尾 `echo "===EXIT $?==="`；④ **不要在仓库根跑 `grep -r`**（`node_modules` 会让它超过 120s 被转后台），用 ripgrep 或限定 `backend/app` 范围；⑤ **全量测试必须带四个 `-p no:` 开关**，见下方第一条 —— 少一个就是假绿（D-26）。
+
+**① 后端全量（唯一正确的写法）**：
 
 ```bash
-cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m pytest app -q 2>&1 | tail -5
+cd /d/小说写作/xuanqiong-wenshu/backend && python -m pytest app -p no:randomly -p no:anyio -p no:seleniumbase -p no:sb_manager -q --timeout=120 --timeout-method=thread -rf 2>&1 | tail -45
 ```
 
+期望 `727 passed, 36 failed`（2026-08-19）。**`-rf` 是必需的**：36 个先存失败要逐条和 D-27 的表对，光看数字对不出「是不是换人了」。
+
+> ⚠️ **绝对不要用** `python -m pytest app -q`（裸跑）。它会因 anyio/asyncio 插件冲突静默吞测试、丢输出、并返回退出码 0 —— 本文档历史上所有「全量全绿」都是这么来的（D-26）。
+
+**② 后端定向（质量守卫，最常用；同步测试不受 D-26 影响）**：
+
 ```bash
-cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m pytest app/services/test_generation_quality_guards.py -q 2>&1 | tail -5
+cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m pytest app/services/test_generation_quality_guards.py -p no:randomly -p no:anyio -q 2>&1 | tail -5
+```
+
+期望 `167 passed, 21 failed`（21 个全是 D-27 A 组欠账）。
+
+**③ 快速护栏（改质量门前先跑这条，约 3.4s）**：
+
+```bash
+cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m pytest app/services/test_generation_quality_guards.py -p no:anyio -q -k "BadSampleRegression or StaticActionMarkerTable or StaticDescriptionRiskBranches or RepeatedParagraphFlood or EndingCoreWindow" 2>&1 | tail -3
+```
+
+**④ 批 8 三态专项（T-13 / T-14 四层接线）**：
+
+```bash
+cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m pytest app/services/test_generation_quality_guards.py -p no:anyio -q -k "TriState or NotEvaluated" 2>&1 | tail -3
 ```
 
 ```bash
 cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m pytest app/services/test_generation_quality_guards.py -q -k "event_density" 2>&1 | tail -20
 ```
 
+**⑤ 前端定向（`npm run test:unit` 在本机不可用，用 `npx vitest run`）**：
+
 ```bash
-cd /d/小说写作/xuanqiong-wenshu/frontend && npm run test:unit -- src/utils/chapterQuality.spec.ts
+cd /d/小说写作/xuanqiong-wenshu/frontend && npx vitest run src/utils/chapterQuality.spec.ts 2>&1 | tail -8
 ```
+
+期望 `5 passed`（2026-08-19 实测 29.29s；`environment 18.04s` 是 jsdom 启动，正常）。
 
 ```bash
 cd /d/小说写作/xuanqiong-wenshu/backend && grep -n "STORY_PROGRESSION_MARKERS\|_unit_has_progression\|density_floor" app/services/pipeline_orchestrator.py
