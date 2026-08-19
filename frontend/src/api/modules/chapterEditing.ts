@@ -1,6 +1,8 @@
+import { buildAuthHeaders } from '@/stores/auth'
 import { API_BASE_URL } from '@/api/config'
 import { ApiError, type Chapter } from '@/api/novel'
 import { normalizeChapterContent } from '@/utils/chapterContent'
+const authFetch = (input: RequestInfo | URL, init: RequestInit = {}) => fetch(input, { ...init, headers: buildAuthHeaders(init.headers) })
 
 const WRITER_PREFIX = '/api/writer'
 const WRITER_BASE = `${API_BASE_URL}${WRITER_PREFIX}/novels`
@@ -30,7 +32,7 @@ const request = async (url: string, options: RequestInit = {}) => {
 
   let response: Response
   try {
-    response = await fetch(url, { ...options, headers })
+    response = await authFetch(url, { ...options, headers })
   } catch {
     throw new Error('网络连接失败，请检查网络后重试')
   }

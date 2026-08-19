@@ -39,7 +39,7 @@
                 </div>
 
                 <div class="m3-reader-dialog__actions">
-                  <button type="button" class="xq-dialog-close md-ripple" @click="$emit('close')" aria-label="关闭阅读层">
+                  <button type="button" class="xq-dialog-close md-ripple" @click="$emit('close')" :aria-label="pick('关闭阅读层', 'Close reader')">
                     ×
                   </button>
                 </div>
@@ -52,16 +52,16 @@
               <div class="xq-dialog-footer m3-reader-dialog__foot">
                 <div class="m3-reader-dialog__foot-note">
                   <span v-if="confirmVersionIndex !== null && confirmVersionIndex !== undefined">
-                    这是一版可直接确认的候选正文。
+                    {{ pick('这是一版可直接确认的候选正文。', 'This candidate draft is ready to confirm.') }}
                   </span>
                   <span v-else>
-                    这是完整内容预览，方便你先看清再决定下一步。
+                    {{ pick('这是完整内容预览，方便你先看清再决定下一步。', 'A full preview, so you can read it through before deciding what to do next.') }}
                   </span>
                 </div>
 
                 <div class="m3-reader-dialog__foot-actions">
                   <button type="button" class="md-btn md-btn-outlined md-ripple" @click="$emit('close')">
-                    关闭
+                    {{ t('common.close') }}
                   </button>
                   <button
                     v-if="confirmVersionIndex !== null && confirmVersionIndex !== undefined"
@@ -70,7 +70,7 @@
                     :disabled="confirmDisabled"
                     @click="$emit('confirm')"
                   >
-                    {{ confirmLabel }}
+                    {{ resolvedConfirmLabel }}
                   </button>
                 </div>
               </div>
@@ -83,7 +83,9 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Dialog, DialogPanel, DialogTitle, TransitionChild, TransitionRoot } from '@headlessui/vue'
+import { useLocale } from '@/composables/useLocale'
 
 interface Props {
   show: boolean
@@ -96,9 +98,8 @@ interface Props {
   confirmDisabled?: boolean
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   chips: () => [],
-  confirmLabel: '确认这一版',
   confirmVersionIndex: null,
   confirmDisabled: false
 })
@@ -107,6 +108,11 @@ defineEmits<{
   (e: 'close'): void
   (e: 'confirm'): void
 }>()
+
+const { pick, t } = useLocale()
+
+// 确认按钮兜底文案随语言切换刷新，因此放在 computed 而非 props 默认值里
+const resolvedConfirmLabel = computed(() => props.confirmLabel || pick('确认这一版', 'Confirm this version'))
 </script>
 
 <style scoped>

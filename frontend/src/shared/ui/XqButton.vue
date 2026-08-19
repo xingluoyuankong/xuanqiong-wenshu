@@ -16,7 +16,7 @@
 <script setup lang="ts">
 withDefaults(
   defineProps<{
-    variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
+    variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'outline' | 'text'
     size?: 'sm' | 'md' | 'lg'
     loading?: boolean
     disabled?: boolean
@@ -115,4 +115,25 @@ withDefaults(
     transform: rotate(360deg);
   }
 }
+
+.xq-button--outline {
+  color: #2563eb;
+  background: transparent;
+  border-color: #2563eb;
+}
+.xq-button--outline:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.06);
+}
+.xq-button--text {
+  color: #475569;
+  background: transparent;
+  border-color: transparent;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+.xq-button--text:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.08);
+  color: #0f172a;
+}
+
 </style>

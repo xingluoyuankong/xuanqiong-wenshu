@@ -241,6 +241,12 @@ export interface GenerationRuntimeEvent {
   developer_detail?: Record<string, any>
   message?: string
   metadata?: Record<string, any>
+  /** 正文分片：只有后端 content_delta 事件才会带，日志事件必须为空。 */
+  content_delta?: string
+  /** 该分片是否只是预览（预览可被后续分片替换，非预览要按段累积）。 */
+  content_is_preview?: boolean
+  /** 长篇分段序号，用于按段去重累积。 */
+  segment_index?: number
 }
 
 export interface GenerationRuntime {
@@ -259,6 +265,21 @@ export interface GenerationRuntime {
   chapter_number?: number
   allowed_actions?: string[]
   last_error_summary?: string | null
+  task_id?: string | null
+  task_status?: string | null
+  task_stage?: string | null
+  task_message?: string | null
+  event_cursor?: number
+  task_event_cursor?: number
+  retry_count?: number
+  max_retries?: number
+  lease_owner?: string | null
+  heartbeat_at?: string | null
+  elapsed_ms?: number | null
+  input_tokens?: number | null
+  output_tokens?: number | null
+  total_tokens?: number | null
+  recovered_from_reload?: boolean
   events?: GenerationRuntimeEvent[]
   [key: string]: any
 }
@@ -414,6 +435,12 @@ export interface GenerateOutlineOptions {
   targetTotalChapters?: number
   targetTotalWords?: number
   chapterWordTarget?: number
+  /** 长篇分卷模式：卷数 */
+  volumeCount?: number
+  /** 长篇分卷模式：每卷章节数 */
+  chaptersPerVolume?: number
+  /** 强制走长篇大纲生成器 */
+  longForm?: boolean
 }
 
 export interface GenerateChapterOptions {
@@ -421,6 +448,8 @@ export interface GenerateChapterOptions {
   qualityRequirements?: string
   minWordCount?: number
   targetWordCount?: number
+  segmentWordLimit?: number
+  generationTimeoutSeconds?: number
   preset?: 'basic' | 'enhanced' | 'longform' | 'ultimate'
   enableConsistency?: boolean
   enableEnrichment?: boolean
@@ -645,39 +674,109 @@ export interface ForeshadowingReminderItem {
 
 
 // ===== Research Types =====
-export interface ResearchConfig {
-  mode: "auto" | "manual"
+export type ResearchMode = 'auto' | 'ask' | 'off'
+export type ResearchScope = 'global' | 'enhanced' | 'chapter'
+
+export interface ResearchConfigUpdate {
+  mode: ResearchMode
   enabled: boolean
-  search_provider: string
+  search_provider: 'tavily' | 'serper' | 'bing' | 'none'
+  search_base_url?: string | null
+  search_api_key?: string | null
+  clear_search_api_key?: boolean
+  research_llm_base_url?: string | null
+  research_llm_model?: string | null
+  research_llm_api_key?: string | null
+  clear_research_llm_api_key?: boolean
   reuse_writing_llm: boolean
-  local_model_enabled: boolean
-  local_model_name?: string
-  local_model_base_url?: string
-  local_model_api_key?: string
-  max_sources: number
+  local_model_enabled: false
+  global_research_enabled: boolean
+  enhanced_research_enabled: boolean
+  chapter_research_enabled: boolean
+  max_parallel_queries: number
+  max_results_per_query: number
+  preferred_domains: string[]
+  blocked_domains: string[]
   category_preferences: string[]
 }
 
-export interface ResearchArtifact {
-  id: string
+export interface ResearchConfig extends ResearchConfigUpdate {
   project_id: string
-  run_id?: string
-  title: string
-  url?: string
-  notes?: string
-  source_type: string
-  status: "pending" | "completed" | "cancelled" | "interrupted"
-  content_preview?: string
-  created_at: string
-  updated_at: string
+  search_api_key_masked?: string | null
+  search_api_key_configured: boolean
+  research_llm_api_key_masked?: string | null
+  research_llm_api_key_configured: boolean
+  provider_priority: string[]
 }
 
-export interface ResearchRunStatus {
+export interface ResearchSource {
+  url: string
+  title?: string | null
+  snippet?: string | null
+  credibility_score?: number | null
+  trust_tier?: string | null
+  cross_source_count?: number | null
+  [key: string]: unknown
+}
+
+export interface ResearchArtifact {
+  id: number
   run_id: string
-  status: "running" | "completed" | "failed" | "cancelled"
-  progress_percent: number
-  message?: string
-  artifacts_count: number
-  started_at?: string
-  completed_at?: string
+  project_id: string
+  scope: ResearchScope
+  chapter_number?: number | null
+  status: string
+  trigger: string
+  query_plan: Array<Record<string, unknown>>
+  sources: ResearchSource[]
+  category_payload: Record<string, unknown>
+  summary?: string | null
+  file_manifest: Record<string, unknown>
+  provider_metadata: Record<string, unknown>
+  error?: Record<string, unknown> | null
+  started_at?: string | null
+  finished_at?: string | null
+}
+
+export interface ResearchRunRequest {
+  scope: ResearchScope
+  chapter_number?: number
+  consent: boolean
+  force: boolean
+  trigger: string
+  context?: Record<string, unknown>
+}
+
+export interface ResearchJobRead {
+  run_id: string
+  project_id: string
+  scope: ResearchScope
+  chapter_number?: number | null
+  status: string
+  cancel_signal_sent: boolean
+  in_process_task_cancelled: boolean
+  artifact?: ResearchArtifact | null
+}
+
+/** @deprecated Use ResearchJobRead. */
+export type ResearchRunStatus = ResearchJobRead
+
+// ===== Research Archive Types =====
+export interface ResearchArchive {
+  id: string
+  project_id: string
+  title: string
+  content: string
+  excerpt?: string | null
+  category?: string | null
+  source_url?: string | null
+  created_at: string
+  updated_at?: string | null
+}
+
+export interface ResearchArchiveCreate {
+  title: string
+  content: string
+  category?: string | null
+  source_url?: string | null
 }

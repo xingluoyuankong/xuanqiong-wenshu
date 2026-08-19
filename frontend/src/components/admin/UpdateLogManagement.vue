@@ -3,9 +3,9 @@
   <n-card :bordered="false" class="admin-card">
     <template #header>
       <div class="card-header">
-        <span class="card-title">更新日志管理</span>
+        <span class="card-title">{{ pick('更新日志管理', 'Update log management') }}</span>
         <n-button quaternary size="small" @click="fetchLogs" :loading="loading">
-          刷新
+          {{ pick('刷新', 'Refresh') }}
         </n-button>
       </div>
     </template>
@@ -17,28 +17,31 @@
 
       <n-card size="small" class="form-card">
         <n-form :model="form" label-placement="top">
-          <div class="form-tip">这里发布的是用户可见更新说明。若勾选置顶，会优先展示在日志列表顶部。</div>
-          <n-form-item label="更新内容">
+          <div class="form-tip">{{ pick(
+            '这里发布的是用户可见更新说明。若勾选置顶，会优先展示在日志列表顶部。',
+            'What you publish here is the user-facing release note. Pinned entries show at the top of the list.'
+          ) }}</div>
+          <n-form-item :label="pick('更新内容', 'Release note')">
             <n-input
               v-model:value="form.content"
               type="textarea"
               :autosize="{ minRows: 3, maxRows: 10 }"
-              placeholder="输入新的更新日志..."
+              :placeholder="pick('输入新的更新日志...', 'Write a new update log…')"
             />
           </n-form-item>
-          <n-form-item label="置顶">
+          <n-form-item :label="pick('置顶', 'Pin')">
             <n-switch v-model:value="form.isPinned" />
           </n-form-item>
           <n-space justify="end">
             <n-button type="primary" :loading="submitting" @click="addLog" :disabled="!form.content.trim()">
-              发布日志
+              {{ pick('发布日志', 'Publish') }}
             </n-button>
           </n-space>
         </n-form>
       </n-card>
 
       <n-spin :show="loading">
-        <n-empty v-if="!logs.length && !loading" description="目前还没有更新记录" />
+        <n-empty v-if="!logs.length && !loading" :description="pick('目前还没有更新记录', 'No update records yet')" />
         <n-space v-else vertical size="large">
           <n-card
             v-for="log in orderedLogs"
@@ -49,7 +52,7 @@
           >
             <div class="log-header">
               <n-space align="center" size="small">
-                <n-tag v-if="log.is_pinned" type="warning" :bordered="false">置顶</n-tag>
+                <n-tag v-if="log.is_pinned" type="warning" :bordered="false">{{ pick('置顶', 'Pinned') }}</n-tag>
                 <span class="log-date">{{ formatDate(log.created_at) }}</span>
                 <span v-if="log.created_by" class="log-author">by {{ log.created_by }}</span>
               </n-space>
@@ -58,24 +61,27 @@
                   :value="log.is_pinned"
                   size="small"
                   :loading="togglingId === log.id"
-                  @update:value="(value) => togglePin(log, value)"
+                  @update:value="(value: boolean) => togglePin(log, value)"
                 >
-                  <template #checked>已置顶</template>
-                  <template #unchecked>未置顶</template>
+                  <template #checked>{{ pick('已置顶', 'Pinned') }}</template>
+                  <template #unchecked>{{ pick('未置顶', 'Not pinned') }}</template>
                 </n-switch>
                 <n-popconfirm
                   placement="left"
-                  positive-text="删除"
-                  negative-text="取消"
+                  :positive-text="pick('删除', 'Delete')"
+                  :negative-text="pick('取消', 'Cancel')"
                   type="error"
                   @positive-click="() => deleteLog(log.id)"
                 >
                   <template #trigger>
                     <n-button quaternary type="error" size="small" :loading="deletingId === log.id">
-                      删除
+                      {{ pick('删除', 'Delete') }}
                     </n-button>
                   </template>
-                  确认删除这条更新日志？“{{ log.content.slice(0, 30) }}{{ log.content.length > 30 ? '…' : '' }}” 删除后无法恢复。
+                  {{ pick(
+                    `确认删除这条更新日志？“${logExcerpt(log.content)}” 删除后无法恢复。`,
+                    `Delete this update log? “${logExcerpt(log.content)}” This cannot be undone.`
+                  ) }}
                 </n-popconfirm>
               </n-space>
             </div>
@@ -108,8 +114,10 @@ import {
 
 import { AdminAPI, type UpdateLog } from '@/api/admin'
 import { useAlert } from '@/composables/useAlert'
+import { useLocale } from '@/composables/useLocale'
 
 const { showAlert } = useAlert()
+const { pick, formatDateTime } = useLocale()
 
 const logs = ref<UpdateLog[]>([])
 const loading = ref(false)
@@ -137,7 +145,7 @@ const fetchLogs = async () => {
   try {
     logs.value = await AdminAPI.listUpdateLogs()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '获取更新日志失败'
+    error.value = err instanceof Error ? err.message : pick('获取更新日志失败', 'Failed to load the update logs')
   } finally {
     loading.value = false
   }
@@ -158,9 +166,9 @@ const addLog = async () => {
     })
     logs.value.unshift(created)
     resetForm()
-    showAlert('更新日志发布成功', 'success')
+    showAlert(pick('更新日志发布成功', 'Update log published'), 'success')
   } catch (err) {
-    showAlert(err instanceof Error ? err.message : '发布失败', 'error')
+    showAlert(err instanceof Error ? err.message : pick('发布失败', 'Publish failed'), 'error')
   } finally {
     submitting.value = false
   }
@@ -171,9 +179,9 @@ const deleteLog = async (id: number) => {
   try {
     await AdminAPI.deleteUpdateLog(id)
     logs.value = logs.value.filter((item) => item.id !== id)
-    showAlert('删除成功', 'success')
+    showAlert(pick('删除成功', 'Deleted'), 'success')
   } catch (err) {
-    showAlert(err instanceof Error ? err.message : '删除失败', 'error')
+    showAlert(err instanceof Error ? err.message : pick('删除失败', 'Delete failed'), 'error')
   } finally {
     deletingId.value = null
   }
@@ -188,28 +196,16 @@ const togglePin = async (log: UpdateLog, value: boolean) => {
       logs.value.splice(index, 1, updated)
     }
   } catch (err) {
-    showAlert(err instanceof Error ? err.message : '更新失败', 'error')
+    showAlert(err instanceof Error ? err.message : pick('更新失败', 'Update failed'), 'error')
   } finally {
     togglingId.value = null
   }
 }
 
-const formatDate = (date: string) => {
-  try {
-    const d = new Date(date)
-    if (isNaN(d.getTime())) return date
-    
-    const year = d.getFullYear()
-    const month = String(d.getMonth() + 1).padStart(2, '0')
-    const day = String(d.getDate()).padStart(2, '0')
-    const hours = String(d.getHours()).padStart(2, '0')
-    const minutes = String(d.getMinutes()).padStart(2, '0')
-    
-    return `${year}年${month}月${day}日 ${hours}:${minutes}`
-  } catch (error) {
-    return date
-  }
-}
+// 删除确认里的日志摘要，超长截断
+const logExcerpt = (content: string) => `${content.slice(0, 30)}${content.length > 30 ? '…' : ''}`
+
+const formatDate = (date: string) => formatDateTime(date) || date
 
 onMounted(fetchLogs)
 </script>

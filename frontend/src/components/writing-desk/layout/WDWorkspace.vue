@@ -1,12 +1,16 @@
 ﻿<template>
   <div class="wd-workspace-root">
     <FloatingProgressCard
-      :visible="showFloatingProgress"
+      :visible="floatingProgressVisible"
       :title="floatingProgressTitle"
       :stage="floatingProgressStage"
       :progress-percent="floatingProgressPercent"
       :word-count="floatingProgressWordCount"
       :status="floatingProgressStatus"
+      :task-id="chapterRuntime?.task_id || chapterRuntime?.run_id"
+      :task-status="chapterRuntime?.task_status"
+      :retry-count="chapterRuntime?.retry_count"
+      :task-recovered="Boolean(chapterRuntime?.recovered_from_reload)"
       @close="showFloatingProgress = false"
     
       :detail-message="floatingProgressDetail"
@@ -15,37 +19,37 @@
       <header v-if="selectedChapterNumber" class="wd-workspace-head">
         <div class="wd-workspace-head__main">
           <div class="wd-workspace-head__eyebrow">
-            <span class="wd-workspace-head__number">第 {{ selectedChapterNumber }} 章</span>
+            <span class="wd-workspace-head__number">{{ pick(`第 ${selectedChapterNumber} 章`, `Chapter ${selectedChapterNumber}`) }}</span>
             <span :class="['wd-workspace-head__state', chapterStateClass]">{{ selectedChapterStatusText }}</span>
             <span v-if="chapterIsBusy" class="wd-workspace-head__tag wd-workspace-head__tag--warning">
-              后台任务
+              {{ pick('后台任务', 'Background task') }}
             </span>
           </div>
 
           <div class="wd-workspace-head__title">
-            <h2>{{ selectedChapterOutline?.title || '未命名章节' }}</h2>
+            <h2>{{ selectedChapterOutline?.title || pick('未命名章节', 'Untitled chapter') }}</h2>
           </div>
         </div>
 
         <div class="wd-workspace-head__side">
           <div class="wd-workspace-head__meta">
-            <span v-if="selectedChapter?.word_count">正文 {{ selectedChapter.word_count }} 字</span>
-            <span v-if="selectedChapter?.versions?.length">候选 {{ selectedChapter.versions.length }} 版</span>
+            <span v-if="selectedChapter?.word_count">{{ pick(`正文 ${selectedChapter.word_count} 字`, `Draft: ${selectedChapter.word_count} words`) }}</span>
+            <span v-if="selectedChapter?.versions?.length">{{ pick(`候选 ${selectedChapter.versions.length} 版`, `${selectedChapter.versions.length} candidates`) }}</span>
             <span v-if="chapterWordGoalText">{{ chapterWordGoalText }}</span>
             <span v-if="chapterWordExecutionText" :class="['wd-workspace-head__meta-pill', chapterWordExecutionClass]">{{ chapterWordExecutionText }}</span>
             <span v-if="chapterWordStatusHint" :class="['wd-workspace-head__meta-pill', chapterWordExecutionClass]">{{ chapterWordStatusHint }}</span>
-            <span v-if="chapterQualitySummary" :class="['wd-workspace-head__meta-pill', chapterQualityClass]" :title="chapterQualitySummary.issues.join('；')">
+            <span v-if="chapterQualitySummary" :class="['wd-workspace-head__meta-pill', chapterQualityClass]" :title="chapterQualitySummary.issues.join(pick('；', '; '))">
               {{ chapterQualitySummary.label }}
             </span>
-            <span v-if="generationRuntime?.enrichment_triggered" class="wd-workspace-head__meta-pill wd-workspace-head__meta-pill--warning">已触发补字数</span>
-            <span v-if="lastStatusSyncText">更新 {{ lastStatusSyncText }}</span>
+            <span v-if="generationRuntime?.enrichment_triggered" class="wd-workspace-head__meta-pill wd-workspace-head__meta-pill--warning">{{ pick('已触发补字数', 'Word-count top-up triggered') }}</span>
+            <span v-if="lastStatusSyncText">{{ pick(`更新 ${lastStatusSyncText}`, `Updated ${lastStatusSyncText}`) }}</span>
           </div>
 
           <div class="wd-workspace-head__actions">
-            <span class="wd-workspace-tool-label">内容工具</span>
+            <span class="wd-workspace-tool-label">{{ pick('内容工具', 'Content tools') }}</span>
             <button type="button" class="md-btn md-btn-text md-ripple m3-action-btn m3-action-btn--quiet" @click="$emit('fetchChapterStatus')">
               <RefreshCw class="wd-btn-icon" aria-hidden="true" />
-              刷新状态
+              {{ pick('刷新状态', 'Refresh status') }}
             </button>
             <button
               v-if="canOpenReader"
@@ -54,7 +58,7 @@
               @click="openPrimaryReader"
             >
               <BookOpen class="wd-btn-icon" aria-hidden="true" />
-              全文阅读
+              {{ pick('全文阅读', 'Read full text') }}
             </button>
             <button
               v-if="selectedChapterNumber !== null && isChapterCompleted(selectedChapterNumber)"
@@ -63,7 +67,7 @@
               @click="openEditModal"
             >
               <Pencil class="wd-btn-icon" aria-hidden="true" />
-              正文编辑
+              {{ pick('正文编辑', 'Edit draft') }}
             </button>
             <button
               v-if="selectedChapterNumber !== null && isChapterCompleted(selectedChapterNumber)"
@@ -72,21 +76,21 @@
               @click="openPatchDiffModal"
             >
               <Wrench class="wd-btn-icon" aria-hidden="true" />
-              精细编辑
+              {{ pick('精细编辑', 'Fine-tune') }}
             </button>
           </div>
         </div>
       </header>
 
-      <section v-if="project" class="wd-health-panel" aria-label="项目健康检查">
+      <section v-if="project" class="wd-health-panel" :aria-label="pick('项目健康检查', 'Project health check')">
         <div class="wd-health-panel__lead">
           <div>
-            <p class="wd-strip-kicker">项目体检</p>
+            <p class="wd-strip-kicker">{{ pick('项目体检', 'Project checkup') }}</p>
             <h3>{{ projectHealthTitle }}</h3>
             <p v-if="healthPanelOpen">{{ projectHealthHint }}</p>
           </div>
           <button type="button" class="wd-health-toggle" @click="healthPanelOpen = !healthPanelOpen">
-            {{ healthPanelOpen ? '收起' : '展开' }}
+            {{ healthPanelOpen ? pick('收起', 'Collapse') : pick('展开', 'Expand') }}
           </button>
         </div>
         <div v-if="healthPanelOpen" class="wd-health-grid">
@@ -105,9 +109,12 @@
       <section v-if="chapterOverviewItems.length" class="wd-chapter-strip">
         <div class="wd-strip-head">
           <div>
-            <p class="wd-strip-kicker">章节总览</p>
-            <h3>横向切换章节</h3>
-            <p class="wd-strip-note">直接点章节卡切换；上一章 / 下一章 已收口到顶部，避免这里再放一套重复导航。</p>
+            <p class="wd-strip-kicker">{{ pick('章节总览', 'Chapter overview') }}</p>
+            <h3>{{ pick('横向切换章节', 'Switch chapters horizontally') }}</h3>
+            <p class="wd-strip-note">{{ pick(
+              '直接点章节卡切换；上一章 / 下一章 已收口到顶部，避免这里再放一套重复导航。',
+              'Click a chapter card to switch. Previous / next now live at the top, so this strip does not duplicate that navigation.'
+            ) }}</p>
           </div>
         </div>
 
@@ -119,7 +126,7 @@
             :class="['wd-strip-chip', item.chapterNumber === selectedChapterNumber ? 'wd-strip-chip--active' : '', `wd-strip-chip--${item.statusTone}`]"
             @click="$emit('selectChapter', item.chapterNumber)"
           >
-            <strong>第 {{ item.chapterNumber }} 章</strong>
+            <strong>{{ pick(`第 ${item.chapterNumber} 章`, `Chapter ${item.chapterNumber}`) }}</strong>
             <span>{{ item.title }}</span>
           </button>
         </div>
@@ -159,14 +166,14 @@
         class="wd-workspace-scroll-top"
         @click="scrollWorkspaceToTop"
       >
-        返回顶部
+        {{ pick('返回顶部', 'Back to top') }}
       </button>
     </div>
 
     <div v-if="showEditModal" class="md-dialog-overlay" @click.self="closeEditModal">
       <div class="md-dialog w-full max-w-5xl m3-editor-dialog flex flex-col">
         <div class="flex items-center justify-between border-b p-6" style="border-bottom-color: var(--md-outline-variant);">
-          <h3 class="md-title-large font-semibold">编辑第 {{ selectedChapterNumber }} 章正文</h3>
+          <h3 class="md-title-large font-semibold">{{ pick(`编辑第 ${selectedChapterNumber} 章正文`, `Edit the draft of chapter ${selectedChapterNumber}`) }}</h3>
           <button type="button" class="md-icon-btn md-ripple" @click="closeEditModal">
             <X class="h-6 w-6" aria-hidden="true" />
           </button>
@@ -174,14 +181,14 @@
 
         <div class="min-h-0 flex-1 overflow-y-auto p-6">
           <div class="flex h-full flex-col">
-            <label class="md-text-field-label mb-2">章节正文</label>
+            <label class="md-text-field-label mb-2">{{ pick('章节正文', 'Chapter draft') }}</label>
             <textarea
               v-model="editingContent"
               class="md-textarea flex-1 w-full resize-none"
-              placeholder="请输入章节正文..."
+              :placeholder="pick('请输入章节正文...', 'Enter the chapter draft…')"
               :disabled="isSaving"
             />
-            <div class="md-body-small md-on-surface-variant mt-2">字数统计：{{ editingContent.length }}</div>
+            <div class="md-body-small md-on-surface-variant mt-2">{{ pick(`字数统计：${editingContent.length}`, `Word count: ${editingContent.length}`) }}</div>
           </div>
         </div>
 
@@ -190,7 +197,7 @@
           style="border-top-color: var(--md-outline-variant); background-color: var(--md-surface-container-low);"
         >
           <button type="button" class="md-btn md-btn-outlined md-ripple disabled:opacity-50" :disabled="isSaving" @click="closeEditModal">
-            取消
+            {{ pick('取消', 'Cancel') }}
           </button>
           <button
             type="button"
@@ -199,7 +206,7 @@
             @click="saveEditedContent"
           >
             <Loader2 v-if="isSaving" class="h-4 w-4 animate-spin" aria-hidden="true" />
-            {{ isSaving ? '保存中...' : '保存' }}
+            {{ isSaving ? pick('保存中...', 'Saving…') : pick('保存', 'Save') }}
           </button>
         </div>
       </div>
@@ -219,8 +226,10 @@ import {
   isRecoverableVersionStatus,
   resolveChapterActionDecision,
   resolveChapterRuntime,
+  resolveStageProgressWindow,
 } from '@/utils/chapterGeneration'
 import { buildChapterQualitySummary } from '@/utils/chapterQuality'
+import { useLocale } from '@/composables/useLocale'
 import FloatingProgressCard from '../widgets/FloatingProgressCard.vue'
 
 const WorkspaceInitial = defineAsyncComponent(() => import('../workspace/states/WorkspaceInitial.vue'))
@@ -263,6 +272,8 @@ interface ReaderPayload {
 
 const props = defineProps<Props>()
 const router = useRouter()
+
+const { pick } = useLocale()
 
 const emit = defineEmits<{
   (e: 'regenerateChapter', value: number): void
@@ -331,25 +342,34 @@ const projectHealth = computed(() => {
 })
 
 const projectHealthTitle = computed(() => {
-  if (projectHealth.value.blocked > 0) return '存在导出阻断，先修复章节状态'
-  if (projectHealth.value.missingDraft > 0) return '大纲已准备，正文仍需推进'
-  return '章节链路完整，可以继续精修或导出'
+  if (projectHealth.value.blocked > 0) return pick('存在导出阻断，先修复章节状态', 'Export is blocked — fix the chapter statuses first')
+  if (projectHealth.value.missingDraft > 0) return pick('大纲已准备，正文仍需推进', 'The outline is ready, but the drafts still need work')
+  return pick('章节链路完整，可以继续精修或导出', 'The chapter chain is complete — polish or export')
 })
 
 const projectHealthHint = computed(() => {
-  if (projectHealth.value.running > 0) return `有 ${projectHealth.value.running} 个章节仍在处理或待确认，请优先完成确认/终止。`
-  if (projectHealth.value.failed > 0) return `有 ${projectHealth.value.failed} 个异常章节，需要重新生成或手动修复。`
-  if (projectHealth.value.blocked > 0) return `当前 ${projectHealth.value.blocked} 个章节缺少成功状态或选中正文，导出会被后端拦截。`
-  return '大纲、章节、候选版本与选中正文关系正常。'
+  if (projectHealth.value.running > 0) return pick(
+    `有 ${projectHealth.value.running} 个章节仍在处理或待确认，请优先完成确认/终止。`,
+    `${projectHealth.value.running} chapters are still running or awaiting confirmation — confirm or stop them first.`
+  )
+  if (projectHealth.value.failed > 0) return pick(
+    `有 ${projectHealth.value.failed} 个异常章节，需要重新生成或手动修复。`,
+    `${projectHealth.value.failed} chapters are in an error state and need regeneration or a manual fix.`
+  )
+  if (projectHealth.value.blocked > 0) return pick(
+    `当前 ${projectHealth.value.blocked} 个章节缺少成功状态或选中正文，导出会被后端拦截。`,
+    `${projectHealth.value.blocked} chapters lack a successful status or a selected draft, so the backend will block the export.`
+  )
+  return pick('大纲、章节、候选版本与选中正文关系正常。', 'Outline, chapters, candidates, and selected drafts all line up.')
 })
 
 const projectHealthItems = computed(() => [
-  { label: '大纲', value: projectHealth.value.outlines, hint: '故事路线', tone: projectHealth.value.outlines ? 'info' : 'warn' },
-  { label: '章节', value: projectHealth.value.chapters, hint: '已建正文位', tone: projectHealth.value.chapters ? 'info' : 'warn' },
-  { label: '候选版本', value: projectHealth.value.versions, hint: '可评审稿件', tone: projectHealth.value.versions ? 'success' : 'warn' },
-  { label: '可导出章节', value: projectHealth.value.withSelectedContent, hint: '成功且有正文', tone: projectHealth.value.blocked ? 'warn' : 'success' },
-  { label: '导出阻断', value: projectHealth.value.blocked, hint: '需处理', tone: projectHealth.value.blocked ? 'danger' : 'success' },
-  { label: '处理中', value: projectHealth.value.running, hint: '后台/待确认', tone: projectHealth.value.running ? 'warn' : 'success' }
+  { label: pick('大纲', 'Outline'), value: projectHealth.value.outlines, hint: pick('故事路线', 'Story route'), tone: projectHealth.value.outlines ? 'info' : 'warn' },
+  { label: pick('章节', 'Chapters'), value: projectHealth.value.chapters, hint: pick('已建正文位', 'Draft slots created'), tone: projectHealth.value.chapters ? 'info' : 'warn' },
+  { label: pick('候选版本', 'Candidates'), value: projectHealth.value.versions, hint: pick('可评审稿件', 'Drafts ready for review'), tone: projectHealth.value.versions ? 'success' : 'warn' },
+  { label: pick('可导出章节', 'Exportable chapters'), value: projectHealth.value.withSelectedContent, hint: pick('成功且有正文', 'Successful with a draft'), tone: projectHealth.value.blocked ? 'warn' : 'success' },
+  { label: pick('导出阻断', 'Export blockers'), value: projectHealth.value.blocked, hint: pick('需处理', 'Needs attention'), tone: projectHealth.value.blocked ? 'danger' : 'success' },
+  { label: pick('处理中', 'In progress'), value: projectHealth.value.running, hint: pick('后台/待确认', 'Background / awaiting confirmation'), tone: projectHealth.value.running ? 'warn' : 'success' }
 ])
 
 const selectedChapterOutline = computed(() => {
@@ -384,7 +404,7 @@ const chapterOverviewItems = computed(() =>
 
     return {
       chapterNumber,
-      title: outline?.title || chapter?.title || `第 ${chapterNumber} 章`,
+      title: outline?.title || chapter?.title || pick(`第 ${chapterNumber} 章`, `Chapter ${chapterNumber}`),
       statusTone,
     }
   })
@@ -399,32 +419,34 @@ const chapterQualitySummary = computed(() => buildChapterQualitySummary(selected
 const chapterWordGoalText = computed(() => {
   const min = chapterRuntime.value?.min_word_count
   const target = chapterRuntime.value?.target_word_count
-  if (min && target) return `最低 ${min} / 目标 ${target} 字`
-  if (target) return `目标 ${target} 字`
-  if (min) return `最低 ${min} 字`
+  if (min && target) return pick(`最低 ${min} / 目标 ${target} 字`, `Min ${min} / target ${target} words`)
+  if (target) return pick(`目标 ${target} 字`, `Target ${target} words`)
+  if (min) return pick(`最低 ${min} 字`, `Min ${min} words`)
   return ''
 })
-const chapterWordRequirementReasonLabelMap: Record<string, string> = {
-  target_met: '已达到目标字数',
-  close_to_target: '已接近目标字数',
-  minimum_met: '已达到最低字数',
-  minimum_met_but_below_target: '已过最低字数，但仍低于目标',
-  below_minimum_after_enrichment: '补字数后仍低于最低要求',
-  below_minimum: '低于最低要求'
-}
+// 键是后端 word_requirement_reason 枚举保持原文
+const chapterWordRequirementReasonLabelMap = (): Record<string, string> => ({
+  target_met: pick('已达到目标字数', 'Target word count reached'),
+  close_to_target: pick('已接近目标字数', 'Close to the target word count'),
+  minimum_met: pick('已达到最低字数', 'Minimum word count reached'),
+  minimum_met_but_below_target: pick('已过最低字数，但仍低于目标', 'Above the minimum but below the target'),
+  below_minimum_after_enrichment: pick('补字数后仍低于最低要求', 'Still below the minimum after the top-up'),
+  below_minimum: pick('低于最低要求', 'Below the minimum')
+})
 
 const chapterWordExecutionText = computed(() => {
   const actual = chapterRuntime.value?.actual_word_count ?? selectedChapter.value?.word_count
-  if (actual) return `实际 ${actual} 字`
+  if (actual) return pick(`实际 ${actual} 字`, `Actual ${actual} words`)
   return ''
 })
 const chapterWordStatusHint = computed(() => {
   const met = chapterRuntime.value?.word_requirement_met
   const reason = chapterRuntime.value?.word_requirement_reason
   if (typeof met !== 'boolean' && !reason) return ''
-  if (reason && chapterWordRequirementReasonLabelMap[reason]) return chapterWordRequirementReasonLabelMap[reason]
-  if (met === true) return '已达到最低字数'
-  if (met === false) return '未达到最低要求'
+  const reasonLabels = chapterWordRequirementReasonLabelMap()
+  if (reason && reasonLabels[reason]) return reasonLabels[reason]
+  if (met === true) return pick('已达到最低字数', 'Minimum word count reached')
+  if (met === false) return pick('未达到最低要求', 'Minimum not reached')
   return ''
 })
 const chapterWordExecutionClass = computed(() => {
@@ -455,22 +477,21 @@ const floatingProgressVisible = computed(() => {
   const status = selectedChapter.value?.generation_status
   return status === 'generating' || status === 'evaluating' || status === 'selecting'
 })
-const floatingProgressTitle = computed(() => `第 ${selectedChapterNumber.value} 章`)
-const floatingProgressStage = computed(() => generationRuntime.value?.progress_stage || selectedChapter.value?.generation_status || '')
+const floatingProgressTitle = computed(() => pick(`第 ${props.selectedChapterNumber} 章`, `Chapter ${props.selectedChapterNumber}`))
+const floatingProgressStage = computed(() => (props.generationRuntime ?? chapterRuntime.value)?.progress_stage || selectedChapter.value?.generation_status || '')
 const floatingProgressPercent = computed(() => {
-  const pct = generationRuntime.value?.progress_percent
-  if (typeof pct === 'number') return pct
-  const stage = floatingProgressStage.value
-  const stageMap: Record<string, number> = {
-    queued: 5, prepare_context: 15, generate_mission: 25,
-    generating: 45, evaluating: 70, selecting: 85,
-    finalize: 95, successful: 100, waiting_for_confirm: 90
-  }
-  return stageMap[stage] ?? 30
+  const runtime = props.generationRuntime ?? chapterRuntime.value
+  const pct = runtime?.progress_percent
+  if (typeof pct === 'number') return Math.max(0, Math.min(100, Math.round(pct)))
+  // 后端没给百分比时改用统一的阶段区间表，和主进度条共用同一套刻度，
+  // 不再用手写 stageMap（未知阶段一律 30 会让进度来回跳）。
+  const stageWindow = resolveStageProgressWindow(floatingProgressStage.value)
+    ?? resolveStageProgressWindow(selectedChapter.value?.generation_status)
+  return stageWindow ? stageWindow.start : 0
 })
 const floatingProgressWordCount = computed(() => selectedChapter.value?.word_count || 0)
 const floatingProgressStatus = computed(() => selectedChapter.value?.generation_status || '')
-const floatingProgressDetail = computed(() => generationRuntime.value?.progress_message || '')
+const floatingProgressDetail = computed(() => (props.generationRuntime ?? chapterRuntime.value)?.progress_message || '')
 const chapterIsBusy = computed(() => isBusyChapterStatus(selectedChapter.value?.generation_status))
 const isTerminatingCurrent = computed(
   () => props.selectedChapterNumber !== null && props.terminatingChapter === props.selectedChapterNumber
@@ -519,14 +540,14 @@ const selectedChapterAction = computed(() => {
 
 const selectedChapterStatusText = computed(() => {
   const status = selectedChapter.value?.generation_status
-  if (status === 'successful') return '正文已确认'
-  if (status === 'generating') return '正在生成'
-  if (status === 'evaluating') return '正在评估'
-  if (status === 'selecting') return '准备确认'
-  if (status === 'waiting_for_confirm') return '等待你确认'
-  if (status === 'evaluation_failed') return '评审异常（候选版本可继续确认）'
-  if (status === 'failed') return '生成失败'
-  return '尚未开始'
+  if (status === 'successful') return pick('正文已确认', 'Draft confirmed')
+  if (status === 'generating') return pick('正在生成', 'Generating')
+  if (status === 'evaluating') return pick('正在评估', 'Reviewing')
+  if (status === 'selecting') return pick('准备确认', 'Ready to confirm')
+  if (status === 'waiting_for_confirm') return pick('等待你确认', 'Awaiting your confirmation')
+  if (status === 'evaluation_failed') return pick('评审异常（候选版本可继续确认）', 'Review error (candidates can still be confirmed)')
+  if (status === 'failed') return pick('生成失败', 'Generation failed')
+  return pick('尚未开始', 'Not started')
 })
 
 const chapterStateClass = computed(() => {
@@ -566,8 +587,10 @@ const buildVersionReaderPayload = (versionIndex: number): ReaderPayload | null =
   if (!version?.content) return null
 
   return {
-    title: selectedChapter.value?.title?.trim() || `第 ${props.selectedChapterNumber} 章`,
-    subtitle: version.style ? `候选版本 · ${version.style}` : `候选版本 ${versionIndex + 1}`,
+    title: selectedChapter.value?.title?.trim() || pick(`第 ${props.selectedChapterNumber} 章`, `Chapter ${props.selectedChapterNumber}`),
+    subtitle: version.style
+      ? pick(`候选版本 · ${version.style}`, `Candidate · ${version.style}`)
+      : pick(`候选版本 ${versionIndex + 1}`, `Candidate ${versionIndex + 1}`),
     content: normalizeChapterContent(version.content),
     source: 'candidate-version',
     chapterNumber: props.selectedChapterNumber || undefined,
@@ -595,10 +618,10 @@ const openPatchDiffModal = () => {
 const handleOpenReader = (payload: ReaderPayload) => {
   const readerKey = `xqws-reader-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const chips: string[] = []
-  if (payload.chapterNumber !== undefined) chips.push(`第 ${payload.chapterNumber} 章`)
-  if (payload.source === 'chapter-content') chips.push('当前正文')
-  if (payload.source === 'candidate-version') chips.push('候选版本')
-  if (typeof payload.versionIndex === 'number') chips.push(`第 ${payload.versionIndex + 1} 版`)
+  if (payload.chapterNumber !== undefined) chips.push(pick(`第 ${payload.chapterNumber} 章`, `Chapter ${payload.chapterNumber}`))
+  if (payload.source === 'chapter-content') chips.push(pick('当前正文', 'Current draft'))
+  if (payload.source === 'candidate-version') chips.push(pick('候选版本', 'Candidate'))
+  if (typeof payload.versionIndex === 'number') chips.push(pick(`第 ${payload.versionIndex + 1} 版`, `Version ${payload.versionIndex + 1}`))
 
   sessionStorage.setItem(readerKey, JSON.stringify({
     title: payload.title,
@@ -644,8 +667,8 @@ const openPrimaryReader = () => {
 
   if (selectedChapterContent.value) {
     handleOpenReader({
-      title: selectedChapter.value?.title?.trim() || `第 ${props.selectedChapterNumber} 章正文`,
-      subtitle: selectedChapter.value?.summary?.trim() || '当前章节正文',
+      title: selectedChapter.value?.title?.trim() || pick(`第 ${props.selectedChapterNumber} 章正文`, `Chapter ${props.selectedChapterNumber} draft`),
+      subtitle: selectedChapter.value?.summary?.trim() || pick('当前章节正文', 'Current chapter draft'),
       content: selectedChapterContent.value,
       source: 'chapter-content',
       chapterNumber: props.selectedChapterNumber || undefined
@@ -685,10 +708,10 @@ const saveEditedContent = async () => {
     })
     closeEditModal()
   } catch (error) {
-    console.error('保存章节内容失败:', error)
+    console.error(pick('保存章节内容失败:', 'Failed to save the chapter content:'), error)
     await globalAlert.showError(
-      error instanceof Error ? error.message : '保存章节内容失败，请稍后重试。',
-      '保存失败'
+      error instanceof Error ? error.message : pick('保存章节内容失败，请稍后重试。', 'Failed to save the chapter content — please retry later.'),
+      pick('保存失败', 'Save failed')
     )
   } finally {
     isSaving.value = false

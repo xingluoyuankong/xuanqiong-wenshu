@@ -54,6 +54,30 @@ except ImportError:  # pragma: no cover - Ollama 为可选依赖
 class LLMService:
     """封装与大模型交互的所有逻辑，包括配额控制与配置选择。"""
 
+    @staticmethod
+    def _is_free_compatible_gateway(base_url: Optional[str]) -> bool:
+        return not LLMClient._supports_prompt_cache_key(base_url)
+
+    @staticmethod
+    def is_deepseek_free_model(model: Optional[str]) -> bool:
+        """Return whether the selected model needs the bounded free-tier writer path."""
+        normalized = re.sub(r"\s+", "-", str(model or "").strip().lower())
+        return normalized.startswith("deepseek-v4-flash-free")
+
+    async def get_generation_capabilities(self, user_id: Optional[int]) -> Dict[str, Any]:
+        """Expose the resolved model capability without leaking credentials."""
+        config = await self._resolve_llm_config(
+            user_id,
+            enforce_daily_limit=False,
+            require_primary_api_key=False,
+        )
+        model = str(config.get("model") or "").strip()
+        return {
+            "model": model,
+            "deepseek_free": self.is_deepseek_free_model(model),
+            "bounded_short_chapter": self.is_deepseek_free_model(model),
+        }
+
     def __init__(self, session):
         self.session = session
         self.llm_repo = LLMConfigRepository(session)
@@ -63,6 +87,8 @@ class LLMService:
         self.usage_service = UsageService(session)
         self._embedding_dimensions: Dict[str, int] = {}
         self._resolved_llm_config_cache: Dict[tuple, Dict[str, Any]] = {}
+        # A service instance may be shared by finalize stages; serialize session-bound resolution.
+        self._session_lock = asyncio.Lock()
 
     async def reconfigure(self, user_id: int) -> None:
         """Clear cached configs so the next generation picks up frontend LLM changes."""
@@ -284,6 +310,7 @@ class LLMService:
         prompt_cache_key: Optional[str] = None,
         allow_truncated_response: bool = False,
         retry_same_model_once: bool = True,
+        allow_non_stream_fallback: bool = True,
     ) -> str:
         messages = [{"role": "system", "content": system_prompt}, *conversation_history]
         hard_timeout = max(10.0, float(timeout) + 8.0)
@@ -300,6 +327,7 @@ class LLMService:
                     prompt_cache_key=prompt_cache_key,
                     allow_truncated_response=allow_truncated_response,
                     retry_same_model_once=retry_same_model_once,
+                    allow_non_stream_fallback=allow_non_stream_fallback,
                 ),
                 timeout=hard_timeout,
             )
@@ -456,6 +484,7 @@ class LLMService:
         prompt_cache_key: Optional[str] = None,
         allow_truncated_response: bool = False,
         retry_same_model_once: bool = True,
+        allow_non_stream_fallback: bool = True,
     ) -> str:
         config = await self._resolve_llm_config(user_id)
         chat_messages = [ChatMessage(role=msg["role"], content=msg["content"]) for msg in messages]
@@ -499,6 +528,7 @@ class LLMService:
                     top_p=top_p,
                     prompt_cache_key=prompt_cache_key,
                     retry_same_model_once=retry_same_model_once,
+                    allow_non_stream_fallback=allow_non_stream_fallback,
                 )
         except HTTPException as exc:
             last_exception = exc
@@ -569,16 +599,19 @@ class LLMService:
         top_p: Optional[float] = None,
         prompt_cache_key: Optional[str] = None,
         retry_same_model_once: bool = True,
+        allow_non_stream_fallback: bool = True,
     ) -> tuple[str, Optional[str]]:
         stream_response_format = response_format
         stream_prompt_cache_key = prompt_cache_key
         full_response = ""
+        reasoning_response = ""
         finish_reason = None
         network_retry_used = False
 
         max_attempts = (2 if retry_same_model_once else 1) + int(bool(response_format)) + int(bool(prompt_cache_key))
         for attempt_index in range(max_attempts):
             full_response = ""
+            reasoning_response = ""
             finish_reason = None
             await self._wait_for_provider_cooldown(provider_key)
             try:
@@ -594,10 +627,14 @@ class LLMService:
                 ):
                     if part.get("content"):
                         full_response += part["content"]
+                    elif part.get("reasoning_content"):
+                        reasoning_response += part["reasoning_content"]
                     if part.get("finish_reason"):
                         finish_reason = part["finish_reason"]
-                # [PATCH] Empty response fallback for glm-5.2 intermittent empty streaming
-                if not full_response:
+                if not full_response and reasoning_response:
+                    full_response = reasoning_response
+                # Empty response fallback for intermittent provider-side empty streams.
+                if not full_response and allow_non_stream_fallback:
                     logger.warning(
                         "LLM stream returned empty response (model=%s), attempting non-stream fallback",
                         model_name,
@@ -611,6 +648,7 @@ class LLMService:
                             response_format=stream_response_format,
                             max_tokens=max_tokens,
                             top_p=top_p,
+                            prompt_cache_key=stream_prompt_cache_key,
                         )
                         if non_stream_resp.get("content"):
                             logger.debug(
@@ -1209,6 +1247,21 @@ class LLMService:
         return [profile for profile in normalized_profiles if profile.get("enabled", True)]
 
     async def _resolve_llm_config(
+        self,
+        user_id: Optional[int],
+        *,
+        enforce_daily_limit: bool = True,
+        require_primary_api_key: bool = True,
+    ) -> Dict[str, Any]:
+        """Resolve configuration under a session lock. Prefer dedicated short-lived sessions for I/O."""
+        async with self._session_lock:
+            return await self._resolve_llm_config_unlocked(
+                user_id,
+                enforce_daily_limit=enforce_daily_limit,
+                require_primary_api_key=require_primary_api_key,
+            )
+
+    async def _resolve_llm_config_unlocked(
         self,
         user_id: Optional[int],
         *,

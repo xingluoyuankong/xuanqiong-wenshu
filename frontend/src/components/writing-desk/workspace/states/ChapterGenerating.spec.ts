@@ -17,6 +17,109 @@ const buildRuntime = () => ({
 })
 
 describe('ChapterGenerating', () => {
+  it('长篇分段正文按段累积显示，而不是只显示最后一段', () => {
+    const wrapper = shallowMount(ChapterGenerating, {
+      props: {
+        chapterNumber: 7,
+        generationRuntime: {
+          progress_stage: 'segment_generation',
+          progress_message: '长篇分段生成 2/3',
+          events: [
+            {
+              at: '2026-04-21T08:00:00Z',
+              stage: 'segment_generation',
+              kind: 'content',
+              content_delta: '第一段正文内容。',
+              content_preview: '第一段正文内容。',
+              content_is_preview: false,
+              segment_index: 0,
+            },
+            {
+              at: '2026-04-21T08:01:00Z',
+              stage: 'segment_generation',
+              kind: 'status',
+              message: '长篇分段生成 2/3',
+            },
+            {
+              at: '2026-04-21T08:02:00Z',
+              stage: 'segment_generation',
+              kind: 'content',
+              content_delta: '第二段正文内容。',
+              content_preview: '第二段正文内容。',
+              content_is_preview: false,
+              segment_index: 1,
+            },
+          ],
+        },
+        progressStage: 'segment_generation',
+        progressMessage: '长篇分段生成 2/3',
+      },
+    })
+
+    const preview = wrapper.find('.cg-live-preview').text()
+    expect(preview).toContain('第一段正文内容。')
+    expect(preview).toContain('第二段正文内容。')
+    expect(preview.indexOf('第一段正文内容。')).toBeLessThan(preview.indexOf('第二段正文内容。'))
+    expect(wrapper.text()).toContain('正文实时流')
+  })
+
+  it('同一段重试重复推送时按段号去重，不重复拼接正文', () => {
+    const wrapper = shallowMount(ChapterGenerating, {
+      props: {
+        chapterNumber: 8,
+        generationRuntime: {
+          progress_stage: 'segment_generation',
+          events: [
+            {
+              at: '2026-04-21T08:00:00Z',
+              kind: 'content',
+              content_delta: '首版第一段。',
+              content_is_preview: false,
+              segment_index: 0,
+            },
+            {
+              at: '2026-04-21T08:00:30Z',
+              kind: 'content',
+              content_delta: '重试后的第一段。',
+              content_is_preview: false,
+              segment_index: 0,
+            },
+          ],
+        },
+        progressStage: 'segment_generation',
+      },
+    })
+
+    const preview = wrapper.find('.cg-live-preview').text()
+    expect(preview).toBe('重试后的第一段。')
+    expect(preview).not.toContain('首版第一段。')
+  })
+
+  it('预览分片不参与累积，仅在没有正式分段正文时兜底显示', () => {
+    const wrapper = shallowMount(ChapterGenerating, {
+      props: {
+        chapterNumber: 9,
+        generationRuntime: {
+          progress_stage: 'generate_variants',
+          events: [
+            {
+              at: '2026-04-21T08:00:00Z',
+              kind: 'content',
+              content_delta: '整章草稿预览片段。',
+              content_preview: '整章草稿预览片段。',
+              content_is_preview: true,
+            },
+          ],
+        },
+        progressStage: 'generate_variants',
+      },
+    })
+
+    expect(wrapper.find('.cg-live-preview').text()).toContain('整章草稿预览片段。')
+    expect(wrapper.text()).toContain('最新草稿片段')
+    expect(wrapper.text()).not.toContain('正文实时流')
+  })
+
   it('默认只展示最近 8 条日志，并可展开全部', async () => {
     const wrapper = shallowMount(ChapterGenerating, {
       props: {

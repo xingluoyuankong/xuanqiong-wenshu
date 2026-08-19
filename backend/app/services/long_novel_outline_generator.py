@@ -199,7 +199,11 @@ class LongNovelOutlineGenerator:
             logger.warning("长篇大纲生成失败: %s", str(e))
         
         # fallback
-        fallback = self.generate_fallback_outline(blueprint_data, volume_count, chapters_per_volume)
+        _fb_title = str(blueprint_data.get("title") or "未命名作品")
+        _fb_genre = str(blueprint_data.get("genre") or "")
+        _fb_word_count = int(blueprint_data.get("total_word_count") or blueprint_data.get("target_total_words") or 300000)
+        _fb_protagonist = str(blueprint_data.get("protagonist") or blueprint_data.get("main_character") or "主角")
+        fallback = self.generate_fallback_outline(_fb_title, _fb_genre, _fb_word_count, _fb_protagonist)
         blueprint_data["novel_outline"] = fallback
         return blueprint_data
 
@@ -253,7 +257,7 @@ class LongNovelOutlineGenerator:
         protagonist: str,
         central_conflict: str,
         worldview: str,
-        characters: List[Dict],
+        characters,  # str | List[Dict]
         volume_count: Optional[int] = None,
         chapters_per_volume: Optional[int] = None,
     ) -> str:
@@ -262,10 +266,14 @@ class LongNovelOutlineGenerator:
         vol_count = volume_count or structure["volume_count"]
         ch_per_vol = chapters_per_volume or structure["chapters_per_volume"]
 
-        characters_text = "\n".join(
-            f"- {c.get('name', '未知')}: {c.get('identity', '')} - {c.get('description', '')}"
-            for c in characters[:15]
-        ) if characters else "（暂无角色设定）"
+        if isinstance(characters, str):
+            characters_text = characters or "（暂无角色设定）"
+        else:
+            characters_text = "\n".join(
+                f"- {c.get('name', '未知')}: {c.get('identity', '')} - {c.get('description', '')}"
+                for c in (characters or [])[:15]
+                if isinstance(c, dict)
+            ) or "（暂无角色设定）"
 
         return LONG_NOVEL_OUTLINE_PROMPT.format(
             title=title,
@@ -369,18 +377,23 @@ class LongNovelOutlineGenerator:
         genre: str,
         target_word_count: int,
         protagonist: str = "主角",
-    ) -> Dict:
-        """生成兜底大纲结构（当 LLM 调用失败时使用）"""
+    ) -> List[Dict]:
+        """生成兜底大纲结构（当 LLM 调用失败时使用）
+
+        Returns a flat list of chapter dicts (same shape as flatten_outline output)
+        so callers can assign it directly to blueprint_data["novel_outline"].
+        """
         structure = LongNovelOutlineGenerator.estimate_structure(target_word_count, genre)
-        volumes = []
+        flat_chapters: List[Dict] = []
 
         for v in range(1, structure["volume_count"] + 1):
-            chapters = []
+            volume_title = f"第{v}卷"
             for c in range(1, structure["chapters_per_volume"] + 1):
                 ch_num = (v - 1) * structure["chapters_per_volume"] + c
-                chapters.append({
+                flat_chapters.append({
                     "chapter_number": ch_num,
                     "volume_number": v,
+                    "volume_title": volume_title,
                     "title": f"第{ch_num}章",
                     "summary": f"第{ch_num}章内容...",
                     "key_events": ["待填充"],
@@ -389,15 +402,4 @@ class LongNovelOutlineGenerator:
                     "word_count_estimate": structure["words_per_chapter"],
                 })
 
-            volumes.append({
-                "volume_number": v,
-                "volume_title": f"第{v}卷",
-                "volume_summary": f"第{v}卷内容概要...",
-                "theme": f"第{v}卷主题",
-                "chapters": chapters,
-            })
-
-        return {
-            "novel_title": title,
-            "volumes": volumes,
-        }
+        return flat_chapters

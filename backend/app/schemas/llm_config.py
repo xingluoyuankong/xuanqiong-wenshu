@@ -52,6 +52,7 @@ class LLMConfigCreate(LLMConfigBase):
 
 class LLMConfigRead(BaseModel):
     user_id: int
+    version: int = Field(default=0, description="Stable persisted configuration change token")
     llm_provider_url: Optional[str] = Field(default=None, description="Custom provider URL")
     llm_provider_model: Optional[str] = Field(default=None, description="Custom provider model")
     llm_provider_api_key_masked: Optional[str] = Field(default=None, description="Masked primary API key")

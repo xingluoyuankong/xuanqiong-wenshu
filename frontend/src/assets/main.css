@@ -1,8 +1,27 @@
-/* AIMETA P=主CSS_全局样式和Tailwind导入|R=全局样式_Tailwind|NR=不含组件样式|E=-|X=internal|A=全局样式|D=tailwindcss|S=dom|RD=./README.ai */
-@import "tailwindcss";
+﻿@import "tailwindcss";
 
 /* 配置 Tailwind 扫描路径，只打包使用的类 */
 @source "./src";
+
+:root {
+  --global-nav-width: 88px;
+  --global-nav-mobile-height: 68px;
+}
+
+/* Fixed workbench rail owns navigation space without shrinking page content. */
+@media (min-width: 721px) {
+  .xq-app-root > :not(.global-nav-shell) {
+    margin-left: var(--global-nav-width);
+  }
+}
+
+@media (max-width: 720px) {
+  .xq-app-root > :not(.global-nav-shell) {
+    padding-bottom: calc(var(--global-nav-mobile-height) + env(safe-area-inset-bottom));
+  }
+}
+
+
 
 @plugin "@tailwindcss/typography";
 
@@ -14,136 +33,10 @@
 /* ============================================
    CSS Custom Properties (Design Tokens)
    ============================================ */
-:root {
-  /* ═══════════════════════════════════════════
-     文具手账风格 - 设计理念
-     纸张质感、柔和圆角、手写氛围、清新淡蓝
-     ═══════════════════════════════════════════ */
 
-  /* 主色调 - 淡雅天蓝色 */
-  --md-primary: #7EB8E8;
-  --md-primary-light: #A8D4F5;
-  --md-primary-dark: #5A9BC9;
-  --md-on-primary: #FFFFFF;
-  --md-primary-container: #E8F4FB;
-  --md-on-primary-container: #2A4A6A;
-
-  /* 辅助色 - 柔和灰蓝 */
-  --md-secondary: #8A9AAB;
-  --md-secondary-light: #A8B8C8;
-  --md-secondary-dark: #6A7A8A;
-  --md-on-secondary: #FFFFFF;
-  --md-secondary-container: #F0F3F6;
-  --md-on-secondary-container: #3A4A5A;
-
-  /* 表面色 - 纸张白 */
-  --md-surface: #FDFEFF;
-  --md-surface-dim: #F8FAFC;
-  --md-surface-bright: #FFFFFF;
-  --md-surface-container-lowest: #FFFFFF;
-  --md-surface-container-low: #F5F8FB;
-  --md-surface-container: #EEF3F7;
-  --md-surface-container-high: #E5EBF1;
-  --md-surface-container-highest: #DBE2E9;
-  --md-on-surface: #3A4A5A;
-  --md-on-surface-variant: #6A7A8A;
-
-  /* 背景 - 淡淡的米白渐变，像纸张 */
-  --md-background: linear-gradient(180deg, #FAFCFE 0%, #F3F7FA 50%, #EDF4F9 100%);
-  --md-on-background: #3A4A5A;
-
-  /* 边框 - 柔和的灰蓝色 */
-  --md-outline: #D0D8E0;
-  --md-outline-variant: #E2E8EF;
-  --md-outline-variant: #E2E8EF;
-
-  /* 状态色 - 柔和色调 */
-  --md-error: #E8A0A0;
-  --md-error-container: #FEF0F0;
-  --md-on-error: #FFFFFF;
-  --md-on-error-container: #6A3030;
-
-  --md-success: #8BC48A;
-  --md-success-container: #F0F7F0;
-  --md-on-success: #FFFFFF;
-  --md-on-success-container: #2A5030;
-
-  --md-warning: #E8C880;
-  --md-warning-container: #FDF8F0;
-  --md-on-warning: #4A4A30;
-  --md-on-warning-container: #6A6030;
-
-  /* Typography - 手账风格字体 */
-  --md-font-family: 'ZCOOL XiaoWei', 'Noto Serif SC', 'STKaiti', 'KaiTi', serif;
-  --md-font-mono: 'Cascadia Code', 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
-
-  /* Display */
-  --md-display-large: 52px;
-  --md-display-medium: 42px;
-  --md-display-small: 32px;
-
-  /* Headline */
-  --md-headline-large: 34px;
-  --md-headline-medium: 28px;
-  --md-headline-small: 24px;
-
-  /* Title */
-  --md-title-large: 22px;
-  --md-title-medium: 17px;
-  --md-title-small: 15px;
-
-  /* Body */
-  --md-body-large: 17px;
-  --md-body-medium: 15px;
-  --md-body-small: 13px;
-
-  /* Label */
-  --md-label-large: 15px;
-  --md-label-medium: 13px;
-  --md-label-small: 12px;
-  
-  /* Elevation (Shadow) - 更柔和的阴影 */
-  --md-elevation-0: none;
-  --md-elevation-1: 0 2px 4px rgba(107, 155, 235, 0.08), 0 4px 8px rgba(107, 155, 235, 0.06);
-  /* Elevation - 柔和的纸质阴影 */
-  --md-elevation-0: none;
-  --md-elevation-1: 0 2px 6px rgba(100, 120, 140, 0.06), 0 4px 12px rgba(100, 120, 140, 0.04);
-  --md-elevation-2: 0 4px 10px rgba(100, 120, 140, 0.08), 0 8px 20px rgba(100, 120, 140, 0.06);
-  --md-elevation-3: 0 6px 14px rgba(100, 120, 140, 0.1), 0 12px 28px rgba(100, 120, 140, 0.08);
-  --md-elevation-4: 0 8px 18px rgba(100, 120, 140, 0.12), 0 16px 36px rgba(100, 120, 140, 0.1);
-  --md-elevation-5: 0 10px 22px rgba(100, 120, 140, 0.14), 0 20px 44px rgba(100, 120, 140, 0.12);
-
-  /* Border Radius - 圆润的圆角，像手账 */
-  --md-radius-none: 0;
-  --md-radius-xs: 8px;
-  --md-radius-sm: 14px;
-  --md-radius-md: 20px;
-  --md-radius-lg: 26px;
-  --md-radius-xl: 32px;
-  --md-radius-full: 9999px;
-  
-  /* Spacing (8dp grid) */
-  --md-spacing-0: 0;
-  --md-spacing-1: 4px;
-  --md-spacing-2: 8px;
-  --md-spacing-3: 12px;
-  --md-spacing-4: 16px;
-  --md-spacing-5: 20px;
-  --md-spacing-6: 24px;
-  --md-spacing-8: 32px;
-  --md-spacing-10: 40px;
-  --md-spacing-12: 48px;
-  --md-spacing-16: 64px;
-  
-  /* Transitions - 更流畅的过渡 */
-  --md-duration-short: 150ms;
-  --md-duration-medium: 300ms;
-  --md-duration-long: 500ms;
-  --md-easing-standard: cubic-bezier(0.25, 0.1, 0.25, 1);
-  --md-easing-emphasized: cubic-bezier(0.25, 0.1, 0.25, 1);
-  --md-easing-decelerate: cubic-bezier(0, 0, 0, 1);
-  --md-easing-accelerate: cubic-bezier(0.3, 0, 1, 1);
-}
+/* 设计令牌统一定义在 src/shared/styles/tokens.css（唯一真源）。
+   此处原有的 :root --md-* 块已删除，所有 --md-* 现为 tokens.css 中指向
+   --xq-* 的兼容别名。请勿在本文件重新定义颜色/字体/间距变量。 */
 
 /* ============================================
    Base Styles
@@ -159,15 +52,66 @@ html {
 }
 
 body {
-  font-family: var(--md-font-family);
-  font-size: var(--md-body-medium);
-  line-height: 1.8;
-  letter-spacing: 0.02em;
-  color: var(--md-on-background);
-  background: var(--md-background);
+  min-height: 100vh;
   margin: 0;
   padding: 0;
-  min-height: 100vh;
+  color: var(--xq-text-body);
+  background: var(--xq-bg);
+  font-family: var(--xq-font-sans);
+  font-size: var(--xq-text-base);
+  line-height: var(--xq-leading-normal);
+  letter-spacing: 0;
+}
+
+/* Tailwind preflight 会把标题字重清零。这里重建排版基线，
+   否则标题与正文同粗、同色，页面就没有任何层次可言
+   （这正是"抓不住重点"的直接原因之一）。 */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  color: var(--xq-text);
+  font-weight: var(--xq-weight-semibold);
+  line-height: var(--xq-leading-tight);
+}
+
+h1 {
+  font-size: var(--xq-text-2xl);
+}
+h2 {
+  font-size: var(--xq-text-xl);
+}
+h3 {
+  font-size: var(--xq-text-lg);
+}
+h4 {
+  font-size: var(--xq-text-md);
+}
+h5,
+h6 {
+  font-size: var(--xq-text-base);
+}
+
+strong,
+b {
+  font-weight: var(--xq-weight-semibold);
+  color: var(--xq-text);
+}
+
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--xq-font-mono);
+}
+
+/* 数字等宽：进度百分比、字数、耗时在变化时不再左右抖动 */
+.xq-tnum,
+[data-tnum] {
+  font-variant-numeric: tabular-nums;
 }
 
 /* ============================================
@@ -175,57 +119,57 @@ body {
    ============================================ */
 .md-display-large {
   font-size: var(--md-display-large);
-  font-weight: 400;
+  font-weight: 600;
   line-height: 1.12;
-  letter-spacing: -0.25px;
+  letter-spacing: -0.02em;
 }
 
 .md-display-medium {
   font-size: var(--md-display-medium);
-  font-weight: 400;
+  font-weight: 600;
   line-height: 1.16;
 }
 
 .md-display-small {
   font-size: var(--md-display-small);
-  font-weight: 400;
+  font-weight: 600;
   line-height: 1.22;
 }
 
 .md-headline-large {
   font-size: var(--md-headline-large);
-  font-weight: 400;
+  font-weight: 600;
   line-height: 1.25;
 }
 
 .md-headline-medium {
   font-size: var(--md-headline-medium);
-  font-weight: 400;
+  font-weight: 600;
   line-height: 1.29;
 }
 
 .md-headline-small {
   font-size: var(--md-headline-small);
-  font-weight: 400;
+  font-weight: 600;
   line-height: 1.33;
 }
 
 .md-title-large {
   font-size: var(--md-title-large);
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.27;
 }
 
 .md-title-medium {
   font-size: var(--md-title-medium);
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.5;
   letter-spacing: 0.15px;
 }
 
 .md-title-small {
   font-size: var(--md-title-small);
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.43;
   letter-spacing: 0.1px;
 }
@@ -331,12 +275,12 @@ body {
 }
 
 .md-btn-outlined:hover:not(:disabled) {
-  background-color: rgba(107, 155, 235, 0.1);
+  background-color: var(--xq-accent-soft);
   border-color: var(--md-primary);
 }
 
 .md-btn-outlined:active:not(:disabled) {
-  background-color: rgba(107, 155, 235, 0.15);
+  background-color: var(--xq-accent-soft);
 }
 
 /* Text Button */
@@ -347,11 +291,11 @@ body {
 }
 
 .md-btn-text:hover:not(:disabled) {
-  background-color: rgba(107, 155, 235, 0.1);
+  background-color: var(--xq-accent-soft);
 }
 
 .md-btn-text:active:not(:disabled) {
-  background-color: rgba(107, 155, 235, 0.15);
+  background-color: var(--xq-accent-soft);
 }
 
 /* Tonal Button */
@@ -392,11 +336,11 @@ body {
 }
 
 .md-icon-btn:hover:not(:disabled) {
-  background-color: rgba(95, 99, 104, 0.08);
+  background-color: var(--xq-surface-2);
 }
 
 .md-icon-btn:active:not(:disabled) {
-  background-color: rgba(95, 99, 104, 0.12);
+  background-color: var(--xq-surface-3);
 }
 
 /* FAB (Floating Action Button) */
@@ -599,7 +543,7 @@ body {
 }
 
 .md-nav-rail-item:hover {
-  background-color: rgba(95, 99, 104, 0.08);
+  background-color: var(--xq-surface-2);
 }
 
 .md-nav-rail-item.active {
@@ -641,7 +585,7 @@ body {
 }
 
 .md-nav-drawer-item:hover {
-  background-color: rgba(95, 99, 104, 0.08);
+  background-color: var(--xq-surface-2);
 }
 
 .md-nav-drawer-item.active {
@@ -693,7 +637,7 @@ body {
 }
 
 .md-tab:hover {
-  background-color: rgba(107, 155, 235, 0.1);
+  background-color: var(--xq-accent-soft);
   color: var(--md-primary);
 }
 
@@ -736,7 +680,7 @@ body {
 }
 
 .md-chip-assist:hover {
-  background-color: rgba(95, 99, 104, 0.08);
+  background-color: var(--xq-surface-2);
 }
 
 .md-chip-filter {
@@ -769,7 +713,7 @@ body {
 .md-dialog-overlay {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.32);
+  background-color: var(--xq-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -780,13 +724,13 @@ body {
 }
 
 .md-dialog {
-  background: var(--md-sys-color-surface-container-high, #f5f5f5);
-  color: var(--md-sys-color-on-surface, #1d1d1d);
-  border-radius: 28px;
+  background: var(--md-sys-color-surface-container-high, var(--xq-surface-2));
+  color: var(--md-sys-color-on-surface, var(--xq-text));
+  border-radius: var(--xq-radius-xl);
   max-width: 1000px;
   width: 90vw;
   max-height: 90vh;
-  box-shadow: var(--md-sys-elevation-3, 0 4px 8px rgba(0,0,0,0.15));
+  box-shadow: var(--xq-shadow-xs);
   position: relative;
   overflow: hidden;
   display: flex;
@@ -838,7 +782,7 @@ body {
 }
 
 .md-list-item:hover {
-  background-color: rgba(95, 99, 104, 0.08);
+  background-color: var(--xq-surface-2);
 }
 
 .md-list-item-leading {
@@ -1301,10 +1245,7 @@ body {
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background:
-    radial-gradient(circle at 14% 12%, rgba(107, 155, 235, 0.18), transparent 32%),
-    rgba(15, 23, 42, 0.48);
-  backdrop-filter: blur(12px);
+  background: var(--xq-overlay);
 }
 
 .xq-dialog-shell {
@@ -1314,12 +1255,10 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-radius: 32px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background:
-    radial-gradient(circle at 12% 0%, rgba(107, 155, 235, 0.16), transparent 30%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.96));
-  box-shadow: 0 30px 90px rgba(15, 23, 42, 0.28);
+  border-radius: var(--xq-radius-xl);
+  border: 1px solid rgba(var(--xq-muted-rgb), 0.2);
+  background: var(--xq-surface);
+  box-shadow: var(--xq-shadow-lg);
 }
 
 .xq-dialog-shell--wide {
@@ -1337,15 +1276,13 @@ body {
   justify-content: space-between;
   gap: 16px;
   padding: 22px 24px 18px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
-  background:
-    radial-gradient(circle at 6% 16%, rgba(99, 102, 241, 0.14), transparent 30%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(241, 247, 255, 0.9));
+  border-bottom: 1px solid rgba(var(--xq-muted-rgb), 0.16);
+  background: var(--xq-surface);
 }
 
 .xq-dialog-kicker {
   margin: 0 0 4px;
-  color: #4f46e5;
+  color: var(--xq-accent);
   font-size: 0.72rem;
   font-weight: 900;
   letter-spacing: 0.13em;
@@ -1354,7 +1291,7 @@ body {
 
 .xq-dialog-title {
   margin: 0;
-  color: #0f172a;
+  color: var(--xq-text);
   font-size: clamp(1.18rem, 2vw, 1.62rem);
   font-weight: 950;
   letter-spacing: -0.02em;
@@ -1363,7 +1300,7 @@ body {
 .xq-dialog-subtitle {
   margin: 6px 0 0;
   max-width: 68ch;
-  color: #64748b;
+  color: var(--xq-text-muted);
   font-size: 0.88rem;
   line-height: 1.65;
 }
@@ -1374,10 +1311,10 @@ body {
   flex: none;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.72);
-  color: #475569;
+  border: 1px solid rgba(var(--xq-muted-rgb), 0.2);
+  border-radius: var(--xq-radius-lg);
+  background: var(--xq-surface);
+  color: var(--xq-text-body);
   font-size: 1.2rem;
   font-weight: 900;
   transition: transform 0.18s ease, background 0.18s ease;
@@ -1385,7 +1322,7 @@ body {
 
 .xq-dialog-close:hover {
   transform: translateY(-1px);
-  background: #fff;
+  background: var(--xq-surface);
 }
 
 .xq-dialog-body {
@@ -1400,16 +1337,16 @@ body {
   justify-content: flex-end;
   gap: 12px;
   padding: 18px 24px 22px;
-  border-top: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(248, 250, 252, 0.72);
+  border-top: 1px solid rgba(var(--xq-muted-rgb), 0.16);
+  background: var(--xq-surface-2);
 }
 
 .xq-field-panel {
   padding: 16px;
-  border-radius: 22px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(255, 255, 255, 0.74);
-  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.05);
+  border-radius: var(--xq-radius-lg);
+  border: 1px solid rgba(var(--xq-muted-rgb), 0.16);
+  background: var(--xq-surface);
+  box-shadow: var(--xq-shadow-md);
 }
 
 .xq-soft-grid {
@@ -1425,17 +1362,15 @@ body {
 .wd-version-diff-dialog,
 .eval-dialog,
 .skill-dialog-shell {
-  border: 1px solid rgba(148, 163, 184, 0.2) !important;
-  background:
-    radial-gradient(circle at 12% 0%, rgba(107, 155, 235, 0.14), transparent 30%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.96)) !important;
-  box-shadow: 0 30px 90px rgba(15, 23, 42, 0.22) !important;
+  border: 1px solid rgba(var(--xq-muted-rgb), 0.2) !important;
+  background: var(--xq-surface) !important;
+  box-shadow: var(--xq-shadow-lg);
 }
 
 .m3-generate-dialog,
 .m3-outline-dialog,
 .m3-detail-dialog {
-  border-radius: 32px !important;
+  border-radius: var(--xq-radius-xl) !important;
   overflow: hidden;
 }
 
@@ -1444,8 +1379,8 @@ body {
 .m3-detail-dialog textarea,
 .m3-edit-dialog textarea,
 .m3-edit-dialog input {
-  border-color: rgba(148, 163, 184, 0.24) !important;
-  background: rgba(255, 255, 255, 0.82) !important;
+  border-color: rgba(var(--xq-muted-rgb), 0.24) !important;
+  background: var(--xq-surface) !important;
 }
 
 .m3-generate-dialog .md-btn,
@@ -1454,7 +1389,7 @@ body {
 .m3-patchdiff-dialog .md-btn,
 .wd-version-diff-dialog .md-btn,
 .m3-reader-dialog .md-btn {
-  border-radius: 999px;
+  border-radius: var(--xq-radius-xl);
   font-weight: 800;
 }
 
@@ -1477,9 +1412,7 @@ body {
   inset: 0;
   pointer-events: none;
   border-radius: inherit;
-  background:
-    radial-gradient(circle at 12% 0%, rgba(99, 102, 241, 0.16), transparent 28%),
-    radial-gradient(circle at 88% 10%, rgba(14, 165, 233, 0.12), transparent 30%);
+  background: var(--xq-surface);
   z-index: -1;
 }
 
@@ -1501,9 +1434,9 @@ body {
 .skill-dialog-shell .skill-card,
 .eval-dialog .eval-stat,
 .m3-detail-dialog .m3-mini-badge {
-  border: 1px solid rgba(148, 163, 184, 0.32);
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
+  border: 1px solid rgba(var(--xq-muted-rgb), 0.32);
+  background: var(--xq-surface);
+  box-shadow: var(--xq-shadow-md);
 }
 
 .xq-diff-dialog .wd-version-diff-dialog__body,
@@ -1511,25 +1444,21 @@ body {
 .skill-dialog-shell .skill-dialog-body,
 .eval-dialog .eval-body,
 .m3-detail-dialog .xq-dialog-body {
-  background:
-    linear-gradient(180deg, rgba(248, 250, 252, 0.78), rgba(255, 255, 255, 0.92)),
-    radial-gradient(circle at 0% 0%, rgba(79, 70, 229, 0.06), transparent 34%);
+  background: var(--xq-surface-2);
 }
 
 .xq-reader-dialog .m3-reader-dialog__body {
-  background:
-    linear-gradient(90deg, rgba(15, 23, 42, 0.04), transparent 12%, transparent 88%, rgba(15, 23, 42, 0.04)),
-    linear-gradient(180deg, #fffaf1, #fff 38%, #f8fafc);
+  background: var(--xq-bg-sunken);
 }
 
 .xq-reader-dialog .m3-reader-content {
   max-width: 860px;
   margin: 0 auto;
   padding: clamp(22px, 4vw, 54px);
-  border-radius: 28px;
-  background: rgba(255, 255, 255, 0.82);
-  box-shadow: 0 28px 70px rgba(15, 23, 42, 0.10);
-  color: #1f2937;
+  border-radius: var(--xq-radius-xl);
+  background: var(--xq-surface);
+  box-shadow: var(--xq-shadow-lg);
+  color: var(--xq-text);
   font-size: clamp(1rem, 1.5vw, 1.14rem);
   line-height: 2.05;
   letter-spacing: 0.01em;
@@ -1545,8 +1474,7 @@ body {
   position: sticky;
   top: 0;
   z-index: 2;
-  background: rgba(248, 250, 252, 0.96);
-  backdrop-filter: blur(12px);
+  background: var(--xq-surface-2);
 }
 
 .skill-dialog-shell .skill-main-grid,
@@ -1559,9 +1487,9 @@ body {
 .eval-dialog .eval-card,
 .m3-detail-dialog .m3-review-card,
 .xq-diff-dialog .patchdiff-edit-area {
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: 0 18px 46px rgba(15, 23, 42, 0.07);
+  border: 1px solid rgba(var(--xq-muted-rgb), 0.24);
+  background: var(--xq-surface);
+  box-shadow: var(--xq-shadow-lg);
 }
 
 @media (max-width: 768px) {
@@ -1587,10 +1515,7 @@ body {
 .style-center-page,
 .knowledge-graph-page,
 .clue-tracker-page {
-  background:
-    radial-gradient(circle at 10% 0%, rgba(79, 70, 229, 0.12), transparent 34%),
-    radial-gradient(circle at 90% 8%, rgba(14, 165, 233, 0.10), transparent 28%),
-    linear-gradient(135deg, #f8fafc 0%, #eef4ff 46%, #eff6ff 100%) !important;
+  background: var(--xq-surface-2) !important;
 }
 
 .admin-sider__panel,
@@ -1600,9 +1525,9 @@ body {
 .style-summary-card,
 .knowledge-graph-page :is(section, article),
 .clue-tracker-page :is(section, article) {
-  border-color: rgba(148, 163, 184, 0.22) !important;
-  background: rgba(255, 255, 255, 0.92) !important;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06) !important;
+  border-color: rgba(var(--xq-muted-rgb), 0.22) !important;
+  background: var(--xq-surface) !important;
+  box-shadow: var(--xq-shadow-md) !important;
 }
 
 .admin-header {
@@ -1615,14 +1540,14 @@ body {
 .style-center-page,
 .knowledge-graph-page,
 .clue-tracker-page {
-  scrollbar-color: rgba(99, 102, 241, 0.45) rgba(226, 232, 240, 0.6);
+  scrollbar-color: rgba(var(--xq-accent-rgb), 0.45) rgba(var(--xq-border-rgb), 0.6);
 }
 
 .header-kicker,
 .style-center-hero__eyebrow,
 .knowledge-graph-page :is(.eyebrow, .kicker),
 .clue-tracker-page :is(.eyebrow, .kicker) {
-  color: #4f46e5 !important;
+  color: var(--xq-accent) !important;
   letter-spacing: 0.24em !important;
 }
 
@@ -1630,7 +1555,7 @@ body {
 .style-center-hero h1,
 .knowledge-graph-page h1,
 .clue-tracker-page h1 {
-  background: linear-gradient(135deg, #0f172a, #3730a3 52%, #0f766e);
+  background: var(--xq-text);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent !important;
@@ -1638,18 +1563,18 @@ body {
 
 .admin-layout .n-menu-item-content,
 .admin-layout .n-menu-item-content-header {
-  border-radius: 18px !important;
+  border-radius: var(--xq-radius-xl) !important;
 }
 
 .admin-layout .n-menu-item-content--selected,
 .admin-layout .n-menu-item-content:hover {
-  background: linear-gradient(135deg, rgba(79, 70, 229, 0.12), rgba(14, 165, 233, 0.10)) !important;
+  background: var(--xq-accent-soft) !important;
 }
 
 /* Settings / LLM workbench shell */
 body:has(.llm-settings-page),
 body:has(.system-settings-page) {
-  background: #f8fafc;
+  background: var(--xq-surface-2);
 }
 
 .llm-settings-page,
@@ -1665,9 +1590,9 @@ body:has(.system-settings-page) {
 .settings-management :is(section, article),
 .llm-settings :is(section, article),
 .system-settings-panel :is(section, article) {
-  border-color: rgba(148, 163, 184, 0.2) !important;
-  background: rgba(255, 255, 255, 0.94) !important;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06) !important;
+  border-color: rgba(var(--xq-muted-rgb), 0.2) !important;
+  background: var(--xq-surface) !important;
+  box-shadow: var(--xq-shadow-md) !important;
 }
 
 .style-center-page .style-center-summary-grid,
@@ -1692,7 +1617,7 @@ body:has(.system-settings-page) {
 .llm-settings-page button:hover,
 .system-settings-page button:hover {
   transform: translateY(-1px);
-  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.10);
+  box-shadow: var(--xq-shadow-md);
 }
 
 /* --------------------------------------------------------------------------
@@ -1701,39 +1626,27 @@ body:has(.system-settings-page) {
    route behavior or feature wiring.
 ---------------------------------------------------------------------------- */
 :root {
-  --xq-topbar-ink: #0f172a;
-  --xq-topbar-muted: #64748b;
-  --xq-topbar-line: rgba(148, 163, 184, 0.24);
-  --xq-topbar-glass: rgba(255, 255, 255, 0.82);
-  --xq-topbar-glass-strong: rgba(255, 255, 255, 0.92);
-  --xq-topbar-blue: #2563eb;
-  --xq-topbar-indigo: #4f46e5;
-  --xq-topbar-cyan: #0891b2;
-  --xq-topbar-amber: #0ea5e9;
-  --xq-topbar-radius: 26px;
-  --xq-topbar-shadow: 0 24px 70px rgba(15, 23, 42, 0.10);
-  --xq-topbar-inner-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  --xq-topbar-ink: var(--xq-text);
+  --xq-topbar-muted: var(--xq-text-muted);
+  --xq-topbar-line: var(--xq-border);
+  --xq-topbar-glass: var(--xq-surface);
+  --xq-topbar-glass-strong: var(--xq-surface);
+  --xq-topbar-blue: var(--xq-accent);
+  --xq-topbar-indigo: var(--xq-accent);
+  --xq-topbar-cyan: var(--xq-accent);
+  --xq-topbar-amber: var(--xq-accent);
+  --xq-topbar-radius: var(--xq-radius-lg);
+  --xq-topbar-shadow: var(--xq-shadow-xs);
+  --xq-topbar-inner-shadow: none;
 }
 
 .xq-topbar,
 .xq-page-topbar {
   position: relative;
-  overflow: hidden;
   color: var(--xq-topbar-ink) !important;
   border-color: var(--xq-topbar-line) !important;
-  background: linear-gradient(135deg, rgba(255,255,255,0.98), rgba(248,250,252,0.96) 52%, rgba(239,246,255,0.94)) !important;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08), var(--xq-topbar-inner-shadow) !important;
-}
-
-.xq-topbar::before,
-.xq-page-topbar::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(90deg, rgba(37, 99, 235, 0.08), transparent 34%, rgba(14, 165, 233, 0.06) 72%, rgba(14, 165, 233, 0.04));
-  opacity: 0.55;
-  mask-image: linear-gradient(180deg, #000 0%, rgba(0,0,0,0.54) 62%, transparent 100%);
+  background: var(--xq-surface) !important;
+  box-shadow: var(--xq-shadow-xs) !important;
 }
 
 .xq-topbar > *,
@@ -1747,7 +1660,7 @@ body:has(.system-settings-page) {
 }
 
 .xq-topbar--global {
-  border-bottom: 1px solid rgba(148, 163, 184, 0.28) !important;
+  border-bottom: 1px solid rgba(var(--xq-muted-rgb), 0.28) !important;
 }
 
 .xq-topbar--global .global-nav-main {
@@ -1761,7 +1674,7 @@ body:has(.system-settings-page) {
 .xq-page-topbar :is(.reader-chip--primary) {
   letter-spacing: 0.18em !important;
   text-transform: uppercase;
-  color: #1d4ed8 !important;
+  color: var(--xq-accent-hover) !important;
 }
 
 .xq-topbar--global .brand {
@@ -1770,10 +1683,10 @@ body:has(.system-settings-page) {
   gap: 8px;
   min-height: 36px;
   padding: 0 14px !important;
-  border-radius: 999px !important;
-  border: 1px solid rgba(37, 99, 235, 0.18) !important;
-  background: linear-gradient(135deg, rgba(37,99,235,0.10), rgba(255,255,255,0.82)) !important;
-  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.12) !important;
+  border-radius: var(--xq-radius-xl) !important;
+  border: 1px solid rgba(var(--xq-accent-rgb), 0.18) !important;
+  background: var(--xq-accent-soft) !important;
+  box-shadow: var(--xq-shadow-md) !important;
 }
 
 .xq-topbar--global .brand::before {
@@ -1782,47 +1695,47 @@ body:has(.system-settings-page) {
   place-items: center;
   width: 20px;
   height: 20px;
-  border-radius: 999px;
+  border-radius: var(--xq-radius-xl);
   color: white;
-  background: linear-gradient(135deg, #2563eb, #14b8a6);
+  background: var(--xq-accent);
 }
 
 .xq-topbar--global :is(.nav-link, .nav-btn, .continue-btn, .locale-btn),
 .xq-topbar :is(button, .wd-utility-btn, .wd-action, .inspiration-back-btn, .inspiration-ghost-btn),
 .xq-page-topbar :is(button, .reader-btn),
 .xq-page-topbar :is(.n-button, [role='button']) {
-  border-radius: 999px !important;
+  border-radius: var(--xq-radius-xl) !important;
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease !important;
 }
 
 .xq-topbar--global :is(.nav-link, .nav-btn, .locale-btn),
 .xq-topbar :is(.wd-utility-btn, .inspiration-back-btn, .inspiration-ghost-btn),
 .xq-page-topbar :is(.reader-btn--ghost) {
-  border: 1px solid rgba(148, 163, 184, 0.24) !important;
-  background: rgba(255,255,255,0.70) !important;
-  color: #334155 !important;
+  border: 1px solid rgba(var(--xq-muted-rgb), 0.24) !important;
+  background: var(--xq-surface) !important;
+  color: var(--xq-text-body) !important;
 }
 
 .xq-topbar--global :is(.nav-link--active, .continue-btn),
 .xq-topbar :is(.wd-utility-btn--accent, .wd-action--primary),
 .xq-page-topbar :is(.reader-btn:not(.reader-btn--ghost)) {
-  border-color: rgba(37, 99, 235, 0.30) !important;
-  color: #fff !important;
-  background: linear-gradient(135deg, #2563eb, #0f766e) !important;
-  box-shadow: 0 14px 32px rgba(37, 99, 235, 0.20) !important;
+  border-color: rgba(var(--xq-accent-rgb), 0.30) !important;
+  color: var(--xq-surface) !important;
+  background: var(--xq-accent) !important;
+  box-shadow: var(--xq-shadow-md) !important;
 }
 
 .xq-topbar--global :is(.nav-link, .nav-btn, .continue-btn, .locale-btn):hover,
 .xq-topbar :is(button, .wd-utility-btn, .wd-action, .inspiration-back-btn, .inspiration-ghost-btn):hover,
 .xq-page-topbar :is(button, .reader-btn):hover {
   transform: translateY(-1px);
-  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.12) !important;
+  box-shadow: var(--xq-shadow-md) !important;
 }
 
 .xq-page-topbar :is(h1, h2),
 .xq-topbar :is(h1, h2),
 .xq-topbar--desk .wd-header-main h1 {
-  color: #0f172a !important;
+  color: var(--xq-text) !important;
   letter-spacing: -0.04em !important;
 }
 
@@ -1836,15 +1749,15 @@ body:has(.system-settings-page) {
 .xq-topbar--detail,
 .xq-topbar--workspace,
 .xq-topbar--inspiration {
-  border-bottom: 1px solid rgba(148, 163, 184, 0.24) !important;
+  border-bottom: 1px solid rgba(var(--xq-muted-rgb), 0.24) !important;
 }
 
 .xq-topbar--desk .wd-header-main,
 .xq-topbar--desk .wd-command-bar,
 .xq-topbar--desk .wd-task-panel,
 .xq-topbar--global .global-task-band {
-  background: rgba(255,255,255,0.62) !important;
-  border-color: rgba(148, 163, 184, 0.22) !important;
+  background: var(--xq-surface) !important;
+  border-color: rgba(var(--xq-muted-rgb), 0.22) !important;
 }
 
 .xq-topbar--detail .md-top-app-bar__container,
@@ -1859,7 +1772,7 @@ body:has(.system-settings-page) {
 .xq-page-topbar--llm,
 .xq-page-topbar--reader,
 .xq-page-topbar--admin {
-  border: 1px solid rgba(148, 163, 184, 0.24) !important;
+  border: 1px solid rgba(var(--xq-muted-rgb), 0.24) !important;
 }
 
 .xq-page-topbar--entry {
@@ -1896,7 +1809,7 @@ body:has(.system-settings-page) {
   .xq-page-topbar--style,
   .xq-page-topbar--admin,
   .xq-page-topbar--reader {
-    border-radius: 22px !important;
+    border-radius: var(--xq-radius-lg) !important;
   }
 }
 
@@ -1907,10 +1820,10 @@ body:has(.system-settings-page) {
 ---------------------------------------------------------------------------- */
 :root {
   --xq-section-radius: 24px;
-  --xq-section-border: rgba(148, 163, 184, 0.24);
+  --xq-section-border: rgba(var(--xq-muted-rgb), 0.24);
   --xq-section-bg: rgba(255, 255, 255, 0.78);
-  --xq-section-bg-soft: rgba(248, 250, 252, 0.78);
-  --xq-section-shadow: 0 18px 48px rgba(15, 23, 42, 0.075);
+  --xq-section-bg-soft: rgba(var(--xq-surface-rgb), 0.78);
+  --xq-section-shadow: 0 18px 48px rgba(var(--xq-ink-rgb), 0.075);
 }
 
 :is(.admin-card, .novel-management-card, .runtime-card, .prompt-admin-card, .settings-panel, .llm-settings-panel),
@@ -1919,11 +1832,8 @@ body:has(.system-settings-page) {
 .style-center-page :is(section, article, .style-card, .style-summary-card) {
   border: 1px solid var(--xq-section-border) !important;
   border-radius: var(--xq-section-radius) !important;
-  background:
-    radial-gradient(circle at 0% 0%, rgba(59, 130, 246, 0.08), transparent 34%),
-    linear-gradient(135deg, var(--xq-section-bg), rgba(255,255,255,0.92)) !important;
-  box-shadow: var(--xq-section-shadow), inset 0 1px 0 rgba(255,255,255,0.70) !important;
-  backdrop-filter: blur(18px);
+  background: var(--xq-section-bg) !important;
+  box-shadow: var(--xq-shadow-xs) !important;
 }
 
 :is(.card-header, .runtime-card__header, .editor-header, .runtime-main__head),
@@ -1942,15 +1852,15 @@ body:has(.system-settings-page) {
   top: -2px;
   width: 42px;
   height: 4px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #2563eb, #14b8a6, #0ea5e9);
+  border-radius: var(--xq-radius-xl);
+  background: var(--xq-accent);
   opacity: 0.9;
 }
 
 :is(.card-title, .runtime-card__title, .editor-header__title, .section-title),
 .knowledge-graph-page :is(h3, h4),
 .clue-tracker-page :is(h3, h4) {
-  color: #0f172a !important;
+  color: var(--xq-text) !important;
   letter-spacing: -0.025em !important;
   font-weight: 750 !important;
 }
@@ -1958,14 +1868,14 @@ body:has(.system-settings-page) {
 :is(.card-subtitle, .runtime-card__subtitle, .editor-header__description, .brief-panel__tip),
 .knowledge-graph-page :is(p),
 .clue-tracker-page :is(p) {
-  color: #64748b !important;
+  color: var(--xq-text-muted) !important;
 }
 
 .knowledge-graph-page :is(button, input, select),
 .clue-tracker-page :is(button, input, select),
 :is(.admin-card, .novel-management-card, .runtime-card, .prompt-admin-card) :is(button, input, textarea, .n-button),
 :is(.settings-panel, .llm-settings-panel, .llm-toolbar) :is(button, input, textarea, select, .n-button) {
-  border-radius: 16px !important;
+  border-radius: var(--xq-radius-xl) !important;
 }
 
 .knowledge-graph-page :is(button:hover),
@@ -1973,15 +1883,15 @@ body:has(.system-settings-page) {
 :is(.admin-card, .novel-management-card, .runtime-card, .prompt-admin-card) :is(button:hover, .n-button:hover),
 :is(.settings-panel, .llm-settings-panel, .llm-toolbar) :is(button:hover, .n-button:hover) {
   transform: translateY(-1px);
-  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.10) !important;
+  box-shadow: var(--xq-shadow-md) !important;
 }
 
 .knowledge-graph-page :is(.bg-slate-50, .bg-sky-50),
 .clue-tracker-page :is(.bg-slate-50, .bg-sky-50),
 .runtime-card :is(.brief-panel, .runtime-main, .project-rail__item, .brief-summary),
 .prompt-admin-card :is(.prompt-editor, .empty-editor, .editor-content) {
-  background: rgba(248, 250, 252, 0.72) !important;
-  border-color: rgba(148, 163, 184, 0.20) !important;
+  background: var(--xq-surface-2) !important;
+  border-color: rgba(var(--xq-muted-rgb), 0.20) !important;
 }
 
 .knowledge-graph-page,
@@ -1994,7 +1904,7 @@ body:has(.system-settings-page) {
   .knowledge-graph-page :is(aside, section, article),
   .clue-tracker-page :is(aside, section, article),
   .style-center-page :is(section, article, .style-card, .style-summary-card) {
-    border-radius: 20px !important;
+    border-radius: var(--xq-radius-lg) !important;
   }
 }
 
@@ -2004,13 +1914,13 @@ body:has(.system-settings-page) {
    single frost-white + mist-blue + cyan premium palette.
 ---------------------------------------------------------------------------- */
 :root {
-  --xq-canvas-base: #f7fbff;
-  --xq-canvas-mid: #eef6ff;
-  --xq-canvas-deep: #eaf2ff;
-  --xq-canvas-cyan: rgba(14, 165, 233, 0.11);
-  --xq-canvas-indigo: rgba(79, 70, 229, 0.10);
-  --xq-canvas-teal: rgba(20, 184, 166, 0.08);
-  --xq-accent-warm: #0ea5e9; /* warm amber deliberately retired for global surfaces */
+  --xq-canvas-base: var(--xq-surface-2);
+  --xq-canvas-mid: var(--xq-accent-soft);
+  --xq-canvas-deep: var(--xq-accent-soft);
+  --xq-canvas-cyan: rgba(var(--xq-accent-rgb), 0.11);
+  --xq-canvas-indigo: rgba(var(--xq-accent-rgb), 0.10);
+  --xq-canvas-teal: rgba(var(--xq-success-rgb), 0.08);
+  --xq-accent-warm: var(--xq-accent); /* warm amber deliberately retired for global surfaces */
 }
 
 html,
@@ -2029,11 +1939,7 @@ body,
 .inspiration-shell,
 .wd-page,
 .writing-desk-page {
-  background:
-    radial-gradient(circle at 8% 0%, var(--xq-canvas-indigo), transparent 32%),
-    radial-gradient(circle at 92% 6%, var(--xq-canvas-cyan), transparent 30%),
-    radial-gradient(circle at 52% 92%, var(--xq-canvas-teal), transparent 38%),
-    linear-gradient(135deg, var(--xq-canvas-base) 0%, var(--xq-canvas-mid) 52%, var(--xq-canvas-deep) 100%) !important;
+  background: var(--xq-canvas-base) !important;
 }
 
 .xq-topbar,
@@ -2057,36 +1963,30 @@ body,
 .style-summary-card,
 .knowledge-graph-page :is(aside, section, article),
 .clue-tracker-page :is(aside, section, article) {
-  background: linear-gradient(135deg, rgba(255,255,255,0.96), rgba(248,251,255,0.94) 54%, rgba(239,246,255,0.92)) !important;
+  background: var(--xq-surface) !important;
 }
 
-.xq-topbar::before,
-.xq-page-topbar::before {
-  background:
-    linear-gradient(90deg, rgba(37, 99, 235, 0.13), transparent 30%, rgba(14, 165, 233, 0.12) 68%, rgba(20, 184, 166, 0.08)),
-    repeating-linear-gradient(135deg, rgba(15, 23, 42, 0.026) 0 1px, transparent 1px 12px) !important;
-}
+/* 顶栏装饰层已删除，此处不再需要覆盖 */
 
 :is(.xq-page-topbar, .xq-topbar, .entry-hero, .style-center-hero, .reader-topbar, .llm-toolbar) :is(.bg-amber-50, .bg-yellow-50, .bg-orange-50),
 :is(.admin-layout, .style-center-page, .knowledge-graph-page, .clue-tracker-page, .inspiration-shell, .entry-page) :is(.bg-amber-50, .bg-yellow-50, .bg-orange-50) {
-  background-color: rgba(239, 246, 255, 0.78) !important;
-  border-color: rgba(125, 211, 252, 0.30) !important;
-  color: #075985 !important;
+  /* Tailwind 暖色提示块统一到 warning 语义，而不是刷成强调紫 */
+  background-color: var(--xq-warning-soft) !important;
+  border-color: var(--xq-warning-border) !important;
+  color: var(--xq-warning-text) !important;
 }
 
 /* Keep warning semantics visible, but stop warning colors from becoming page-wide yellow blocks. */
 :is(.xq-page-topbar, .xq-topbar, .admin-layout, .style-center-page, .knowledge-graph-page, .clue-tracker-page) :is(.text-sky-700, .text-yellow-700, .text-orange-700) {
-  color: #0369a1 !important;
+  color: var(--xq-info-text) !important;
 }
 
 /* Last-mile old gradient neutralization: no large surface should end in cream/yellow. */
 [style*="255, 247, 237"],
 [style*="245, 158, 11"],
-[style*="#eff6ff"],
-[style*="#0ea5e9"] {
-  background:
-    radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.08), transparent 34%),
-    linear-gradient(135deg, rgba(255,255,255,0.90), rgba(239,246,255,0.88)) !important;
+[style*="var(--xq-accent-soft)"],
+[style*="var(--xq-accent)"] {
+  background: var(--xq-surface) !important;
 }
 
 /* --------------------------------------------------------------------------
@@ -2095,11 +1995,11 @@ body,
    blue-violet/sky warning surfaces on product pages.
 ---------------------------------------------------------------------------- */
 :root {
-  --xq-warn-surface: rgba(239, 246, 255, 0.82);
-  --xq-warn-surface-strong: rgba(224, 242, 254, 0.86);
-  --xq-warn-border: rgba(14, 165, 233, 0.26);
-  --xq-warn-ink: #075985;
-  --xq-warn-dot: #0ea5e9;
+  --xq-warn-surface: rgba(var(--xq-accent-rgb), 0.82);
+  --xq-warn-surface-strong: rgba(var(--xq-accent-rgb), 0.86);
+  --xq-warn-border: rgba(var(--xq-accent-rgb), 0.26);
+  --xq-warn-ink: var(--xq-accent-text);
+  --xq-warn-dot: var(--xq-accent);
 }
 
 :is(
@@ -2121,7 +2021,7 @@ body,
   .bg-amber-50, .bg-amber-100, .bg-yellow-50, .bg-yellow-100, .bg-orange-50, .bg-orange-100,
   [class*='bg-amber-'], [class*='bg-yellow-'], [class*='bg-orange-']
 ) {
-  background: linear-gradient(135deg, var(--xq-warn-surface), var(--xq-warn-surface-strong)) !important;
+  background: var(--xq-warn-surface) !important;
   border-color: var(--xq-warn-border) !important;
 }
 
@@ -2172,9 +2072,10 @@ body,
 }
 
 :is(.status-warning, .wd-state-pill--warning, .task-chip--warn, .wd-meta-pill--warn) {
-  background: linear-gradient(135deg, rgba(224,242,254,0.92), rgba(239,246,255,0.86)) !important;
-  border-color: rgba(14,165,233,0.30) !important;
-  color: #075985 !important;
+  /* 警告态必须仍然读起来像警告：soft 底 + 同色系描边与文字 */
+  background: var(--xq-warning-soft) !important;
+  border-color: var(--xq-warning-border) !important;
+  color: var(--xq-warning-text) !important;
 }
 
 /* Keep destructive/error states red; only warning/warm decoration is cooled. */
@@ -2187,31 +2088,28 @@ body,
    This is the final UI contract above legacy md/Tailwind/Naive/local systems.
 ---------------------------------------------------------------------------- */
 :root {
-  --xq-ui-bg: #f8fbff;
-  --xq-ui-bg-2: #eef6ff;
+  --xq-ui-bg: var(--xq-surface-2);
+  --xq-ui-bg-2: var(--xq-accent-soft);
   --xq-ui-surface: rgba(255, 255, 255, 0.82);
   --xq-ui-surface-strong: rgba(255, 255, 255, 0.94);
-  --xq-ui-surface-soft: rgba(239, 246, 255, 0.76);
-  --xq-ui-border: rgba(148, 163, 184, 0.24);
-  --xq-ui-ink: #0f172a;
-  --xq-ui-muted: #64748b;
-  --xq-ui-faint: #94a3b8;
-  --xq-ui-primary: #2563eb;
-  --xq-ui-primary-2: #0891b2;
-  --xq-ui-primary-soft: rgba(37, 99, 235, 0.10);
+  --xq-ui-surface-soft: rgba(var(--xq-accent-rgb), 0.76);
+  --xq-ui-border: rgba(var(--xq-muted-rgb), 0.24);
+  --xq-ui-ink: var(--xq-text);
+  --xq-ui-muted: var(--xq-text-muted);
+  --xq-ui-faint: var(--xq-text-faint);
+  --xq-ui-primary: var(--xq-accent);
+  --xq-ui-primary-2: var(--xq-accent);
+  --xq-ui-primary-soft: rgba(var(--xq-accent-rgb), 0.10);
   --xq-ui-radius: 22px;
   --xq-ui-radius-lg: 30px;
-  --xq-ui-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
-  --xq-ui-shadow-hover: 0 24px 64px rgba(15, 23, 42, 0.12);
+  --xq-ui-shadow: 0 18px 48px rgba(var(--xq-ink-rgb), 0.08);
+  --xq-ui-shadow-hover: 0 24px 64px rgba(var(--xq-ink-rgb), 0.12);
 }
 
 .xq-app-root {
   min-height: 100vh;
   color: var(--xq-ui-ink);
-  background:
-    radial-gradient(circle at 10% 0%, rgba(37, 99, 235, 0.11), transparent 30rem),
-    radial-gradient(circle at 92% 4%, rgba(14, 165, 233, 0.10), transparent 28rem),
-    linear-gradient(135deg, var(--xq-ui-bg), var(--xq-ui-bg-2)) !important;
+  background: var(--xq-ui-bg) !important;
   font-family: var(--xq-font-sans, "Noto Sans SC", "Microsoft YaHei", "PingFang SC", sans-serif);
 }
 
@@ -2249,11 +2147,8 @@ body,
 ) {
   border: 1px solid var(--xq-ui-border) !important;
   border-radius: var(--xq-ui-radius-lg) !important;
-  background:
-    radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.055), transparent 30%),
-    linear-gradient(135deg, var(--xq-ui-surface-strong), var(--xq-ui-surface-soft)) !important;
+  background: var(--xq-ui-surface-strong) !important;
   box-shadow: var(--xq-ui-shadow) !important;
-  backdrop-filter: blur(18px);
 }
 
 .xq-app-root :is(.md-card, .n-card, .xq-panel, .entry-card, .project-row, .style-card, .wd-card, .admin-card):hover {
@@ -2273,26 +2168,26 @@ body,
   .n-select,
   .n-base-selection
 ) {
-  border-radius: 16px !important;
+  border-radius: var(--xq-radius-xl) !important;
 }
 
 .xq-app-root :is(.md-btn, .n-button--primary-type, .xq-button--primary, button.primary, .wd-action--primary) {
-  color: #fff !important;
-  border-color: rgba(37, 99, 235, 0.24) !important;
-  background: linear-gradient(135deg, var(--xq-ui-primary), var(--xq-ui-primary-2)) !important;
-  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.20) !important;
+  color: var(--xq-surface) !important;
+  border-color: rgba(var(--xq-accent-rgb), 0.24) !important;
+  background: var(--xq-ui-primary) !important;
+  box-shadow: var(--xq-shadow-md) !important;
 }
 
 .xq-app-root :is(.md-btn--ghost, .n-button--tertiary-type, .n-button--quaternary-type, .xq-button--secondary, .xq-button--ghost, .wd-action--ghost) {
-  color: #1d4ed8 !important;
-  border-color: rgba(148, 163, 184, 0.25) !important;
-  background: rgba(255, 255, 255, 0.72) !important;
+  color: var(--xq-accent-hover) !important;
+  border-color: rgba(var(--xq-muted-rgb), 0.25) !important;
+  background: var(--xq-surface) !important;
 }
 
 .xq-app-root :is(input, textarea, select, .n-input, .n-base-selection) {
-  border-color: rgba(148, 163, 184, 0.28) !important;
-  background: rgba(255, 255, 255, 0.72) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.70);
+  border-color: rgba(var(--xq-muted-rgb), 0.28) !important;
+  background: var(--xq-surface) !important;
+  box-shadow: var(--xq-shadow-xs);
 }
 
 .xq-app-root :is(button, .md-btn, .n-button, .xq-button) {
@@ -2311,16 +2206,65 @@ body,
 }
 
 .xq-app-root :is(.md-chip, .n-tag, .reader-chip, .wd-meta-pill, .task-chip) {
-  border-radius: 999px !important;
-  border-color: rgba(148, 163, 184, 0.24) !important;
-  background: rgba(239, 246, 255, 0.78) !important;
-  color: #075985 !important;
+  /* 徽标统一形态：pill + 中性底 + 1px 描边，不再整站刷成紫色块 */
+  border-radius: var(--xq-radius-pill) !important;
+  border-color: var(--xq-border) !important;
+  background: var(--xq-surface-2) !important;
+  color: var(--xq-text-body) !important;
 }
 
 /* Prevent local hero systems from drifting into a different product. */
 .xq-app-root :is(.entry-hero, .inspiration-topbar, .style-center-hero, .reader-topbar, .llm-toolbar, .admin-header, .wd-header-shell) {
   border-color: var(--xq-ui-border) !important;
-  background:
-    radial-gradient(circle at 2% 0%, rgba(37, 99, 235, 0.09), transparent 32%),
-    linear-gradient(135deg, rgba(255,255,255,0.92), rgba(239,246,255,0.86)) !important;
+  background: var(--xq-surface) !important;
+}
+
+
+/* === Global compact utilities (injected) === */
+@layer base {
+  .xq-card {
+    border-radius: var(--xq-radius-lg) !important;
+    padding: 14px 16px !important;
+    box-shadow: var(--xq-shadow-sm) !important;
+    transition: box-shadow 0.2s ease, transform 0.15s ease;
+  }
+  .xq-card:hover {
+    box-shadow: var(--xq-shadow-sm) !important;
+    transform: translateY(-1px);
+  }
+  .md-btn {
+    padding: 4px 12px !important;
+    font-size: 12px !important;
+    border-radius: 8px !important;
+    min-height: 30px !important;
+  }
+  .fade-enter-active, .fade-leave-active {
+    transition: opacity 0.18s ease, transform 0.2s ease;
+  }
+  .fade-enter-from, .fade-leave-to {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* === Accessibility: reduced motion === */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .fade-enter-active, .fade-leave-active,
+  .fade-enter-from, .fade-leave-to {
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* === Dark mode compatibility === */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: light dark;
+  }
 }

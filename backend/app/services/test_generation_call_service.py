@@ -17,6 +17,7 @@ from app.services.generation_call_service import (
     resolve_retry_delay_seconds,
     validate_json_schema_subset,
 )
+from app.services.llm_service import LLMService
 
 
 class _FakeLLMService:
@@ -57,7 +58,6 @@ async def test_call_generation_json_repairs_malformed_json_once():
 
 
 @pytest.mark.anyio
-@pytest.mark.skip(reason="API refactored")
 async def test_call_generation_text_retries_retryable_http_exception():
     stages = []
 
@@ -86,7 +86,6 @@ async def test_call_generation_text_retries_retryable_http_exception():
 
 
 @pytest.mark.anyio
-@pytest.mark.skip(reason="API refactored")
 async def test_call_generation_text_reduces_max_tokens_after_provider_token_limit_rejection():
     stages = []
 
@@ -126,7 +125,7 @@ async def test_call_generation_text_reduces_max_tokens_after_provider_token_limi
 
 
 @pytest.mark.anyio
-async def test_call_generation_text_heartbeats_and_reduces_max_tokens_after_soft_timeout():
+async def test_call_generation_text_does_not_retry_timeout_by_default():
     stages = []
 
     class SlowLLMService(_FakeLLMService):
@@ -162,17 +161,55 @@ async def test_call_generation_text_heartbeats_and_reduces_max_tokens_after_soft
         )
 
     assert exc_info.value.status_code == 504
-    assert len(llm.calls) == 2
+    assert len(llm.calls) == 1
     assert llm.calls[0]["max_tokens"] == 20000
+    assert not any("重试" in message for _, message in stages)
+
+
+@pytest.mark.anyio
+async def test_call_generation_text_retries_timeout_only_when_explicitly_enabled():
+    class SlowThenFastLLMService(_FakeLLMService):
+        async def get_llm_response(self, **kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                await asyncio.sleep(1)
+            return "ok"
+
+    llm = SlowThenFastLLMService([])
+    result = await call_generation_text(
+        llm_service=llm,
+        system_prompt="system",
+        conversation_history=[{"role": "user", "content": "long chapter"}],
+        temperature=0.3,
+        user_id=1,
+        timeout=1.0,
+        policy=GenerationCallPolicy(
+            stage_label="长章正文候选",
+            retry_attempts=2,
+            retry_on_timeout=True,
+            response_format=None,
+            max_tokens=20000,
+            heartbeat_interval_seconds=None,
+            soft_timeout_seconds=0.03,
+            backoff_base_seconds=0.01,
+        ),
+    )
+
+    assert result.text == "ok"
+    assert len(llm.calls) == 2
     assert 12000 <= llm.calls[1]["max_tokens"] < 20000
-    assert any(stage == "generate_variants" and "Provider" in message for stage, message in stages)
-    assert any("降低输出上限" in message for _, message in stages)
 
 
 def test_estimate_generation_token_count_handles_cjk_and_ascii():
     assert estimate_generation_token_count("") == 0
     assert estimate_generation_token_count("hello world " * 10) >= 20
     assert estimate_generation_token_count("玄穹文枢正在生成更长的章节") >= 8
+
+
+def test_deepseek_free_model_capability_is_narrowly_scoped():
+    assert LLMService.is_deepseek_free_model("deepseek-v4-flash-free") is True
+    assert LLMService.is_deepseek_free_model("deepseek-v4-flash-0731") is False
+    assert LLMService.is_deepseek_free_model("glm-5.2") is False
 
 
 def test_retry_delay_respects_retry_after_and_cap():
@@ -279,7 +316,6 @@ async def test_call_generation_json_uses_schema_and_repairs_local_schema_failure
 
 
 @pytest.mark.anyio
-@pytest.mark.skip(reason="API refactored")
 async def test_call_generation_text_downgrades_schema_when_provider_rejects_structured_outputs():
     stages = []
 

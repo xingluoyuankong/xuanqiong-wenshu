@@ -12,7 +12,7 @@ import time
 from copy import deepcopy
 from datetime import datetime, timezone
 from dataclasses import asdict, dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
 
 import httpx
 from fastapi import HTTPException
@@ -377,9 +377,9 @@ class PipelineOrchestrator:
             return True, "score_improved_without_issue_regression", before, after
         return False, "not_improved_enough", before, after
 
+    # ====== EXTRACTABLE: _pipeline_quality_gate.py — 结构质量门与内容指纹 ======
     @staticmethod
     def _content_fingerprint(text: Optional[str]) -> str:
-    # ====== EXTRACTABLE: _pipeline_quality_gate.py (L381-L940) ======
         normalized = re.sub(r"\s+", " ", str(text or "")).strip()
         if not normalized:
             return ""
@@ -420,9 +420,14 @@ class PipelineOrchestrator:
         violations: Optional[List[Dict[str, Any]]],
         chapter_mission: Optional[dict],
         story_guard_key: str = "story_progression_guard",
-        target_word_count: int = 3000,
-        min_word_count: int = 2000,
+        target_word_count: int,
+        min_word_count: int,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        # 两个字数参数**故意没有默认值**（T-12 步骤 C）。原来的 3000/2000 是硬编码
+        # 兜底，而 `_resolve_config` 实际产出的是 target/min = 0.9 的任意档位
+        # （800/720 一路到 20000/18000）——默认值一旦存在，新调用点忘记传就会
+        # 静默按 3000/2000 判，真实语料上这会让 `below_min` 触发 24.1%。
+        # 现在忘记传是 TypeError，在测试里就炸，不会漏到生产。
         summaries = dict(review_summaries or {})
         story_guard = cls._score_story_quality_candidate(
             content=content,
@@ -438,11 +443,13 @@ class PipelineOrchestrator:
 
     QUALITY_ISSUE_LABELS = {
         "static_description_risk": "静态描写过多",
+        "repeated_paragraph_flood": "整段重复灌水",
         "insufficient_dialogue_pressure": "有效对白不足",
         "chapter_progression_weak": "实质推进不足",
         "scene_fulfillment_weak": "场景兑现不足",
         "dialogue_does_not_change_state": "对白未改变局势",
         "ending_pressure_missing": "章末递压不足",
+        "focus_character_missing": "焦点角色缺席",
         "critical_issues_remaining": "自检严重问题未消除",
         "score_below_floor": "结构质量分过低",
         "too_many_major_issues": "主要结构问题过多",
@@ -459,11 +466,13 @@ class PipelineOrchestrator:
 
     QUALITY_ISSUE_HINTS = {
         "static_description_risk": "压缩独立景物/心理段，把篇幅改成动作回合、对话攻防和后果。",
+        "repeated_paragraph_flood": "删掉整段照抄的重复内容，用新的事件、对话或后果补足字数。",
         "insufficient_dialogue_pressure": "补足至少两轮有效对白，让人物互相施压、拒绝、让步或反制。",
         "chapter_progression_weak": "把本章目标、冲突、转折写成可见事件，而不是停留在铺陈。",
         "scene_fulfillment_weak": "逐场兑现 scene_list 的目标、阻碍、反应、转折和钩子。",
         "dialogue_does_not_change_state": "让对白造成主动权、信息量、关系、风险或下一步选择的变化。",
         "ending_pressure_missing": "结尾必须交出危险、证据、期限、误会或代价，避免总结式平收。",
+        "focus_character_missing": "让本章焦点角色实际出场、说话、行动或被明确处理。",
         "critical_consistency_unresolved": "优先修复前后文事实冲突，再继续润色。",
         "major_consistency_unresolved": "补齐承接关系和未闭环钩子，避免章节断裂。",
         "word_count_far_below_target": "扩写只能补行动、对话、后果和短余波，不能用空泛描写凑字。",
@@ -507,13 +516,19 @@ class PipelineOrchestrator:
             rich_progression_evidence = (
                 float(guard.get("scene_fulfillment_rate") or 0.0) >= 0.75
                 and float(guard.get("scene_structure_rate") or 0.0) >= 0.7
-                and bool(guard.get("dialogue_changes_state", True))
+                # T-13：`is not False` 而不是 `bool(get(..., True))`。语义是「只要不是
+                # 明确失败就不算反对证据」——None（不适用）不再被当成正向证据白送，
+                # 也不会被 bool() 压成 False 而误判为失败。
+                and guard.get("dialogue_changes_state") is not False
                 and bool(guard.get("ending_pressure_passed", guard.get("ending_hook_detected", True)))
-                and bool(guard.get("event_density_passed", True))
-                and bool(guard.get("state_change_interval_passed", True))
+                # T-14：同理，密度两态字段的 bool() 也要去掉。
+                and guard.get("event_density_passed") is not False
+                and guard.get("state_change_interval_passed") is not False
             )
             if guard.get("static_description_risk"):
                 add("static_description_risk")
+            if guard.get("repetition_risk"):
+                add("repeated_paragraph_flood")
             if guard.get("expected_dialogue") and int(guard.get("dialogue_marker_count") or 0) < 4 and int(guard.get("word_count") or 0) >= 1500:
                 add("insufficient_dialogue_pressure")
             if (
@@ -526,10 +541,16 @@ class PipelineOrchestrator:
                 add("scene_fulfillment_weak")
             if int(guard.get("scene_count") or 0) > 0 and float(guard.get("scene_structure_rate") or 1.0) < 0.55:
                 add("scene_structure_weak")
-            if guard.get("expected_dialogue") and "dialogue_changes_state" in guard and not guard.get("dialogue_changes_state", True):
+            # T-13：与 blocker 侧同一判据（`is False`），否则 warning 摘要会比 blocker 更严，
+            # 出现「前端标红了但没拦章」的不一致。
+            if guard.get("expected_dialogue") and "dialogue_changes_state" in guard and guard.get("dialogue_changes_state") is False:
                 add("dialogue_does_not_change_state")
             if int(guard.get("word_count") or 0) >= 1200 and not guard.get("ending_pressure_passed", guard.get("ending_hook_detected", True)):
                 add("ending_pressure_missing")
+            # T-11：只进 warning 摘要，不进 blockers（别名匹配不可靠，见判罚处注释）。
+            # 字数门槛已经在 focus_character_missing 里判过，这里不要再判一次。
+            if guard.get("focus_character_missing"):
+                add("focus_character_missing")
             if int(guard.get("word_count") or 0) >= 1800 and guard.get("event_density_passed") is False:
                 add("event_density_weak")
             if int(guard.get("word_count") or 0) >= 2500 and guard.get("state_change_interval_passed") is False:
@@ -686,10 +707,11 @@ class PipelineOrchestrator:
                 and scene_structure_rate >= 0.7
                 and story_dialogue_markers >= 8
                 and not story_guard.get("static_description_risk")
-                and story_guard.get("dialogue_changes_state", True)
+                # T-13/T-14：这三个都是三态字段，一律用 `is not False`。
+                and story_guard.get("dialogue_changes_state") is not False
                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
-                and story_guard.get("event_density_passed", True)
-                and story_guard.get("state_change_interval_passed", True)
+                and story_guard.get("event_density_passed") is not False
+                and story_guard.get("state_change_interval_passed") is not False
             )
             if story_guard.get("static_description_risk"):
                 blockers.append({
@@ -703,6 +725,19 @@ class PipelineOrchestrator:
                     "code": "chapter_artifact_markers",
                     "message": "章节正文含有提纲/标记残留，不能作为成品章节放行。",
                 })
+            # T-10：精确重复是字符串完全相同，判定 100% 可靠，可以直接做 blocker，
+            # 不需要 soft_pass 兜底——没有任何正当理由让整段照抄的正文过门。
+            if story_guard.get("repetition_risk"):
+                blockers.append({
+                    "source": "story_progression_guard",
+                    "code": "repeated_paragraph_flood",
+                    "message": (
+                        "正文里存在整段照抄的重复内容"
+                        f"（最长重复段 {int(story_guard.get('longest_repeated_paragraph_chars') or 0)} 字，"
+                        f"同一段最多出现 {int(story_guard.get('max_repeated_paragraph_count') or 0)} 次），"
+                        "属于凑字数退化，不能放行。"
+                    ),
+                })
             if story_guard.get("expected_dialogue") and story_word_count >= 1500 and story_dialogue_markers < 4:
                 blockers.append({
                     "source": "story_progression_guard",
@@ -712,7 +747,12 @@ class PipelineOrchestrator:
             progression_soft_pass = (
                 story_dialogue_markers >= 8
                 and not story_guard.get("static_description_risk")
-                and story_guard.get("dialogue_changes_state", False)
+                # T-13：这一条**故意保持「必须是 True」**，与同批其它消费点的
+                # `is not False` 不同。它的原写法默认值就是 False（要求正向证据），
+                # 而它的作用是豁免 chapter_progression_weak —— 豁免必须有据，
+                # 「不适用」不构成据。另外此处 None 实际不可达：None 只在
+                # dialogue_marker_count <= 0 时产生，与上一行 `>= 8` 互斥。
+                and story_guard.get("dialogue_changes_state") is True
                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", False))
                 and critique_critical <= 1
                 and (critique_score is None or critique_score >= 70)
@@ -743,7 +783,9 @@ class PipelineOrchestrator:
                 )
                 and story_dialogue_markers >= 4
                 and not story_guard.get("static_description_risk")
-                and story_guard.get("dialogue_changes_state", True)
+                # T-13：原默认值是 True（缺键即视为不反对），照此映射成 `is not False`。
+                # 上一行 `>= 4` 已让 None 不可达，这里只是把语义写准。
+                and story_guard.get("dialogue_changes_state") is not False
                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
                 and critique_critical <= 1
                 and (critique_score is None or critique_score >= 60)
@@ -753,8 +795,11 @@ class PipelineOrchestrator:
                 ai_scene_supports_pass
                 and progression_soft_pass
                 and story_dialogue_markers >= 10
-                and story_guard.get("event_density_passed", True)
-                and story_guard.get("state_change_interval_passed", True)
+                # T-14：密度三态。这里用 `is not False` 是安全的——None 只在
+                # word_count < 800 时产生，而它豁免的 blocker 门槛都在 1200 字以上，
+                # 两个区间不相交，所以「未评估也算不反对」不会放过任何该拦的样本。
+                and story_guard.get("event_density_passed") is not False
+                and story_guard.get("state_change_interval_passed") is not False
                 and critique_critical <= 1
                 and critique_major < 8
                 and not critical_consistency
@@ -764,10 +809,11 @@ class PipelineOrchestrator:
                 scene_rate >= 0.75
                 and story_dialogue_markers >= 8
                 and not story_guard.get("static_description_risk")
-                and story_guard.get("dialogue_changes_state", True)
+                # T-13/T-14：三个三态字段统一 `is not False`（原默认值都是 True）。
+                and story_guard.get("dialogue_changes_state") is not False
                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
-                and story_guard.get("event_density_passed", True)
-                and story_guard.get("state_change_interval_passed", True)
+                and story_guard.get("event_density_passed") is not False
+                and story_guard.get("state_change_interval_passed") is not False
                 and critique_critical <= 1
                 and (critique_score is None or critique_score >= 70)
                 and not critical_consistency
@@ -798,10 +844,13 @@ class PipelineOrchestrator:
                     "code": "scene_structure_weak",
                     "message": "正文虽然可能点到了场景关键词，但缺少目标、阻碍、转折、结果/压力的结构证据。",
                 })
+            # T-13：blocker 判据改成显式 `is False`。三态下 None 表示「不适用」，
+            # 绝不能进 blocker；而 expected_dialogue 为真时 `_evaluate_dialogue_changes_state`
+            # 只会返回 True/False（见那里的判定顺序注释），所以这道 blocker 的触发面不变。
             if (
                 story_guard.get("expected_dialogue")
                 and "dialogue_changes_state" in story_guard
-                and not story_guard.get("dialogue_changes_state", True)
+                and story_guard.get("dialogue_changes_state") is False
             ):
                 blockers.append({
                     "source": "story_progression_guard",
@@ -822,7 +871,8 @@ class PipelineOrchestrator:
             density_soft_pass = (
                 story_dialogue_markers >= 8
                 and story_mission_hits >= 3
-                and story_guard.get("dialogue_changes_state", True)
+                # T-13：原默认值 True，映射成 `is not False`。
+                and story_guard.get("dialogue_changes_state") is not False
                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
                 and not story_guard.get("static_description_risk")
             )
@@ -952,7 +1002,9 @@ class PipelineOrchestrator:
                 "suggestion": "把空转段改成行动、阻碍、反制、发现、代价、关系变化或短余波决策。",
                 "example": "每个长窗口至少出现一次新信息、主动权变化、风险升级或伏笔兑现。",
             })
-        if guard.get("expected_dialogue") and not guard.get("dialogue_changes_state", True):
+        # T-13：定向修复清单也用 `is False`。None 表示「本章不适用对话维度」，
+        # 给它发一条「把对话改成两轮攻防」的返修指令是无意义的返工要求。
+        if guard.get("expected_dialogue") and guard.get("dialogue_changes_state") is False:
             issues.append({
                 "dimension": "dialogue",
                 "severity": "major",
@@ -1829,6 +1881,252 @@ class PipelineOrchestrator:
             "persisted": True,
             "version_ids": [item.id for item in version_models if item.id is not None],
             "version_count": len(version_models),
+        }
+
+    # 定向修复的轮数上限。每一轮都是一次 LLM 调用，成本与耗时线性增长，所以
+    # 刻意硬编码而不做配置项——它是成本闸门，不是调参空间。
+    STRUCTURAL_GATE_REPAIR_MAX_ROUNDS = 2
+
+    @staticmethod
+    def _is_structural_repair_improvement(
+        before_codes: Sequence[str],
+        after_codes: Sequence[str],
+    ) -> bool:
+        """判定一次定向修复是否算改善：blocker 严格子集收缩。
+
+        只看数量会把「换了一种毛病」当成「治好了一种毛病」——实测一个只剩
+        `chapter_artifact_markers` 的正文，blocker 数从 7 降到 1，但那是一种全新的失败形态，
+        采纳它会让修复循环朝错误方向收敛。所以要求：数量严格下降，且不引入新的 code 类型。
+        """
+        before = set(before_codes or ())
+        after = set(after_codes or ())
+        return len(after) < len(before) and not (after - before)
+
+    async def _attempt_structural_gate_repair(
+        self,
+        *,
+        best_content: str,
+        review_summaries: Dict[str, Any],
+        structural_quality_gate: Dict[str, Any],
+        guardrail_violations: Optional[List[Dict[str, Any]]],
+        chapter_mission: Optional[dict],
+        repair_context: Optional[Dict[str, Any]],
+        active_config: "PipelineConfig",
+        user_id: int,
+    ) -> Optional[Dict[str, Any]]:
+        """结构质量门失败后的结构定向修复闭环（最多 2 轮）。
+
+        取失败闸门对应的 story guard，转成结构问题清单，交给 revise_chapter 做局部定向修复；
+        用 non-regressive 保护防缩水，再用同一评分口径重评。每轮的采纳标准是
+        `_is_structural_repair_improvement`（blocker 严格子集收缩），**不是「必须一次过门」**：
+        从 7 个 blocker 修到只剩 1 个也要采纳，因为拒稿对用户价值为零，而带未达标标记的部分
+        改善至少可用、可见，并且下一轮从更好的起点继续。
+
+        返回值总是字典（除 `enable_self_critique` 之外的跳过原因也会带诊断），
+        用 `adopted` 表达是否采纳：
+
+        - `adopted=True`：带 `content` / `review_summaries` / `structural_quality_gate`，
+          调用方回写正文；此时门可能仍未通过（部分改善），不能假装过门。
+        - `adopted=False`：只带 `repair_summary`，调用方照原有逻辑落库拒稿 + 422，
+          但要把诊断写进 runtime_metadata，让前端能显示「已尝试自动修复，仍有 N 项未达标」，
+          而不是让用户面对一个无解的 422。
+
+        与其把 quality_issue_codes 甩给用户做“全新随机重试”，不如先按拦截原因做确定性的
+        定向修复——这是结构质量闸门从“只评分”走向“评分并自愈”的闭环补齐。
+        """
+        codes_before = [str(code) for code in (structural_quality_gate.get("quality_issue_codes") or [])]
+
+        def _summary(
+            *,
+            attempted: bool,
+            rounds: int,
+            outcome: str,
+            codes_after: Sequence[str],
+            new_codes: Sequence[str] = (),
+            skipped_reason: Optional[str] = None,
+            issue_count: int = 0,
+        ) -> Dict[str, Any]:
+            after = [str(code) for code in codes_after]
+            return {
+                "status": "applied" if outcome in {"passed", "improved"} else "rejected",
+                "repair_attempted": attempted,
+                "repair_rounds": rounds,
+                "repair_outcome": outcome,
+                "repair_skipped_reason": skipped_reason,
+                "issue_count": issue_count,
+                "issue_codes_before": list(codes_before),
+                "issue_codes_after": after,
+                "new_issue_codes": sorted(set(new_codes)),
+                "remaining_issue_count": len(after),
+            }
+
+        def _skip(reason: str) -> Dict[str, Any]:
+            return {
+                "adopted": False,
+                "repair_summary": _summary(
+                    attempted=False,
+                    rounds=0,
+                    outcome="skipped",
+                    codes_after=codes_before,
+                    skipped_reason=reason,
+                ),
+            }
+
+        if not active_config.enable_self_critique:
+            # TODO(T-17/D-11)：关闭自评时至少要走确定性清理，不该完全无自愈手段。
+            return _skip("self_critique_disabled")
+
+        story_guard = structural_quality_gate.get("story_progression_guard")
+        if not isinstance(story_guard, dict) and isinstance(review_summaries, dict):
+            story_guard = review_summaries.get("story_progression_guard")
+        if not isinstance(story_guard, dict):
+            return _skip("story_guard_missing")
+
+        current_content = best_content
+        current_summaries = review_summaries
+        current_gate = structural_quality_gate
+        current_codes = list(codes_before)
+        current_guard = story_guard
+
+        adopted_content: Optional[str] = None
+        adopted_summaries: Optional[Dict[str, Any]] = None
+        adopted_gate: Optional[Dict[str, Any]] = None
+        rounds = 0
+        new_codes_seen: set = set()
+        issue_count = 0
+        skipped_reason: Optional[str] = None
+
+        for _round in range(self.STRUCTURAL_GATE_REPAIR_MAX_ROUNDS):
+            structural_issues = self._build_structural_reader_polish_issues(current_guard)
+            if not structural_issues:
+                # 闸门失败但没有可定向修复的结构问题（例如纯连续性冲突），交回调用方拦截
+                if rounds == 0:
+                    skipped_reason = "no_structural_issue"
+                break
+            issue_count = len(structural_issues)
+
+            try:
+                repair_service = SelfCritiqueService(self.session, self.llm_service, self.prompt_service)
+                revised = await repair_service.revise_chapter(
+                    chapter_content=current_content,
+                    issues=structural_issues[:8],
+                    context=repair_context or {},
+                    user_id=user_id,
+                    allow_stagewide=False,
+                )
+            except Exception as exc:  # noqa: BLE001 - 修复失败不应吞掉原始拦截，降级即可
+                logger.warning("结构质量门定向修复降级：error=%s", exc)
+                if rounds == 0:
+                    skipped_reason = "revise_failed"
+                break
+
+            rounds += 1
+            if not revised or revised == current_content:
+                continue
+
+            next_content, content_guard = self._preserve_non_regressive_content(
+                previous_content=current_content,
+                candidate_content=revised,
+                stage_label="self_critique",
+                min_word_count=active_config.min_word_count,
+            )
+            if content_guard is not None:
+                # 修复导致内容缩水被回退，没有实质改善
+                continue
+
+            repaired_summaries, repaired_gate = self._evaluate_structural_quality_gate_for_content(
+                review_summaries=current_summaries,
+                content=next_content,
+                violations=guardrail_violations,
+                chapter_mission=chapter_mission,
+                target_word_count=active_config.target_word_count,
+                min_word_count=active_config.min_word_count,
+            )
+            repaired_codes = [str(code) for code in (repaired_gate.get("quality_issue_codes") or [])]
+            passed = bool(repaired_gate.get("passed", False))
+
+            if not passed and not self._is_structural_repair_improvement(current_codes, repaired_codes):
+                new_codes_seen.update(set(repaired_codes) - set(current_codes))
+                continue
+
+            adopted_content = next_content
+            adopted_summaries = repaired_summaries
+            adopted_gate = repaired_gate
+            current_content = next_content
+            current_summaries = repaired_summaries
+            current_gate = repaired_gate
+            current_codes = repaired_codes
+            guard_candidate = repaired_gate.get("story_progression_guard")
+            if isinstance(guard_candidate, dict):
+                current_guard = guard_candidate
+
+            if passed:
+                break
+
+        if adopted_content is None:
+            return {
+                "adopted": False,
+                "repair_summary": _summary(
+                    attempted=rounds > 0,
+                    rounds=rounds,
+                    outcome="skipped" if rounds == 0 else "unchanged",
+                    codes_after=codes_before,
+                    new_codes=new_codes_seen,
+                    skipped_reason=skipped_reason,
+                    issue_count=issue_count,
+                ),
+            }
+
+        outcome = "passed" if bool((adopted_gate or {}).get("passed", False)) else "improved"
+        return {
+            "adopted": True,
+            "content": adopted_content,
+            "review_summaries": adopted_summaries,
+            "structural_quality_gate": adopted_gate,
+            "repair_summary": _summary(
+                attempted=True,
+                rounds=rounds,
+                outcome=outcome,
+                codes_after=current_codes,
+                new_codes=new_codes_seen,
+                issue_count=issue_count,
+            ),
+        }
+
+    def _build_structural_gate_repair_context(
+        self,
+        *,
+        outline_title: str,
+        outline_summary: str,
+        chapter_mission: Optional[dict],
+        history_context: Dict[str, Any],
+        project_memory_text: str,
+        style_context: Any,
+        writer_blueprint: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """构造结构质量门定向修复用的上下文。
+
+        与 reader_polish / self_critique 局部修复同源，聚焦“修结构而非补描写”：把大纲目标、
+        章节任务、前情脉络与人物设定交给 revise_chapter，让它按拦截原因做定向修复，而不是脱离
+        上下文重新发挥。只依赖 generate_chapter 主体无条件定义的变量，避免闸门时点取到未定义值。
+        """
+        return {
+            "outline_title": outline_title,
+            "outline_summary": outline_summary,
+            "chapter_mission": chapter_mission,
+            "previous_summary": history_context.get("previous_summary"),
+            "previous_tail": history_context.get("previous_tail"),
+            "previous_chapter_bundle": history_context.get("previous_chapter_bundle"),
+            "recent_track": history_context.get("recent_track"),
+            "plot_arc_digest": history_context.get("plot_arc_digest"),
+            "project_memory": project_memory_text,
+            "style_context": style_context,
+            "character_profiles": json.dumps(writer_blueprint.get("characters", []), ensure_ascii=False),
+            "emotion_target": (chapter_mission or {}).get("emotion_target"),
+            "reader_polish_hard_rule": (
+                "本轮修复必须优先修结构问题：场景兑现、对话改局势、结尾递压、连续性；"
+                "禁止把修复变成补景物、补心理、补形容词。"
+            ),
         }
 
     async def _assert_generation_active(
@@ -2741,6 +3039,8 @@ class PipelineOrchestrator:
             versions=versions,
             chapter_mission=review_chapter_mission,
             user_id=user_id,
+            target_word_count=active_config.target_word_count,
+            min_word_count=active_config.min_word_count,
         )
         await mark_stage("ai_review", review_started_at, detail="AI 评审阶段完成")
         runtime_metadata["review_status"] = (ai_review_result or {}).get("status", "skipped")
@@ -2961,6 +3261,8 @@ class PipelineOrchestrator:
                         content=best_content,
                         violations=(best_version.get("metadata") or {}).get("guardrail", {}).get("violations", []),
                         chapter_mission=chapter_mission,
+                        target_word_count=active_config.target_word_count,
+                        min_word_count=active_config.min_word_count,
                     )
                     structural_reader_issues = self._build_structural_reader_polish_issues(reader_structural_guard)
                     if structural_reader_issues:
@@ -3242,6 +3544,8 @@ class PipelineOrchestrator:
                     violations=guardrail_violations,
                     chapter_mission=chapter_mission,
                     story_guard_key="story_progression_guard_pre_enrichment",
+                    target_word_count=active_config.target_word_count,
+                    min_word_count=active_config.min_word_count,
                 )
                 runtime_metadata["quality_gates"]["pre_enrichment_structural_gate"] = pre_enrichment_gate
             else:
@@ -3250,7 +3554,66 @@ class PipelineOrchestrator:
                     content=best_content,
                     violations=guardrail_violations,
                     chapter_mission=chapter_mission,
+                    target_word_count=active_config.target_word_count,
+                    min_word_count=active_config.min_word_count,
                 )
+                if not structural_quality_gate.get("passed", True):
+                    gate_repair_result = await self._attempt_structural_gate_repair(
+                        best_content=best_content,
+                        review_summaries=review_summaries,
+                        structural_quality_gate=structural_quality_gate,
+                        guardrail_violations=guardrail_violations,
+                        chapter_mission=chapter_mission,
+                        repair_context=self._build_structural_gate_repair_context(
+                            outline_title=outline_title,
+                            outline_summary=outline_summary,
+                            chapter_mission=chapter_mission,
+                            history_context=history_context,
+                            project_memory_text=project_memory_text,
+                            style_context=style_context,
+                            writer_blueprint=writer_blueprint,
+                        ),
+                        active_config=active_config,
+                        user_id=user_id,
+                    )
+                    gate_repair_summary = (gate_repair_result or {}).get("repair_summary")
+                    if gate_repair_summary:
+                        # 未采纳也要留诊断，否则用户面对的是一个「无解的 422」
+                        runtime_metadata.setdefault("quality_gate_repairs", []).append(
+                            gate_repair_summary
+                        )
+                    if gate_repair_result and gate_repair_result.get("adopted"):
+                        best_content = gate_repair_result["content"]
+                        review_summaries = gate_repair_result["review_summaries"]
+                        structural_quality_gate = gate_repair_result["structural_quality_gate"]
+                        repair_passed = bool(structural_quality_gate.get("passed", False))
+                        await self._update_generation_runtime(
+                            chapter,
+                            generation_run_id=generation_run_id,
+                            stage="review",
+                            message=(
+                                "结构质量闸门定向修复已生效，章节通过质量门"
+                                if repair_passed
+                                else "结构质量闸门定向修复改善了部分问题，但仍有未达标项"
+                            ),
+                            progress_percent=91,
+                            level="info" if repair_passed else "warning",
+                            event_kind="quality_gate",
+                            title="质量门定向修复通过" if repair_passed else "质量门定向修复部分改善",
+                            summary=(
+                                "按拦截原因做了结构定向修复并重评通过，未走全新随机重试。"
+                                if repair_passed
+                                else "按拦截原因做了结构定向修复，问题已减少但尚未全部消除。"
+                            ),
+                            content_preview=self._truncate_runtime_text(best_content, 520),
+                            metrics={
+                                "actual_word_count": self._count_words(best_content),
+                                "repair_rounds": gate_repair_summary.get("repair_rounds"),
+                                "repair_outcome": gate_repair_summary.get("repair_outcome"),
+                                "issue_codes_before": gate_repair_summary.get("issue_codes_before", []),
+                                "issue_codes_after": gate_repair_summary.get("issue_codes_after", []),
+                            },
+                        )
                 runtime_metadata["quality_gates"]["structural_gate"] = structural_quality_gate
                 if not structural_quality_gate.get("passed", True):
                     blocked_candidate_refs = await self._persist_quality_gate_blocked_versions(
@@ -3419,7 +3782,66 @@ class PipelineOrchestrator:
                 content=best_content,
                 violations=guardrail_violations,
                 chapter_mission=chapter_mission,
+                target_word_count=active_config.target_word_count,
+                min_word_count=active_config.min_word_count,
             )
+            if not structural_quality_gate.get("passed", True):
+                gate_repair_result = await self._attempt_structural_gate_repair(
+                    best_content=best_content,
+                    review_summaries=review_summaries,
+                    structural_quality_gate=structural_quality_gate,
+                    guardrail_violations=guardrail_violations,
+                    chapter_mission=chapter_mission,
+                    repair_context=self._build_structural_gate_repair_context(
+                        outline_title=outline_title,
+                        outline_summary=outline_summary,
+                        chapter_mission=chapter_mission,
+                        history_context=history_context,
+                        project_memory_text=project_memory_text,
+                        style_context=style_context,
+                        writer_blueprint=writer_blueprint,
+                    ),
+                    active_config=active_config,
+                    user_id=user_id,
+                )
+                gate_repair_summary = (gate_repair_result or {}).get("repair_summary")
+                if gate_repair_summary:
+                    # 未采纳也要留诊断，否则用户面对的是一个「无解的 422」
+                    runtime_metadata.setdefault("quality_gate_repairs", []).append(
+                        gate_repair_summary
+                    )
+                if gate_repair_result and gate_repair_result.get("adopted"):
+                    best_content = gate_repair_result["content"]
+                    review_summaries = gate_repair_result["review_summaries"]
+                    structural_quality_gate = gate_repair_result["structural_quality_gate"]
+                    repair_passed = bool(structural_quality_gate.get("passed", False))
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="review",
+                        message=(
+                            "结构质量闸门定向修复已生效，章节通过质量门"
+                            if repair_passed
+                            else "结构质量闸门定向修复改善了部分问题，但仍有未达标项"
+                        ),
+                        progress_percent=91,
+                        level="info" if repair_passed else "warning",
+                        event_kind="quality_gate",
+                        title="质量门定向修复通过" if repair_passed else "质量门定向修复部分改善",
+                        summary=(
+                            "按拦截原因做了结构定向修复并重评通过，未走全新随机重试。"
+                            if repair_passed
+                            else "按拦截原因做了结构定向修复，问题已减少但尚未全部消除。"
+                        ),
+                        content_preview=self._truncate_runtime_text(best_content, 520),
+                        metrics={
+                            "actual_word_count": self._count_words(best_content),
+                            "repair_rounds": gate_repair_summary.get("repair_rounds"),
+                            "repair_outcome": gate_repair_summary.get("repair_outcome"),
+                            "issue_codes_before": gate_repair_summary.get("issue_codes_before", []),
+                            "issue_codes_after": gate_repair_summary.get("issue_codes_after", []),
+                        },
+                    )
             runtime_metadata["quality_gates"]["structural_gate"] = structural_quality_gate
             if not structural_quality_gate.get("passed", True):
                 blocked_candidate_refs = await self._persist_quality_gate_blocked_versions(
@@ -3475,6 +3897,8 @@ class PipelineOrchestrator:
                 content=best_content,
                 violations=guardrail_violations,
                 chapter_mission=chapter_mission,
+                target_word_count=active_config.target_word_count,
+                min_word_count=active_config.min_word_count,
             )
             final_quality_guard = self._attach_quality_gate_status_to_guard(
                 final_quality_guard,
@@ -5002,10 +5426,16 @@ class PipelineOrchestrator:
         target_word_count: int,
         min_word_count: int,
     ) -> Tuple[bool, Dict[str, Any], List[str]]:
+        # T-12 第 2 层：这里原来漏传字数参数——本函数签名明明收了 target/min，
+        # 却让评分器按 0/0 判（字数三标志全假），于是 story_guard 里的字数字段
+        # 与下面 preferred_floor 算出的 `word_count_far_below_target` 长期不一致：
+        # reason_codes 说字数不足，同一份 story_guard 的字数标志却说没问题。
         story_guard = cls._score_story_quality_candidate(
             content=content,
             violations=list(violations or []),
             chapter_mission=chapter_mission,
+            target_word_count=target_word_count,
+            min_word_count=min_word_count,
         )
         target_word_count = max(0, int(target_word_count or 0))
         min_word_count = max(0, int(min_word_count or 0))
@@ -5020,14 +5450,15 @@ class PipelineOrchestrator:
             )
             and int(story_guard.get("dialogue_marker_count") or 0) >= 4
             and not story_guard.get("static_description_risk")
-            and story_guard.get("dialogue_changes_state", True)
+            # T-13/T-14：首稿重试路径的两条软放行，判据与质量门侧保持一致。
+            and story_guard.get("dialogue_changes_state") is not False
             and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
-            and story_guard.get("event_density_passed", True)
+            and story_guard.get("event_density_passed") is not False
         )
         density_soft_pass = bool(
             int(story_guard.get("mission_hit_count") or 0) >= 4
             and int(story_guard.get("dialogue_marker_count") or 0) >= 8
-            and story_guard.get("dialogue_changes_state", True)
+            and story_guard.get("dialogue_changes_state") is not False
             and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
             and not story_guard.get("static_description_risk")
         )
@@ -5051,7 +5482,9 @@ class PipelineOrchestrator:
             and not scene_soft_pass
         ):
             reasons.append("scene_structure_weak")
-        if story_guard.get("expected_dialogue") and not story_guard.get("dialogue_changes_state", True):
+        # T-13：重试原因码判据与质量门 blocker 一致（`is False`）。
+        # 这条 reason 会驱动定向重试的返修指令，None 不应触发返工。
+        if story_guard.get("expected_dialogue") and story_guard.get("dialogue_changes_state") is False:
             reasons.append("dialogue_does_not_change_state")
         if int(story_guard.get("word_count") or 0) >= 1200 and not story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected")):
             reasons.append("ending_pressure_missing")
@@ -5424,6 +5857,8 @@ class PipelineOrchestrator:
                     content=retry_candidate,
                     violations=retry_guardrail_metadata.get("violations") or [],
                     chapter_mission=chapter_mission,
+                    target_word_count=config.target_word_count,
+                    min_word_count=config.min_word_count,
                 )
                 retry_score = int(retry_story_guard.get("score") or 0)
                 current_score = int(initial_story_guard.get("score") or 0)
@@ -5873,14 +6308,45 @@ class PipelineOrchestrator:
             "scene_details": details,
         }
 
+    # ====== EXTRACTABLE: _pipeline_story_scoring.py — 故事质量评分与事件密度 ======
     STORY_PROGRESSION_MARKERS = (
         "逼问", "质问", "追问", "反问", "试探", "压迫", "威胁", "拒绝", "反制", "让步",
         "改口", "承认", "暴露", "揭开", "揭露", "证实", "发现", "意识到", "明白", "决定",
         "选择", "交换", "代价", "风险", "危险", "失控", "反转", "翻脸", "背叛", "线索",
         "证据", "期限", "后果", "付出", "受伤", "倒下", "失去", "得到", "夺回", "打开",
         "推开", "抓住", "按住", "拔出", "砸开", "冲进", "闯入", "逃出", "追上", "救下",
-    # ====== EXTRACTABLE: _pipeline_story_scoring.py (L5881-L6281, ~400 lines) ======
-        "杀", "死", "活", "必须", "否则", "来不及", "下一步", "转而", "却", "但", "然而",
+        "杀", "死", "必须", "否则", "来不及",
+    )
+    # 弱转折信号：只是句子之间的转折修饰，不代表故事状态发生了改变；
+    # "活" 还会被「生活 / 干活 / 活动」命中。它们只做辅助，不参与推进判定，
+    # 否则任何日常流水账都能骗过事件密度门。
+    WEAK_TRANSITION_MARKERS = ("却", "但", "然而", "转而", "下一步", "活")
+    # 引号自身不是推进证据——寒暄对话也全是引号。带引号的句子必须另有推进词
+    # 或对话状态改变词才算推进。
+    DIALOGUE_QUOTE_MARKS = ("“", "”", "「", "」", "『", "』", '"')
+
+    # 章末压力词表分两级：弱信号（标点与纯副词，任何句子都可能出现）只能做辅助，
+    # 不能单独顶替语义压力；语义信号才是"这一章留下了未解决的麻烦"的证据。
+    ENDING_WEAK_HOOK_MARKERS = (
+        "？", "?", "！", "!", "却", "突然", "忽然",
+    )
+    # 必须写成中文字面量而不是 \uXXXX 转义：转义后 grep 不到，谁都没法维护。
+    # 也不许放某一部小说的专有名词（药渣 / 旧南渠 之类），否则换题材就判不出压力。
+    ENDING_SEMANTIC_HOOK_MARKERS = (
+        "门外", "脚步", "消息", "期限", "代价", "危险", "危机", "压力", "后果",
+        "线索", "证据", "异常", "不自然", "来不及", "问题", "警告",
+        "下一", "下一轮", "下一章", "下一刻", "倒计时", "没时间", "最后一次",
+        "必须", "否则", "只能", "不得不", "别无选择", "绝路", "退路",
+        "封锁", "通缉", "追索", "追杀", "追兵", "追上来", "包围", "逼近", "堵死", "锁死",
+        "陷阱", "盯上", "跟踪", "失踪", "失控", "暴露", "真相", "背叛", "威胁",
+        "死人", "会死", "死在", "人命", "生死", "活不过", "重伤",
+    )
+    # 只有完整的收束表达才算平淡结尾。"一切都"是中性前缀（"一切都还是未知"是真钩子），
+    # 单独拿它做硬否决会把强钩子误杀。
+    ENDING_CLOSURE_MARKERS = (
+        "终于结束", "告一段落", "松了口气", "暂时平静", "圆满", "尘埃落定",
+        "一切都结束", "一切都过去", "一切都平静", "一切都恢复",
+        "一切都安稳", "一切都很好", "一切都没事", "平平淡淡才是真",
     )
 
     @classmethod
@@ -5901,23 +6367,114 @@ class PipelineOrchestrator:
     def _unit_has_progression(cls, unit: str) -> bool:
         if not unit:
             return False
-        if any(mark in unit for mark in ("“", "”", "「", "」", "『", "』", '"')):
-            return True
-        return any(marker in unit for marker in cls.STORY_PROGRESSION_MARKERS)
+        has_marker = any(marker in unit for marker in cls.STORY_PROGRESSION_MARKERS)
+        if any(mark in unit for mark in cls.DIALOGUE_QUOTE_MARKS):
+            # 对话句要么带推进词，要么带对话状态改变词；只有引号不算。
+            return has_marker or cls._count_dialogue_state_change_markers(unit) > 0
+        return has_marker
+
+    # 窗口内推进句占比的下限，以及窗口至少要有的推进句数。
+    # 只要求「占比」会让只剩两三句的窗口靠一句推进就满分，所以两个条件都要满足。
+    # 占比 0.05 是真实语料实测下来的：历史合格章节的整章推进句占比中位数只有 0.079
+    # （p05 0.026），千字窗口里约 50 句、推进 3-4 句。第一版取 0.25 时，107 条真实
+    # 合格正文只有 6.5% 能让 window_pass_rate 达到 0.5，指标等于恒假。
+    # 「推进不能只集中在开头」这个诉求主要由 MIN_HITS 保证，不靠抬高占比。
+    WINDOW_PROGRESSION_RATIO_FLOOR = 0.05
+    WINDOW_PROGRESSION_MIN_HITS = 2
+    # 尾窗短于窗口长度的这个比例时并入前一窗，不单独判定：
+    # 950 字切完只剩十几个字，再要求它有两句推进必然不达标，是纯粹的切分噪声。
+    WINDOW_TAIL_MERGE_RATIO = 0.4
+
+    @classmethod
+    def _window_has_state_change(cls, window: str) -> bool:
+        """千字窗口是否算「有状态推进」。
+
+        判定按窗口内的推进句占比算，而不是「窗口里出现过一次推进词」——
+        后者用在 950 字的窗口上等于恒真，指标会完全失去鉴别力。
+        """
+        units = cls._story_units(window)
+        if not units:
+            return False
+        hits = sum(1 for unit in units if cls._unit_has_progression(unit))
+        return (hits / len(units)) >= cls.WINDOW_PROGRESSION_RATIO_FLOOR and hits >= cls.WINDOW_PROGRESSION_MIN_HITS
+
+    @classmethod
+    def _split_progression_windows(cls, condensed: str, *, window_size: int) -> List[str]:
+        windows = [condensed[index:index + window_size] for index in range(0, len(condensed), window_size)]
+        if not windows:
+            return [condensed]
+        if len(windows) > 1 and len(windows[-1]) < int(window_size * cls.WINDOW_TAIL_MERGE_RATIO):
+            tail = windows.pop()
+            windows[-1] = windows[-1] + tail
+        return windows
+
+    @classmethod
+    def _event_density_floors(cls, word_count: int) -> Dict[str, Any]:
+        """事件密度门的分档阈值。
+
+        历史值 1.0 / 1.25 / 1.45 让这个门在数学上不可能失败：`_story_units` 是句子级
+        切分，千字正文能切出 45-65 个单元，`event_density_per_1000` 不可能低到 1.0。
+
+        当前值由 147 条真实生成章节（去重、剔除退化循环文本后 107 条历史判定合格的
+        正文）实测校准，不是拍脑袋也不是靠合成样本定的——第一版阈值（6.0 / 0.14 /
+        绝对连段 12 句）正是用合成样本定的，在真实语料上误杀 96%。
+
+        真实分布（历史合格池，n=107）：
+        `event_density_per_1000` p05=2.01 / p50=4.60 / p95=9.48；
+        `progression_unit_rate` p05=0.026 / p50=0.079 / p95=0.204；
+        `max_plain_unit_run` 的绝对值毫无参考性（p50=36 / p95=104 / max=167，随章节
+        长度线性膨胀），必须换成占全章句数的比例 `plain_run_ratio`：p50=0.22 /
+        p95=0.45 / max=0.68，而纯寒暄灌水样本是 1.0——这才是有鉴别力的形态。
+
+        阈值一律取真实分布的低分位（约 p03-p08），因为这是一道**底线门**：只拦纯描写
+        堆砌、纯寒暄这类灾难样本，不承担质量优选（那是评分与 prompt 的职责）。
+        宁可漏判，也不要误杀真实章节。
+        """
+        if word_count < 2500:
+            return {"density_floor": 1.5, "unit_rate_floor": 0.025, "window_floor": 0.5, "plain_run_ratio_limit": 0.75}
+        if word_count < 7000:
+            return {"density_floor": 1.8, "unit_rate_floor": 0.028, "window_floor": 0.5, "plain_run_ratio_limit": 0.72}
+        return {"density_floor": 2.0, "unit_rate_floor": 0.03, "window_floor": 0.55, "plain_run_ratio_limit": 0.7}
+
+    # T-14：短样本不评估事件密度的字数下限。**不要下调**——800 字以下切不出
+    # 足够的 story_unit，分位统计没有意义，密度会被单句噪声主导。真实语料
+    # （n=138）里 <800 字只有 2 条（0.014），p03 已经是 950，下调换不到什么。
+    EVENT_DENSITY_MIN_SAMPLE_CHARS = 800
 
     @classmethod
     def _evaluate_event_density(cls, text: str, *, word_count: int) -> Dict[str, Any]:
-        if word_count < 800:
+        """事件密度评估。样本过短时返回**「未评估」而不是「通过」**。
+
+        T-14（D-08）。改造前这个分支谎报 `passed=True` + `progression_unit_rate=1.0`
+        + `event_density_per_1000=0.0`，三个数字互相矛盾：推进单元 0 个、密度 0、
+        推进率却是 100%。历史库里实测有 2 条快照就长这样，用户看到的是
+        「推进单元 0 个，推进率 100%，密度达标」。
+
+        现在三个 passed 与四个比率一律返回 `None`（= 未评估），并显式给出
+        `event_density_evaluated=False` 与跳过原因。消费侧全部改成 `is not False`，
+        所以「未评估」不会被当成失败去拦章，也不会被当成正向证据去激活软放行。
+        """
+        if word_count < cls.EVENT_DENSITY_MIN_SAMPLE_CHARS:
             return {
-                "event_density_passed": True,
-                "long_chapter_density_passed": True,
-                "state_change_interval_passed": True,
+                # 这两个字段是「未评估」与「评估后不通过」的唯一区分依据。
+                # 前端靠 event_density_evaluated 显示中性提示而不是红色风险。
+                "event_density_evaluated": False,
+                "event_density_skip_reason": "sample_too_short",
+                "event_density_min_sample_chars": cls.EVENT_DENSITY_MIN_SAMPLE_CHARS,
+                # 三个 passed 判定：None 而不是 True。绝不能改回 True——
+                # 那是拿「没测」当「测过且合格」，会连带白送 4 条软放行。
+                "event_density_passed": None,
+                "long_chapter_density_passed": None,
+                "state_change_interval_passed": None,
+                # 计数是真实的 0（确实没统计出推进单元），保留；
+                # 但四个**比率/占比**没有分母，必须 None，不能给 1.0 / 0.0。
                 "progression_unit_count": 0,
                 "story_unit_count": 0,
-                "progression_unit_rate": 1.0,
-                "event_density_per_1000": 0.0,
-                "state_change_window_pass_rate": 1.0,
+                "progression_unit_rate": None,
+                "event_density_per_1000": None,
+                "state_change_window_pass_rate": None,
                 "max_plain_unit_run": 0,
+                "max_plain_unit_run_ratio": None,
             }
 
         units = cls._story_units(text)
@@ -5935,16 +6492,20 @@ class PipelineOrchestrator:
 
         condensed = "".join(str(text or "").split())
         window_size = 1200 if word_count >= 7000 else 950
-        windows = [condensed[index:index + window_size] for index in range(0, len(condensed), window_size)] or [condensed]
-        window_hits = sum(1 for window in windows if cls._unit_has_progression(window))
+        windows = cls._split_progression_windows(condensed, window_size=window_size) or [condensed]
+        window_hits = sum(1 for window in windows if cls._window_has_state_change(window))
         window_pass_rate = round(window_hits / max(1, len(windows)), 4)
 
         density_per_1000 = round(progression_count / max(1.0, word_count / 1000), 4)
         progression_rate = round(progression_count / max(1, story_unit_count), 4)
-        density_floor = 1.0 if word_count < 2500 else 1.25 if word_count < 7000 else 1.45
-        unit_rate_floor = 0.16 if word_count < 2500 else 0.2 if word_count < 7000 else 0.22
-        window_floor = 0.6 if word_count < 2500 else 0.68 if word_count < 7000 else 0.74
-        plain_run_limit = 5 if word_count < 7000 else 4
+        # 最长无推进连段要按占全章句数的比例算：绝对句数随章节长度线性膨胀，
+        # 真实章节的 p95 是 104 句，用绝对阈值必然按长度歧视长章。
+        plain_run_ratio = round(max_plain_run / max(1, story_unit_count), 4)
+        floors = cls._event_density_floors(word_count)
+        density_floor = floors["density_floor"]
+        unit_rate_floor = floors["unit_rate_floor"]
+        window_floor = floors["window_floor"]
+        plain_run_ratio_limit = floors["plain_run_ratio_limit"]
 
         state_interval_passed = bool(window_pass_rate >= window_floor)
         dense_progression_override = bool(
@@ -5955,13 +6516,16 @@ class PipelineOrchestrator:
         event_density_passed = bool(
             density_per_1000 >= density_floor
             and progression_rate >= unit_rate_floor
-            and (max_plain_run <= plain_run_limit or dense_progression_override)
+            and (plain_run_ratio <= plain_run_ratio_limit or dense_progression_override)
         )
         long_chapter_passed = True
         if word_count >= 7000:
             long_chapter_passed = bool(event_density_passed and state_interval_passed and progression_count >= 12)
 
         return {
+            # T-14：正常路径显式标记「评估过了」，与短路分支的 False 成对。
+            # 消费方判断「有没有测」只看这个字段，不要靠 passed is None 反推。
+            "event_density_evaluated": True,
             "event_density_passed": event_density_passed,
             "long_chapter_density_passed": long_chapter_passed,
             "state_change_interval_passed": state_interval_passed,
@@ -5973,6 +6537,7 @@ class PipelineOrchestrator:
             "state_change_window_hit_count": window_hits,
             "state_change_window_pass_rate": window_pass_rate,
             "max_plain_unit_run": max_plain_run,
+            "max_plain_unit_run_ratio": plain_run_ratio,
         }
 
     @staticmethod
@@ -5989,20 +6554,86 @@ class PipelineOrchestrator:
         )
         return sum(str(text or "").count(marker) for marker in markers + normalized_markers)
 
+    # T-13：未声明对话预期时的状态标记门槛。取 1 而不是 2（声明时用的值），
+    # 因为这批章节本来就没被要求写对话场，用同样严的判据等于追认一个没提过的要求。
+    # 真实语料（n=28，即 expected_dialogue=False 的全部样本）实测 sc 分布
+    # p05=1 / p50=14 / p95=31 / min=0：门槛取 1 时 27 条判 True、1 条判 False，
+    # 取 2 会多罚 1 条。这是底线门不是优选项，按「宁可漏判不要误杀」取 1。
+    UNDECLARED_DIALOGUE_STATE_MARKER_FLOOR = 1
+
     @classmethod
     def _evaluate_dialogue_changes_state(cls, text: str, *, expected_dialogue: bool, dialogue_markers: int) -> Dict[str, Any]:
+        """对话是否改变局势——**三态**：True 通过 / False 不通过 / None 不适用。
+
+        T-13（D-07）。改造前是 `True if not expected_dialogue else ...`，把「本章没要求
+        对话」直接当成「对话质量合格」，白给 +140 分，还会连带激活 4 条软放行——
+        后者比分数严重，因为它能绕过其它 blocker。
+
+        **判定顺序刻意与交接文档 D-07 的示例代码不同，不要"改回去"**：文档把
+        `dialogue_markers == 0 → None` 判在最前面，那样「任务书要求了对话、正文却零对话」
+        也会落进 None，而 `dialogue_does_not_change_state` blocker 用的是
+        `is not False` 判据 —— 这道 blocker 会因此静默失效，等于把门改松，与本任务
+        的目的相反。真实语料里这种样本恰好是 0 条（所以两种顺序在现有数据上跑分完全
+        一样，测不出差别），正因为测不出来才必须在代码里把顺序固定住。
+
+        所以：**先看任务书要求，「不适用」只在「没要求 + 正文确实没对话」时成立。**
+        """
         marker_count = cls._count_dialogue_state_change_markers(text)
-        passed = True if not expected_dialogue else dialogue_markers >= 2 and marker_count >= 2
+        if expected_dialogue:
+            # 声明了对话预期 → 判据保持原样，不放松（blocker 依赖这一支）
+            passed: Optional[bool] = bool(dialogue_markers >= 2 and marker_count >= 2)
+            applicable = True
+        elif dialogue_markers <= 0:
+            # 没要求对话，正文也确实没有对话 → 该维度不适用，不加分也不减分
+            passed = None
+            applicable = False
+        else:
+            # 没要求对话但正文有对话 → 仍按内容判，只是门槛更低（见上方常量注释）
+            passed = bool(marker_count >= cls.UNDECLARED_DIALOGUE_STATE_MARKER_FLOOR)
+            applicable = True
         return {
             "expected_dialogue": expected_dialogue,
+            # 显式记「任务书有没有声明预期」，让消费方不必靠 expected_dialogue 反推
+            "dialogue_expectation_declared": bool(expected_dialogue),
+            "dialogue_state_applicable": applicable,
             "dialogue_marker_count": dialogue_markers,
             "state_change_marker_count": marker_count,
             "dialogue_changes_state": passed,
         }
 
+    # D-24：章末「泄气」判定的两个阈值。
+    # 260 字符窗保留原样（缩窗会把真实语料通过率从 81.2% 打到 47%-74%，是误杀而不是提高召回），
+    # 改成在窗判定之外**加一条针对末段本身的否决**：
+    # - `ENDING_CORE_WEAK_ONLY_LIMIT = 2`：末段零语义命中却有 >= 2 个弱信号（问号、叹号、
+    #   省略号、程度副词），就是「用标点假装压力」。真实语料 n=136 的历史通过池（n=101）
+    #   实测：W>=1 通过率 76.2%、W>=2 是 80.2%、W>=3 是 81.2%（= 基线，等于没修）。
+    #   取 2 是「能拦住合成坏样本、又只净减 1 条真实样本」的唯一取值。
+    # - `ENDING_CORE_FLAT_CHARS = 150`：末段长到 150 字还一个语义压力词都没有，
+    #   属于平铺收尾。真实语料里**没有任何样本落进这一条**（w_min=2 叠加 long_n
+    #   120/150/200 通过率都仍是 80.2%），所以它是零误杀成本的补充覆盖，
+    #   专门堵「不用问号、纯粹写一大段平淡收尾」的形态。
+    ENDING_CORE_WEAK_ONLY_LIMIT = 2
+    ENDING_CORE_FLAT_CHARS = 150
+
     @classmethod
-    def _evaluate_ending_pressure(cls, condensed_text: str, chapter_mission: Optional[dict]) -> Dict[str, Any]:
+    def _evaluate_ending_pressure(
+        cls,
+        condensed_text: str,
+        chapter_mission: Optional[dict],
+        raw_text: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """章末压力门。
+
+        `condensed_text` 是去掉全部空白的正文，用来取 260 字尾窗；`raw_text` 是保留
+        换行的原文，**只用来切出「最后一个非空段落」**（D-24）。不传 raw_text 时退化成
+        「整段就是末段」，老的单元测试调用因此不用改。
+        """
         ending_excerpt = condensed_text[-260:]
+        # D-24 核心段：真实语料末段长度 p50=24 / p75=73 / p95=151，远短于 260，
+        # 所以正文最后一段几乎必然被卷进尾窗——语义命中可能根本不来自结尾。
+        source_text = raw_text if raw_text is not None else condensed_text
+        ending_paragraphs = [line.strip() for line in str(source_text or "").splitlines() if line.strip()]
+        ending_core = "".join(ending_paragraphs[-1].split()) if ending_paragraphs else ending_excerpt
         continuity = (chapter_mission or {}).get("continuity_anchor") if isinstance(chapter_mission, dict) else {}
         deliver_to_next = continuity.get("deliver_to_next") if isinstance(continuity, dict) else []
         _, deliver_hits = cls._score_text_hits(deliver_to_next, ending_excerpt)
@@ -6025,42 +6656,129 @@ class PipelineOrchestrator:
                     if last_scene.get(key):
                         mission_hook_sources.append(last_scene.get(key))
         _, mission_hook_hits = cls._score_text_hits(mission_hook_sources, ending_excerpt)
-        hook_markers = (
-            "却", "突然", "忽然", "门外", "脚步", "消息", "期限", "代价", "危险",
-            "线索", "证据", "下一刻", "来不及", "问题", "？", "?", "！", "!",
+        semantic_hits = [marker for marker in cls.ENDING_SEMANTIC_HOOK_MARKERS if marker in ending_excerpt]
+        weak_hits = [marker for marker in cls.ENDING_WEAK_HOOK_MARKERS if marker in ending_excerpt]
+        # 明确倒计时是可验证的章末压力，不能因没有复述任务书原词而漏判。
+        if re.search(r"[一二三四五六七八九十]\s*[、，,]\s*[一二三四五六七八九十]", ending_excerpt):
+            semantic_hits.append("倒计时")
+        closure_hits = [marker for marker in cls.ENDING_CLOSURE_MARKERS if marker in ending_excerpt]
+        # D-24：末段自身的命中情况。语义命中落在窗内但不在末段里，说明压力来自正文而非结尾。
+        core_semantic_hits = [marker for marker in cls.ENDING_SEMANTIC_HOOK_MARKERS if marker in ending_core]
+        core_weak_hits = [marker for marker in cls.ENDING_WEAK_HOOK_MARKERS if marker in ending_core]
+        core_deflating = bool(
+            not core_semantic_hits
+            and (
+                len(core_weak_hits) >= cls.ENDING_CORE_WEAK_ONLY_LIMIT
+                or len(ending_core) >= cls.ENDING_CORE_FLAT_CHARS
+            )
         )
-        closure_markers = ("终于结束", "告一段落", "松了口气", "一切都", "暂时平静", "圆满", "尘埃落定")
-        zh_hook_markers = (
-            "\u4e0b\u4e00", "\u4e0b\u4e00\u8f6e", "\u4e0b\u4e00\u7ae0",
-            "\u6da8\u6f6e", "\u6f6e\u6c34", "\u5371\u9669", "\u5371\u673a",
-            "\u538b\u529b", "\u4ee3\u4ef7", "\u540e\u679c", "\u8bc1\u636e",
-            "\u7ebf\u7d22", "\u5f02\u5e38", "\u4e0d\u81ea\u7136",
-            "\u6765\u4e0d\u53ca", "\u5fc5\u987b", "\u5426\u5219",
-            "\u9000\u8def", "\u5c01\u9501", "\u7f09\u5370\u4ee4", "\u901a\u7f09",
-            "\u5012\u8ba1\u65f6", "\u8ffd\u7d22", "\u8ffd\u6740", "\u903c\u8fd1",
-            "\u5835\u6b7b", "\u9501\u6b7b", "\u53ea\u80fd", "\u4e0d\u5f97\u4e0d",
-            "\u4f1a\u5148\u6b7b", "\u6b7b\u5728", "\u65e7\u6728\u7247",
-            "\u6b7b\u4eba", "\u4f1a\u6b7b\u4eba", "\u771f\u4f1a\u6b7b",
-            "\u65e7\u5357\u6e20", "\u836f\u6e23", "\u836f\u5473", "\u836f\u8017",
-            "\u89c1\u4e86\u5730", "\u4eba\u547d", "\u75c5\u4eba",
+        # 语义压力是必要条件：只靠两个问号叹号骗不过章末压力门。
+        generic_pass = bool(semantic_hits) and (len(semantic_hits) + len(weak_hits)) >= 2
+        mission_hook_pass = bool(mission_hook_hits and (semantic_hits or weak_hits))
+        passed = bool(
+            (deliver_hits or mission_hook_pass or generic_pass)
+            and not closure_hits
+            and not core_deflating
         )
-        hook_hits = [marker for marker in (*hook_markers, *zh_hook_markers) if marker in ending_excerpt]
-        closure_hits = [marker for marker in closure_markers if marker in ending_excerpt]
-        mission_hook_pass = bool(mission_hook_hits and hook_hits)
-        passed = bool((deliver_hits or len(hook_hits) >= 2 or mission_hook_pass) and not closure_hits)
         return {
             "ending_pressure_passed": passed,
-            "ending_pressure_hits": (deliver_hits + mission_hook_hits + hook_hits)[:10],
+            "ending_pressure_hits": (deliver_hits + mission_hook_hits + semantic_hits + weak_hits)[:10],
             "mission_hook_hits": mission_hook_hits[:6],
+            "ending_semantic_hit_count": len(semantic_hits),
+            "ending_weak_hit_count": len(weak_hits),
             "flat_closure_markers": closure_hits[:4],
+            # D-24 第 3 条要求：语义命中落在尾窗哪个位置必须可观测，否则误杀无法诊断。
+            "ending_core_chars": len(ending_core),
+            "ending_core_semantic_hit_count": len(core_semantic_hits),
+            "ending_core_weak_hit_count": len(core_weak_hits),
+            "ending_core_deflating": core_deflating,
         }
 
-    @staticmethod
-    def _estimate_static_description_runs(paragraphs: List[str]) -> Dict[str, int]:
+    # 静态段落判定用的动作词表（T-09）。两条硬约束，改这张表前先看 D-08：
+    # ① 不放高频单字。原表里的「看 / 却 / 但 / 发现」是汉语超高频字，纯风景描写里
+    #    「湖面看似平滑」「云影却淡」「但风铃不动」轻易出现，整段立刻被判成「有动作」，
+    #    于是 max_static_run 恒为 0 —— 这是 D-08 的第一层根因，实测 130 字纯风景段
+    #    含这四个字时 static_paragraph_count 就是 0。
+    # ② 自然现象动词不算动作，单列在 AMBIENT_MOTION_MARKERS 里，只做文档与护栏用途，
+    #    不参与判定。「风吹过」「光洒在」没有行为主体，不构成情节推进。
+    STATIC_ACTION_MARKERS = (
+        "说", "问", "答", "开口",
+        "回头", "扭头", "转身", "起身", "坐下",
+        "走", "退", "冲向", "冲出", "扑", "撞",
+        "伸手", "抬头", "抬手", "举起", "放下", "拿起", "握", "推", "抓", "按",
+        "拔出", "扣动", "掏出",
+        "盯", "看向", "看着", "瞪",
+        "决定",
+    )
+
+    # 无主体的自然现象动词：**永远不算动作**。单列出来是为了让护栏测试能断言
+    # 它们没有偷偷混进 STATIC_ACTION_MARKERS。
+    AMBIENT_MOTION_MARKERS = ("吹", "洒", "飘", "流", "垂", "映", "漫", "摇曳", "掠", "拂")
+
+    # T-11：焦点人物名的占位符黑名单。任务书里写「主角」「男主」这类通用称谓时，
+    # 拿它去正文里做字符串匹配必然匹配不到，会把每一章都判成「焦点人物缺席」。
+    FOCUS_CHARACTER_PLACEHOLDERS = frozenset(
+        {"主角", "男主", "女主", "角色", "角色A", "角色B", "protagonist", "pov"}
+    )
+
+    @classmethod
+    def _collect_focus_character_names(cls, chapter_mission: Optional[dict]) -> List[str]:
+        """从任务书里收集本章焦点人物名（T-11，逻辑照搬孤儿版 story_quality_scoring.py）。
+
+        四个数据源按优先级合并：`focus_characters` / `character_focus` / `pov_character` /
+        `scene_list[].characters`。这四个键**生产路径此前一个都没用过**——连续性门用的是
+        另一条数据源 `package.cast_plan.chapter_focus_names`，在 `package is None`
+        （短篇或未启用长篇上下文）时整条门直接放行，所以这里补的是独立的第二条通路。
+
+        三个约束都是必要的，不是防御性代码：
+        - 占位符过滤：见 FOCUS_CHARACTER_PLACEHOLDERS 的注释。
+        - 2-12 字：短于 2 字的切片是标点残渣，长于 12 字的是被误切的句子而不是人名。
+        - 去重后取前 8：任务书里的人物表可以很长，但一章里真正的焦点不会超过这个数，
+          名字越多，「一个都没出现」这个判定越难成立，也就越保守。
+        """
+        if not isinstance(chapter_mission, dict):
+            return []
+        names: List[str] = []
+        seen: set = set()
+
+        def add_name(value: Any) -> None:
+            if not value:
+                return
+            if isinstance(value, dict):
+                for item in value.values():
+                    add_name(item)
+                return
+            if isinstance(value, list):
+                for item in value:
+                    add_name(item)
+                return
+            text = str(value).strip()
+            if not text:
+                return
+            for raw in re.split(r"[，。；、,;\s/|]+", text):
+                name = raw.strip("：:- ").strip()
+                if not (2 <= len(name) <= 12):
+                    continue
+                if name in cls.FOCUS_CHARACTER_PLACEHOLDERS or name.lower() in cls.FOCUS_CHARACTER_PLACEHOLDERS:
+                    continue
+                if name not in seen:
+                    seen.add(name)
+                    names.append(name)
+
+        add_name(chapter_mission.get("focus_characters"))
+        add_name(chapter_mission.get("character_focus"))
+        add_name(chapter_mission.get("pov_character"))
+        for scene in chapter_mission.get("scene_list") or []:
+            if isinstance(scene, dict):
+                add_name(scene.get("characters"))
+        return names[:8]
+
+    @classmethod
+    def _estimate_static_description_runs(cls, paragraphs: List[str]) -> Dict[str, int]:
         static_count = 0
         max_run = 0
         current_run = 0
-        action_markers = ("说", "问", "答", "走", "退", "伸手", "抬头", "看", "盯", "推", "抓", "按", "转身", "决定", "发现", "却", "但")
+        action_markers = cls.STATIC_ACTION_MARKERS
         for paragraph in paragraphs:
             plain = "".join(str(paragraph or "").split())
             is_static = len(plain) >= 100 and not any(marker in plain for marker in action_markers)
@@ -6072,57 +6790,52 @@ class PipelineOrchestrator:
                 current_run = 0
         return {"static_paragraph_count": static_count, "max_static_run": max_run}
 
-    @classmethod
-    def _score_fallback_candidate(
-        cls,
-        *,
-        content: str,
-        violations: List[Dict[str, Any]],
-        chapter_mission: Optional[dict],
-    ) -> Dict[str, Any]:
-        text = str(content or "")
-        condensed = "".join(text.split())
-        word_count = len(condensed)
-        target_floor = max(0, int(target_word_count or 0))
-        minimum_floor = max(0, int(min_word_count or 0))
-        if target_floor and minimum_floor > target_floor:
-            minimum_floor = target_floor
-        preferred_floor = max(minimum_floor, int(target_floor * 0.92)) if target_floor else minimum_floor
-        word_count_below_min = bool(minimum_floor and word_count < minimum_floor)
-        word_count_far_below_target = bool(preferred_floor and word_count < preferred_floor)
-        upper_target = int(target_floor * 1.25) if target_floor else 0
-        word_count_far_above_target = bool(upper_target and word_count > upper_target)
-        paragraphs = [segment for segment in text.splitlines() if segment.strip()]
-        paragraph_count = len(paragraphs)
-        dialogue_markers = sum(text.count(marker) for marker in ("“", "”", "「", "」", "『", "』", '"'))
-        mission_keywords = cls._collect_fallback_mission_keywords(chapter_mission)
-        mission_hits = [keyword for keyword in mission_keywords if keyword and keyword in condensed]
-        expected_dialogue = cls._chapter_mission_expects_dialogue(chapter_mission)
-        ending_excerpt = condensed[-220:]
-        hook_markers = ("？", "！", "?", "!", "忽然", "却", "竟", "脚步", "敲门", "消息", "声音", "目光", "门外", "下一瞬")
-        ending_hook = any(marker in ending_excerpt for marker in hook_markers)
-        static_description_risk = dialogue_markers == 0 and paragraph_count <= 4 and word_count >= 1800
+    @staticmethod
+    def _evaluate_repetition_risk(paragraphs: List[str], *, word_count: int) -> Dict[str, Any]:
+        """精确重复段落检测（T-10，阈值照抄孤儿版 story_quality_scoring.py，不要调）。
 
-        score = 0
-        score += len(mission_hits) * 180
-        score += min(paragraph_count, 12) * 18
-        score += min(dialogue_markers, 10) * 12
-        score += 80 if ending_hook else 0
-        score += min(word_count, 2400) // 50
-        score -= len(violations) * 500
-        score -= 160 if static_description_risk else 0
+        为什么必须有这道门：重复段落是 LLM 凑字数最典型的退化形式，而评分器会把它
+        当成正分——重复段同样贡献 `paragraph_count` 与 `progression_unit_count`，
+        也就是说在这道门落地之前，**复制粘贴同一段能刷高分**。
 
+        三个阈值的用意：
+        - `len(plain) >= 30` 才计入：短段落重复是正常的（「好。」「嗯。」这类对话应答）。
+        - `word_count >= 800` 才启用：短文本统计量不稳。
+        - 判定用「同段 >= 3 次且 >= 30 字」或「重复占比 >= 0.3 且最长 >= 80 字」两条，
+          刻意留出排比/复沓修辞的空间。真实语料 n=136 实测触发率 0.000
+          （`repeated_instances` p95=0、max=1），所以这道门不会碰到正常文本。
+
+        近似重复（编辑距离/向量相似）明确不做，留 P3——精确重复已能抓住绝大多数灌水。
+        """
+        normalized: List[str] = []
+        for paragraph in paragraphs:
+            plain = re.sub(r"\s+", "", str(paragraph or ""))
+            if len(plain) >= 30:
+                normalized.append(plain)
+        counts: Dict[str, int] = {}
+        for paragraph in normalized:
+            counts[paragraph] = counts.get(paragraph, 0) + 1
+        repeated = [(text, count) for text, count in counts.items() if count > 1]
+        repeated_instances = sum(count - 1 for _text, count in repeated)
+        max_repeat = max((count for _text, count in repeated), default=1)
+        longest_repeated = max((len(text) for text, _count in repeated), default=0)
+        repeated_ratio = round(repeated_instances / max(1, len(normalized)), 4)
+        risk = bool(
+            word_count >= 800
+            and repeated
+            and (
+                (max_repeat >= 3 and longest_repeated >= 30)
+                or (repeated_instances >= 2 and repeated_ratio >= 0.3 and longest_repeated >= 80)
+            )
+        )
         return {
-            "score": score,
-            "word_count": word_count,
-            "paragraph_count": paragraph_count,
-            "dialogue_marker_count": dialogue_markers,
-            "guardrail_violation_count": len(violations),
-            "mission_hit_count": len(mission_hits),
-            "mission_hits": mission_hits[:8],
-            "expected_dialogue": expected_dialogue,
-            "ending_hook_detected": ending_hook,
-            "static_description_risk": static_description_risk,
+            "repetition_risk": risk,
+            "repeated_paragraph_count": len(repeated),
+            "repeated_paragraph_instances": repeated_instances,
+            "max_repeated_paragraph_count": max_repeat,
+            "repeated_paragraph_ratio": repeated_ratio,
+            "longest_repeated_paragraph_chars": longest_repeated,
+            "repeated_paragraph_examples": [text[:120] for text, _count in repeated[:3]],
         }
 
     @staticmethod
@@ -6175,11 +6888,44 @@ class PipelineOrchestrator:
         text = str(content or "")
         condensed = "".join(text.split())
         word_count = len(condensed)
+        # T-12 第 1 层：在这之前，target_word_count / min_word_count 只出现在签名里，
+        # 函数体零引用——字数是 CLAUDE.md 的第一目标，却完全没进候选评分。
+        #
+        # preferred_floor 的 0.92 在生产里是个**死参数**：`_resolve_config` 与
+        # `_resolve_chapter_draft_contract` 都按 min = target * 0.9 推导，于是
+        # max(min_floor, 0.92*target) 恒等于 0.92*target。真实语料实测（n=82）把
+        # 比例从 0.92 一路降到 0.70，far_below 只从 0.244 动到 0.220。保留 0.92
+        # 是为了让「调用方显式传了更低的 min」这种情形仍然有意义，不是为了调参。
+        target_floor = max(0, int(target_word_count or 0))
+        minimum_floor = max(0, int(min_word_count or 0))
+        if target_floor and minimum_floor > target_floor:
+            minimum_floor = target_floor
+        preferred_floor = max(minimum_floor, int(target_floor * 0.92)) if target_floor else minimum_floor
+        word_count_below_min = bool(minimum_floor and word_count < minimum_floor)
+        word_count_far_below_target = bool(preferred_floor and word_count < preferred_floor)
+        # upper_target 的 2.0 / 1.6 来自孤儿版，**不要换成死代码 _score_fallback_candidate
+        # 里的 1.25**。真实语料敏感性实测（n=82，历史通过池）：2.0/1.6 → 0.012、
+        # 1.6/1.4 → 0.134、1.25/1.25 → 0.305。1.25 会把三成正常章节判成「字数远超目标」，
+        # 是 25 倍的误杀差距。
+        # 已知不单调：target=2500 时 upper=5000，target=2501 时 upper=4001。这是孤儿版
+        # 的原始行为，保留是因为 2500 是短章/长章的分界，两侧的「超长」含义本就不同。
+        if target_floor:
+            upper_target = int(target_floor * 2.0) if target_floor <= 2500 else int(target_floor * 1.6)
+        else:
+            upper_target = 0
+        word_count_far_above_target = bool(upper_target and word_count > upper_target)
         paragraphs = [segment for segment in text.splitlines() if segment.strip()]
         paragraph_count = len(paragraphs)
         dialogue_markers = sum(text.count(marker) for marker in ("“", "”", "「", "」", "『", "』", '"'))
         mission_keywords = cls._collect_fallback_mission_keywords(chapter_mission)
         mission_hits = [keyword for keyword in mission_keywords if keyword and keyword in condensed]
+        # T-11：焦点人物缺席。判罚条件是「一个都没出现」而不是「有人没出现」——
+        # 配角某章不出场是正常叙事，只有全员缺席才说明这一章写偏了任务书。
+        focus_character_names = cls._collect_focus_character_names(chapter_mission)
+        focus_character_hits = [name for name in focus_character_names if name and name in condensed]
+        focus_character_missing = bool(
+            focus_character_names and not focus_character_hits and word_count >= 1200
+        )
         expected_dialogue = cls._chapter_mission_expects_dialogue(chapter_mission)
         scene_fulfillment = cls._evaluate_scene_fulfillment(chapter_mission, condensed)
         dialogue_state = cls._evaluate_dialogue_changes_state(
@@ -6187,15 +6933,32 @@ class PipelineOrchestrator:
             expected_dialogue=expected_dialogue,
             dialogue_markers=dialogue_markers,
         )
-        ending_pressure = cls._evaluate_ending_pressure(condensed, chapter_mission)
+        # raw_text 必须传原文：D-24 的末段判定要靠换行切段，condensed 已经没有换行了。
+        ending_pressure = cls._evaluate_ending_pressure(condensed, chapter_mission, raw_text=text)
         ending_hook = bool(ending_pressure.get("ending_pressure_passed"))
         static_runs = cls._estimate_static_description_runs(paragraphs)
         event_density = cls._evaluate_event_density(text, word_count=word_count)
+        repetition = cls._evaluate_repetition_risk(paragraphs, word_count=word_count)
         artifact_markers = cls._detect_chapter_artifact_markers(text)
+        # 静态描写风险的四条 or（T-08）。阈值来自孤儿版 story_quality_scoring.py，
+        # 但**第 2 条的 max_static_run 门槛保持 >= 3 而不是照抄孤儿版的 >= 2**：
+        # T-09 收紧 STATIC_ACTION_MARKERS 后，真实语料（n=136，§11.2.1 分位表见
+        # 交接文档第 7 节批 6 记录）的 max_static_run 分布整体右移（p50 0→1），
+        # 孤儿版原样触发 4.4%，而 >= 3 只触发 2.9%，都在底线门可接受范围内，
+        # 但 >= 3 对「零星长段」更宽容，符合「宁可漏判不要误杀」。
+        # 第 4 条是唯一能抓「插几句寒暄对话掩护大段描写」的判定，前三条一有对话就放过。
+        static_paragraph_count = int(static_runs.get("static_paragraph_count") or 0)
+        max_static_run = int(static_runs.get("max_static_run") or 0)
         static_description_risk = bool(
-            (dialogue_markers == 0 and paragraph_count <= 4 and word_count >= 1800)
-            or (word_count >= 1500 and static_runs.get("max_static_run", 0) >= 3)
-            or (word_count >= 2500 and event_density.get("event_density_passed") is False and static_runs.get("max_static_run", 0) >= 2)
+            (dialogue_markers == 0 and paragraph_count <= 4 and word_count >= 1200)
+            or (word_count >= 1200 and max_static_run >= 3)
+            or (word_count >= 2000 and event_density.get("event_density_passed") is False and max_static_run >= 2)
+            or (
+                word_count >= 1600
+                and dialogue_markers > 0
+                and max_static_run >= 2
+                and static_paragraph_count >= 3
+            )
         )
         scene_rate = float(scene_fulfillment.get("scene_fulfillment_rate", 1.0) or 0)
         scene_structure_rate = float(scene_fulfillment.get("scene_structure_rate", 1.0) or 0)
@@ -6207,18 +6970,57 @@ class PipelineOrchestrator:
         score += min(dialogue_markers, 10) * 12
         score += int(scene_rate * 280) if scene_count else 80
         score += int(scene_structure_rate * 140) if scene_count else 40
-        score += 140 if dialogue_state.get("dialogue_changes_state") else -140
+        # T-13：三态评分。`None`（该维度不适用）既不加分也不减分——原来的
+        # `if ... else -140` 会把 None 当假值扣 140，比改造前的「白给 +140」错得更远
+        # （280 分的摆动幅度，占好样本总分 11%）。**必须显式写三分支，不能用真假判断。**
+        dialogue_changes_state = dialogue_state.get("dialogue_changes_state")
+        if dialogue_changes_state is True:
+            score += 140
+        elif dialogue_changes_state is False:
+            score -= 140
         score += 140 if ending_hook else -120
         score += min(int(event_density.get("progression_unit_count") or 0), 18) * 16
-        score += 80 if event_density.get("event_density_passed") else -180
-        score += 60 if event_density.get("state_change_interval_passed") else -130
-        score += 90 if event_density.get("long_chapter_density_passed") else -180
+        # T-14：三个密度判定现在是三态。None（样本过短未评估）既不加也不减——
+        # 原写法 `if ... else -负分` 会把 None 当失败，三项合计倒扣 490 分，
+        # 等于凭「章节短到测不了」判它密度不合格。**必须显式三分支。**
+        for _metric_key, _bonus, _penalty in (
+            ("event_density_passed", 80, 180),
+            ("state_change_interval_passed", 60, 130),
+            ("long_chapter_density_passed", 90, 180),
+        ):
+            _metric_value = event_density.get(_metric_key)
+            if _metric_value is True:
+                score += _bonus
+            elif _metric_value is False:
+                score -= _penalty
         score += min(word_count, 2400) // 50
         score -= len(violations) * 500
         score -= 260 if static_description_risk else 0
+        # 判罚必须大于重复段落自身能刷到的正分，否则复制粘贴仍然划算。
+        score -= 420 if repetition.get("repetition_risk") else 0
+        # T-11：判罚 −240，不做 blocker。LLM 常用别名/称谓替代本名（「顾家小姐」代「顾棠」），
+        # 字符串匹配会误判，所以只压候选排序、不拦章节，与连续性门的 warning 定位一致。
+        # 真实语料校准（§11.2.1 批 7 表）：能解析出人物名的样本占 49.1%，其中全员缺席
+        # 且 >=1200 字的 0/53 —— 触发率 0.000，与 T-10 同型，是底线门不是优选项。
+        score -= 240 if focus_character_missing else 0
+        # T-12 步骤 B：字数三判罚。系数与分层的定值依据见 §11.2.1 批 7 分位表。
+        score -= 620 if word_count_below_min else 0
+        score -= 520 if word_count_far_above_target else 0
+        score -= 180 if word_count_far_below_target and not word_count_below_min else 0
 
         quality_metric_snapshot = {
             "word_count": word_count,
+            # T-12：七个字数字段一起进白名单。`word_requirement_met` 用三态——
+            # 没有 minimum_floor 时是 None（「没配最低字数」不等于「没达标」），
+            # 前端要显示成「不适用」而不是「未通过」。
+            "target_word_count": target_floor,
+            "min_word_count": minimum_floor,
+            "preferred_word_floor": preferred_floor,
+            "upper_word_ceiling": upper_target,
+            "word_count_below_min": word_count_below_min,
+            "word_count_far_above_target": word_count_far_above_target,
+            "word_count_far_below_target": word_count_far_below_target,
+            "word_requirement_met": (not word_count_below_min) if minimum_floor else None,
             "paragraph_count": paragraph_count,
             "mission_hit_count": len(mission_hits),
             "scene_fulfillment_rate": scene_rate,
@@ -6226,23 +7028,63 @@ class PipelineOrchestrator:
             "scene_count": scene_count,
             "scene_structure_rate": scene_structure_rate,
             "structure_passed_scene_count": scene_fulfillment.get("structure_passed_scene_count", 0),
-            "dialogue_changes_state": bool(dialogue_state.get("dialogue_changes_state")),
+            # T-13：**不能再套 bool()**——那会把三态里的 None 压回 False，
+            # 前端严格比较 `=== false` 就会把「本章不适用对话」显示成「对白未改局势」。
+            # 这个白名单是新字段唯一的静默丢弃点，所以另外两个字段也一起进来：
+            # 用户看到「对白未改局势」时得能知道这是任务书要求过的、还是系统自己加的。
+            "dialogue_changes_state": dialogue_state.get("dialogue_changes_state"),
+            "dialogue_expectation_declared": dialogue_state.get("dialogue_expectation_declared"),
+            "dialogue_state_applicable": dialogue_state.get("dialogue_state_applicable"),
             "dialogue_state_change_markers": dialogue_state.get("state_change_marker_count", 0),
             "ending_pressure_passed": ending_hook,
+            "ending_semantic_hit_count": ending_pressure.get("ending_semantic_hit_count", 0),
+            "ending_weak_hit_count": ending_pressure.get("ending_weak_hit_count", 0),
+            # 平淡收束是一票否决，不透出命中的词，用户只会看到「章末未递出压力」
+            # 却不知道是哪句话触发的，也没法判断是不是误杀。
+            "flat_closure_markers": ending_pressure.get("flat_closure_markers", []),
+            # D-24：末段泄气是新的一票否决路径，四个字段一起进快照才能解释「为什么被拦」。
+            "ending_core_chars": ending_pressure.get("ending_core_chars", 0),
+            "ending_core_semantic_hit_count": ending_pressure.get("ending_core_semantic_hit_count", 0),
+            "ending_core_weak_hit_count": ending_pressure.get("ending_core_weak_hit_count", 0),
+            "ending_core_deflating": bool(ending_pressure.get("ending_core_deflating")),
             "static_description_risk": static_description_risk,
             "static_paragraph_count": static_runs.get("static_paragraph_count", 0),
             "max_static_run": static_runs.get("max_static_run", 0),
-            "event_density_passed": bool(event_density.get("event_density_passed")),
+            # T-14：**三个 passed 不能再套 bool()**，比率也不能再用 `, 0` 兜底——
+            # 那两件事合起来正是历史库里那 2 条「推进单元 0 个 / 推进率 100% / 密度达标」
+            # 矛盾快照的成因。None 原样透出，前端靠 event_density_evaluated 区分
+            # 「未评估」和「不通过」。
+            "event_density_evaluated": event_density.get("event_density_evaluated"),
+            "event_density_skip_reason": event_density.get("event_density_skip_reason"),
+            "event_density_passed": event_density.get("event_density_passed"),
             "chapter_artifact_markers": artifact_markers.get("chapter_artifact_markers"),
             "chapter_artifact_marker_examples": artifact_markers.get("chapter_artifact_marker_examples", []),
-            "long_chapter_density_passed": bool(event_density.get("long_chapter_density_passed")),
-            "state_change_interval_passed": bool(event_density.get("state_change_interval_passed")),
+            "long_chapter_density_passed": event_density.get("long_chapter_density_passed"),
+            "state_change_interval_passed": event_density.get("state_change_interval_passed"),
             "progression_unit_count": event_density.get("progression_unit_count", 0),
             "story_unit_count": event_density.get("story_unit_count", 0),
-            "progression_unit_rate": event_density.get("progression_unit_rate", 0),
-            "event_density_per_1000": event_density.get("event_density_per_1000", 0),
-            "state_change_window_pass_rate": event_density.get("state_change_window_pass_rate", 0),
+            "progression_unit_rate": event_density.get("progression_unit_rate"),
+            "event_density_per_1000": event_density.get("event_density_per_1000"),
+            "state_change_window_pass_rate": event_density.get("state_change_window_pass_rate"),
             "max_plain_unit_run": event_density.get("max_plain_unit_run", 0),
+            "max_plain_unit_run_ratio": event_density.get("max_plain_unit_run_ratio"),
+            # T-10：这四个字段是 repeated_paragraph_flood 的唯一诊断依据。
+            # 这份白名单是新字段唯一的静默丢弃点——漏一个，前端就只能看到
+            # 「章节内有整段复制」而不知道是哪一段、重复了几次。
+            "repetition_risk": bool(repetition.get("repetition_risk")),
+            "repeated_paragraph_count": repetition.get("repeated_paragraph_count", 0),
+            "max_repeated_paragraph_count": repetition.get("max_repeated_paragraph_count", 1),
+            "repeated_paragraph_ratio": repetition.get("repeated_paragraph_ratio", 0),
+            "longest_repeated_paragraph_chars": repetition.get("longest_repeated_paragraph_chars", 0),
+            # T-11：四个字段一起进白名单。只透出 focus_character_missing 的话，用户看到
+            # 「焦点角色缺席」却不知道系统认为焦点是谁——而这个判定恰恰最容易因为别名而误判，
+            # 没有 focus_character_names 就没法判断是不是误杀。
+            "focus_character_names": focus_character_names,
+            "focus_character_hit_count": len(focus_character_hits),
+            "missing_focus_characters": [
+                name for name in focus_character_names if name not in focus_character_hits
+            ],
+            "focus_character_missing": focus_character_missing,
         }
         quality_issue_summary = cls._build_quality_issue_summary(story_guard=quality_metric_snapshot)
         quality_metric_snapshot["quality_issue_summary"] = quality_issue_summary
@@ -6266,33 +7108,63 @@ class PipelineOrchestrator:
             "scene_structure_rate": scene_structure_rate,
             "structure_passed_scene_count": scene_fulfillment.get("structure_passed_scene_count", 0),
             "scene_fulfillment": scene_fulfillment,
+            # T-13：guard 顶层本来就是原样透出（没套 bool），三态改造后自动生效。
+            # 两个新字段跟着一起进来，保持与 quality_metric_snapshot 同构。
             "dialogue_changes_state": dialogue_state.get("dialogue_changes_state"),
+            "dialogue_expectation_declared": dialogue_state.get("dialogue_expectation_declared"),
+            "dialogue_state_applicable": dialogue_state.get("dialogue_state_applicable"),
             "dialogue_state_change_markers": dialogue_state.get("state_change_marker_count", 0),
             "ending_pressure_passed": ending_pressure.get("ending_pressure_passed"),
             "ending_pressure": ending_pressure,
             "static_description_runs": static_runs,
             "event_density": event_density,
+            # T-14：guard 顶层同样原样透出，比率去掉 `, 0` 兜底（未评估 ≠ 0.0）。
+            "event_density_evaluated": event_density.get("event_density_evaluated"),
+            "event_density_skip_reason": event_density.get("event_density_skip_reason"),
             "event_density_passed": event_density.get("event_density_passed"),
             "long_chapter_density_passed": event_density.get("long_chapter_density_passed"),
             "state_change_interval_passed": event_density.get("state_change_interval_passed"),
             "progression_unit_count": event_density.get("progression_unit_count", 0),
-            "event_density_per_1000": event_density.get("event_density_per_1000", 0),
-            "state_change_window_pass_rate": event_density.get("state_change_window_pass_rate", 0),
+            "event_density_per_1000": event_density.get("event_density_per_1000"),
+            "state_change_window_pass_rate": event_density.get("state_change_window_pass_rate"),
             "quality_issue_summary": quality_issue_summary,
             "quality_issue_codes": quality_issue_summary.get("codes", []),
             "quality_issue_labels": quality_issue_summary.get("labels", []),
-    # ====== END _pipeline_story_scoring.py ======
-
+            "focus_character_names": focus_character_names,
+            "focus_character_hit_count": len(focus_character_hits),
+            "missing_focus_characters": [
+                name for name in focus_character_names if name not in focus_character_hits
+            ],
+            "focus_character_missing": focus_character_missing,
+            "target_word_count": target_floor,
+            "min_word_count": minimum_floor,
+            "preferred_word_floor": preferred_floor,
+            "upper_word_ceiling": upper_target,
+            "word_count_below_min": word_count_below_min,
+            "word_count_far_above_target": word_count_far_above_target,
+            "word_count_far_below_target": word_count_far_below_target,
+            "word_requirement_met": (not word_count_below_min) if minimum_floor else None,
             "quality_metric_snapshot": quality_metric_snapshot,
+            **repetition,
             **artifact_markers,
         }
+
+    # ====== END _pipeline_story_scoring.py ======
 
     @classmethod
     def _fallback_select_best_version(
         cls,
         versions: List[Dict[str, Any]],
         chapter_mission: Optional[dict] = None,
+        *,
+        target_word_count: int = 0,
+        min_word_count: int = 0,
     ) -> Tuple[int, Dict[str, Any]]:
+        # T-12 第 4 层：这两个参数默认 0（= 字数判罚中性），和上面
+        # `_evaluate_structural_quality_gate_for_content` 的「不给默认值」相反。
+        # 差别在于失败模式：那边是**判定通过与否**，静默按错值判会误杀章节；
+        # 这里是**候选排序**，所有候选共享同一份配置，缺配置时字数维度整体缺席，
+        # 排序退化成 T-12 之前的行为，不会把某一个候选单独判死。
         scored: List[Tuple[int, int, Dict[str, Any]]] = []
         for idx, variant in enumerate(versions):
             metadata = dict(variant.get("metadata") or {})
@@ -6303,6 +7175,8 @@ class PipelineOrchestrator:
                 content=content,
                 violations=violations,
                 chapter_mission=chapter_mission,
+                target_word_count=target_word_count,
+                min_word_count=min_word_count,
             )
             candidate_summary.update(
                 {
@@ -6360,7 +7234,9 @@ class PipelineOrchestrator:
             or (ai_candidate.get("expected_dialogue") and ai_word_count >= 1500 and ai_dialogue_markers < 4)
             or (ai_word_count >= 1500 and ai_mission_hits < 2)
             or (int(ai_candidate.get("scene_count") or 0) > 0 and ai_scene_rate < 0.5)
-            or (ai_candidate.get("expected_dialogue") and not ai_candidate.get("dialogue_changes_state", True))
+            # T-13：`is False` —— 这是「AI 稿有硬伤所以考虑换兜底稿」的判据，
+            # 「本章不适用对话维度」不是硬伤。
+            or (ai_candidate.get("expected_dialogue") and ai_candidate.get("dialogue_changes_state") is False)
             or (ai_word_count >= 1200 and not ai_candidate.get("ending_pressure_passed", ai_candidate.get("ending_hook_detected")))
             or (not ai_candidate.get("guardrail_passed", True) and fallback_candidate.get("guardrail_passed", False))
         )
@@ -6369,7 +7245,10 @@ class PipelineOrchestrator:
             or fallback_mission_hits >= ai_mission_hits + 2
             or fallback_dialogue_markers >= ai_dialogue_markers + 4
             or fallback_scene_rate >= ai_scene_rate + 0.34
-            or (fallback_candidate.get("dialogue_changes_state") and not ai_candidate.get("dialogue_changes_state"))
+            # T-13：「兜底稿明显更好」要求兜底通过而 AI 稿**明确不通过**。
+            # 原写法用真假判断，None 会被算成「AI 稿不通过」，凭「不适用」就换稿。
+            or (fallback_candidate.get("dialogue_changes_state") is True
+                and ai_candidate.get("dialogue_changes_state") is False)
             or (fallback_candidate.get("ending_pressure_passed") and not ai_candidate.get("ending_pressure_passed"))
             or (fallback_candidate.get("ending_hook_detected") and not ai_candidate.get("ending_hook_detected"))
             or (fallback_candidate.get("guardrail_passed", False) and not ai_candidate.get("guardrail_passed", True))
@@ -6420,6 +7299,8 @@ class PipelineOrchestrator:
         versions: List[Dict[str, Any]],
         chapter_mission: Optional[dict],
         user_id: int,
+        target_word_count: int = 0,
+        min_word_count: int = 0,
     ) -> Tuple[int, Optional[Dict[str, Any]]]:
         if len(versions) <= 1:
             candidate = versions[0] if versions else {}
@@ -6447,6 +7328,8 @@ class PipelineOrchestrator:
         fallback_index, fallback_summary = self._fallback_select_best_version(
             versions,
             chapter_mission=chapter_mission,
+            target_word_count=target_word_count,
+            min_word_count=min_word_count,
         )
         try:
             ai_review_service = AIReviewService(self.llm_service, self.prompt_service)
@@ -6504,7 +7387,6 @@ class PipelineOrchestrator:
             "scores": ai_review_result.scores,
             "evaluation": ai_review_result.overall_evaluation,
             "flaws": ai_review_result.critical_flaws,
-    # ====== EXTRACTABLE: _pipeline_self_critique.py (L6506-L6782, ~276 lines) ======
             "suggestions": ai_review_result.refinement_suggestions,
             "status": "ai_review_overridden_by_story_guard" if override_applied else ai_review_result.status,
             "skip_reason": None,
@@ -6512,6 +7394,7 @@ class PipelineOrchestrator:
             "selection_override": override_detail,
         }
 
+    # ====== EXTRACTABLE: _pipeline_self_critique.py — 自评与定向修复 ======
     async def _run_self_critique(
         self,
         chapter: Chapter,

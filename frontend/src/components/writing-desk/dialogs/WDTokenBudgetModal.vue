@@ -1,14 +1,14 @@
-<!-- Token 预算管理弹窗 -->
+﻿<!-- Token 预算管理弹窗 -->
 <template>
   <div v-if="show" class="xq-dialog-overlay" @click.self="$emit('close')">
     <div class="xq-dialog-shell xq-dialog-shell--wide">
       <div class="xq-dialog-header">
         <div>
           <p class="xq-dialog-kicker">Token Budget</p>
-          <h3 class="xq-dialog-title">Token 预算管理</h3>
-          <p class="xq-dialog-subtitle">控制 AI 生成成本，跟踪模块使用情况，并提前发现预算风险。</p>
+          <h3 class="xq-dialog-title">{{ pick('Token 预算管理', 'Token budget management') }}</h3>
+          <p class="xq-dialog-subtitle">{{ pick('控制 AI 生成成本，跟踪模块使用情况，并提前发现预算风险。', 'Control AI generation costs, track usage by module, and catch budget risks early.') }}</p>
         </div>
-        <button @click="$emit('close')" class="xq-dialog-close" aria-label="关闭">×</button>
+        <button @click="$emit('close')" class="xq-dialog-close" :aria-label="t('common.close')">×</button>
       </div>
 
       <!-- 标签页 -->
@@ -33,7 +33,7 @@
         <!-- 加载状态 -->
         <div v-if="loading" class="flex flex-col items-center justify-center py-12">
           <div class="animate-spin rounded-full h-12 w-12 border-4 border-indigo-500 border-t-transparent"></div>
-          <p class="mt-4 text-slate-500">加载中...</p>
+          <p class="mt-4 text-slate-500">{{ pick('加载中...', 'Loading...') }}</p>
         </div>
 
         <!-- 错误状态 -->
@@ -45,27 +45,27 @@
           </div>
           <p class="mt-4 text-red-600">{{ error }}</p>
           <button @click="loadData" class="mt-4 px-4 py-2 text-sm text-indigo-600 hover:text-indigo-800">
-            重试
+            {{ t('common.retry') }}
           </button>
         </div>
 
         <!-- 概览标签页 -->
         <div v-else-if="activeTab === 'overview'">
           <!-- 使用概览卡片 -->
-          <div class="bg-gradient-to-r from-indigo-50 to-cyan-50 rounded-xl p-4 mb-6">
+          <div class="bg-gradient-to-r from-indigo-50 to-cyan-50 rounded-xl p-4 mb-3">
             <div class="flex items-center justify-between mb-4">
               <div>
-                <p class="text-sm text-slate-600">总预算</p>
+                <p class="text-sm text-slate-600">{{ pick('总预算', 'Total budget') }}</p>
                 <p class="text-2xl font-bold text-slate-900">¥{{ budgetConfig.total_budget?.toFixed(2) || '0.00' }}</p>
               </div>
               <div class="text-right">
-                <p class="text-sm text-slate-600">已使用</p>
+                <p class="text-sm text-slate-600">{{ pick('已使用', 'Used') }}</p>
                 <p class="text-2xl font-bold" :class="usagePercent >= 90 ? 'text-red-600' : 'text-indigo-600'">
                   ¥{{ usageStats.total_cost?.toFixed(2) || '0.00' }}
                 </p>
               </div>
               <div class="text-right">
-                <p class="text-sm text-slate-600">剩余</p>
+                <p class="text-sm text-slate-600">{{ pick('剩余', 'Remaining') }}</p>
                 <p class="text-2xl font-bold text-green-600">¥{{ usageStats.budget_remaining?.toFixed(2) || '0.00' }}</p>
               </div>
             </div>
@@ -79,15 +79,15 @@
               ></div>
             </div>
             <p class="text-sm text-slate-500 mt-2 text-center">
-              已使用 {{ usagePercent?.toFixed(1) || '0' }}%
+              {{ pick(`已使用 ${usagePercentText}%`, `${usagePercentText}% used`) }}
               <span v-if="usagePercent >= budgetConfig.warning_threshold" class="text-red-600 font-medium">
-                (已超过预警阈值 {{ budgetConfig.warning_threshold }}%)
+                {{ pick(`(已超过预警阈值 ${budgetConfig.warning_threshold}%)`, `(exceeds the ${budgetConfig.warning_threshold}% warning threshold)`) }}
               </span>
             </p>
           </div>
 
           <!-- 模块使用情况 -->
-          <p class="text-sm font-medium text-slate-700 mb-3">各模块使用情况</p>
+          <p class="text-sm font-medium text-slate-700 mb-3">{{ pick('各模块使用情况', 'Usage by module') }}</p>
           <div class="grid grid-cols-2 gap-4">
             <div
               v-for="(data, module) in usageStats.module_stats"
@@ -109,8 +109,8 @@
           </div>
 
           <!-- 预警列表 -->
-          <div v-if="alerts.length" class="mt-6">
-            <p class="text-sm font-medium text-slate-700 mb-3">预算预警</p>
+          <div v-if="alerts.length" class="mt-3">
+            <p class="text-sm font-medium text-slate-700 mb-3">{{ pick('预算预警', 'Budget alerts') }}</p>
             <div class="space-y-2">
               <div
                 v-for="alert in alerts"
@@ -132,7 +132,7 @@
                   @click="resolveAlert(alert.id)"
                   class="px-2 py-1 text-xs text-indigo-600 hover:text-indigo-800"
                 >
-                  标记已处理
+                  {{ pick('标记已处理', 'Mark resolved') }}
                 </button>
               </div>
             </div>
@@ -142,9 +142,9 @@
         <!-- 配置标签页 -->
         <div v-else-if="activeTab === 'config'">
           <!-- 预算设置 -->
-          <div class="space-y-4 mb-6">
+          <div class="space-y-4 mb-3">
             <div>
-              <label class="block text-sm font-medium text-slate-700 mb-1">总预算 (人民币)</label>
+              <label class="block text-sm font-medium text-slate-700 mb-1">{{ pick('总预算 (人民币)', 'Total budget (CNY)') }}</label>
               <input
                 v-model.number="editConfig.total_budget"
                 type="number"
@@ -154,7 +154,7 @@
               />
             </div>
             <div>
-              <label class="block text-sm font-medium text-slate-700 mb-1">单章节预算 (人民币)</label>
+              <label class="block text-sm font-medium text-slate-700 mb-1">{{ pick('单章节预算 (人民币)', 'Per-chapter budget (CNY)') }}</label>
               <input
                 v-model.number="editConfig.chapter_budget"
                 type="number"
@@ -164,7 +164,7 @@
               />
             </div>
             <div>
-              <label class="block text-sm font-medium text-slate-700 mb-1">预警阈值 (%)</label>
+              <label class="block text-sm font-medium text-slate-700 mb-1">{{ pick('预警阈值 (%)', 'Warning threshold (%)') }}</label>
               <input
                 v-model.number="editConfig.warning_threshold"
                 type="number"
@@ -173,12 +173,12 @@
                 max="100"
                 class="w-full px-3 py-2 border-2 border-slate-200 rounded-lg focus:border-indigo-500 focus:outline-none"
               />
-              <p class="text-xs text-slate-500 mt-1">当使用量达到此百分比时触发预警</p>
+              <p class="text-xs text-slate-500 mt-1">{{ pick('当使用量达到此百分比时触发预警', 'Triggers an alert when usage reaches this percentage') }}</p>
             </div>
           </div>
 
           <!-- 模块分配 -->
-          <p class="text-sm font-medium text-slate-700 mb-3">模块分配比例 (总和应为 100%)</p>
+          <p class="text-sm font-medium text-slate-700 mb-3">{{ pick('模块分配比例 (总和应为 100%)', 'Module allocation (must total 100%)') }}</p>
           <div class="space-y-3">
             <div v-for="module in budgetModules" :key="module" class="flex items-center gap-4">
               <span class="w-20 text-sm text-slate-600">{{ getModuleLabel(module) }}</span>
@@ -193,7 +193,7 @@
             </div>
           </div>
           <p class="text-sm mt-2" :class="totalAllocation === 100 ? 'text-green-600' : 'text-red-600'">
-            当前总和: {{ totalAllocation }}%
+            {{ pick(`当前总和: ${totalAllocation}%`, `Current total: ${totalAllocation}%`) }}
           </p>
 
           <button
@@ -201,7 +201,7 @@
             :disabled="saving || totalAllocation !== 100"
             class="mt-4 w-full px-4 py-2 text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {{ saving ? '保存中...' : '保存配置' }}
+            {{ saving ? pick('保存中...', 'Saving...') : pick('保存配置', 'Save settings') }}
           </button>
         </div>
 
@@ -211,19 +211,19 @@
             <svg class="w-12 h-12 mx-auto mb-3 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
             </svg>
-            <p>共 {{ usageStats.record_count || 0 }} 条使用记录</p>
-            <p class="text-sm mt-1">总计 {{ usageStats.total_tokens?.toLocaleString() || 0 }} tokens</p>
+            <p>{{ pick(`共 ${usageStats.record_count || 0} 条使用记录`, `${usageStats.record_count || 0} usage records`) }}</p>
+            <p class="text-sm mt-1">{{ pick(`总计 ${formatNumber(usageStats.total_tokens || 0)} tokens`, `${formatNumber(usageStats.total_tokens || 0)} tokens in total`) }}</p>
           </div>
         </div>
       </div>
 
       <!-- 底部 -->
-      <div class="px-6 py-4 border-t border-slate-200 flex justify-between">
+      <div class="px-4 py-2 border-t border-slate-200 flex justify-between">
         <button
           @click="$emit('close')"
           class="px-4 py-2 text-slate-600 hover:text-slate-800"
         >
-          关闭
+          {{ t('common.close') }}
         </button>
       </div>
     </div>
@@ -233,6 +233,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { TokenBudgetAPI } from '@/api/novel'
+import { useLocale } from '@/composables/useLocale'
+
+const { pick, t, formatNumber } = useLocale()
 
 type BudgetModuleKey = 'world' | 'character' | 'outline' | 'content'
 
@@ -249,11 +252,11 @@ const emit = defineEmits<{
 }>()
 
 // 标签页
-const tabs = [
-  { key: 'overview', label: '使用概览' },
-  { key: 'config', label: '预算配置' },
-  { key: 'records', label: '使用记录' }
-]
+const tabs = computed(() => [
+  { key: 'overview', label: pick('使用概览', 'Usage overview') },
+  { key: 'config', label: pick('预算配置', 'Budget settings') },
+  { key: 'records', label: pick('使用记录', 'Usage records') }
+])
 
 const budgetModules: BudgetModuleKey[] = ['world', 'character', 'outline', 'content']
 const activeTab = ref('overview')
@@ -301,6 +304,9 @@ const editConfig = ref<{
 // 计算属性
 const usagePercent = computed(() => usageStats.value.usage_percent || 0)
 
+// 已使用百分比文案（中英共用同一数值，避免模板里重复求值）
+const usagePercentText = computed(() => usagePercent.value?.toFixed(1) || '0')
+
 const totalAllocation = computed(() => {
   const alloc = editConfig.value.module_allocation
   return (alloc.world || 0) + (alloc.character || 0) + (alloc.outline || 0) + (alloc.content || 0)
@@ -309,11 +315,11 @@ const totalAllocation = computed(() => {
 // 方法
 const getModuleLabel = (module: string | number) => {
   const labels: Record<string, string> = {
-    world: '世界观',
-    character: '角色',
-    outline: '大纲',
-    content: '正文',
-    other: '其他'
+    world: pick('世界观', 'World setting'),
+    character: pick('角色', 'Characters'),
+    outline: pick('大纲', 'Outline'),
+    content: pick('正文', 'Draft'),
+    other: pick('其他', 'Other')
   }
   const moduleKey = String(module)
   return labels[moduleKey] || moduleKey
@@ -367,7 +373,7 @@ const loadData = async () => {
       warning_threshold: config.warning_threshold
     }
   } catch (e: any) {
-    error.value = e.message || '加载失败'
+    error.value = e.message || pick('加载失败', 'Failed to load')
   } finally {
     loading.value = false
   }
@@ -392,7 +398,7 @@ const saveConfig = async () => {
     }
     emit('updated')
   } catch (e: any) {
-    error.value = e.message || '保存失败'
+    error.value = e.message || pick('保存失败', 'Failed to save')
   } finally {
     saving.value = false
   }
@@ -403,7 +409,7 @@ const resolveAlert = async (alertId: number) => {
     await TokenBudgetAPI.resolveAlert(props.projectId, alertId)
     alerts.value = alerts.value.filter(a => a.id !== alertId)
   } catch (e: any) {
-    error.value = e.message || '操作失败'
+    error.value = e.message || pick('操作失败', 'Action failed')
   }
 }
 

@@ -16,11 +16,11 @@
         <div class="md-dialog w-full max-w-5xl mx-4 max-h-[90vh] flex flex-col">
           <!-- Material 3 Dialog Header -->
           <div class="md-dialog-header flex items-center justify-between">
-            <h3 class="md-dialog-title">编辑 {{ title }}</h3>
-            <button 
-              @click="$emit('close')" 
+            <h3 class="md-dialog-title">{{ pick(`编辑 ${title}`, `Edit ${title}`) }}</h3>
+            <button
+              @click="$emit('close')"
               class="md-icon-btn md-ripple"
-              aria-label="关闭"
+              :aria-label="pick('关闭', 'Close')"
             >
               <svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -36,31 +36,31 @@
             <RelationshipsEditor v-else-if="props.field === 'relationships'" v-model="editableContent" />
             <FactionsEditor v-else-if="props.field === 'world_setting.factions'" v-model="editableContent" />
             <div v-else class="md-text-field">
-              <textarea 
-                v-model="editableContent" 
+              <textarea
+                v-model="editableContent"
                 class="md-textarea w-full"
                 style="min-height: 256px;"
-                placeholder="请输入内容..."
+                :placeholder="pick('请输入内容...', 'Enter the content…')"
               ></textarea>
             </div>
           </div>
 
           <!-- Material 3 Dialog Actions -->
           <div class="md-dialog-actions" style="border-top: 1px solid var(--md-outline-variant);">
-            <button 
-              @click="$emit('close')" 
+            <button
+              @click="$emit('close')"
               class="md-btn md-btn-text md-ripple"
             >
-              取消
+              {{ pick('取消', 'Cancel') }}
             </button>
-            <button 
-              @click="saveChanges" 
+            <button
+              @click="saveChanges"
               class="md-btn md-btn-filled md-ripple"
             >
               <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
               </svg>
-              保存
+              {{ pick('保存', 'Save') }}
             </button>
           </div>
         </div>
@@ -71,12 +71,15 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue';
+import { useLocale } from '@/composables/useLocale';
 import ChapterOutlineEditor from './ChapterOutlineEditor.vue';
 import KeyLocationsEditor from './KeyLocationsEditor.vue';
 import CharactersEditor from './CharactersEditorEnhanced.vue';
 import RelationshipsEditor from './RelationshipsEditor.vue';
 import FactionsEditor from './FactionsEditor.vue';
 import type { ChapterOutline } from '@/api/novel';
+
+const { pick } = useLocale();
 
 const props = defineProps({
   show: Boolean,

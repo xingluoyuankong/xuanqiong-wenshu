@@ -10,28 +10,28 @@
       <template #header>
         <div class="mobile-card-header">
           <span class="mobile-card-title">{{ novel.title }}</span>
-          <n-tag size="small" type="info" round>{{ novel.genre || '未分类' }}</n-tag>
+          <n-tag size="small" type="info" round>{{ novel.genre || pick('未分类', 'Uncategorised') }}</n-tag>
         </div>
       </template>
       <div class="mobile-meta">
-        <span class="mobile-label">编号</span>
+        <span class="mobile-label">{{ pick('编号', 'ID') }}</span>
         <span class="mobile-value">{{ novel.id }}</span>
       </div>
       <div class="mobile-meta">
-        <span class="mobile-label">创作者</span>
+        <span class="mobile-label">{{ pick('创作者', 'Author') }}</span>
         <span class="mobile-value">{{ novel.owner_username }}</span>
       </div>
       <div class="mobile-meta">
-        <span class="mobile-label">进度</span>
+        <span class="mobile-label">{{ pick('进度', 'Progress') }}</span>
         <span class="mobile-value">{{ formatProgress(novel) }}</span>
       </div>
       <div class="mobile-meta">
-        <span class="mobile-label">最近更新</span>
+        <span class="mobile-label">{{ pick('最近更新', 'Last updated') }}</span>
         <span class="mobile-value">{{ formatDate(novel.last_edited) }}</span>
       </div>
       <template #footer>
         <n-button type="primary" size="small" block @click="$emit('view', novel.id)">
-          查看详情
+          {{ pick('查看详情', 'View details') }}
         </n-button>
       </template>
     </n-card>
@@ -40,7 +40,10 @@
 
 <script setup lang="ts">
 import type { AdminNovelSummary } from '@/api/admin'
+import { useLocale } from '@/composables/useLocale'
 import { formatAdminNovelDate, formatAdminNovelProgress } from '@/composables/admin/useNovelManagement'
+
+const { pick } = useLocale()
 
 const props = defineProps<{
   novels: AdminNovelSummary[]

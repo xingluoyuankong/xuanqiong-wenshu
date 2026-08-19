@@ -1,69 +1,303 @@
+/* ============================================================
+   玄穹文枢 · 设计令牌（唯一真源 Single Source of Truth）
+   所有颜色/字体/间距/圆角/阴影只允许在此定义。
+   组件内禁止再写十六进制色值，一律引用 var(--xq-*)。
+   ============================================================ */
 :root {
   color-scheme: light;
 
-  --xq-bg-ink: #0d1021;
-  --xq-bg-midnight: #14182f;
-  --xq-bg-paper: #f8fbff;
-  --xq-bg-paper-soft: #eef6ff;
-  --xq-bg-glass: rgba(255, 255, 255, 0.76);
+  /* ---------- 画布与表面：暖灰阶（stone），比冷灰蓝更贴合写作场景 ---------- */
+  --xq-bg: #fafaf9;
+  --xq-bg-sunken: #f5f5f4;
+  --xq-surface: #ffffff;
+  --xq-surface-2: #f7f7f6;
+  --xq-surface-3: #efeeec;
+  --xq-surface-hover: #f5f5f4;
+  --xq-overlay: rgba(28, 25, 23, 0.44);
 
-  --xq-ink: #0f172a;
-  --xq-ink-muted: #64748b;
-  --xq-ink-faint: #94a3b8;
-  --xq-gold: #0ea5e9;
-  --xq-gold-deep: #2563eb;
-  --xq-cinnabar: #e11d48;
-  --xq-jade: #0f766e;
-  --xq-celestial: #4f46e5;
-  --xq-border: rgba(148, 163, 184, 0.24);
+  /* ---------- 描边：只用 1px 发丝线，不用粗边框 ---------- */
+  --xq-border: #e7e5e4;
+  --xq-border-soft: #f0efed;
+  --xq-border-strong: #d6d3d1;
 
-  --xq-radius-xs: 8px;
-  --xq-radius-sm: 14px;
-  --xq-radius-md: 22px;
-  --xq-radius-lg: 32px;
+  /* ---------- 文字：4 级层次，靠字重与灰阶区分，不靠颜色 ---------- */
+  --xq-text: #1c1917;
+  --xq-text-body: #44403c;
+  --xq-text-muted: #78716c;
+  --xq-text-faint: #a8a29e;
+  --xq-text-inverse: #ffffff;
+
+  /* ---------- 强调色：全站唯一，只用于主操作/激活态/进度 ---------- */
+  --xq-accent: #4f46e5;
+  --xq-accent-hover: #4338ca;
+  --xq-accent-active: #3730a3;
+  --xq-accent-soft: #eef2ff;
+  --xq-accent-soft-hover: #e0e7ff;
+  --xq-accent-border: #c7d2fe;
+  --xq-accent-text: #3730a3;
+
+  /* ---------- 语义色：仅用于状态点/徽标/文字，禁止大面积填充 ---------- */
+  --xq-success: #16a34a;
+  --xq-success-soft: #f0fdf4;
+  --xq-success-border: #bbf7d0;
+  --xq-success-text: #15803d;
+  --xq-warning: #d97706;
+  --xq-warning-soft: #fffbeb;
+  --xq-warning-border: #fde68a;
+  --xq-warning-text: #b45309;
+  --xq-danger: #dc2626;
+  --xq-danger-soft: #fef2f2;
+  --xq-danger-border: #fecaca;
+  --xq-danger-text: #b91c1c;
+  --xq-info: #0284c7;
+  --xq-info-soft: #f0f9ff;
+  --xq-info-border: #bae6fd;
+  --xq-info-text: #0369a1;
+
+  /* ---------- 字体：界面用无衬线，仅正文阅读区用衬线 ---------- */
+  --xq-font-sans: "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --xq-font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", Georgia, serif;
+  --xq-font-mono: "JetBrains Mono", "Cascadia Code", Consolas, "Courier New", monospace;
+
+  /* ---------- 字号：紧凑刻度，界面主体 13-15px ---------- */
+  --xq-text-2xs: 11px;
+  --xq-text-xs: 12px;
+  --xq-text-sm: 13px;
+  --xq-text-base: 14px;
+  --xq-text-md: 15px;
+  --xq-text-lg: 17px;
+  --xq-text-xl: 20px;
+  --xq-text-2xl: 24px;
+  --xq-text-3xl: 30px;
+
+  --xq-leading-tight: 1.3;
+  --xq-leading-snug: 1.5;
+  --xq-leading-normal: 1.65;
+  --xq-leading-relaxed: 1.85;
+
+  --xq-weight-normal: 400;
+  --xq-weight-medium: 500;
+  --xq-weight-semibold: 600;
+  --xq-weight-bold: 700;
+
+  /* ---------- 间距：4pt 栅格 ---------- */
+  --xq-space-1: 4px;
+  --xq-space-2: 8px;
+  --xq-space-3: 12px;
+  --xq-space-4: 16px;
+  --xq-space-5: 20px;
+  --xq-space-6: 24px;
+  --xq-space-8: 32px;
+  --xq-space-10: 40px;
+  --xq-space-12: 48px;
+  --xq-space-16: 64px;
+
+  /* ---------- 圆角：收紧，避免过度圆润的"软趴趴"观感 ---------- */
+  --xq-radius-xs: 4px;
+  --xq-radius-sm: 6px;
+  --xq-radius-md: 8px;
+  --xq-radius-lg: 12px;
+  --xq-radius-xl: 16px;
   --xq-radius-pill: 999px;
 
-  --xq-shadow-paper: 0 18px 45px rgba(15, 23, 42, 0.08);
-  --xq-shadow-floating: 0 26px 70px rgba(13, 16, 33, 0.22);
-  --xq-ring: 0 0 0 4px rgba(14, 165, 233, 0.18);
+  /* ---------- 阴影：极轻，层次靠描边而非投影 ---------- */
+  --xq-shadow-xs: 0 1px 2px rgba(28, 25, 23, 0.05);
+  --xq-shadow-sm: 0 1px 3px rgba(28, 25, 23, 0.06), 0 1px 2px rgba(28, 25, 23, 0.04);
+  --xq-shadow-md: 0 4px 12px rgba(28, 25, 23, 0.07), 0 1px 3px rgba(28, 25, 23, 0.05);
+  --xq-shadow-lg: 0 12px 32px rgba(28, 25, 23, 0.1), 0 2px 6px rgba(28, 25, 23, 0.05);
 
-  --xq-font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun", serif;
-  --xq-font-sans: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", sans-serif;
-  --xq-font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  --xq-ring: 0 0 0 3px rgba(79, 70, 229, 0.16);
+  --xq-ring-danger: 0 0 0 3px rgba(220, 38, 38, 0.16);
 
+  /* RGB 通道：供需要自定义透明度的场景使用 rgba(var(--xq-accent-rgb), .12)。
+     历史代码里散落的 130 多处硬编码 rgba 全部改为引用这几个通道，
+     这样整站只剩一个色相体系，不会再出现蓝/紫/青/墨绿混杂。 */
+  --xq-accent-rgb: 79, 70, 229;
+  --xq-ink-rgb: 28, 25, 23;
+  --xq-muted-rgb: 120, 113, 108;
+  --xq-border-rgb: 231, 229, 228;
+  --xq-surface-rgb: 247, 247, 246;
+  --xq-success-rgb: 22, 163, 74;
+  --xq-warning-rgb: 217, 119, 6;
+  --xq-danger-rgb: 220, 38, 38;
+  --xq-white-rgb: 255, 255, 255;
+
+  /* ---------- 动效 ---------- */
   --xq-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --xq-fast: 160ms var(--xq-ease);
-  --xq-normal: 280ms var(--xq-ease);
+  --xq-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --xq-fast: 140ms var(--xq-ease);
+  --xq-normal: 220ms var(--xq-ease);
+  --xq-slow: 380ms var(--xq-ease);
+
+  /* ---------- 布局 ---------- */
+  --xq-nav-width: 72px;
+  --xq-header-height: 56px;
+  --xq-content-max: 1440px;
+  --xq-reading-max: 68ch;
+
+  /* ============================================================
+     兼容层：历史变量名一律重定向到上方新令牌。
+     目的是一次改动即统一全站配色，避免逐个组件替换。
+     新代码请勿使用下面这些名字。
+     ============================================================ */
+
+  /* 旧 --xq-* 命名（原为"金/朱砂/翡翠"等中式色名，实际值早已偏离语义） */
+  --xq-bg-ink: #1c1917;
+  --xq-bg-midnight: #292524;
+  --xq-bg-paper: var(--xq-bg);
+  --xq-bg-paper-soft: var(--xq-bg-sunken);
+  --xq-bg-glass: rgba(255, 255, 255, 0.82);
+  --xq-ink: var(--xq-text);
+  --xq-ink-muted: var(--xq-text-muted);
+  --xq-ink-faint: var(--xq-text-faint);
+  --xq-gold: var(--xq-accent);
+  --xq-gold-deep: var(--xq-accent-active);
+  --xq-cinnabar: var(--xq-danger);
+  --xq-jade: var(--xq-success);
+  --xq-celestial: var(--xq-accent);
+  --xq-shadow-paper: var(--xq-shadow-sm);
+  --xq-shadow-floating: var(--xq-shadow-lg);
+
+  /* 旧 Material 令牌 */
+  --md-primary: var(--xq-accent);
+  --md-primary-light: #6366f1;
+  --md-primary-dark: var(--xq-accent-active);
+  --md-on-primary: var(--xq-text-inverse);
+  --md-primary-container: var(--xq-accent-soft);
+  --md-on-primary-container: var(--xq-accent-text);
+
+  --md-secondary: var(--xq-text-muted);
+  --md-secondary-light: var(--xq-text-faint);
+  --md-secondary-dark: var(--xq-text-body);
+  --md-on-secondary: var(--xq-text-inverse);
+  --md-secondary-container: var(--xq-surface-2);
+  --md-on-secondary-container: var(--xq-text-body);
+
+  --md-surface: var(--xq-surface);
+  --md-surface-dim: var(--xq-bg-sunken);
+  --md-surface-bright: #ffffff;
+  --md-surface-container-lowest: #ffffff;
+  --md-surface-container-low: var(--xq-surface-2);
+  --md-surface-container: var(--xq-surface-2);
+  --md-surface-container-high: var(--xq-surface-3);
+  --md-surface-container-highest: var(--xq-border);
+  --md-on-surface: var(--xq-text-body);
+  --md-on-surface-variant: var(--xq-text-muted);
+
+  --md-background: var(--xq-bg);
+  --md-on-background: var(--xq-text-body);
+
+  --md-outline: var(--xq-border-strong);
+  --md-outline-variant: var(--xq-border);
+
+  --md-error: var(--xq-danger);
+  --md-error-container: var(--xq-danger-soft);
+  --md-on-error: var(--xq-text-inverse);
+  --md-on-error-container: var(--xq-danger-text);
+  --md-success: var(--xq-success);
+  --md-success-container: var(--xq-success-soft);
+  --md-on-success: var(--xq-text-inverse);
+  --md-on-success-container: var(--xq-success-text);
+  --md-warning: var(--xq-warning);
+  --md-warning-container: var(--xq-warning-soft);
+  --md-on-warning: var(--xq-text-inverse);
+  --md-on-warning-container: var(--xq-warning-text);
+
+  /* 关键：去掉装饰性楷体（ZCOOL XiaoWei），界面统一无衬线 */
+  --md-font-family: var(--xq-font-sans);
+  --md-font-mono: var(--xq-font-mono);
+
+  --md-display-large: var(--xq-text-3xl);
+  --md-display-medium: 28px;
+  --md-display-small: var(--xq-text-2xl);
+  --md-headline-large: var(--xq-text-2xl);
+  --md-headline-medium: var(--xq-text-xl);
+  --md-headline-small: var(--xq-text-lg);
+  --md-title-large: var(--xq-text-lg);
+  --md-title-medium: var(--xq-text-md);
+  --md-title-small: var(--xq-text-base);
+  --md-body-large: var(--xq-text-md);
+  --md-body-medium: var(--xq-text-base);
+  --md-body-small: var(--xq-text-sm);
+  --md-label-large: var(--xq-text-base);
+  --md-label-medium: var(--xq-text-sm);
+  --md-label-small: var(--xq-text-xs);
+
+  --md-elevation-0: none;
+  --md-elevation-1: var(--xq-shadow-xs);
+  --md-elevation-2: var(--xq-shadow-sm);
+  --md-elevation-3: var(--xq-shadow-md);
+  --md-elevation-4: var(--xq-shadow-md);
+  --md-elevation-5: var(--xq-shadow-lg);
+
+  --md-radius-none: 0;
+  --md-radius-xs: var(--xq-radius-xs);
+  --md-radius-sm: var(--xq-radius-md);
+  --md-radius-md: var(--xq-radius-lg);
+  --md-radius-lg: var(--xq-radius-lg);
+  --md-radius-xl: var(--xq-radius-xl);
+  --md-radius-full: var(--xq-radius-pill);
+
+  --md-spacing-0: 0;
+  --md-spacing-1: var(--xq-space-1);
+  --md-spacing-2: var(--xq-space-2);
+  --md-spacing-3: var(--xq-space-3);
+  --md-spacing-4: var(--xq-space-4);
+  --md-spacing-5: var(--xq-space-5);
+  --md-spacing-6: var(--xq-space-6);
+  --md-spacing-8: var(--xq-space-8);
+  --md-spacing-10: var(--xq-space-10);
+  --md-spacing-12: var(--xq-space-12);
+  --md-spacing-16: var(--xq-space-16);
+
+  --md-duration-short: 140ms;
+  --md-duration-medium: 220ms;
+  --md-duration-long: 380ms;
+  --md-easing-standard: var(--xq-ease);
+  --md-easing-emphasized: var(--xq-ease-out);
+  --md-easing-decelerate: var(--xq-ease-out);
+  --md-easing-accelerate: var(--xq-ease);
+
+  /* 补齐历史代码里「引用了但从未定义」的旧名。
+     未定义的 var() 会让整条 CSS 声明被浏览器直接丢弃，
+     表现为局部区块彻底失去背景/文字色，所以必须给出兜底值。 */
+  --md-surface-variant: var(--xq-surface-2);
+  --md-secondary-container-hover: var(--xq-surface-3);
+  --md-on-surface-variant-hover: var(--xq-text-body);
+  --md-sys-color-on-surface: var(--xq-text-body);
+  --md-sys-color-surface-container-high: var(--xq-surface-3);
+  --md-sys-elevation-3: var(--xq-shadow-md);
+  /* 旧 Google 品牌四色：统一收敛到本站语义色，不再引入第二套色相 */
+  --md-google-blue: var(--xq-info);
+  --md-google-green: var(--xq-success);
+  --md-google-red: var(--xq-danger);
+  --md-google-yellow: var(--xq-warning);
 }
 
+/* 页面画布：去掉多重径向渐变叠加，改为单一纯净底色 */
 .xq-page-canvas {
   min-height: 100vh;
-  color: var(--xq-ink);
-  background:
-    radial-gradient(circle at 14% 8%, rgba(37, 99, 235, 0.12), transparent 28rem),
-    radial-gradient(circle at 86% 12%, rgba(14, 165, 233, 0.12), transparent 24rem),
-    linear-gradient(135deg, #f8fbff 0%, #eef6ff 52%, #eaf2ff 100%);
+  color: var(--xq-text-body);
+  background: var(--xq-bg);
   font-family: var(--xq-font-sans);
 }
 
+/* 纸纹网格：原来的双向网格线在信息密集页面制造视觉噪音，直接关闭 */
 .xq-paper-grain {
   position: relative;
-}
-
-.xq-paper-grain::before {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  content: "";
-  opacity: 0.26;
-  background-image:
-    linear-gradient(rgba(37, 99, 235, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(14, 165, 233, 0.028) 1px, transparent 1px);
-  background-size: 28px 28px;
-  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), transparent 88%);
 }
 
 .xq-focus-ring:focus-visible {
   outline: none;
   box-shadow: var(--xq-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

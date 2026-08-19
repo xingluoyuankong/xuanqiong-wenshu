@@ -1,4 +1,4 @@
-<!-- AIMETA P=自定义提示_提示消息组件|R=提示弹窗|NR=不含业务逻辑|E=component:CustomAlert|X=internal|A=提示组件|D=vue|S=dom|RD=./README.ai -->
+﻿<!-- AIMETA P=自定义提示_提示消息组件|R=提示弹窗|NR=不含业务逻辑|E=component:CustomAlert|X=internal|A=提示组件|D=vue|S=dom|RD=./README.ai -->
 <template>
   <Teleport to="body">
     <transition
@@ -18,18 +18,18 @@
           enter-from-class="opacity-0 scale-95"
           leave-to-class="opacity-0 scale-95"
         >
-          <div class="md-dialog max-w-xl w-full mx-4">
+          <div class="md-dialog max-w-lg w-full mx-4">
             <!-- Material 3 Dialog Header -->
             <div class="md-dialog-header flex items-center gap-4">
               <!-- Icon -->
               <div
-                class="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0"
+                class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
                 :style="iconContainerStyle"
               >
                 <!-- Error Icon -->
                 <svg
                   v-if="type === 'error'"
-                  class="w-6 h-6"
+                  class="w-5 h-5"
                   :style="{ color: iconColor }"
                   viewBox="0 0 24 24"
                   fill="none"
@@ -41,7 +41,7 @@
                 <!-- Success Icon -->
                 <svg
                   v-else-if="type === 'success'"
-                  class="w-6 h-6"
+                  class="w-5 h-5"
                   :style="{ color: iconColor }"
                   viewBox="0 0 24 24"
                   fill="none"
@@ -53,7 +53,7 @@
                 <!-- Warning Icon -->
                 <svg
                   v-else-if="type === 'warning'"
-                  class="w-6 h-6"
+                  class="w-5 h-5"
                   :style="{ color: iconColor }"
                   viewBox="0 0 24 24"
                   fill="none"
@@ -65,7 +65,7 @@
                 <!-- Confirmation Icon -->
                 <svg
                   v-else-if="type === 'confirmation'"
-                  class="w-6 h-6"
+                  class="w-5 h-5"
                   :style="{ color: iconColor }"
                   viewBox="0 0 24 24"
                   fill="none"
@@ -77,7 +77,7 @@
                 <!-- Info Icon -->
                 <svg
                   v-else
-                  class="w-6 h-6"
+                  class="w-5 h-5"
                   :style="{ color: iconColor }"
                   viewBox="0 0 24 24"
                   fill="none"
@@ -99,10 +99,10 @@
               </p>
               <div
                 v-if="diagnosticLines.length"
-                class="mt-4 rounded-2xl px-4 py-3"
+                class="mt-4 rounded-lg px-4 py-3"
                 style="background-color: var(--md-surface-container-high);"
               >
-                <p class="md-label-large mb-2" style="color: var(--md-on-surface);">诊断信息</p>
+                <p class="md-label-large mb-2" style="color: var(--md-on-surface);">{{ diagnosticTitle }}</p>
                 <ul class="space-y-1">
                   <li
                     v-for="(line, index) in diagnosticLines"
@@ -130,14 +130,14 @@
                 @click="handleCancel"
                 class="md-btn md-btn-text md-ripple"
               >
-                {{ cancelText }}
+                {{ cancelLabel }}
               </button>
               <button
                 @click="handleConfirm"
                 class="md-btn md-ripple"
                 :class="confirmButtonClass"
               >
-                {{ confirmText }}
+                {{ confirmLabel }}
               </button>
             </div>
           </div>
@@ -150,6 +150,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 
+import { useLocale } from '@/composables/useLocale'
+
 interface Props {
   visible: boolean
   type?: 'success' | 'error' | 'warning' | 'info' | 'confirmation'
@@ -160,12 +162,14 @@ interface Props {
   cancelText?: string
 }
 
+// 按钮文案默认留空，由下面的 computed 按当前语言给出，
+// withDefaults 的默认值只在组件定义时求值一次，放 pick() 会锁死语言。
 const props = withDefaults(defineProps<Props>(), {
   type: 'info',
   title: '',
   showCancel: false,
-  confirmText: '确定',
-  cancelText: '取消'
+  confirmText: '',
+  cancelText: ''
 })
 
 const emit = defineEmits<{
@@ -174,15 +178,21 @@ const emit = defineEmits<{
   close: []
 }>()
 
+const { pick } = useLocale()
+
+const confirmLabel = computed(() => props.confirmText || pick('确定', 'Confirm'))
+const cancelLabel = computed(() => props.cancelText || pick('取消', 'Cancel'))
+const diagnosticTitle = computed(() => pick('诊断信息', 'Diagnostics'))
+
 const titleText = computed(() => {
   if (props.title) return props.title
 
   switch (props.type) {
-    case 'success': return '操作成功'
-    case 'error': return '出现错误'
-    case 'warning': return '警告提示'
-    case 'confirmation': return '请确认'
-    default: return '提示信息'
+    case 'success': return pick('操作成功', 'Operation succeeded')
+    case 'error': return pick('出现错误', 'Something went wrong')
+    case 'warning': return pick('警告提示', 'Warning')
+    case 'confirmation': return pick('请确认', 'Please confirm')
+    default: return pick('提示信息', 'Notice')
   }
 })
 
@@ -193,7 +203,7 @@ const primaryMessage = computed(() => messageLines.value[0] || '')
 const diagnosticLines = computed(() => messageLines.value.slice(1))
 const showCopyButton = computed(() => props.type === 'error' && diagnosticLines.value.length > 0 && props.message.trim().length > 0)
 const copied = ref(false)
-const copyButtonText = computed(() => (copied.value ? '已复制' : '复制诊断'))
+const copyButtonText = computed(() => (copied.value ? pick('已复制', 'Copied') : pick('复制诊断', 'Copy diagnostics')))
 
 // Material 3 Color Theming
 const iconContainerStyle = computed(() => {

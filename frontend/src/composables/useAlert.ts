@@ -1,5 +1,7 @@
 ﻿import { ref } from 'vue'
 
+import { pick } from '@/composables/useLocale'
+
 type AlertType = 'success' | 'error' | 'info' | 'confirmation'
 
 interface Alert {
@@ -25,11 +27,12 @@ const closeAlert = (id: number, result: boolean) => {
   }
 }
 
+// 弹窗默认文案在调用时求值，切换语言后新弹出的弹窗即跟随当前语言
 const defaultTitle = (type: AlertType) => {
-  if (type === 'success') return '成功'
-  if (type === 'error') return '错误'
-  if (type === 'confirmation') return '请确认'
-  return '提示'
+  if (type === 'success') return pick('成功', 'Success')
+  if (type === 'error') return pick('错误', 'Error')
+  if (type === 'confirmation') return pick('请确认', 'Please confirm')
+  return pick('提示', 'Notice')
 }
 
 const showAlert = (
@@ -47,8 +50,8 @@ const showAlert = (
       title: title || defaultTitle(type),
       message,
       showCancel: options.showCancel || false,
-      confirmText: options.confirmText || '确定',
-      cancelText: options.cancelText || '取消',
+      confirmText: options.confirmText || pick('确定', 'Confirm'),
+      cancelText: options.cancelText || pick('取消', 'Cancel'),
       onConfirm: resolve,
     }
     alerts.value.push(newAlert)
@@ -59,10 +62,11 @@ const showAlert = (
   })
 }
 
-const showSuccess = (message: string, title = '成功') => showAlert(message, 'success', title)
-const showError = (message: string, title = '错误') => showAlert(message, 'error', title)
-const showInfo = (message: string, title = '提示') => showAlert(message, 'info', title)
-const showConfirm = (message: string, title = '请确认') => showAlert(message, 'confirmation', title, { showCancel: true })
+// title 留空即走 defaultTitle()，由它按当前语言给出标题
+const showSuccess = (message: string, title = '') => showAlert(message, 'success', title)
+const showError = (message: string, title = '') => showAlert(message, 'error', title)
+const showInfo = (message: string, title = '') => showAlert(message, 'info', title)
+const showConfirm = (message: string, title = '') => showAlert(message, 'confirmation', title, { showCancel: true })
 
 export const globalAlert = {
   alerts,

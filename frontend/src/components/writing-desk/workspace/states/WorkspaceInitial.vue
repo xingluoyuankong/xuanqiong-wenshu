@@ -1,26 +1,38 @@
 <template>
   <div class="wi-shell">
     <div class="wi-panel">
-      <div class="wi-kicker">✍️ 写作工作台</div>
-      <h3>从左侧选择章节，或直接定位系统推荐的下一章</h3>
-      <p>选择章节后，可以直接生成、评估、确认版本或继续优化正文。</p>
+      <div class="wi-kicker">{{ pick('✍️ 写作工作台', '✍️ Writing desk') }}</div>
+      <h3>{{ pick(
+        '从左侧选择章节，或直接定位系统推荐的下一章',
+        'Pick a chapter on the left, or jump straight to the next one we recommend'
+      ) }}</h3>
+      <p>{{ pick(
+        '选择章节后，可以直接生成、评估、确认版本或继续优化正文。',
+        'Once a chapter is selected you can generate, score, confirm a version, or keep polishing the draft.'
+      ) }}</p>
       <div class="wi-grid">
         <div>
           <strong>1</strong>
-          <span>选择章节</span>
+          <span>{{ pick('选择章节', 'Pick a chapter') }}</span>
         </div>
         <div>
           <strong>2</strong>
-          <span>生成正文</span>
+          <span>{{ pick('生成正文', 'Generate the draft') }}</span>
         </div>
         <div>
           <strong>3</strong>
-          <span>确认版本</span>
+          <span>{{ pick('确认版本', 'Confirm a version') }}</span>
         </div>
       </div>
     </div>
   </div>
 </template>
+
+<script setup lang="ts">
+import { useLocale } from '@/composables/useLocale'
+
+const { pick } = useLocale()
+</script>
 
 <style scoped>
 .wi-shell {

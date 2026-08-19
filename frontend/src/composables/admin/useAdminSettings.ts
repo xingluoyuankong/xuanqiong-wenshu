@@ -1,4 +1,5 @@
 ﻿import { computed, reactive, ref } from 'vue'
+import type { SelectOption } from 'naive-ui'
 
 import {
   AdminAPI,
@@ -6,6 +7,7 @@ import {
   type SystemConfigUpdatePayload,
 } from '@/api/admin'
 import { useAlert } from '@/composables/useAlert'
+import { useLocale } from '@/composables/useLocale'
 import { getSystemConfigMeta, SYSTEM_CONFIG_META, type SystemConfigMeta } from '@/components/admin/settings/systemConfigMeta'
 
 export interface SystemConfigViewModel extends SystemConfig {
@@ -14,19 +16,21 @@ export interface SystemConfigViewModel extends SystemConfig {
   displayCategory: string
   displayDescription: string
   valueType: SystemConfigMeta['type'] | 'text'
-  options?: SystemConfigMeta['options']
+  options?: SelectOption[]
   order: number
 }
 
 export const useAdminSettings = () => {
   const { showAlert } = useAlert()
+  const { pick } = useLocale()
 
   const dailyLimit = ref<number | null>(null)
   const dailyLimitLoading = ref(false)
   const dailyLimitSaving = ref(false)
   const dailyLimitError = ref<string | null>(null)
 
-  const configs = ref<SystemConfigViewModel[]>([])
+  // 服务端原始数据。展示字段由 configs 这个 computed 派生，切换语言后自动跟着变
+  const rawConfigs = ref<SystemConfig[]>([])
   const configLoading = ref(false)
   const configSaving = ref(false)
   const configError = ref<string | null>(null)
@@ -43,7 +47,11 @@ export const useAdminSettings = () => {
     order: 9999,
   })
 
-  const modalTitle = computed(() => `编辑参数：${configForm.displayKey || configForm.key}`)
+  const modalTitle = computed(() => {
+    const meta = getSystemConfigMeta(configForm.key)
+    const name = meta?.label() || configForm.displayKey || configForm.key
+    return pick(`编辑参数：${name}`, `Edit parameter: ${name}`)
+  })
 
   const resetConfigForm = () => {
     configForm.key = ''
@@ -63,34 +71,47 @@ export const useAdminSettings = () => {
     return {
       ...config,
       meta,
-      displayKey: meta?.labelZh || config.key,
-      displayCategory: meta?.categoryZh || '其他参数',
-      displayDescription: meta?.descriptionZh || config.description || '暂无详细说明',
+      displayKey: meta?.label() || config.key,
+      displayCategory: meta?.category() || pick('其他参数', 'Other parameters'),
+      displayDescription: meta?.description() || config.description || pick('暂无详细说明', 'No description yet'),
       valueType: meta?.type || inferValueType(config.value),
-      options: meta?.options,
+      options: meta?.options?.(),
       order: meta?.order ?? 9999,
     }
   }
 
-  const buildConfigList = (serverConfigs: SystemConfig[]) => {
+  const configs = computed<SystemConfigViewModel[]>(() =>
+    rawConfigs.value
+      .map(normalizeConfig)
+      .sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
+  )
+
+  /** 用 SYSTEM_CONFIG_META 的顺序补齐后端缺失的参数，未知参数追加在后面。 */
+  const buildRawList = (serverConfigs: SystemConfig[]): SystemConfig[] => {
     const byKey = new Map(serverConfigs.map(item => [item.key, item]))
-    const normalized: SystemConfigViewModel[] = []
+    const list: SystemConfig[] = []
 
     for (const meta of SYSTEM_CONFIG_META) {
       const found = byKey.get(meta.key)
-      normalized.push(normalizeConfig({
+      list.push({
         key: meta.key,
         value: found?.value ?? '',
-        description: found?.description || meta.descriptionZh,
-      }))
+        description: found?.description || '',
+      })
       byKey.delete(meta.key)
     }
 
     for (const unknown of byKey.values()) {
-      normalized.push(normalizeConfig(unknown))
+      list.push(unknown)
     }
 
-    return normalized.sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
+    return list
+  }
+
+  const upsertRawConfig = (updated: SystemConfig) => {
+    const index = rawConfigs.value.findIndex((item) => item.key === updated.key)
+    if (index !== -1) rawConfigs.value.splice(index, 1, updated)
+    else rawConfigs.value.push(updated)
   }
 
   const fetchDailyLimit = async () => {
@@ -100,7 +121,7 @@ export const useAdminSettings = () => {
       const result = await AdminAPI.getDailyRequestLimit()
       dailyLimit.value = result.limit
     } catch (err) {
-      dailyLimitError.value = err instanceof Error ? err.message : '加载每日限制失败'
+      dailyLimitError.value = err instanceof Error ? err.message : pick('加载每日限制失败', 'Failed to load the daily limit')
     } finally {
       dailyLimitLoading.value = false
     }
@@ -108,15 +129,15 @@ export const useAdminSettings = () => {
 
   const saveDailyLimit = async () => {
     if (dailyLimit.value === null || dailyLimit.value < 0) {
-      showAlert('请设置有效的每日额度', 'error')
+      showAlert(pick('请设置有效的每日额度', 'Enter a valid daily quota'), 'error')
       return
     }
     dailyLimitSaving.value = true
     try {
       await AdminAPI.setDailyRequestLimit(dailyLimit.value)
-      showAlert('每日额度已更新', 'success')
+      showAlert(pick('每日额度已更新', 'Daily quota updated'), 'success')
     } catch (err) {
-      showAlert(err instanceof Error ? err.message : '保存失败', 'error')
+      showAlert(err instanceof Error ? err.message : pick('保存失败', 'Save failed'), 'error')
     } finally {
       dailyLimitSaving.value = false
     }
@@ -127,9 +148,9 @@ export const useAdminSettings = () => {
     configError.value = null
     try {
       const result = await AdminAPI.listSystemConfigs()
-      configs.value = buildConfigList(result)
+      rawConfigs.value = buildRawList(result)
     } catch (err) {
-      configError.value = err instanceof Error ? err.message : '加载配置失败'
+      configError.value = err instanceof Error ? err.message : pick('加载配置失败', 'Failed to load the configuration')
     } finally {
       configLoading.value = false
     }
@@ -147,7 +168,7 @@ export const useAdminSettings = () => {
 
   const submitConfig = async () => {
     if (!configForm.key.trim()) {
-      showAlert('参数 Key 不能为空', 'error')
+      showAlert(pick('参数 Key 不能为空', 'The parameter key cannot be empty'), 'error')
       return
     }
 
@@ -157,15 +178,11 @@ export const useAdminSettings = () => {
         value: normalizeConfigValue(configForm.value, configForm.valueType),
         description: configForm.description || configForm.displayDescription || undefined,
       })
-      const normalized = normalizeConfig(updated)
-      const index = configs.value.findIndex((item) => item.key === updated.key)
-      if (index !== -1) configs.value.splice(index, 1, normalized)
-      else configs.value.push(normalized)
-      configs.value = [...configs.value].sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
-      showAlert('参数已保存', 'success')
+      upsertRawConfig(updated)
+      showAlert(pick('参数已保存', 'Parameter saved'), 'success')
       closeConfigModal()
     } catch (err) {
-      showAlert(err instanceof Error ? err.message : '保存失败', 'error')
+      showAlert(err instanceof Error ? err.message : pick('保存失败', 'Save failed'), 'error')
     } finally {
       configSaving.value = false
     }
@@ -176,12 +193,8 @@ export const useAdminSettings = () => {
       value: normalizeConfigValue(value, config.valueType),
       description: config.description || config.displayDescription || undefined,
     })
-    const normalized = normalizeConfig(updated)
-    const index = configs.value.findIndex((item) => item.key === updated.key)
-    if (index !== -1) configs.value.splice(index, 1, normalized)
-    else configs.value.push(normalized)
-    configs.value = [...configs.value].sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
-    return normalized
+    upsertRawConfig(updated)
+    return normalizeConfig(updated)
   }
 
   const initialize = async () => {

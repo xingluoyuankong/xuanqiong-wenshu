@@ -1,10 +1,10 @@
 ﻿<template>
   <div class="admin-layout" :class="{ 'admin-layout--collapsed': collapsed }">
     <aside class="admin-sider" :class="{ 'admin-sider--collapsed': collapsed }">
-      <button v-if="!collapsed" type="button" class="admin-sider__backdrop" aria-label="关闭侧栏" @click="collapsed = true"></button>
+      <button v-if="!collapsed" type="button" class="admin-sider__backdrop" :aria-label="pick('关闭侧栏', 'Close the sidebar')" @click="collapsed = true"></button>
       <div class="admin-sider__panel">
-        <button type="button" class="admin-sider__toggle" :aria-label="collapsed ? '展开侧栏' : '收起侧栏'" @click="collapsed = !collapsed">{{ collapsed ? '›' : '‹' }}</button>
-        <div class="sider-header"><span v-if="!collapsed" class="logo">玄穹文枢管理台</span><span v-else class="logo-small">管理</span></div>
+        <button type="button" class="admin-sider__toggle" :aria-label="collapsed ? pick('展开侧栏', 'Expand the sidebar') : pick('收起侧栏', 'Collapse the sidebar')" @click="collapsed = !collapsed">{{ collapsed ? '›' : '‹' }}</button>
+        <div class="sider-header"><span v-if="!collapsed" class="logo">{{ pick('玄穹文枢管理台', 'Xuanqiong Console') }}</span><span v-else class="logo-small">{{ pick('管理', 'Admin') }}</span></div>
         <n-menu :value="activeKey" :options="menuOptions" :collapsed="collapsed" :collapsed-width="64" :accordion="true" @update:value="handleMenuSelect" />
       </div>
     </aside>
@@ -13,7 +13,7 @@
       <header class="admin-header xq-page-topbar xq-page-topbar--admin">
         <div class="header-content">
           <div class="header-main">
-            <button type="button" class="mobile-trigger" aria-label="切换侧栏" @click="collapsed = !collapsed">☰</button>
+            <button type="button" class="mobile-trigger" :aria-label="pick('切换侧栏', 'Toggle the sidebar')" @click="collapsed = !collapsed">☰</button>
             <div>
               <p class="header-kicker">{{ pick('玄穹文枢管理台', 'Xuanqiong Console') }}</p>
               <span class="header-title">{{ currentMenuLabel }}</span>

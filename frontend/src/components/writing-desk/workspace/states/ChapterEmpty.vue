@@ -7,40 +7,52 @@
           <strong>{{ chapterNumber }}</strong>
         </div>
         <div class="ce-copy">
-          <p class="ce-kicker">章节待生成</p>
-          <h3>第 {{ chapterNumber }} 章还没有正文</h3>
+          <p class="ce-kicker">{{ pick('章节待生成', 'Chapter not generated') }}</p>
+          <h3>{{ pick(`第 ${chapterNumber} 章还没有正文`, `Chapter ${chapterNumber} has no text yet`) }}</h3>
         </div>
       </div>
       <p class="ce-desc">
         <template v-if="canGenerate">
-          已经轮到这一章进入正文生产。点击开始后，系统会在后台生成候选版本。
+          {{ pick(
+            '已经轮到这一章进入正文生产。点击开始后，系统会在后台生成候选版本。',
+            'This chapter is next in line for drafting. Once you start, candidate versions are generated in the background.'
+          ) }}
         </template>
         <template v-else>
-          当前章节还被顺序锁保护。请先完成前置章节。
+          {{ pick(
+            '当前章节还被顺序锁保护。请先完成前置章节。',
+            'This chapter is still held by the sequence lock — finish the earlier chapters first.'
+          ) }}
         </template>
       </p>
       <div class="ce-path">
         <div :class="['ce-step', canGenerate ? 'ce-step--done' : '']">
           <span>1</span>
-          <strong>确认前文</strong>
+          <strong>{{ pick('确认前文', 'Confirm earlier text') }}</strong>
         </div>
         <div :class="['ce-step', canGenerate ? 'ce-step--active' : 'ce-step--locked']">
           <span>2</span>
-          <strong>生成本章</strong>
+          <strong>{{ pick('生成本章', 'Generate this chapter') }}</strong>
         </div>
         <div class="ce-step ce-step--future">
           <span>3</span>
-          <strong>评审确认</strong>
+          <strong>{{ pick('评审确认', 'Review and confirm') }}</strong>
         </div>
       </div>
       <div :class="['ce-hint', canGenerate ? 'ce-hint--ready' : 'ce-hint--locked']">
-        {{ canGenerate ? '请使用顶部主命令栏开始生成' : '请按顺序推进章节' }}
+        {{ canGenerate
+          ? pick('请使用顶部主命令栏开始生成', 'Use the command bar at the top to start generating')
+          : pick('请按顺序推进章节', 'Work through the chapters in order') }}
       </div>
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
+import { useLocale } from '@/composables/useLocale'
+
+const { pick } = useLocale()
+
 defineProps<{
   chapterNumber: number
   generatingChapter: number | null

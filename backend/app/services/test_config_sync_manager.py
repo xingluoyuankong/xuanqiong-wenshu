@@ -22,6 +22,20 @@ class TestConfigSyncManager:
         assert v2 == v1 + 1
 
     @pytest.mark.asyncio
+    async def test_persisted_version_is_idempotent_and_notified_once(self):
+        user_id = 999005
+        queue = await self.mgr.subscribe(user_id)
+
+        first = await self.mgr.bump_version(user_id, persisted_version=8123)
+        second = await self.mgr.bump_version(user_id, persisted_version=8123)
+
+        assert first == 8123
+        assert second == 8123
+        event = await asyncio.wait_for(queue.get(), timeout=0.5)
+        assert event["version"] == 8123
+        assert queue.empty()
+
+    @pytest.mark.asyncio
     async def test_subscribe_receives_bump_event(self):
         """A subscriber queue receives the new version when bump is called."""
         user_id = 999002

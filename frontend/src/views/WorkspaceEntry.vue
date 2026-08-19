@@ -1,28 +1,99 @@
 ﻿<template>
   <main class="entry-page xq-page-canvas">
-    <section class="entry-hero xq-page-topbar xq-page-topbar--entry xq-paper-grain">
+    <section
+      class="entry-hero xq-page-topbar xq-page-topbar--entry xq-paper-grain"
+      aria-labelledby="entry-title"
+    >
       <div class="entry-hero__copy">
-        <p class="entry-kicker">玄穹文书 · AI 长篇创作驾驶舱</p>
-        <h1>从一个灵感，推进到可连载的完整小说工程。</h1>
+        <p class="entry-kicker">{{ pick('玄穹文书 · AI 长篇创作驾驶舱', 'Xuanqiong Wenshu · AI long-form writing cockpit') }}</p>
+        <h1 id="entry-title">{{ pick(
+          '从一个灵感，推进到可连载的完整小说工程。',
+          'Take a single idea all the way to a complete, serialisable novel project.'
+        ) }}</h1>
         <p class="entry-hero__desc">
-          这里把灵感访谈、蓝图规划、章节生成、版本评审和 LLM 配置整合在同一个创作工作流中，帮助你稳定地产出可读、可追踪、可迭代的长篇内容。
+          {{ pick(
+            '这里把灵感访谈、蓝图规划、章节生成、版本评审和 LLM 配置整合在同一个创作工作流中，帮助你稳定地产出可读、可追踪、可迭代的长篇内容。',
+            'Inspiration interviews, blueprint planning, chapter generation, version review, and LLM configuration all live in one writing workflow, so you can keep producing readable, traceable, iterable long-form work.'
+          ) }}
         </p>
         <div class="entry-actions">
-          <XqButton size="lg" @click="startPrimaryAction">{{ primaryActionLabel }}</XqButton>
-          <XqButton variant="secondary" size="lg" @click="go('/inspiration')">开启灵感模式</XqButton>
-          <XqButton variant="ghost" size="lg" @click="go('/workspace')">进入项目工作台</XqButton>
+          <XqButton data-testid="entry-primary-action" size="lg" @click="startPrimaryAction">{{
+            primaryActionLabel
+          }}</XqButton>
+          <XqButton variant="secondary" size="lg" @click="go('/inspiration')">{{
+            pick('开启灵感模式', 'Start inspiration mode')
+          }}</XqButton>
+          <XqButton variant="ghost" size="lg" @click="go('/workspace')">{{
+            pick('进入项目工作台', 'Open the project workspace')
+          }}</XqButton>
         </div>
       </div>
-      <aside class="entry-hero__status">
-        <span class="status-dot"></span>
-        <p>当前流程</p>
-        <strong>灵感 → 蓝图 → 大纲 → 正文 → 优化</strong>
-        <small>先确认故事方向，再进入章节生成；后台任务状态会在写作台持续同步。</small>
+      <aside
+        class="entry-hero__status"
+        data-testid="hero-next-step"
+        :aria-label="pick('下一步创作', 'Next writing step')"
+      >
+        <div class="status-heading">
+          <span class="status-dot" aria-hidden="true"></span>
+          <p>{{ pick('下一步创作', 'Next writing step') }}</p>
+        </div>
+        <template v-if="leadProject">
+          <span class="status-label">{{ pick('最近编辑', 'Recently edited') }}</span>
+          <strong class="status-project-title">{{ leadProject.title || pick('未命名项目', 'Untitled project') }}</strong>
+          <span class="status-progress"
+            >{{ projectProgress(leadProject) }} · {{ formatLastEdited(leadProject.last_edited) }}</span
+          >
+          <small>{{ pick(
+            '接着上次的进度继续，正文、蓝图和生成状态会在项目内保持同步。',
+            'Pick up where you left off — draft text, blueprint, and generation state stay in sync inside the project.'
+          ) }}</small>
+          <XqButton
+            data-testid="hero-continue"
+            class="status-action"
+            variant="secondary"
+            size="sm"
+            @click="enterProject(leadProject)"
+          >
+            <template #icon>↗</template>
+            {{ pick('继续写作', 'Continue writing') }}
+          </XqButton>
+        </template>
+        <template v-else>
+          <strong>{{ pick('从灵感开始', 'Start from an idea') }}</strong>
+          <small>{{ pick(
+            '先用一次简短访谈确定故事方向，再生成可执行的长篇蓝图。',
+            'Settle the story direction with one short interview, then generate an actionable long-form blueprint.'
+          ) }}</small>
+          <XqButton
+            data-testid="hero-create"
+            class="status-action"
+            variant="secondary"
+            size="sm"
+            @click="go('/inspiration')"
+          >
+            <template #icon>✦</template>
+            {{ pick('创建第一部小说', 'Create your first novel') }}
+          </XqButton>
+        </template>
       </aside>
     </section>
 
-    <section class="entry-grid" aria-label="核心功能入口">
-      <button v-for="item in mainFunctions" :key="item.title" type="button" class="entry-card" @click="go(item.to)">
+    <section class="entry-grid" :aria-label="pick('核心功能入口', 'Core feature entries')">
+      <div class="entry-grid__heading">
+        <div>
+          <p class="entry-grid__kicker">{{ pick('快速入口', 'Quick entries') }}</p>
+          <h2>{{ pick('把创作推进到下一步', 'Move the work one step forward') }}</h2>
+        </div>
+        <span>{{ pick('按需进入，不打断当前写作流程', 'Jump in as needed without breaking your writing flow') }}</span>
+      </div>
+      <button
+        v-for="item in mainFunctions"
+        :key="item.id"
+        :data-testid="`entry-function-${item.id}`"
+        type="button"
+        class="entry-card"
+        @click="go(item.to)"
+      >
         <span class="entry-card__icon">{{ item.icon }}</span>
         <span class="entry-card__label">{{ item.label }}</span>
         <strong>{{ item.title }}</strong>
@@ -30,24 +101,40 @@
       </button>
     </section>
 
-    <XqPanel class="recent-panel" title="最近项目" subtitle="显示最近 5 个项目，便于直接续写或检查生成状态。">
-      <template #kicker>继续创作</template>
+    <XqPanel
+      class="recent-panel"
+      :title="pick('最近项目', 'Recent projects')"
+      :subtitle="pick(
+        '显示最近 5 个项目，便于直接续写或检查生成状态。',
+        'Shows the 5 most recent projects so you can keep writing or check generation status right away.'
+      )"
+    >
+      <template #kicker>{{ pick('继续创作', 'Keep writing') }}</template>
       <template #actions>
-        <XqButton variant="secondary" size="sm" @click="reloadProjects">刷新列表</XqButton>
+        <XqButton variant="secondary" size="sm" @click="reloadProjects">{{ pick('刷新列表', 'Refresh list') }}</XqButton>
       </template>
 
-      <div v-if="bootstrapLoading" class="entry-empty">正在加载项目列表……</div>
-      <div v-else-if="bootstrapError" class="entry-empty entry-empty--error">{{ bootstrapError }}</div>
-      <div v-else-if="!recentProjects.length" class="entry-empty">还没有项目。先进入灵感模式，创建你的第一部小说。</div>
+      <div v-if="bootstrapLoading" class="entry-empty">{{ pick('正在加载项目列表……', 'Loading the project list…') }}</div>
+      <div v-else-if="bootstrapError" class="entry-empty entry-empty--error">
+        {{ bootstrapError }}
+      </div>
+      <div v-else-if="!recentProjects.length" class="entry-empty">
+        {{ pick(
+          '还没有项目。先进入灵感模式，创建你的第一部小说。',
+          'No projects yet. Head into inspiration mode and create your first novel.'
+        ) }}
+      </div>
       <div v-else class="project-list grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         <article v-for="project in recentProjects" :key="project.id" class="project-row">
           <button type="button" class="project-main" @click="enterProject(project)">
-            <strong>{{ project.title || '未命名项目' }}</strong>
-            <span>{{ projectProgress(project) }} · {{ formatDate(project.last_edited) }}</span>
+            <strong>{{ project.title || pick('未命名项目', 'Untitled project') }}</strong>
+            <span>{{ projectProgress(project) }} · {{ formatLastEdited(project.last_edited) }}</span>
           </button>
           <div class="project-actions">
-            <XqButton variant="secondary" size="sm" @click="enterProject(project)">打开</XqButton>
-            <XqButton variant="ghost" size="sm" @click="openRuntimeLogs(project.id)">运行日志</XqButton>
+            <XqButton variant="secondary" size="sm" @click="enterProject(project)">{{ pick('打开', 'Open') }}</XqButton>
+            <XqButton variant="ghost" size="sm" @click="openRuntimeLogs(project.id)">{{
+              pick('运行日志', 'Runtime logs')
+            }}</XqButton>
           </div>
         </article>
       </div>
@@ -61,9 +148,11 @@ import { useRouter } from 'vue-router'
 import { useNovelStore } from '../stores/novel'
 import type { NovelProjectSummary } from '@/api/novel'
 import { XqButton, XqPanel } from '@/shared/ui'
+import { useLocale } from '@/composables/useLocale'
 
 const router = useRouter()
 const novelStore = useNovelStore()
+const { pick, formatDate } = useLocale()
 const bootstrapLoading = ref(true)
 const bootstrapError = ref('')
 
@@ -72,16 +161,60 @@ const projects = computed(() =>
 )
 const recentProjects = computed(() => projects.value.slice(0, 5))
 const leadProject = computed(() => recentProjects.value[0] ?? null)
-const primaryActionLabel = computed(() => (leadProject.value ? '继续最近项目' : '创建第一部小说'))
+const primaryActionLabel = computed(() => (leadProject.value
+  ? pick('继续最近项目', 'Continue the latest project')
+  : pick('创建第一部小说', 'Create your first novel')))
 
-const mainFunctions = [
-  { icon: '✦', label: '从 0 到 1', title: '灵感模式', desc: '通过访谈把模糊想法变成可执行小说蓝图。', to: '/inspiration' },
-  { icon: '▦', label: '项目管理', title: '项目工作台', desc: '查看项目、章节、生成进度与最近改动。', to: '/workspace' },
-  { icon: '◇', label: '审美统一', title: '风格中心', desc: '维护文风、叙事口吻和生成要求。', to: '/style-center' },
-  { icon: '◎', label: '运行监控', title: '管理后台', desc: '检查任务日志、状态恢复与异常记录。', to: '/admin' },
-  { icon: '⚙', label: '系统配置', title: '应用设置', desc: '调整偏好、快捷键与创作环境。', to: '/settings' },
-  { icon: 'AI', label: '模型连接', title: 'LLM 设置', desc: '配置模型、Key、供应商与连通性测试。', to: '/llm-settings' },
-]
+const mainFunctions = computed(() => [
+  {
+    id: 'inspiration',
+    icon: '✦',
+    label: pick('从 0 到 1', 'Zero to one'),
+    title: pick('灵感模式', 'Inspiration mode'),
+    desc: pick('通过访谈把模糊想法变成可执行小说蓝图。', 'Turn a vague idea into an actionable novel blueprint through an interview.'),
+    to: '/inspiration',
+  },
+  {
+    id: 'workspace',
+    icon: '▦',
+    label: pick('项目管理', 'Project management'),
+    title: pick('项目工作台', 'Project workspace'),
+    desc: pick('查看项目、章节、生成进度与最近改动。', 'Review projects, chapters, generation progress, and recent changes.'),
+    to: '/workspace',
+  },
+  {
+    id: 'style',
+    icon: '◇',
+    label: pick('审美统一', 'Consistent voice'),
+    title: pick('风格中心', 'Style centre'),
+    desc: pick('维护文风、叙事口吻和生成要求。', 'Maintain prose style, narrative voice, and generation requirements.'),
+    to: '/style-center',
+  },
+  {
+    id: 'admin',
+    icon: '◎',
+    label: pick('运行监控', 'Runtime monitoring'),
+    title: pick('管理后台', 'Admin console'),
+    desc: pick('检查任务日志、状态恢复与异常记录。', 'Inspect job logs, state recovery, and error records.'),
+    to: '/admin',
+  },
+  {
+    id: 'settings',
+    icon: '⚙',
+    label: pick('系统配置', 'System configuration'),
+    title: pick('应用设置', 'App settings'),
+    desc: pick('调整偏好、快捷键与创作环境。', 'Adjust preferences, shortcuts, and the writing environment.'),
+    to: '/settings',
+  },
+  {
+    id: 'llm',
+    icon: 'AI',
+    label: pick('模型连接', 'Model connection'),
+    title: pick('LLM 设置', 'LLM settings'),
+    desc: pick('配置模型、Key、供应商与连通性测试。', 'Configure models, keys, providers, and connectivity tests.'),
+    to: '/llm-settings',
+  },
+])
 
 function go(to: string) {
   router.push(to)
@@ -91,14 +224,17 @@ function parseTime(value: string | null | undefined) {
   const time = new Date(value).getTime()
   return Number.isNaN(time) ? 0 : time
 }
-function formatDate(value: string | null | undefined) {
-  if (!value) return '未编辑'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(date)
+function formatLastEdited(value: string | null | undefined) {
+  if (!value) return pick('未编辑', 'Not edited yet')
+  return formatDate(value) || value
 }
 function projectProgress(project: NovelProjectSummary) {
-  return project.total_chapters ? `${project.completed_chapters}/${project.total_chapters} 章` : '蓝图待确认'
+  return project.total_chapters
+    ? pick(
+        `${project.completed_chapters}/${project.total_chapters} 章`,
+        `${project.completed_chapters}/${project.total_chapters} ch.`,
+      )
+    : pick('蓝图待确认', 'Blueprint pending confirmation')
 }
 function startPrimaryAction() {
   const project = leadProject.value
@@ -121,7 +257,7 @@ async function reloadProjects() {
   try {
     await novelStore.loadProjects()
   } catch (error) {
-    bootstrapError.value = error instanceof Error ? error.message : '加载项目失败'
+    bootstrapError.value = error instanceof Error ? error.message : pick('加载项目失败', 'Failed to load projects')
   } finally {
     bootstrapLoading.value = false
   }
@@ -129,53 +265,9 @@ async function reloadProjects() {
 onMounted(reloadProjects)
 </script>
 <style scoped>
-/* Compact project grid */
-.project-list {
-  display: grid;
-}
-.project-row {
-  background: rgba(255,255,255,0.85);
-  border-radius: 10px;
-  border: 1px solid rgba(148,163,184,0.12);
-  padding: 12px 14px;
-  transition: all 0.2s ease;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  cursor: pointer;
-  max-height: 100px;
-}
-.project-row:hover {
-  background: rgba(255,255,255,0.98);
-  border-color: rgba(99,102,241,0.2);
-  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-}
-.project-main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  border: none;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  padding: 0;
-}
-.project-main strong {
-  font-size: 13px;
-  font-weight: 600;
-  color: #1e293b;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.project-main span {
-  font-size: 11px;
-  color: #64748b;
-}
-
 .entry-page {
   min-height: calc(100vh - 64px);
-  padding: 1.75rem;
+  padding: clamp(1rem, 3vw, 1.75rem);
 }
 
 .entry-hero,
@@ -186,10 +278,10 @@ onMounted(reloadProjects)
 
 .entry-hero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
-  gap: 1.5rem;
+  grid-template-columns: minmax(0, 1fr) 312px;
+  gap: 1.25rem;
   overflow: hidden;
-  padding: clamp(1.5rem, 4vw, 2.6rem);
+  padding: clamp(1.35rem, 3.2vw, 2.15rem);
   border: 1px solid var(--xq-border);
   border-radius: var(--xq-radius-lg);
   background: rgba(255, 250, 240, 0.84);
@@ -207,17 +299,17 @@ onMounted(reloadProjects)
 }
 
 h1 {
-  max-width: 820px;
-  margin: 0.85rem 0 0;
+  max-width: 700px;
+  margin: 0.72rem 0 0;
   font-family: var(--xq-font-serif);
-  font-size: clamp(2.45rem, 6vw, 5rem);
-  line-height: 1;
-  letter-spacing: -0.05em;
+  font-size: clamp(2.25rem, 5vw, 4.25rem);
+  line-height: 1.06;
+  letter-spacing: 0;
 }
 
 .entry-hero__desc {
-  max-width: 760px;
-  margin: 1.15rem 0 0;
+  max-width: 680px;
+  margin: 1rem 0 0;
   color: var(--xq-ink-muted);
   line-height: 1.95;
 }
@@ -226,35 +318,68 @@ h1 {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
-  margin-top: 1.75rem;
+  margin-top: 1.45rem;
 }
 
 .entry-hero__status {
   align-self: stretch;
   display: grid;
-  align-content: end;
-  gap: 0.7rem;
-  min-height: 250px;
+  align-content: start;
+  gap: 0.65rem;
+  min-height: 220px;
   border-radius: var(--xq-radius-md);
-  padding: 1.55rem;
+  padding: 1.15rem;
   color: #fffaf0;
   background:
     radial-gradient(circle at 18% 8%, rgba(214, 169, 79, 0.28), transparent 12rem),
     linear-gradient(145deg, var(--xq-bg-ink), var(--xq-bg-midnight) 58%, #2b594f);
-  box-shadow: var(--xq-shadow-floating), inset 0 1px rgba(255, 255, 255, 0.16);
+  box-shadow:
+    var(--xq-shadow-floating),
+    inset 0 1px rgba(255, 255, 255, 0.16);
+}
+
+.status-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
 }
 
 .entry-hero__status p,
-.entry-hero__status small {
+.entry-hero__status small,
+.status-progress,
+.status-label {
   margin: 0;
   color: rgba(255, 250, 240, 0.72);
   line-height: 1.75;
 }
 
+.status-label {
+  margin-top: 0.8rem;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
 .entry-hero__status strong {
   font-family: var(--xq-font-serif);
-  font-size: 1.55rem;
+  font-size: 1.65rem;
   line-height: 1.35;
+}
+
+.status-project-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-progress {
+  font-size: 0.88rem;
+}
+
+.status-action {
+  justify-self: start;
+  margin-top: 0.35rem;
 }
 
 .status-dot {
@@ -273,17 +398,51 @@ h1 {
   gap: 0.9rem;
 }
 
+.entry-grid__heading {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.25rem 0.15rem 0.1rem;
+}
+
+.entry-grid__heading h2 {
+  margin: 0.25rem 0 0;
+  font-family: var(--xq-font-serif);
+  font-size: 1.55rem;
+  line-height: 1.2;
+}
+
+.entry-grid__heading > span {
+  color: var(--xq-ink-faint);
+  font-size: 0.86rem;
+}
+
+.entry-grid__kicker {
+  margin: 0;
+  color: var(--xq-gold-deep);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
 .entry-card {
-  min-height: 180px;
+  min-height: 148px;
   text-align: left;
   border: 1px solid var(--xq-border);
   border-radius: var(--xq-radius-md);
   background: rgba(255, 250, 240, 0.78);
-  padding: 1.35rem;
+  padding: 1.1rem;
   color: var(--xq-ink);
   cursor: pointer;
   box-shadow: 0 14px 38px rgba(80, 54, 24, 0.07);
-  transition: transform var(--xq-fast), border-color var(--xq-fast), box-shadow var(--xq-fast), background var(--xq-fast);
+  transition:
+    transform var(--xq-fast),
+    border-color var(--xq-fast),
+    box-shadow var(--xq-fast),
+    background var(--xq-fast);
 }
 
 .entry-card:hover {
@@ -295,11 +454,11 @@ h1 {
 
 .entry-card__icon {
   display: inline-flex;
-  width: 2.8rem;
-  height: 2.8rem;
+  width: 2.35rem;
+  height: 2.35rem;
   align-items: center;
   justify-content: center;
-  border-radius: 1rem;
+  border-radius: 0.8rem;
   background: rgba(214, 169, 79, 0.16);
   color: var(--xq-gold-deep);
   font-size: 1.35rem;
@@ -307,7 +466,7 @@ h1 {
 
 .entry-card__label {
   display: block;
-  margin-top: 1rem;
+  margin-top: 0.8rem;
   color: var(--xq-ink-faint);
   font-size: 0.76rem;
   font-weight: 900;
@@ -318,12 +477,12 @@ h1 {
   display: block;
   margin-top: 0.35rem;
   font-family: var(--xq-font-serif);
-  font-size: 1.4rem;
+  font-size: 1.25rem;
 }
 
 .entry-card small {
   display: block;
-  margin-top: 0.65rem;
+  margin-top: 0.45rem;
   color: var(--xq-ink-muted);
   line-height: 1.7;
   font-size: 0.9rem;
@@ -331,6 +490,7 @@ h1 {
 
 .project-list {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
   gap: 0.75rem;
 }
 
@@ -338,14 +498,16 @@ h1 {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
-  align-items: center;
+  align-items: flex-start;
   border: 1px solid var(--xq-border);
   border-radius: var(--xq-radius-md);
-  padding: 0.95rem;
+  padding: 0.9rem;
   background: rgba(255, 250, 240, 0.64);
 }
 
 .project-main {
+  min-width: 0;
+  flex: 1;
   display: grid;
   gap: 0.4rem;
   border: 0;
@@ -358,6 +520,9 @@ h1 {
 
 .project-main strong {
   font-size: 1.05rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .project-main span {
@@ -386,15 +551,43 @@ h1 {
 }
 
 @media (max-width: 980px) {
-  .entry-hero { grid-template-columns: 1fr; }
-  .entry-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .project-row { align-items: stretch; flex-direction: column; }
+  .entry-hero {
+    grid-template-columns: 1fr;
+  }
+  .entry-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .project-row {
+    align-items: stretch;
+  }
+  .entry-hero__status {
+    min-height: 0;
+  }
 }
 
 @media (max-width: 560px) {
-  .entry-page { padding: 0.9rem; }
-  .entry-hero { border-radius: var(--xq-radius-md); }
-  .entry-grid { grid-template-columns: 1fr; }
+  .entry-page {
+    padding: 0.9rem;
+  }
+  .entry-hero {
+    border-radius: var(--xq-radius-md);
+  }
+  .entry-grid {
+    grid-template-columns: 1fr;
+  }
+  .entry-grid__heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .entry-card {
+    min-height: 0;
+  }
+  .project-row {
+    flex-direction: column;
+  }
+  .project-actions {
+    width: 100%;
+  }
 }
 </style>
-

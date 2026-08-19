@@ -3,8 +3,11 @@
     <template #header>
       <div class="card-header">
         <div>
-          <span class="card-title">系统配置</span>
-          <p class="card-subtitle">参数按分类显示。布尔值直接选 true / false，数字参数只允许输入数字。</p>
+          <span class="card-title">{{ pick('系统配置', 'System configuration') }}</span>
+          <p class="card-subtitle">{{ pick(
+            '参数按分类显示。布尔值直接选 true / false，数字参数只允许输入数字。',
+            'Parameters are grouped by category. Booleans are picked as true / false, and numeric parameters accept numbers only.'
+          ) }}</p>
         </div>
       </div>
     </template>
@@ -21,7 +24,10 @@
 <script setup lang="ts">
 import { computed, h, reactive, watch } from 'vue'
 import { NButton, NInputNumber, NSelect, NTag, type DataTableColumns, type SelectOption } from 'naive-ui'
+import { useLocale } from '@/composables/useLocale'
 import type { SystemConfigViewModel } from '@/composables/admin/useAdminSettings'
+
+const { pick } = useLocale()
 
 const props = defineProps<{ configs: SystemConfigViewModel[]; loading: boolean; error: string | null; saveInline: (config: SystemConfigViewModel, value: string) => Promise<unknown> }>()
 const emit = defineEmits<{ edit: [config: SystemConfigViewModel]; 'clear-error': [] }>()
@@ -53,7 +59,7 @@ const saveInline = async (row: SystemConfigViewModel) => {
 
 const columns = computed<DataTableColumns<SystemConfigViewModel>>(() => [
   {
-    title: '分类 / 参数',
+    title: pick('分类 / 参数', 'Category / parameter'),
     key: 'displayKey',
     minWidth: 240,
     render: row => h('div', { class: 'name-cell' }, [
@@ -63,7 +69,7 @@ const columns = computed<DataTableColumns<SystemConfigViewModel>>(() => [
     ]),
   },
   {
-    title: '当前值',
+    title: pick('当前值', 'Current value'),
     key: 'value',
     minWidth: 260,
     render: row => {
@@ -93,10 +99,10 @@ const columns = computed<DataTableColumns<SystemConfigViewModel>>(() => [
       return h('span', { class: 'static-value' }, formatValue(row))
     },
   },
-  { title: '类型', key: 'valueType', width: 96, render: row => typeLabel(row.valueType) },
-  { title: '功能说明', key: 'displayDescription', minWidth: 320, ellipsis: { tooltip: true } },
+  { title: pick('类型', 'Type'), key: 'valueType', width: 96, render: row => typeLabel(row.valueType) },
+  { title: pick('功能说明', 'What it does'), key: 'displayDescription', minWidth: 320, ellipsis: { tooltip: true } },
   {
-    title: '操作',
+    title: pick('操作', 'Actions'),
     key: 'actions',
     width: 150,
     render: row => canInlineEdit(row)
@@ -107,32 +113,32 @@ const columns = computed<DataTableColumns<SystemConfigViewModel>>(() => [
             tertiary: true,
             loading: Boolean(savingMap[row.key]),
             onClick: () => void saveInline(row),
-          }, { default: () => '保存' }),
+          }, { default: () => pick('保存', 'Save') }),
           h(NButton, {
             size: 'small',
             quaternary: true,
             onClick: () => emit('edit', row),
-          }, { default: () => '详情' }),
+          }, { default: () => pick('详情', 'Details') }),
         ])
-      : h(NButton, { size: 'small', type: 'primary', tertiary: true, onClick: () => emit('edit', row) }, { default: () => '修改' }),
+      : h(NButton, { size: 'small', type: 'primary', tertiary: true, onClick: () => emit('edit', row) }, { default: () => pick('修改', 'Edit') }),
   },
 ])
 
 function formatValue(row: SystemConfigViewModel) {
-  if (!row.value) return '未设置'
-  if (row.valueType === 'password') return '已设置（已隐藏）'
-  if (row.valueType === 'boolean') return row.value === 'true' ? '开启 / true' : '关闭 / false'
+  if (!row.value) return pick('未设置', 'Not set')
+  if (row.valueType === 'password') return pick('已设置（已隐藏）', 'Set (hidden)')
+  if (row.valueType === 'boolean') return row.value === 'true' ? pick('开启 / true', 'On / true') : pick('关闭 / false', 'Off / false')
   return row.value
 }
 
 function typeLabel(type: SystemConfigViewModel['valueType']) {
   switch (type) {
-    case 'boolean': return '布尔'
-    case 'number': return '数字'
-    case 'select': return '选项'
-    case 'password': return '密码'
-    case 'multiline': return '多行'
-    default: return '文本'
+    case 'boolean': return pick('布尔', 'Boolean')
+    case 'number': return pick('数字', 'Number')
+    case 'select': return pick('选项', 'Select')
+    case 'password': return pick('密码', 'Password')
+    case 'multiline': return pick('多行', 'Multiline')
+    default: return pick('文本', 'Text')
   }
 }
 </script>

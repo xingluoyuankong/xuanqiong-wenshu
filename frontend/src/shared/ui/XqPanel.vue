@@ -58,8 +58,8 @@ withDefaults(
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1.5rem;
-  padding: 1.5rem 1.5rem 0;
+  gap: 0.844rem;
+  padding: 0.844rem 0.844rem 0;
 }
 
 .xq-panel__kicker {
@@ -91,6 +91,6 @@ withDefaults(
 .xq-panel__body {
   position: relative;
   z-index: 1;
-  padding: 1.5rem;
+  padding: 1.125rem;
 }
 </style>

@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div class="notification-container" role="region" aria-label="通知">
+    <div class="notification-container" role="region" :aria-label="pick('通知', 'Notifications')">
       <TransitionGroup name="toast">
         <div
           v-for="n in notifications"
@@ -38,7 +38,9 @@
 <script setup lang="ts">
 import { useNotificationStore } from '@/stores/notification'
 import { storeToRefs } from 'pinia'
+import { useLocale } from '@/composables/useLocale'
 
+const { pick } = useLocale()
 const store = useNotificationStore()
 const { notifications } = storeToRefs(store)
 const { remove } = store

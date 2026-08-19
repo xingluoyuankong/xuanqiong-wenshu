@@ -1,3 +1,4 @@
+import { buildAuthHeaders } from '@/stores/auth'
 import { API_BASE_URL } from '@/api/config'
 import {
   ApiError,
@@ -11,6 +12,8 @@ import {
   type RewriteChapterOutlineOptions,
 } from '@/api/novel'
 import { normalizeChapterContent } from '@/utils/chapterContent'
+
+const authFetch = (input: RequestInfo | URL, init: RequestInit = {}) => fetch(input, { ...init, headers: buildAuthHeaders(init.headers) })
 
 const WRITER_PREFIX = '/api/writer'
 const WRITER_BASE = `${API_BASE_URL}${WRITER_PREFIX}/novels`
@@ -42,7 +45,7 @@ const request = async (url: string, options: RequestInit = {}) => {
 
   let response: Response
   try {
-    response = await fetch(url, { ...options, headers })
+    response = await authFetch(url, { ...options, headers })
   } catch {
     throw new Error('网络连接失败，请检查网络后重试')
   }
@@ -197,6 +200,12 @@ export const generateChapter = (
   if (options.targetWordCount && options.targetWordCount > 0) {
     payload.target_word_count = options.targetWordCount
   }
+  if (options.segmentWordLimit && options.segmentWordLimit > 0) {
+    payload.segment_word_limit = options.segmentWordLimit
+  }
+  if (options.generationTimeoutSeconds && options.generationTimeoutSeconds > 0) {
+    payload.generation_timeout_seconds = options.generationTimeoutSeconds
+  }
   if (options.preset) {
     payload.preset = options.preset
   }
@@ -235,6 +244,14 @@ export const cancelChapterGeneration = (
     body: JSON.stringify(payload),
   })
 }
+
+export const resumeChapterGeneration = (
+  projectId: string,
+  runId: string,
+) => requestProject(`${WRITER_BASE}/${projectId}/chapters/resume`, {
+  method: 'POST',
+  body: JSON.stringify({ run_id: runId }),
+})
 
 export const evaluateChapter = (
   projectId: string,
@@ -346,8 +363,8 @@ const buildOutlinePayload = (
   startChapter: number,
   numChapters: number,
   options: GenerateOutlineOptions = {},
-): Record<string, number> => {
-  const payload: Record<string, number> = {
+): Record<string, number | boolean> => {
+  const payload: Record<string, number | boolean> = {
     start_chapter: startChapter,
     num_chapters: numChapters,
   }
@@ -359,6 +376,15 @@ const buildOutlinePayload = (
   }
   if (options.chapterWordTarget && options.chapterWordTarget > 0) {
     payload.chapter_word_target = options.chapterWordTarget
+  }
+  if (options.volumeCount && options.volumeCount > 0) {
+    payload.volume_count = options.volumeCount
+  }
+  if (options.chaptersPerVolume && options.chaptersPerVolume > 0) {
+    payload.chapters_per_volume = options.chaptersPerVolume
+  }
+  if (options.longForm) {
+    payload.long_form = true
   }
   return payload
 }

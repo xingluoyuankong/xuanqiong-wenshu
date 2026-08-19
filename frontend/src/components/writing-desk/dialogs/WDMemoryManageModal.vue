@@ -1,14 +1,14 @@
-<!-- 记忆管理弹窗 - 管理项目的记忆层 -->
+﻿<!-- 记忆管理弹窗 - 管理项目的记忆层 -->
 <template>
   <div v-if="show" class="xq-dialog-overlay" @click.self="$emit('close')">
     <div class="xq-dialog-shell">
       <div class="xq-dialog-header">
         <div>
           <p class="xq-dialog-kicker">Memory Layer</p>
-          <h3 class="xq-dialog-title">记忆管理</h3>
-          <p class="xq-dialog-subtitle">管理项目动态记忆层，支持增量更新、快照、压缩和回滚。</p>
+          <h3 class="xq-dialog-title">{{ pick('记忆管理', 'Memory management') }}</h3>
+          <p class="xq-dialog-subtitle">{{ pick('管理项目动态记忆层，支持增量更新、快照、压缩和回滚。', 'Manage the project memory layer with incremental updates, snapshots, compaction, and rollback.') }}</p>
         </div>
-        <button @click="$emit('close')" class="xq-dialog-close" aria-label="关闭">×</button>
+        <button @click="$emit('close')" class="xq-dialog-close" :aria-label="t('common.close')">×</button>
       </div>
 
       <!-- 内容区 -->
@@ -16,7 +16,7 @@
         <!-- 加载状态 -->
         <div v-if="loading" class="flex flex-col items-center justify-center py-12">
           <div class="animate-spin rounded-full h-12 w-12 border-4 border-indigo-500 border-t-transparent"></div>
-          <p class="mt-4 text-slate-500">加载中...</p>
+          <p class="mt-4 text-slate-500">{{ pick('加载中...', 'Loading...') }}</p>
         </div>
 
         <!-- 错误状态 -->
@@ -28,7 +28,7 @@
           </div>
           <p class="mt-4 text-red-600">{{ error }}</p>
           <button @click="loadSnapshots" class="mt-4 px-4 py-2 text-sm text-indigo-600 hover:text-indigo-800">
-            重试
+            {{ t('common.retry') }}
           </button>
         </div>
 
@@ -43,9 +43,9 @@
                 </svg>
               </div>
               <div class="flex-1">
-                <p class="font-medium text-slate-900">记忆状态</p>
+                <p class="font-medium text-slate-900">{{ pick('记忆状态', 'Memory status') }}</p>
                 <p class="text-sm text-slate-600">
-                  共 {{ snapshots.length }} 个快照 | 当前版本: {{ currentVersion }}
+                  {{ pick(`共 ${snapshots.length} 个快照 | 当前版本: ${currentVersion}`, `${snapshots.length} snapshots | Current version: ${currentVersion}`) }}
                 </p>
               </div>
               <button
@@ -53,13 +53,13 @@
                 :disabled="actionLoading"
                 class="px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
               >
-                增量更新
+                {{ pick('增量更新', 'Incremental update') }}
               </button>
             </div>
           </div>
 
           <!-- 快照列表 -->
-          <p class="text-sm font-medium text-slate-700 mb-3">记忆快照</p>
+          <p class="text-sm font-medium text-slate-700 mb-3">{{ pick('记忆快照', 'Memory snapshots') }}</p>
 
           <div v-if="snapshots.length" class="space-y-3">
             <div
@@ -77,12 +77,12 @@
                     v-if="snapshot.id === currentSnapshotId"
                     class="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded-full"
                   >
-                    当前
+                    {{ pick('当前', 'Current') }}
                   </span>
                 </div>
                 <p class="text-sm text-slate-500">{{ snapshot.created_at }}</p>
                 <p class="text-xs text-slate-400 mt-1">
-                  章节: {{ snapshot.chapter_number }}
+                  {{ pick(`章节: ${snapshot.chapter_number}`, `Chapter: ${snapshot.chapter_number}`) }}
                 </p>
               </div>
               <div class="flex gap-2">
@@ -92,7 +92,7 @@
                   :disabled="actionLoading"
                   class="px-3 py-1.5 text-sm font-medium text-sky-600 bg-sky-50 rounded-lg hover:bg-sky-100 disabled:opacity-50"
                 >
-                  回滚
+                  {{ pick('回滚', 'Roll back') }}
                 </button>
               </div>
             </div>
@@ -100,8 +100,8 @@
 
           <!-- 空状态 -->
           <div v-else class="text-center py-8 text-slate-500">
-            <p>暂无记忆快照</p>
-            <p class="text-sm mt-1">点击"增量更新"开始构建记忆</p>
+            <p>{{ pick('暂无记忆快照', 'No memory snapshots yet') }}</p>
+            <p class="text-sm mt-1">{{ pick('点击"增量更新"开始构建记忆', 'Run "Incremental update" to start building memory') }}</p>
           </div>
 
           <!-- 操作反馈 -->
@@ -118,13 +118,13 @@
           :disabled="actionLoading || snapshots.length === 0"
           class="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 disabled:opacity-50"
         >
-          压缩记忆
+          {{ pick('压缩记忆', 'Compact memory') }}
         </button>
         <button
           @click="$emit('close')"
           class="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800"
         >
-          关闭
+          {{ t('common.close') }}
         </button>
       </div>
     </div>
@@ -134,6 +134,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { OptimizerAPI } from '@/api/novel'
+import { useLocale } from '@/composables/useLocale'
 
 interface Snapshot {
   id: number
@@ -151,6 +152,8 @@ const emit = defineEmits<{
   (e: 'close'): void
   (e: 'updated'): void
 }>()
+
+const { pick, t } = useLocale()
 
 const loading = ref(false)
 const actionLoading = ref(false)
@@ -170,7 +173,7 @@ async function loadSnapshots() {
     currentVersion.value = `v${res.current_memory_version || 0}`
     currentSnapshotId.value = res.current_snapshot_id ?? (snapshots.value.length > 0 ? snapshots.value[0].id : null)
   } catch (e: any) {
-    error.value = e.message || '加载快照失败'
+    error.value = e.message || pick('加载快照失败', 'Failed to load snapshots')
     console.error('加载记忆快照失败:', e)
   } finally {
     loading.value = false
@@ -184,12 +187,12 @@ async function triggerIncrementalUpdate() {
     await OptimizerAPI.updateMemoryIncremental(props.projectId, {
       chapter_number: 0
     })
-    actionMessage.value = '增量更新成功'
+    actionMessage.value = pick('增量更新成功', 'Incremental update finished')
     actionSuccess.value = true
     emit('updated')
     await loadSnapshots()
   } catch (e: any) {
-    actionMessage.value = e.message || '增量更新失败'
+    actionMessage.value = e.message || pick('增量更新失败', 'Incremental update failed')
     actionSuccess.value = false
     console.error('增量更新失败:', e)
   } finally {
@@ -205,12 +208,12 @@ async function rollbackToSnapshot(snapshotId: number) {
     const snapshotIndex = snapshots.value.findIndex(s => s.id === snapshotId)
     const targetVersion = snapshotIndex >= 0 ? snapshotIndex + 1 : snapshotId
     await OptimizerAPI.rollbackMemory(props.projectId, targetVersion)
-    actionMessage.value = '回滚成功'
+    actionMessage.value = pick('回滚成功', 'Rolled back successfully')
     actionSuccess.value = true
     emit('updated')
     await loadSnapshots()
   } catch (e: any) {
-    actionMessage.value = e.message || '回滚失败'
+    actionMessage.value = e.message || pick('回滚失败', 'Rollback failed')
     actionSuccess.value = false
     console.error('回滚失败:', e)
   } finally {
@@ -224,12 +227,12 @@ async function compressMemory() {
   actionMessage.value = ''
   try {
     await OptimizerAPI.compressMemory(props.projectId)
-    actionMessage.value = '压缩成功'
+    actionMessage.value = pick('压缩成功', 'Compacted successfully')
     actionSuccess.value = true
     emit('updated')
     await loadSnapshots()
   } catch (e: any) {
-    actionMessage.value = e.message || '压缩失败'
+    actionMessage.value = e.message || pick('压缩失败', 'Compaction failed')
     actionSuccess.value = false
     console.error('压缩失败:', e)
   } finally {

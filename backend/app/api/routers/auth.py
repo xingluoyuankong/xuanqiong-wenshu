@@ -23,7 +23,8 @@ async def login(
     stmt = select(User).where(User.username == form_data.username)
     result = await session.execute(stmt)
     user = result.scalars().first()
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    if not user or not bool(user.is_active) or not verify_password(form_data.password, user.hashed_password):
+        # 对不存在、停用和密码错误统一返回，避免泄露账号状态。
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
     expires = timedelta(minutes=settings.access_token_expire_minutes)
     access_token = create_access_token(subject=str(user.id), expires_delta=expires)

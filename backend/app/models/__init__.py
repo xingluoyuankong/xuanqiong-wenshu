@@ -15,6 +15,7 @@ from .novel import (
     NovelBlueprint,
     NovelConversation,
     NovelProject,
+    ProjectLedgerSyncLease,
 )
 from .prompt import Prompt
 from .update_log import UpdateLog
@@ -83,6 +84,9 @@ from .clue_tracker import StoryClue, ClueChapterLink, ClueThread
 # 新增：阵营模型
 from .faction import Faction, FactionRelationship, FactionMember, FactionRelationshipHistory
 
+# 可恢复任务运行时模型（必须在 Base.metadata.create_all 前导入）
+from .task_runtime import TaskRuntime, TaskRuntimeEvent
+
 __all__ = [
     # 基础模型
     "AdminSetting",
@@ -98,6 +102,7 @@ __all__ = [
     "ChapterVersion",
     "ChapterEvaluation",
     "NovelProject",
+    "ProjectLedgerSyncLease",
     "Prompt",
     "UpdateLog",
     "UsageMetric",
@@ -154,4 +159,6 @@ __all__ = [
     "FactionRelationship",
     "FactionMember",
     "FactionRelationshipHistory",
+    "TaskRuntime",
+    "TaskRuntimeEvent",
 ]

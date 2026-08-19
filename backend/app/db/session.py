@@ -1,4 +1,4 @@
-# AIMETA P=数据库会话_异步会话工厂|R=异步会话_连接池|NR=不含查询逻辑|E=AsyncSessionLocal_get_db|X=internal|A=会话工厂|D=sqlalchemy|S=db|RD=./README.ai
+﻿# AIMETA P=数据库会话_异步会话工厂|R=异步会话_连接池|NR=不含查询逻辑|E=AsyncSessionLocal_get_db|X=internal|A=会话工厂|D=sqlalchemy|S=db|RD=./README.ai
 import os
 from collections.abc import AsyncGenerator
 
@@ -19,8 +19,8 @@ if settings.is_sqlite_backend:
             "check_same_thread": False,
             "timeout": 300,  # 等待锁释放的超时时间（秒）- 适应长生成
         },
-        pool_size=10,
-        max_overflow=20,
+        pool_size=5,
+        max_overflow=10,
         pool_timeout=60,
         pool_recycle=1800,
         # poolclass=NullPool 已禁用：NullPool导致生成期间所有读请求阻塞
@@ -60,13 +60,6 @@ if settings.is_sqlite_backend:
         cursor.execute("PRAGMA busy_timeout=300000")
         cursor.close()
 
-    @event.listens_for(engine.sync_engine, "connect")
-    def set_sqlite_pragma(dbapi_connection, connection_record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA synchronous=NORMAL")
-        cursor.execute("PRAGMA busy_timeout=300000")  # 5分钟超时（适应长生成）
-        cursor.close()
 
 # 统一的 Session 工厂，禁用 expire_on_commit 方便返回模型对象
 AsyncSessionLocal = async_sessionmaker(bind=engine, expire_on_commit=False)

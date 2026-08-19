@@ -1,4 +1,4 @@
-<!-- [DEPRECATED] This component has 0 runtime references as of 2026-08-07 audit. Retained for backward compatibility. -->
+﻿<!-- [DEPRECATED] This component has 0 runtime references as of 2026-08-07 audit. Retained for backward compatibility. -->
 <!-- AIMETA P=情感节拍选择_情感标记选择|R=情感选择|NR=不含分析功能|E=component:EmotionBeatSelector|X=internal|A=选择器|D=vue|S=dom|RD=./README.ai -->
 <template>
   <div class="emotion-beat-selector">

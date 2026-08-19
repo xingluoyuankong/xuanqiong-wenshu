@@ -167,8 +167,18 @@ from ...services.config_sync_manager import get_config_sync_manager
 from ...core.dependencies import get_current_user
 
 @router.post("/bump")
-async def bump_config_version(user=Depends(get_current_user)):
-    """Notify backend that frontend config has changed. Triggers PipelineOrchestrator reconfigure."""
+async def bump_config_version(
+    service: LLMConfigService = Depends(get_llm_config_service),
+    user: UserInDB = Depends(get_current_user),
+):
+    """广播配置变更，但以数据库配置版本作为跨进程真相源。"""
+    config = await service.get_config(user.id)
+    if config is None:
+        raise HTTPException(status_code=404, detail={"code": "LLM_CONFIG_NOT_FOUND", "message": "当前用户还没有保存 LLM 配置"})
     sync_mgr = get_config_sync_manager()
-    new_version = await sync_mgr.bump_version(user.id)
-    return {"version": new_version, "message": f"Config sync bumped to v{new_version}"}
+    sync_version = await sync_mgr.bump_version(user.id, persisted_version=config.version)
+    return {
+        "version": config.version,
+        "sync_version": sync_version,
+        "message": f"Config persisted as v{config.version}",
+    }

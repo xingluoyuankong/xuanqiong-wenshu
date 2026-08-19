@@ -10,31 +10,34 @@
       
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
         <div>
-          <label class="block text-sm font-medium text-gray-600 mb-1">从</label>
-          <input type="text" v-model="relationship.character_from" class="w-full p-1 border-b-2 border-gray-300 focus:border-indigo-500 outline-none transition bg-transparent" placeholder="例如：林远" />
+          <label class="block text-sm font-medium text-gray-600 mb-1">{{ pick('从', 'From') }}</label>
+          <input type="text" v-model="relationship.character_from" class="w-full p-1 border-b-2 border-gray-300 focus:border-indigo-500 outline-none transition bg-transparent" :placeholder="pick('例如：林远', 'For example: Lin Yuan')" />
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-600 mb-1">到</label>
-          <input type="text" v-model="relationship.character_to" class="w-full p-1 border-b-2 border-gray-300 focus:border-indigo-500 outline-none transition bg-transparent" placeholder="例如：苏晴" />
+          <label class="block text-sm font-medium text-gray-600 mb-1">{{ pick('到', 'To') }}</label>
+          <input type="text" v-model="relationship.character_to" class="w-full p-1 border-b-2 border-gray-300 focus:border-indigo-500 outline-none transition bg-transparent" :placeholder="pick('例如：苏晴', 'For example: Su Qing')" />
         </div>
       </div>
       <div>
-        <label class="block text-sm font-medium text-gray-600 mb-1">关系描述</label>
-        <textarea 
-          v-model="relationship.description" 
+        <label class="block text-sm font-medium text-gray-600 mb-1">{{ pick('关系描述', 'Relationship description') }}</label>
+        <textarea
+          v-model="relationship.description"
           class="w-full h-20 p-2 mt-1 border border-gray-300 rounded-md focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition text-sm"
-          placeholder="关于这段关系的详细描述..."
+          :placeholder="pick('关于这段关系的详细描述...', 'Describe this relationship in detail…')"
         ></textarea>
       </div>
     </div>
     <button @click="addRelationship" class="w-full mt-4 px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-md hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-      + 添加新关系
+      {{ pick('+ 添加新关系', '+ Add a relationship') }}
     </button>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue';
+import { useLocale } from '@/composables/useLocale';
+
+const { pick } = useLocale();
 
 interface Relationship {
   character_from: string;

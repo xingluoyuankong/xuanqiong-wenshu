@@ -8,31 +8,34 @@
         </svg>
       </button>
       <div class="mb-2">
-        <label class="block text-sm font-medium text-gray-600 mb-1">地点名称</label>
-        <input 
-          type="text" 
-          v-model="location.name" 
+        <label class="block text-sm font-medium text-gray-600 mb-1">{{ pick('地点名称', 'Location name') }}</label>
+        <input
+          type="text"
+          v-model="location.name"
           class="w-full p-1 border-b-2 border-gray-300 focus:border-indigo-500 outline-none transition bg-transparent"
-          placeholder="例如：林远生前的公寓"
+          :placeholder="pick('例如：林远生前的公寓', 'For example: Lin Yuan’s old apartment')"
         />
       </div>
       <div>
-        <label class="block text-sm font-medium text-gray-600 mb-1">描述</label>
-        <textarea 
-          v-model="location.description" 
+        <label class="block text-sm font-medium text-gray-600 mb-1">{{ pick('描述', 'Description') }}</label>
+        <textarea
+          v-model="location.description"
           class="w-full h-20 p-2 mt-1 border border-gray-300 rounded-md focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition text-sm"
-          placeholder="关于这个地点的详细描述..."
+          :placeholder="pick('关于这个地点的详细描述...', 'Describe this location in detail…')"
         ></textarea>
       </div>
     </div>
     <button @click="addLocation" class="w-full mt-4 px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-md hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-      + 添加新地点
+      {{ pick('+ 添加新地点', '+ Add a location') }}
     </button>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue';
+import { useLocale } from '@/composables/useLocale';
+
+const { pick } = useLocale();
 
 interface KeyLocation {
   name: string;

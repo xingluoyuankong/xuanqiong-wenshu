@@ -12,6 +12,7 @@ from ...db.session import get_session
 from ...schemas.user import UserInDB
 from ...services.clue_tracker_service import ClueTrackerService
 from ...services.novel_service import NovelService
+from ...services.project_ledger_lease_service import project_ledger_lease
 
 router = APIRouter(prefix="/projects", tags=["clue-tracker"])
 
@@ -188,6 +189,55 @@ async def get_project_clues(
         }
         for clue in clues
     ]
+
+
+@router.get("/{project_id}/clues/overview")
+async def get_clue_overview(
+    project_id: str,
+    status: Optional[str] = None,
+    clue_type: Optional[str] = None,
+    include_red_herring: bool = True,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> dict:
+    """Return a consistent clue snapshot after one serialized ledger sync."""
+    await NovelService(session).ensure_project_owner(project_id, current_user.id)
+    service = ClueTrackerService(session)
+    async with project_ledger_lease(project_id):
+        sync = await service.sync_from_foreshadowings(project_id, commit=True)
+        clues = await service.get_project_clues(
+            project_id=project_id,
+            status=status,
+            clue_type=clue_type,
+            include_red_herring=include_red_herring,
+        )
+        analysis = await service.analyze_clue_threads(project_id)
+    return {
+        "project_id": project_id,
+        "clues": [
+            {
+                "id": clue.id,
+                "project_id": clue.project_id,
+                "name": clue.name,
+                "clue_type": clue.clue_type,
+                "description": clue.description,
+                "importance": clue.importance,
+                "planted_chapter": clue.planted_chapter,
+                "resolution_chapter": clue.resolution_chapter,
+                "status": clue.status,
+                "is_red_herring": clue.is_red_herring,
+                "red_herring_explanation": clue.red_herring_explanation,
+                "clue_content": clue.clue_content,
+                "hint_level": clue.hint_level,
+                "design_intent": clue.design_intent,
+                "created_at": clue.created_at.isoformat(),
+                "updated_at": clue.updated_at.isoformat(),
+            }
+            for clue in clues
+        ],
+        "analysis": analysis,
+        "sync": sync,
+    }
 
 
 @router.get("/{project_id}/clues/threads", response_model=ClueThreadAnalysisResponse)

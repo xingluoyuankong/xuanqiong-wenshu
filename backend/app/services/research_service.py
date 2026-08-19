@@ -824,8 +824,9 @@ class ProjectResearchService:
     async def build_prompt_context(
         self,
         project_id: str,
-        chapter_number: int,
+        chapter_number: Optional[int],
         *,
+        scope: Optional[str] = None,
         max_chars: int = 6500,
     ) -> tuple[str, Dict[str, Any]]:
         """Build research context for novel generation prompt.
@@ -835,26 +836,44 @@ class ProjectResearchService:
         provides information about the research artifacts used.
         """
         artifacts: List[ResearchArtifact] = []
-        scope_filters = (
-            ("global", ResearchArtifact.chapter_number.is_(None)),
-            ("enhanced", ResearchArtifact.chapter_number.is_(None)),
-            ("chapter", ResearchArtifact.chapter_number == chapter_number),
-        )
-        for scope, chapter_filter in scope_filters:
-            statement = (
-                select(ResearchArtifact)
-                .where(
-                    ResearchArtifact.project_id == project_id,
-                    ResearchArtifact.status.in_(("successful", "degraded")),
-                    ResearchArtifact.scope == scope,
-                    chapter_filter,
-                )
-                .order_by(desc(ResearchArtifact.created_at), desc(ResearchArtifact.id))
-                .limit(1)
+        if scope:
+            if scope == "chapter":
+                chapter_filter = ResearchArtifact.chapter_number == chapter_number
+            else:
+                chapter_filter = ResearchArtifact.chapter_number.is_(None)
+            scope_filters = ((scope, chapter_filter),)
+        else:
+            scope_filters = (
+                ("global", ResearchArtifact.chapter_number.is_(None)),
+                ("enhanced", ResearchArtifact.chapter_number.is_(None)),
+                ("chapter", ResearchArtifact.chapter_number == chapter_number),
             )
-            artifact = (await self.session.execute(statement)).scalar_one_or_none()
-            if artifact is not None:
-                artifacts.append(artifact)
+        try:
+            for requested_scope, chapter_filter in scope_filters:
+                statement = (
+                    select(ResearchArtifact)
+                    .where(
+                        ResearchArtifact.project_id == project_id,
+                        ResearchArtifact.status.in_(("successful", "degraded")),
+                        ResearchArtifact.scope == requested_scope,
+                        chapter_filter,
+                    )
+                    .order_by(desc(ResearchArtifact.created_at), desc(ResearchArtifact.id))
+                    .limit(1)
+                )
+                artifact = (await self.session.execute(statement)).scalar_one_or_none()
+                if artifact is not None:
+                    artifacts.append(artifact)
+        except Exception as exc:  # archive context is an optional dependency of generation
+            logger.warning("研究归档读取失败，降级为空上下文: project=%s error=%s", project_id, exc)
+            return "", {
+                "artifact_count": 0,
+                "artifact_scopes": [],
+                "artifact_run_ids": [],
+                "source_urls": [],
+                "context_chars": 0,
+                "archive_error": str(exc),
+            }
 
         if not artifacts:
             return "", {

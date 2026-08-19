@@ -1,6 +1,7 @@
 ﻿import { reactive, ref } from 'vue'
 import { AdminAPI, type PromptCreatePayload, type PromptItem } from '@/api/admin'
 import { useAlert } from '@/composables/useAlert'
+import { pick } from '@/composables/useLocale'
 
 const createEmptyPromptForm = (): PromptCreatePayload => ({
   name: '',
@@ -63,7 +64,7 @@ export const usePromptManagement = () => {
         selectPrompt(prompts.value[0])
       }
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '获取提示词列表失败'
+      error.value = err instanceof Error ? err.message : pick('获取提示词列表失败', 'Failed to load the prompt list')
     } finally {
       loading.value = false
     }
@@ -72,7 +73,7 @@ export const usePromptManagement = () => {
   const savePrompt = async () => {
     if (!selectedPrompt.value) return
     if (!editForm.content.trim()) {
-      showAlert('提示词内容不能为空', 'error')
+      showAlert(pick('提示词内容不能为空', 'The prompt body cannot be empty'), 'error')
       return
     }
     saving.value = true
@@ -85,9 +86,9 @@ export const usePromptManagement = () => {
       selectPrompt(updated)
       const index = prompts.value.findIndex(item => item.id === updated.id)
       if (index !== -1) prompts.value.splice(index, 1, updated)
-      showAlert('保存成功', 'success')
+      showAlert(pick('保存成功', 'Saved'), 'success')
     } catch (err) {
-      showAlert(err instanceof Error ? err.message : '保存失败', 'error')
+      showAlert(err instanceof Error ? err.message : pick('保存失败', 'Save failed'), 'error')
     } finally {
       saving.value = false
     }
@@ -100,9 +101,9 @@ export const usePromptManagement = () => {
       await AdminAPI.deletePrompt(selectedPrompt.value.id)
       prompts.value = prompts.value.filter(item => item.id !== selectedPrompt.value?.id)
       resetSelection()
-      showAlert('删除成功', 'success')
+      showAlert(pick('删除成功', 'Deleted'), 'success')
     } catch (err) {
-      showAlert(err instanceof Error ? err.message : '删除失败', 'error')
+      showAlert(err instanceof Error ? err.message : pick('删除失败', 'Delete failed'), 'error')
     } finally {
       deleting.value = false
     }
@@ -119,7 +120,7 @@ export const usePromptManagement = () => {
 
   const createPrompt = async () => {
     if (!createForm.name.trim() || !createForm.content.trim()) {
-      showAlert('提示词名称和内容都是必填项', 'error')
+      showAlert(pick('提示词名称和内容都是必填项', 'Both the prompt identifier and body are required'), 'error')
       return
     }
     creating.value = true
@@ -133,9 +134,9 @@ export const usePromptManagement = () => {
       prompts.value.unshift(created)
       selectPrompt(created)
       closeCreateModal()
-      showAlert('创建成功', 'success')
+      showAlert(pick('创建成功', 'Created'), 'success')
     } catch (err) {
-      showAlert(err instanceof Error ? err.message : '创建失败', 'error')
+      showAlert(err instanceof Error ? err.message : pick('创建失败', 'Create failed'), 'error')
     } finally {
       creating.value = false
     }

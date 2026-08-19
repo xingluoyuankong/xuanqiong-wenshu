@@ -84,6 +84,61 @@ CHAPTER_BEATS: List[Dict[str, Any]] = [
         "event": "\u4e3b\u7ebf\u5206\u9014\u5165\u65e7\u4eac",
         "location": "\u5206\u5c94\u5b98\u9053",
     },
+    {
+        "n": 6,
+        "title": "旧京验档",
+        "summary": "第6章摘要：林舟潜入旧京档库，补上禁卫司令牌缺失那一页。",
+        "content": "林舟潜入旧京档库，比对夜雨令编号，补上禁卫司旧档缺失的一页，血契灼烧再起。",
+        "global": "全书：林舟在旧京补全禁卫司档案缺页，夜雨令来历指向宫中旧案。",
+        "hook": "宫中旧案主使未明",
+        "clue": "补回的档案缺页",
+        "event": "补全禁卫司旧档缺页",
+        "location": "旧京档库",
+    },
+    {
+        "n": 7,
+        "title": "顾棠断线",
+        "summary": "第7章摘要：顾棠牵制追杀失手被俘，半枚禁卫信物落入军监。",
+        "content": "顾棠牵制追杀时失手被俘，半枚禁卫信物被军监取走，止血药方来源随之断线。",
+        "global": "全书：顾棠落入军监，半枚信物易手，林舟在旧京失去接应。",
+        "hook": "军监为何要信物",
+        "clue": "军监扣下的半枚信物",
+        "event": "顾棠被军监俘获",
+        "location": "军监诏狱",
+    },
+    {
+        "n": 8,
+        "title": "血契三日",
+        "summary": "第8章摘要：血契三日反噬到期，林舟以档案缺页换得压制之法。",
+        "content": "血契三日反噬到期，林舟用旧档缺页与旧禁卫做交换，换来压制血契的法门。",
+        "global": "全书：林舟暂压血契，代价是旧档缺页外流，夜雨令行踪暴露。",
+        "hook": "缺页外流的后果",
+        "clue": "外流缺页的抄本",
+        "event": "以缺页换压制之法",
+        "location": "旧京废祠",
+    },
+    {
+        "n": 9,
+        "title": "诏狱夺人",
+        "summary": "第9章摘要：林舟夜袭诏狱救出顾棠，取回半枚禁卫信物。",
+        "content": "林舟夜袭军监诏狱救出顾棠，取回半枚禁卫信物，两人确认宫中旧案主使身份。",
+        "global": "全书：顾棠脱困，信物归位，宫中旧案主使已可指名。",
+        "hook": "主使仍在宫中掌权",
+        "clue": "主使的宫中印记",
+        "event": "夜袭诏狱救出顾棠",
+        "location": "军监诏狱",
+    },
+    {
+        "n": 10,
+        "title": "夜雨归令",
+        "summary": "第10章摘要：两人合璧信物与夜雨令，直指宫中旧案主使。",
+        "content": "顾棠合璧半枚信物与夜雨令，火印与旧档缺页对齐，宫中旧案主使浮出水面。",
+        "global": "全书：夜雨令与禁卫信物合璧，宫中旧案主使浮出，主线进入正面对决。",
+        "hook": "正面对决前的布局",
+        "clue": "合璧后的完整火印",
+        "event": "信物与夜雨令合璧",
+        "location": "旧京城楼",
+    },
 ]
 
 
@@ -145,8 +200,8 @@ async def _seed_project(session) -> None:
             project_id=PROJECT_ID,
             title="\u591a\u7ae0\u8fde\u7eed\u6027\u751f\u4ea7\u8bc1\u660e",
             world_setting={
-                "novel_outline": [{"title": "\u5377\u4e00", "expected_chapter_range": "1-5"}],
-                "volume_plan": [{"title": "\u591c\u96e8\u7ebf", "chapter_range": "1-5"}],
+                "novel_outline": [{"title": "\u5377\u4e00", "expected_chapter_range": "1-10"}],
+                "volume_plan": [{"title": "\u591c\u96e8\u7ebf", "chapter_range": "1-10"}],
             },
         )
     )
@@ -365,7 +420,6 @@ async def _build_package(session, target_chapter: int):
 
 
 @pytest.mark.anyio
-@pytest.mark.skip(reason="API refactored")
 async def test_production_multi_chapter_short_and_long_continuity_chain(tmp_path, monkeypatch):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'multi-chapter-continuity.db'}")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -377,7 +431,9 @@ async def test_production_multi_chapter_short_and_long_continuity_chain(tmp_path
             await session.commit()
             seen_summaries: List[str] = []
             last_global = ""
-            for n in range(1, 5):
+            # 连续 1→9 章逐章定稿并校验下一章上下文，第 10 章在循环后单独收口，
+            # 覆盖目标要求的“正式路径连续生成至少 10 章”。
+            for n in range(1, 10):
                 chapter, content = await _prepare_chapter_for_finalize(session, n)
                 await session.commit()
                 pre_summary = extract_narrative_summary(chapter.real_summary, outline_summary=_beat(n)["title"])
@@ -436,25 +492,44 @@ async def test_production_multi_chapter_short_and_long_continuity_chain(tmp_path
                 assert gate.metrics.get("longform_context_missing") is not True
                 assert gate.metrics.get("continuity_degraded") is not True
 
-            chapter5, content5 = await _prepare_chapter_for_finalize(session, 5)
+            # 第 10 章收口：定稿后校验全书记忆、历史摘要链与快照覆盖到第 10 章。
+            final_n = CHAPTER_BEATS[-1]["n"]
+            assert final_n == 10
+            chapter_last, content_last = await _prepare_chapter_for_finalize(session, final_n)
             await session.commit()
-            result5 = await _finalize_one(session, monkeypatch, 5, content5)
-            assert result5["success"] is True
-            await session.refresh(chapter5)
-            assert extract_narrative_summary(chapter5.real_summary) == _beat(5)["summary"]
-            await _seed_longform_artifacts_for_chapter(session, 5, chapter5.id)
+            result_last = await _finalize_one(session, monkeypatch, final_n, content_last)
+            assert result_last["success"] is True
+            await session.refresh(chapter_last)
+            assert extract_narrative_summary(chapter_last.real_summary) == _beat(final_n)["summary"]
+            await _seed_longform_artifacts_for_chapter(session, final_n, chapter_last.id)
             await session.commit()
-            history6 = await _collect_history_for(session, 6, memory_text=_beat(5)["global"])
-            assert history6["previous_summary"] == _beat(5)["summary"]
+            history_next = await _collect_history_for(session, final_n + 1, memory_text=_beat(final_n)["global"])
+            assert history_next["previous_summary"] == _beat(final_n)["summary"]
+            # 全部 10 章摘要都必须留在历史链里，任何一章丢失都说明长程上下文断裂。
             for beat in CHAPTER_BEATS:
-                assert any(beat["summary"] == item or beat["summary"] in str(item) for item in history6.get("completed_summaries", []))
+                assert any(
+                    beat["summary"] == item or beat["summary"] in str(item)
+                    for item in history_next.get("completed_summaries", [])
+                ), f"第{beat['n']}章摘要未进入历史链"
             memory = (await session.execute(select(ProjectMemory).where(ProjectMemory.project_id == PROJECT_ID))).scalar_one()
-            assert memory.last_updated_chapter == 5
-            assert memory.global_summary == _beat(5)["global"]
-            package_late = await _build_package(session, 5)
-            assert package_late.memory_digest.get("last_updated_chapter") == 5
+            assert memory.last_updated_chapter == final_n
+            assert memory.global_summary == _beat(final_n)["global"]
+            package_late = await _build_package(session, final_n)
+            assert package_late.memory_digest.get("last_updated_chapter") == final_n
             snap_nums = {int(item.get("chapter_number")) for item in (package_late.memory_digest.get("recent_snapshots") or [])}
-            assert {1, 2, 3, 4}.issubset(snap_nums)
+            assert snap_nums, "第10章上下文包没有任何近期快照"
+            assert max(snap_nums) == final_n - 1
+            # 逐章定稿必须留下 10 份章节快照，确认没有中途丢章。
+            all_snapshot_numbers = set(
+                (
+                    await session.execute(
+                        select(ChapterSnapshot.chapter_number).where(ChapterSnapshot.project_id == PROJECT_ID)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert set(range(1, final_n + 1)).issubset(all_snapshot_numbers)
             chapter1 = (await session.execute(select(Chapter).where(Chapter.project_id == PROJECT_ID, Chapter.chapter_number == 1))).scalar_one()
             version1 = (await session.execute(select(ChapterVersion).where(ChapterVersion.id == chapter1.selected_version_id))).scalar_one()
             replay = await _finalize_one(session, monkeypatch, 1, version1.content)

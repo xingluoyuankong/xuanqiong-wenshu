@@ -11,49 +11,49 @@
 
       <!-- 章节列表侧边栏 -->
       <aside
-        class="fixed lg:static inset-y-0 left-0 z-50 w-72 lg:w-72 bg-white lg:bg-slate-50/70 border-r border-slate-200 flex flex-col h-full min-h-0 max-h-full overflow-hidden transition-transform duration-300 lg:translate-x-0 shadow-2xl lg:shadow-none"
+        class="fixed lg:static inset-y-0 left-0 z-50 w-64 lg:w-64 bg-white lg:bg-slate-50/70 border-r border-slate-200 flex flex-col h-full min-h-0 max-h-full overflow-hidden transition-transform duration-300 lg:translate-x-0 shadow-2xl lg:shadow-none"
         :class="showChapterList ? 'translate-x-0' : '-translate-x-full'"
       >
-        <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
-          <h3 class="text-base font-semibold text-slate-900">章节</h3>
+        <div class="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between">
+          <h3 class="text-sm font-semibold text-slate-900">{{ pick('章节', 'Chapters') }}</h3>
           <div class="flex items-center gap-2">
             <button
               @click="exportAllChapters('txt')"
               class="text-xs px-2 py-1 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded"
-              title="导出全部章节为TXT"
+              :title="pick('导出全部章节为TXT', 'Export all chapters as TXT')"
             >
-              导出TXT
+              {{ pick('导出TXT', 'Export TXT') }}
             </button>
             <button
               @click="exportAllChapters('docx')"
               class="text-xs px-2 py-1 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded"
-              title="导出全部章节为DOCX"
+              :title="pick('导出全部章节为DOCX', 'Export all chapters as DOCX')"
             >
-              导出DOCX
+              {{ pick('导出DOCX', 'Export DOCX') }}
             </button>
-            <span class="text-xs text-slate-500">{{ chapters.length }} 篇</span>
+            <span class="text-xs text-slate-500">{{ pick(`${chapters.length} 篇`, `${chapters.length} chapters`) }}</span>
           </div>
         </div>
         <ul class="flex-1 h-full overflow-y-auto divide-y divide-slate-200 overscroll-contain">
           <li v-for="(chapter, index) in chapters" :key="chapter.chapter_number">
             <button
-              class="w-full text-left px-5 py-3 transition-colors duration-200"
-              :class="selectedChapter?.chapter_number === chapter.chapter_number ? 'bg-indigo-50 text-indigo-600 font-semibold' : 'hover:bg-slate-50 lg:hover:bg-white text-slate-700'"
+              class="w-full text-left px-3 py-2 transition-all duration-200 hover:translate-x-1-colors duration-200"
+              :class="selectedChapter?.chapter_number === chapter.chapter_number ? 'bg-indigo-50 text-indigo-600 font-semibold border-l-3 border-indigo-500' : 'hover:bg-slate-50 lg:hover:bg-white text-slate-700'"
               @click="selectChapter(chapter.chapter_number)"
             >
               <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3 min-w-0">
-                  <span class="inline-flex items-center justify-center w-6 h-6 text-xs font-semibold text-slate-500 bg-slate-100 rounded-full">
+                  <span class="inline-flex items-center justify-center w-5 h-5 text-[11px] font-semibold text-slate-500 bg-slate-100 rounded-full">
                     {{ index + 1 }}
                   </span>
-                  <span class="truncate">{{ chapter.title || `第${chapter.chapter_number}章` }}</span>
+                  <span class="truncate">{{ chapter.title || chapterFallbackTitle(chapter.chapter_number) }}</span>
                 </div>
                 <span v-if="chapterCache.has(chapter.chapter_number)" class="text-xs text-slate-400">
-                  {{ calculateWordCount(chapterCache.get(chapter.chapter_number)?.content) }} 字
+                  {{ formatWordCountLabel(calculateWordCount(chapterCache.get(chapter.chapter_number)?.content)) }}
                 </span>
-                <span v-else class="text-xs text-slate-400">未加载</span>
+                <span v-else class="text-xs text-slate-400">{{ pick('未加载', 'Not loaded') }}</span>
               </div>
-              <p v-if="chapter.summary" class="mt-1 text-xs text-slate-500 truncate">
+              <p v-if="chapter.summary" class="mt-0.5 text-[11px] text-slate-400 truncate">
                 {{ chapter.summary }}
               </p>
             </button>
@@ -76,27 +76,27 @@
         <!-- Loading State -->
         <div v-if="isLoading" class="h-full flex items-center justify-center">
           <div class="text-center">
-            <div class="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-3"></div>
-            <p class="text-sm text-slate-500">加载中...</p>
+            <div class="w-7 h-7 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-2"></div>
+            <p class="text-sm text-slate-500">{{ pick('加载中...', 'Loading…') }}</p>
           </div>
         </div>
 
         <!-- Error State -->
         <div v-else-if="error" class="h-full flex items-center justify-center">
           <div class="text-center max-w-md px-6">
-            <div class="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-3">
+            <div class="w-8 h-8 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-2">
               <svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
             <p class="text-sm text-slate-600">{{ error }}</p>
-            <p class="mt-2 text-xs leading-6 text-slate-500">可以重试当前章节加载；如果只是正文未生成，也可以先回到写作台继续推进生成流程。</p>
+            <p class="mt-2 text-xs leading-6 text-slate-500">{{ pick('可以重试当前章节加载；如果只是正文未生成，也可以先回到写作台继续推进生成流程。', 'You can retry loading this chapter; if only the draft is missing, head back to the writing desk and continue the generation flow.') }}</p>
             <button
               @click="retryFailedChapter"
               :disabled="!failedChapterNumber"
               class="mt-4 inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
-              重试加载本章
+              {{ pick('重试加载本章', 'Retry loading this chapter') }}
             </button>
           </div>
         </div>
@@ -104,19 +104,19 @@
         <!-- Content -->
         <template v-else-if="selectedChapter">
           <!-- Header with Status and Tabs -->
-          <header class="px-6 py-4 border-b border-slate-200 bg-slate-50/50">
-            <div class="flex items-start justify-between gap-4 mb-3">
+          <header class="px-4 py-2.5 border-b border-slate-200 bg-slate-50/40">
+            <div class="flex items-start justify-between gap-4 mb-2">
               <div class="flex-1">
-                <h4 class="text-xl font-bold text-slate-900">{{ selectedChapter.title || `第${selectedChapter.chapter_number}章` }}</h4>
+                <h4 class="text-base font-bold text-slate-900">{{ selectedChapter.title || chapterFallbackTitle(selectedChapter.chapter_number) }}</h4>
                 <div class="flex items-center gap-3 mt-1.5">
-                  <span class="text-sm text-slate-500">第 {{ selectedChapter.chapter_number }} 章</span>
+                  <span class="text-sm text-slate-500">{{ pick(`第 ${selectedChapter.chapter_number} 章`, `Chapter ${selectedChapter.chapter_number}`) }}</span>
                   <span class="text-sm text-slate-400">·</span>
-                  <span class="text-sm text-slate-500">{{ calculateWordCount(selectedChapter.content) }} 字</span>
+                  <span class="text-sm text-slate-500">{{ formatWordCountLabel(calculateWordCount(selectedChapter.content)) }}</span>
                 </div>
               </div>
               <div class="flex items-center gap-2">
                 <button
-                  class="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors duration-200"
+                  class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md border transition-colors duration-200"
                   :class="selectedChapter?.content ? 'border-indigo-200 text-indigo-600 hover:bg-indigo-50' : 'border-slate-200 text-slate-400 cursor-not-allowed'"
                   :disabled="!selectedChapter?.content"
                   @click="exportChapterAsTxt"
@@ -124,10 +124,10 @@
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v16h16V4m-4 4l-4-4-4 4m4-4v12" />
                   </svg>
-                  导出TXT
+                  {{ pick('导出TXT', 'Export TXT') }}
                 </button>
                 <button
-                  class="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors duration-200"
+                  class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md border transition-colors duration-200"
                   :class="selectedChapter?.content ? 'border-indigo-200 text-indigo-600 hover:bg-indigo-50' : 'border-slate-200 text-slate-400 cursor-not-allowed'"
                   :disabled="!selectedChapter?.content"
                   @click="exportChapterAsDocx"
@@ -135,7 +135,7 @@
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
-                  导出DOCX
+                  {{ pick('导出DOCX', 'Export DOCX') }}
                 </button>
                 <span v-if="selectedChapter.generation_status"
                   class="px-3 py-1 text-xs font-medium rounded-full"
@@ -151,7 +151,7 @@
                 v-for="tab in tabs"
                 :key="tab.key"
                 @click="activeTab = tab.key"
-                class="px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200"
+                class="px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-200"
                 :class="activeTab === tab.key
                   ? 'bg-white text-indigo-600 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'"
@@ -169,25 +169,25 @@
           <!-- Tab Content -->
           <article class="flex-1 h-full overflow-y-auto min-h-0 overscroll-contain">
             <!-- 正文 Tab -->
-            <div v-show="activeTab === 'content'" class="px-2 py-3">
+            <div v-show="activeTab === 'content'" class="px-2 py-2">
               <div class="max-w-full space-y-4">
                 <!-- Summary Cards -->
                 <div v-if="selectedChapter.summary || selectedChapter.real_summary" class="grid gap-4">
-                  <div v-if="selectedChapter.summary" class="bg-blue-50 border border-blue-100 rounded-xl p-4">
+                  <div v-if="selectedChapter.summary" class="bg-blue-50 border border-blue-100 rounded-lg p-3">
                     <h5 class="text-xs font-semibold text-blue-900 mb-2 flex items-center gap-1.5">
                       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
-                      计划大纲
+                      {{ pick('计划大纲', 'Planned outline') }}
                     </h5>
                     <p class="text-sm text-blue-800 leading-relaxed">{{ selectedChapter.summary }}</p>
                   </div>
-                  <div v-if="selectedChapter.real_summary" class="bg-green-50 border border-green-100 rounded-xl p-4">
+                  <div v-if="selectedChapter.real_summary" class="bg-green-50 border border-green-100 rounded-lg p-3">
                     <h5 class="text-xs font-semibold text-green-900 mb-2 flex items-center gap-1.5">
                       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                       </svg>
-                      实际内容概要
+                      {{ pick('实际内容概要', 'Actual content summary') }}
                     </h5>
                     <div class="prose prose-sm prose-green max-w-none text-green-800" v-html="renderedRealSummary"></div>
                   </div>
@@ -196,30 +196,30 @@
                 <!-- Main Content -->
                 <div class="prose prose-slate max-w-none p-4 sm:p-6 rounded-xl bg-[var(--paper-card)]">
                   <div class="text-base text-slate-900 leading-8 whitespace-pre-wrap font-serif">
-                    {{ selectedChapter.content || '暂无内容' }}
+                    {{ selectedChapter.content || pick('暂无内容', 'No content yet') }}
                   </div>
                 </div>
               </div>
             </div>
 
             <!-- 版本 Tab -->
-            <div v-show="activeTab === 'versions'" class="px-2 py-3">
+            <div v-show="activeTab === 'versions'" class="px-2 py-2">
               <div class="max-w-full">
                 <div v-if="selectedChapter.versions && selectedChapter.versions.length > 0" class="space-y-4">
                   <div v-for="(version, index) in selectedChapter.versions" :key="index"
                     class="border border-slate-200 rounded-xl p-5 hover:border-indigo-300 hover:shadow-md transition-all duration-200 group cursor-pointer"
                     @click="openVersionModal(version.content, index)">
-                    <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center justify-between mb-2">
                       <h5 class="text-sm font-semibold text-slate-900 flex items-center gap-2">
                         <span class="w-6 h-6 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-xs font-bold">
                           {{ index + 1 }}
                         </span>
-                        版本 {{ index + 1 }}
+                        {{ pick(`版本 ${index + 1}`, `Version ${index + 1}`) }}
                       </h5>
                       <div class="flex items-center gap-3">
-                        <span class="text-xs text-slate-500">{{ calculateWordCount(version.content) }} 字</span>
+                        <span class="text-xs text-slate-500">{{ formatWordCountLabel(calculateWordCount(version.content)) }}</span>
                         <span class="text-xs font-medium text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                          点击查看全文 →
+                          {{ pick('点击查看全文 →', 'Click to read the full text →') }}
                         </span>
                       </div>
                     </div>
@@ -229,29 +229,29 @@
                   </div>
                 </div>
                 <div v-else class="text-center py-12 text-slate-400">
-                  <p>暂无版本记录</p>
-                  <p class="mt-2 text-sm text-slate-500">当前章节还没有可切换版本。回到写作台生成、评审或优化后，这里会出现版本列表。</p>
+                  <p>{{ pick('暂无版本记录', 'No version history yet') }}</p>
+                  <p class="mt-2 text-sm text-slate-500">{{ pick('当前章节还没有可切换版本。回到写作台生成、评审或优化后，这里会出现版本列表。', 'This chapter has no alternate versions yet. Generate, review, or optimize it on the writing desk and the version list will appear here.') }}</p>
                 </div>
               </div>
             </div>
 
             <!-- 评审 Tab -->
-            <div v-show="activeTab === 'evaluation'" class="px-2 py-3">
+            <div v-show="activeTab === 'evaluation'" class="px-2 py-2">
               <div class="max-w-full">
                 <div v-if="evaluationData" class="space-y-4">
                   <!-- 最佳选择 -->
-                  <div v-if="evaluationData.best_choice" class="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 rounded-xl p-4">
+                  <div v-if="evaluationData.best_choice" class="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg p-3">
                     <div class="flex items-start gap-4">
-                      <div class="w-12 h-12 bg-indigo-500 rounded-xl flex items-center justify-center flex-shrink-0">
+                      <div class="w-8 h-8 bg-indigo-500 rounded-xl flex items-center justify-center flex-shrink-0">
                         <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
                         </svg>
                       </div>
                       <div class="flex-1">
-                        <h5 class="text-lg font-bold text-indigo-900 mb-2">最佳版本选择</h5>
-                        <div class="flex items-center gap-2 mb-3">
-                          <span class="px-3 py-1 bg-indigo-500 text-white text-sm font-bold rounded-full">
-                            版本 {{ evaluationData.best_choice }}
+                        <h5 class="text-base font-bold text-indigo-900 mb-2">{{ pick('最佳版本选择', 'Best version choice') }}</h5>
+                        <div class="flex items-center gap-2 mb-2">
+                          <span class="px-2 py-0.5 bg-indigo-500 text-white text-xs font-bold rounded-full">
+                            {{ pick(`版本 ${evaluationData.best_choice}`, `Version ${evaluationData.best_choice}`) }}
                           </span>
                         </div>
                         <p v-if="evaluationData.reason_for_choice" class="text-sm text-indigo-900 leading-relaxed">
@@ -267,7 +267,7 @@
                       class="border border-slate-200 rounded-xl overflow-hidden"
                       :class="isSelectedVersion(versionKey, evaluationData.best_choice) ? 'ring-2 ring-indigo-400' : ''">
                       <!-- 版本标题 -->
-                      <div class="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                      <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                         <h6 class="font-bold text-slate-900 flex items-center gap-2">
                           <span class="w-6 h-6 bg-slate-700 text-white rounded-full flex items-center justify-center text-xs">
                             {{ getVersionNumber(versionKey) }}
@@ -276,11 +276,11 @@
                         </h6>
                         <span v-if="isSelectedVersion(versionKey, evaluationData.best_choice)"
                           class="px-2.5 py-1 bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-full">
-                          最佳
+                          {{ pick('最佳', 'Best') }}
                         </span>
                       </div>
 
-                      <div class="p-4 space-y-3">
+                      <div class="p-3 space-y-2">
                         <!-- 优点 -->
                         <div v-if="versionEval.pros && versionEval.pros.length > 0"
                           class="bg-green-50 border border-green-100 rounded-lg p-3">
@@ -288,7 +288,7 @@
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                             </svg>
-                            优点
+                            {{ pick('优点', 'Strengths') }}
                           </h6>
                           <ul class="space-y-1.5">
                             <li v-for="(item, idx) in versionEval.pros" :key="idx"
@@ -306,7 +306,7 @@
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                             </svg>
-                            缺点
+                            {{ pick('缺点', 'Weaknesses') }}
                           </h6>
                           <ul class="space-y-1.5">
                             <li v-for="(item, idx) in versionEval.cons" :key="idx"
@@ -320,7 +320,7 @@
                         <!-- 总体评价 -->
                         <div v-if="versionEval.overall_review"
                           class="bg-blue-50 border border-blue-100 rounded-lg p-3">
-                          <h6 class="text-xs font-bold text-blue-900 mb-2">总体评价</h6>
+                          <h6 class="text-xs font-bold text-blue-900 mb-2">{{ pick('总体评价', 'Overall review') }}</h6>
                           <p class="text-xs text-blue-800 leading-relaxed">{{ versionEval.overall_review }}</p>
                         </div>
                       </div>
@@ -330,15 +330,15 @@
                   <!-- 简单格式兼容 -->
                   <div v-else-if="evaluationData.decision || evaluationData.feedback" class="space-y-4">
                     <!-- 评审决策 -->
-                    <div v-if="evaluationData.decision" class="bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-200 rounded-xl p-4">
-                      <div class="flex items-center gap-3 mb-4">
-                        <div class="w-10 h-10 bg-indigo-500 rounded-lg flex items-center justify-center">
+                    <div v-if="evaluationData.decision" class="bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-200 rounded-lg p-3">
+                      <div class="flex items-center gap-3 mb-3">
+                        <div class="w-7 h-7 bg-indigo-500 rounded-lg flex items-center justify-center">
                           <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                           </svg>
                         </div>
                         <div>
-                          <h5 class="text-sm font-bold text-indigo-900">评审决策</h5>
+                          <h5 class="text-sm font-bold text-indigo-900">{{ pick('评审决策', 'Review decision') }}</h5>
                           <p class="text-xs text-indigo-700">{{ evaluationData.decision }}</p>
                         </div>
                       </div>
@@ -347,10 +347,10 @@
                     <!-- 评分卡片 -->
                     <div v-if="evaluationData.scores" class="grid grid-cols-2 md:grid-cols-3 gap-4">
                       <div v-for="(score, key) in evaluationData.scores" :key="key"
-                        class="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md transition-shadow">
+                        class="bg-white border border-slate-200 rounded-lg p-3 hover:shadow-md transition-shadow">
                         <div class="flex items-center justify-between mb-2">
                           <span class="text-xs font-medium text-slate-600">{{ getScoreLabel(key) }}</span>
-                          <span class="text-lg font-bold" :class="getScoreColor(score)">{{ score }}</span>
+                          <span class="text-base font-bold" :class="getScoreColor(score)">{{ score }}</span>
                         </div>
                         <div class="w-full bg-slate-100 rounded-full h-2">
                           <div class="h-2 rounded-full transition-all duration-300"
@@ -362,20 +362,20 @@
 
                     <!-- 详细反馈 -->
                     <div v-if="evaluationData.feedback"
-                      class="bg-slate-50 border border-slate-200 rounded-xl p-4">
-                      <h5 class="text-sm font-bold text-slate-900 mb-3">详细反馈</h5>
+                      class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                      <h5 class="text-sm font-bold text-slate-900 mb-2">{{ pick('详细反馈', 'Detailed feedback') }}</h5>
                       <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{{ evaluationData.feedback }}</p>
                     </div>
                   </div>
                 </div>
 
                 <div v-else class="text-center py-12">
-                  <div class="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <div class="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-2">
                     <svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
                   </div>
-                  <p class="text-slate-400">暂无评审意见</p>
+                  <p class="text-slate-400">{{ pick('暂无评审意见', 'No review notes yet') }}</p>
                 </div>
               </div>
             </div>
@@ -385,10 +385,10 @@
         <!-- Empty State -->
         <div v-else class="h-full flex items-center justify-center text-slate-400">
           <div class="text-center">
-            <svg class="w-16 h-16 mx-auto mb-3 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-16 h-16 mx-auto mb-2 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
             </svg>
-            <p class="text-sm">请选择章节查看详细内容</p>
+            <p class="text-sm">{{ pick('请选择章节查看详细内容', 'Select a chapter to see its details') }}</p>
           </div>
         </div>
       </section>
@@ -403,7 +403,7 @@
     >
       <div v-if="versionModal.show" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
         @click="closeVersionModal">
-        <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[85vh] overflow-hidden"
+        <div class="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[85vh] overflow-hidden"
           @click.stop>
           <!-- Modal Header -->
           <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
@@ -412,8 +412,8 @@
                 {{ versionModal.index + 1 }}
               </span>
               <div>
-                <h3 class="text-lg font-bold text-slate-900">版本 {{ versionModal.index + 1 }}</h3>
-                <p class="text-xs text-slate-500">{{ calculateWordCount(versionModal.content) }} 字</p>
+                <h3 class="text-base font-bold text-slate-900">{{ pick(`版本 ${versionModal.index + 1}`, `Version ${versionModal.index + 1}`) }}</h3>
+                <p class="text-xs text-slate-500">{{ formatWordCountLabel(calculateWordCount(versionModal.content)) }}</p>
               </div>
             </div>
             <button @click="closeVersionModal"
@@ -445,7 +445,9 @@ import type { ChapterVersion } from '@/api/novel'
 import { AdminAPI } from '@/api/admin'
 import { useRoute } from 'vue-router'
 import { API_BASE_URL, API_PREFIX } from '@/api/config'
+import { buildAuthHeaders } from '@/stores/auth'
 import { renderSafeMarkdown } from '@/utils/safeMarkdown'
+import { useLocale } from '@/composables/useLocale'
 
 interface ChapterItem {
   chapter_number: number
@@ -480,6 +482,8 @@ const props = defineProps<{
 const route = useRoute()
 const projectId = route.params.id as string
 
+const { pick } = useLocale()
+
 const selectedChapter = ref<ChapterDetail | null>(null)
 const isLoading = ref(false)
 const error = ref<string | null>(null)
@@ -501,12 +505,17 @@ const chapterCache = new Map<number, ChapterDetail>()
 
 const chapters = computed(() => props.chapters || [])
 
-// Tab 配置
-const tabs = [
-  { key: 'content' as const, label: '正文', badge: false },
-  { key: 'versions' as const, label: '版本', badge: true },
-  { key: 'evaluation' as const, label: '评审', badge: false }
-]
+// Tab 配置：包成 computed，标签才会随语言切换刷新
+const tabs = computed(() => [
+  { key: 'content' as const, label: pick('正文', 'Draft'), badge: false },
+  { key: 'versions' as const, label: pick('版本', 'Versions'), badge: true },
+  { key: 'evaluation' as const, label: pick('评审', 'Review'), badge: false }
+])
+
+// 章节标题缺失时的回退文案
+const chapterFallbackTitle = (chapterNumber: number): string => pick(`第${chapterNumber}章`, `Chapter ${chapterNumber}`)
+
+const formatWordCountLabel = (count: number): string => pick(`${count} 字`, `${count} words`)
 
 // 计算字数的辅助函数
 const calculateWordCount = (content: string | null | undefined): number => {
@@ -517,15 +526,16 @@ const calculateWordCount = (content: string | null | undefined): number => {
 
 // 获取状态标签
 const getStatusLabel = (status: string): string => {
+  // 键是后端 generation_status 枚举保持原文
   const statusMap: Record<string, string> = {
-    'not_generated': '未生成',
-    'generating': '生成中',
-    'evaluating': '评审中',
-    'selecting': '选择中',
-    'failed': '生成失败',
-    'evaluation_failed': '评审失败',
-    'waiting_for_confirm': '待确认',
-    'successful': '已完成'
+    'not_generated': pick('未生成', 'Not generated'),
+    'generating': pick('生成中', 'Generating'),
+    'evaluating': pick('评审中', 'Reviewing'),
+    'selecting': pick('选择中', 'Selecting'),
+    'failed': pick('生成失败', 'Generation failed'),
+    'evaluation_failed': pick('评审失败', 'Review failed'),
+    'waiting_for_confirm': pick('待确认', 'Awaiting confirmation'),
+    'successful': pick('已完成', 'Completed')
   }
   return statusMap[status] || status
 }
@@ -573,7 +583,7 @@ const exportChapterAsTxt = () => {
   const chapter = selectedChapter.value
   if (!chapter) return
 
-  const title = chapter.title?.trim() || `第${chapter.chapter_number}章`
+  const title = chapter.title?.trim() || chapterFallbackTitle(chapter.chapter_number)
   const safeTitle = sanitizeFileName(title) || `chapter-${chapter.chapter_number}`
   const content = chapter.content ?? ''
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
@@ -586,7 +596,7 @@ const exportChapterAsDocx = async () => {
 
   const { Document, Packer, Paragraph, TextRun, HeadingLevel, PageBreakBefore } = await import('docx')
 
-  const title = chapter.title?.trim() || `第${chapter.chapter_number}章`
+  const title = chapter.title?.trim() || chapterFallbackTitle(chapter.chapter_number)
   const safeTitle = sanitizeFileName(title) || `chapter-${chapter.chapter_number}`
   const content = chapter.content ?? ''
 
@@ -624,7 +634,7 @@ const readExportFailure = async (response: Response): Promise<string> => {
     const data = rawText ? JSON.parse(rawText) : {}
     const detail = data?.detail
     if (detail && typeof detail === 'object') {
-      const message = typeof detail.message === 'string' ? detail.message : '导出失败'
+      const message = typeof detail.message === 'string' ? detail.message : pick('导出失败', 'Export failed')
       const issues = Array.isArray(detail.issues) ? detail.issues.slice(0, 8).join('\n') : ''
       return issues ? `${message}\n${issues}` : message
     }
@@ -633,11 +643,11 @@ const readExportFailure = async (response: Response): Promise<string> => {
   } catch {
     // fallback below
   }
-  return rawText.trim() || '导出失败，请检查章节是否已生成并确认版本。'
+  return rawText.trim() || pick('导出失败，请检查章节是否已生成并确认版本。', 'Export failed — check that the chapters are generated and a version is confirmed.')
 }
 
 const checkExportPreflight = async (): Promise<boolean> => {
-  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/novels/${projectId}/export/preflight`)
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/novels/${projectId}/export/preflight`, { headers: buildAuthHeaders() })
   if (!response.ok) {
     throw new Error(await readExportFailure(response))
   }
@@ -646,10 +656,13 @@ const checkExportPreflight = async (): Promise<boolean> => {
 
   const issues = Array.isArray(data.issues) ? data.issues.slice(0, 10) : []
   const header = [
-    `当前可导出章节：${data.exportable_chapters}/${Math.max(data.total_chapters, data.outline_chapters)}`,
-    data.total_word_count ? `可导出字数约 ${data.total_word_count} 字` : '',
+    pick(
+      `当前可导出章节：${data.exportable_chapters}/${Math.max(data.total_chapters, data.outline_chapters)}`,
+      `Exportable chapters: ${data.exportable_chapters}/${Math.max(data.total_chapters, data.outline_chapters)}`
+    ),
+    data.total_word_count ? pick(`可导出字数约 ${data.total_word_count} 字`, `Exportable word count: about ${data.total_word_count}`) : '',
   ].filter(Boolean).join('\n')
-  throw new Error([header, ...issues].filter(Boolean).join('\n') || '小说仍有章节未生成、未定稿或正文为空。')
+  throw new Error([header, ...issues].filter(Boolean).join('\n') || pick('小说仍有章节未生成、未定稿或正文为空。', 'Some chapters are still ungenerated, unfinalized, or have an empty draft.'))
 }
 
 // 导出全部章节
@@ -657,17 +670,17 @@ const exportAllChapters = async (format: 'txt' | 'docx') => {
   try {
     await checkExportPreflight()
     const url = `${API_BASE_URL}${API_PREFIX}/novels/${projectId}/export/${format}`
-    const response = await fetch(url)
+    const response = await fetch(url, { headers: buildAuthHeaders() })
 
     if (!response.ok) {
       throw new Error(await readExportFailure(response))
     }
 
     const blob = await response.blob()
-    triggerBrowserDownload(blob, `小说_${projectId}_${new Date().toISOString().split('T')[0]}.${format}`)
+    triggerBrowserDownload(blob, `${pick('小说', 'novel')}_${projectId}_${new Date().toISOString().split('T')[0]}.${format}`)
   } catch (err) {
-    console.error('导出失败:', err)
-    alert(err instanceof Error ? err.message : '导出失败，请重试')
+    console.error(pick('导出失败:', 'Export failed:'), err)
+    alert(err instanceof Error ? err.message : pick('导出失败，请重试', 'Export failed — please retry'))
   }
 }
 
@@ -704,15 +717,16 @@ const evaluationData = computed(() => {
 // 获取评分标签
 const getScoreLabel = (key: string | number): string => {
   const normalizedKey = typeof key === 'number' ? key.toString() : key
+  // 键是后端评分维度枚举保持原文
   const labelMap: Record<string, string> = {
-    'plot': '情节',
-    'character': '人物',
-    'writing': '文笔',
-    'logic': '逻辑',
-    'emotion': '情感',
-    'creativity': '创意',
-    'coherence': '连贯性',
-    'engagement': '吸引力'
+    'plot': pick('情节', 'Plot'),
+    'character': pick('人物', 'Characters'),
+    'writing': pick('文笔', 'Prose'),
+    'logic': pick('逻辑', 'Logic'),
+    'emotion': pick('情感', 'Emotion'),
+    'creativity': pick('创意', 'Creativity'),
+    'coherence': pick('连贯性', 'Continuity'),
+    'engagement': pick('吸引力', 'Engagement')
   }
   return labelMap[normalizedKey] || normalizedKey
 }
@@ -743,7 +757,7 @@ const getVersionNumber = (versionKey: string | number): number => {
 // 获取版本标签
 const getVersionLabel = (versionKey: string | number): string => {
   const num = getVersionNumber(versionKey)
-  return `版本 ${num}`
+  return pick(`版本 ${num}`, `Version ${num}`)
 }
 
 // 判断是否为选中的版本
@@ -822,8 +836,8 @@ const loadChapterDetail = async (chapterNumber: number) => {
     selectedChapter.value = normalizedDetail
     failedChapterNumber.value = chapterNumber
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载失败'
-    console.error('加载章节详情失败:', err)
+    error.value = err instanceof Error ? err.message : pick('加载失败', 'Load failed')
+    console.error(pick('加载章节详情失败:', 'Failed to load chapter detail:'), err)
   } finally {
     isLoading.value = false
   }

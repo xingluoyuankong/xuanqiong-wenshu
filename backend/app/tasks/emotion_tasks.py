@@ -1,4 +1,6 @@
 # AIMETA P=情感分析任务_异步情感曲线计算|R=异步情感分析_缓存更新|NR=不含同步分析|E=celery_task:analyze_emotion|X=job|A=Celery任务|D=celery,redis|S=db,cache|RD=./README.ai
+import asyncio
+import concurrent.futures
 import logging
 from typing import List, Optional
 from app.config.celery_config import app
@@ -6,6 +8,19 @@ from app.services.emotion_service import EmotionService
 from app.services.cache_service import CacheService
 
 logger = logging.getLogger(__name__)
+
+
+def _run_in_new_loop(coro):
+    """Run a coroutine in a brand-new event loop inside a worker thread.
+
+    Using a ThreadPoolExecutor ensures the new loop is fully isolated from
+    any event loop already attached to the calling (Celery worker) thread,
+    avoiding 'This event loop is already running' errors.
+    """
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(asyncio.run, coro)
+        return future.result()
+
 
 @app.task(bind=True, name='app.tasks.emotion_tasks.analyze_emotion_async')
 def analyze_emotion_async(
@@ -33,23 +48,11 @@ def analyze_emotion_async(
             }
         )
         
-        # 创建会话
-        import asyncio
-        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-        from sqlalchemy.orm import sessionmaker
-        from app.core.config import settings
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        try:
-            result = loop.run_until_complete(
-                _analyze_emotion_impl(novel_id, chapter_ids, self)
-            )
-            logger.info(f"情感曲线分析完成: novel_id={novel_id}")
-            return result
-        finally:
-            loop.close()
+        result = _run_in_new_loop(
+            _analyze_emotion_impl(novel_id, chapter_ids, self)
+        )
+        logger.info(f"情感曲线分析完成: novel_id={novel_id}")
+        return result
     
     except Exception as exc:
         logger.exception(f"情感分析失败: {exc}")

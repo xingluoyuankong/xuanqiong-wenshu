@@ -3,7 +3,7 @@
   <div class="h-screen flex flex-col overflow-hidden md-surface">
     <!-- Material 3 Top App Bar -->
     <header class="md-top-app-bar xq-topbar xq-topbar--detail sticky top-0 z-40">
-      <div class="max-w-[1800px] mx-auto w-full flex items-center px-4 h-16">
+      <div class="max-w-[1800px] mx-auto w-full flex items-center px-4 h-14">
         <!-- Leading: Menu Button (Mobile) -->
         <button
           class="md-icon-btn lg:hidden mr-2"
@@ -21,7 +21,7 @@
             {{ formattedTitle }}
           </h1>
           <p v-if="overviewMeta.updated_at" class="md-body-small" style="color: var(--md-on-surface-variant);">
-            最近更新：{{ formatDateTime(overviewMeta.updated_at) }}
+            {{ pick('最近更新：', 'Updated: ') }}{{ formatDateTime(overviewMeta.updated_at) }}
           </p>
         </div>
 
@@ -34,8 +34,8 @@
             <svg class="w-5 h-5 hidden sm:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
-            <span class="hidden sm:inline">返回列表</span>
-            <span class="sm:hidden">返回</span>
+            <span class="hidden sm:inline">{{ pick('返回列表', 'Back to list') }}</span>
+            <span class="sm:hidden">{{ pick('返回', 'Back') }}</span>
           </button>
           <button
             v-if="!isAdmin"
@@ -45,8 +45,8 @@
             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
             </svg>
-            <span class="hidden sm:inline">开始创作</span>
-            <span class="sm:hidden">创作</span>
+            <span class="hidden sm:inline">{{ pick('开始创作', 'Start writing') }}</span>
+            <span class="sm:hidden">{{ pick('创作', 'Write') }}</span>
           </button>
         </div>
       </div>
@@ -56,19 +56,19 @@
     <div class="flex max-w-[1800px] mx-auto w-full flex-1 min-h-0 overflow-hidden">
       <!-- Material 3 Navigation Drawer -->
       <aside
-        class="fixed left-0 top-16 bottom-0 z-30 w-80 md-surface transform transition-transform duration-300 lg:translate-x-0"
+        class="fixed left-0 top-16 bottom-0 z-30 w-72 md-surface transform transition-transform duration-300 lg:translate-x-0"
         :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full'"
         style="border-right: 1px solid var(--md-outline-variant);"
       >
         <!-- Drawer Header -->
-        <div class="flex items-center gap-3 px-6 py-4" style="border-bottom: 1px solid var(--md-outline-variant);">
-          <div class="w-10 h-10 rounded-full flex items-center justify-center" style="background-color: var(--md-primary-container);">
+        <div class="flex items-center gap-3 px-4 py-2.5" style="border-bottom: 1px solid var(--md-outline-variant);">
+          <div class="w-6 h-6 rounded-full flex items-center justify-center" style="background-color: var(--md-primary-container);">
             <svg class="w-5 h-5" style="color: var(--md-on-primary-container);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
             </svg>
           </div>
           <span class="md-title-medium" style="color: var(--md-on-surface);">
-            {{ isAdmin ? '内容视图' : '蓝图导航' }}
+            {{ isAdmin ? pick('内容视图', 'Content view') : pick('蓝图导航', 'Blueprint navigation') }}
           </span>
         </div>
 
@@ -115,35 +115,38 @@
 
       <!-- Main Content Area -->
       <div class="flex-1 lg:ml-80 min-h-0 flex flex-col h-full">
-        <div class="flex-1 min-h-0 h-full p-3 sm:p-4 lg:p-5 flex flex-col overflow-hidden box-border">
+        <div class="flex-1 min-h-0 h-full p-2 sm:p-3 lg:p-4 flex flex-col overflow-hidden box-border">
           <div class="flex-1 flex flex-col min-h-0 h-full">
             <!-- Material 3 Card -->
-            <div 
-              class="md-card md-card-elevated flex-1 h-full p-6 sm:p-8 min-h-[20rem] flex flex-col box-border" 
+            <div
+              class="md-card md-card-elevated flex-1 h-full p-3 sm:p-4 min-h-[20rem] flex flex-col box-border"
               :class="contentCardClass"
               style="border-radius: var(--md-radius-lg);"
             >
               <!-- Loading State -->
-              <div v-if="isSectionLoading" class="flex flex-col items-center justify-center py-20 sm:py-28">
+              <div v-if="isSectionLoading" class="flex flex-col items-center justify-center py-10 sm:py-16">
                 <div class="md-spinner"></div>
-                <p class="mt-4 md-body-medium" style="color: var(--md-on-surface-variant);">正在加载 {{ activeSectionMeta.label }}</p>
+                <p class="mt-2 md-body-medium" style="color: var(--md-on-surface-variant);">{{ pick(`正在加载 ${activeSectionMeta.label}`, `Loading ${activeSectionMeta.label}`) }}</p>
                 <p class="mt-2 md-body-small text-center" style="color: var(--md-on-surface-variant);">{{ activeSectionMeta.description }}</p>
               </div>
 
               <!-- Error State -->
-              <div v-else-if="currentError" class="flex flex-col items-center justify-center py-20 sm:py-28 space-y-4">
-                <div class="w-16 h-16 rounded-full flex items-center justify-center" style="background-color: var(--md-error-container);">
-                  <svg class="w-8 h-8" style="color: var(--md-error);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div v-else-if="currentError" class="flex flex-col items-center justify-center py-10 sm:py-16 space-y-4">
+                <div class="w-16 h-14 rounded-full flex items-center justify-center" style="background-color: var(--md-error-container);">
+                  <svg class="w-6 h-6" style="color: var(--md-error);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>
                 <p class="md-body-large text-center" style="color: var(--md-on-surface);">{{ currentError }}</p>
-                <p class="md-body-small text-center max-w-md" style="color: var(--md-on-surface-variant);">可以先重试当前分析区；如果仍然失败，也可以先切换到其他模块继续查看，不会影响整个项目详情页。</p>
+                <p class="md-body-small text-center max-w-md" style="color: var(--md-on-surface-variant);">{{ pick(
+                  '可以先重试当前分析区；如果仍然失败，也可以先切换到其他模块继续查看，不会影响整个项目详情页。',
+                  'Retry this analysis panel first. If it keeps failing, switch to another module — the rest of the project detail page still works.'
+                ) }}</p>
                 <button
                   class="md-btn md-btn-filled md-ripple"
                   @click="reloadSection(activeSection, true)"
                 >
-                  重试
+                  {{ pick('重试', 'Retry') }}
                 </button>
               </div>
 
@@ -185,31 +188,31 @@
         <div class="absolute inset-0" @click="cancelNewChapter"></div>
         <div class="md-dialog relative w-full max-w-lg mx-4" @click.stop>
           <div class="md-dialog-header">
-            <h3 class="md-dialog-title">新增章节大纲</h3>
+            <h3 class="md-dialog-title">{{ pick('新增章节大纲', 'Add a chapter outline') }}</h3>
           </div>
           <div class="md-dialog-content space-y-6">
             <div class="md-text-field">
               <label for="new-chapter-title" class="md-text-field-label">
-                章节标题
+                {{ pick('章节标题', 'Chapter title') }}
               </label>
               <input
                 id="new-chapter-title"
                 v-model="newChapterTitle"
                 type="text"
                 class="md-text-field-input"
-                placeholder="例如：意外的相遇"
+                :placeholder="pick('例如：意外的相遇', 'For example: An unexpected encounter')"
               >
             </div>
             <div class="md-text-field">
               <label for="new-chapter-summary" class="md-text-field-label">
-                章节摘要
+                {{ pick('章节摘要', 'Chapter summary') }}
               </label>
               <textarea
                 id="new-chapter-summary"
                 v-model="newChapterSummary"
                 rows="4"
                 class="md-textarea w-full"
-                placeholder="简要描述本章节发生的主要事件"
+                :placeholder="pick('简要描述本章节发生的主要事件', 'Briefly describe the main events of this chapter')"
               ></textarea>
             </div>
           </div>
@@ -219,14 +222,14 @@
               class="md-btn md-btn-text md-ripple"
               @click="cancelNewChapter"
             >
-              取消
+              {{ pick('取消', 'Cancel') }}
             </button>
             <button
               type="button"
               class="md-btn md-btn-filled md-ripple"
               @click="saveNewChapter"
             >
-              保存
+              {{ pick('保存', 'Save') }}
             </button>
           </div>
         </div>
@@ -268,6 +271,7 @@ import { NovelAPI, OptimizerAPI, AnalyticsAPI } from '@/api/novel'
 import { AdminAPI } from '@/api/admin'
 import type { NovelProject, NovelSectionResponse, NovelSectionType, AllSectionType } from '@/api/novel'
 import { formatDateTime } from '@/utils/date'
+import { useLocale } from '@/composables/useLocale'
 import { resolveProjectWritingEntry } from '@/utils/projectRouting'
 import OverviewSection from '@/components/novel-detail/OverviewSection.vue'
 import WorldSettingSection from '@/components/novel-detail/WorldSettingSection.vue'
@@ -301,29 +305,53 @@ const props = withDefaults(defineProps<Props>(), {
 const route = useRoute()
 const router = useRouter()
 const novelStore = useNovelStore()
+const { pick } = useLocale()
 
 const projectId = route.params.id as string
 const isSidebarOpen = ref(typeof window !== 'undefined' ? window.innerWidth >= 1024 : true)
 
-const sections: Array<{ key: SectionKey; label: string; description: string }> = [
-  { key: 'overview', label: '项目概览', description: '定位与整体梗概' },
-  { key: 'world_setting', label: '世界设定', description: '规则、地点与阵营' },
-  { key: 'novel_outline', label: '小说总大纲', description: '长篇骨架与推进结构' },
-  { key: 'characters', label: '主要角色', description: '人物性格与目标' },
-  { key: 'relationships', label: '人物关系', description: '角色之间的联系' },
-  { key: 'chapter_outline', label: '章节大纲', description: props.isAdmin ? '故事章节规划' : '故事结构规划' },
-  { key: 'chapters', label: '章节内容', description: props.isAdmin ? '生成章节与正文' : '生成状态与摘要' },
-  { key: 'emotion_curve', label: '情感曲线', description: '追踪章节情感变化' },
-  { key: 'story_trajectory', label: '故事轨迹', description: '识别情节走势与关键转折' },
-  { key: 'creative_guidance', label: '创意指导', description: '给出当前章节与后续建议' },
-  { key: 'comprehensive_analysis', label: '综合分析', description: '汇总情感、轨迹与指导结果' },
-  { key: 'foreshadowing', label: '伏笔管理', description: '埋下、推进与回收看板' },
-  { key: 'knowledge_graph', label: '知识图谱', description: '角色关系与情节追踪' },
-  { key: 'style_learning', label: '风格学习', description: '直达文风中心，支持外部片段与整本小说导入' },
-  { key: 'memory_management', label: '记忆管理', description: '动态记忆层与版本控制' },
-  { key: 'token_budget', label: 'Token预算', description: '控制AI生成成本与模块分配' },
-  { key: 'clue_tracker', label: '线索追踪', description: '伏笔、红鲱鱼与推理线索管理' }
+// 导航区的顺序与 key 是内部真源；label/description 是展示文案，用 computed 保证切换语言后重新求值
+const sectionKeys: SectionKey[] = [
+  'overview',
+  'world_setting',
+  'novel_outline',
+  'characters',
+  'relationships',
+  'chapter_outline',
+  'chapters',
+  'emotion_curve',
+  'story_trajectory',
+  'creative_guidance',
+  'comprehensive_analysis',
+  'foreshadowing',
+  'knowledge_graph',
+  'research',
+  'style_learning',
+  'memory_management',
+  'token_budget',
+  'clue_tracker',
 ]
+
+const sections = computed<Array<{ key: SectionKey; label: string; description: string }>>(() => [
+  { key: 'overview', label: pick('项目概览', 'Overview'), description: pick('定位与整体梗概', 'Positioning and the overall premise') },
+  { key: 'world_setting', label: pick('世界设定', 'World setting'), description: pick('规则、地点与阵营', 'Rules, locations, and factions') },
+  { key: 'novel_outline', label: pick('小说总大纲', 'Master outline'), description: pick('长篇骨架与推进结构', 'Long-form skeleton and progression structure') },
+  { key: 'characters', label: pick('主要角色', 'Main characters'), description: pick('人物性格与目标', 'Personalities and goals') },
+  { key: 'relationships', label: pick('人物关系', 'Relationships'), description: pick('角色之间的联系', 'How the characters connect') },
+  { key: 'chapter_outline', label: pick('章节大纲', 'Chapter outline'), description: props.isAdmin ? pick('故事章节规划', 'Chapter planning') : pick('故事结构规划', 'Story structure planning') },
+  { key: 'chapters', label: pick('章节内容', 'Chapter content'), description: props.isAdmin ? pick('生成章节与正文', 'Generated chapters and text') : pick('生成状态与摘要', 'Generation state and summaries') },
+  { key: 'emotion_curve', label: pick('情感曲线', 'Emotion curve'), description: pick('追踪章节情感变化', 'Track emotional shifts across chapters') },
+  { key: 'story_trajectory', label: pick('故事轨迹', 'Story trajectory'), description: pick('识别情节走势与关键转折', 'Spot plot direction and key turns') },
+  { key: 'creative_guidance', label: pick('创意指导', 'Creative guidance'), description: pick('给出当前章节与后续建议', 'Advice for this chapter and what comes next') },
+  { key: 'comprehensive_analysis', label: pick('综合分析', 'Comprehensive analysis'), description: pick('汇总情感、轨迹与指导结果', 'Combines emotion, trajectory, and guidance results') },
+  { key: 'foreshadowing', label: pick('伏笔管理', 'Foreshadowing'), description: pick('埋下、推进与回收看板', 'Board for planting, advancing, and paying off') },
+  { key: 'knowledge_graph', label: pick('知识图谱', 'Knowledge graph'), description: pick('角色关系与情节追踪', 'Character relations and plot tracking') },
+  { key: 'research', label: pick('研究资料', 'Research'), description: pick('联网研究、来源与章节资料归档', 'Online research, sources, and per-chapter archives') },
+  { key: 'style_learning', label: pick('风格学习', 'Style learning'), description: pick('直达文风中心，支持外部片段与整本小说导入', 'Jump to the style center; import external excerpts or whole novels') },
+  { key: 'memory_management', label: pick('记忆管理', 'Memory management'), description: pick('动态记忆层与版本控制', 'Dynamic memory layers and version control') },
+  { key: 'token_budget', label: pick('Token预算', 'Token budget'), description: pick('控制AI生成成本与模块分配', 'Control generation cost and per-module allocation') },
+  { key: 'clue_tracker', label: pick('线索追踪', 'Clue tracker'), description: pick('伏笔、红鲱鱼与推理线索管理', 'Manage setups, red herrings, and deduction clues') },
+])
 const sectionComponents: Record<SectionKey, any> = {
   overview: OverviewSection,
   world_setting: WorldSettingSection,
@@ -338,6 +366,7 @@ const sectionComponents: Record<SectionKey, any> = {
   comprehensive_analysis: AnalysisWorkbench,
   foreshadowing: ForeshadowingSection,
   knowledge_graph: KnowledgeGraphView,
+  research: ResearchCenterSection,
   clue_tracker: ClueTrackerView,
   style_learning: null,
   memory_management: null,
@@ -411,6 +440,12 @@ const getSectionIcon = (key: SectionKey) => {
       h('line', { x1: 9.5, y1: 14, x2: 5.5, y2: 16.5 }),
       h('line', { x1: 14.5, y1: 14, x2: 18.5, y2: 16.5 })
     ]),
+    research: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }, [
+      h('circle', { cx: 11, cy: 11, r: 6 }),
+      h('line', { x1: 16, y1: 16, x2: 21, y2: 21 }),
+      h('line', { x1: 8, y1: 11, x2: 14, y2: 11 }),
+      h('line', { x1: 11, y1: 8, x2: 11, y2: 14 })
+    ]),
     clue_tracker: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }, [
       h('circle', { cx: 11, cy: 11, r: 7 }),
       h('line', { x1: 21, y1: 21, x2: 16.65, y2: 16.65 }),
@@ -447,6 +482,7 @@ const sectionLoading = reactive<Record<SectionKey, boolean>>({
   comprehensive_analysis: false,
   foreshadowing: false,
   knowledge_graph: false,
+  research: false,
   clue_tracker: false,
   style_learning: false,
   memory_management: false,
@@ -466,6 +502,7 @@ const sectionError = reactive<Record<SectionKey, string | null>>({
   comprehensive_analysis: null,
   foreshadowing: null,
   knowledge_graph: null,
+  research: null,
   clue_tracker: null,
   style_learning: null,
   memory_management: null,
@@ -473,13 +510,14 @@ const sectionError = reactive<Record<SectionKey, string | null>>({
 })
 
 const overviewMeta = reactive<{ title: string; updated_at: string | null }>({
-  title: '加载中…',
+  // 空串表示尚未加载，展示文案由 formattedTitle 派生，避免初值锁死语言
+  title: '',
   updated_at: null
 })
 
 const routeSection = typeof route.query.section === 'string' ? route.query.section : ''
-const activeSection = ref<SectionKey>(sections.some(section => section.key === routeSection) ? routeSection as SectionKey : 'overview')
-const activeSectionMeta = computed(() => sections.find(section => section.key === activeSection.value) || sections[0])
+const activeSection = ref<SectionKey>(sectionKeys.includes(routeSection as SectionKey) ? routeSection as SectionKey : 'overview')
+const activeSectionMeta = computed(() => sections.value.find(section => section.key === activeSection.value) || sections.value[0])
 
 // Modal state (user mode only)
 const isModalOpen = ref(false)
@@ -506,8 +544,8 @@ const originalBodyOverflow = ref('')
 const novel = computed(() => !props.isAdmin ? novelStore.currentProject as NovelProject | null : null)
 
 const formattedTitle = computed(() => {
-  const title = overviewMeta.title || '加载中…'
-  return title.startsWith('《') && title.endsWith('》') ? title : `《${title}》`
+  const title = overviewMeta.title || pick('加载中…', 'Loading…')
+  return title.startsWith('《') && title.endsWith('》') ? title : pick(`《${title}》`, title)
 })
 
 const componentContainerClass = computed(() => {
@@ -527,7 +565,8 @@ const contentCardClass = computed(() => {
 // 懒加载完整项目（仅在需要编辑时）
 const ensureProjectLoaded = async () => {
   if (props.isAdmin || !projectId) return
-  if (novel.value) return // 已加载
+  // 已加载则直接返回
+  if (novel.value) return
   await novelStore.loadProject(projectId)
 }
 
@@ -556,7 +595,7 @@ const loadSection = async (section: SectionKey, force = false) => {
   if (analysisSections.includes(section)) {
     return
   }
-  
+
   if (!force && sectionData[section]) {
     return
   }
@@ -574,7 +613,7 @@ const loadSection = async (section: SectionKey, force = false) => {
     }
   } catch (error) {
     console.error('加载模块失败:', error)
-    sectionError[section] = error instanceof Error ? error.message : '加载失败'
+    sectionError[section] = error instanceof Error ? error.message : pick('加载失败', 'Failed to load')
   } finally {
     sectionLoading[section] = false
   }
@@ -605,7 +644,7 @@ const fetchAnalysisSection = async (section: Extract<SectionKey, 'story_trajecto
     }
   } catch (error) {
     console.error('加载增强分析失败:', error)
-    sectionError[section] = error instanceof Error ? error.message : '加载失败'
+    sectionError[section] = error instanceof Error ? error.message : pick('加载失败', 'Failed to load')
   } finally {
     sectionLoading[section] = false
   }
@@ -680,6 +719,7 @@ const componentProps = computed(() => {
     case 'emotion_curve':
     case 'foreshadowing':
     case 'knowledge_graph':
+    case 'research':
       return { projectId: novel.value?.id || projectId }
     case 'story_trajectory':
     case 'creative_guidance':
@@ -755,7 +795,7 @@ const startAddChapter = async () => {
   await ensureProjectLoaded()
   const outline = sectionData.chapter_outline?.chapter_outline || novel.value?.blueprint?.chapter_outline || []
   const nextNumber = outline.length > 0 ? Math.max(...outline.map((item: any) => item.chapter_number)) + 1 : 1
-  newChapterTitle.value = `新章节 ${nextNumber}`
+  newChapterTitle.value = pick(`新章节 ${nextNumber}`, `New chapter ${nextNumber}`)
   newChapterSummary.value = ''
   isAddChapterModalOpen.value = true
 }
@@ -822,7 +862,7 @@ const saveNewChapter = async () => {
   const project = novel.value
   if (!project) return
   if (!newChapterTitle.value.trim()) {
-    alert('章节标题不能为空')
+    alert(pick('章节标题不能为空', 'The chapter title cannot be empty'))
     return
   }
 

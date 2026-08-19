@@ -1,9 +1,11 @@
+import { buildAuthHeaders } from '@/stores/auth'
 import { API_BASE_URL, API_PREFIX } from '@/api/config'
+const authFetch = (input: RequestInfo | URL, init: RequestInit = {}) => fetch(input, { ...init, headers: buildAuthHeaders(init.headers) })
 
 const PATCH_DIFF_BASE = `${API_BASE_URL}${API_PREFIX}`
 
 const request = async <T>(url: string, options?: RequestInit): Promise<T> => {
-  const response = await fetch(url, {
+  const response = await authFetch(url, {
     headers: {
       'Content-Type': 'application/json',
       ...(options?.headers || {}),

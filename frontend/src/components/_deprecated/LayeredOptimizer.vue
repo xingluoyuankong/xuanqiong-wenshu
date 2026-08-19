@@ -1,4 +1,4 @@
-<!-- [DEPRECATED] This component has 0 runtime references as of 2026-08-07 audit. Retained for backward compatibility. -->
+﻿<!-- [DEPRECATED] This component has 0 runtime references as of 2026-08-07 audit. Retained for backward compatibility. -->
 <!-- AIMETA P=分层优化器_内容优化界面|R=优化建议展示|NR=不含内容修改|E=component:LayeredOptimizer|X=internal|A=优化器|D=vue|S=dom,net|RD=./README.ai -->
 <template>
   <div class="layered-optimizer">
@@ -80,7 +80,7 @@
     </div>
 
     <!-- 优化历史 -->
-    <div v-if="optimizationHistory.length > 0" class="mt-6 pt-4 border-t border-gray-200">
+    <div v-if="optimizationHistory.length > 0" class="mt-3 pt-4 border-t border-gray-200">
       <h4 class="text-sm font-medium text-gray-700 mb-3">优化历史</h4>
       <div class="space-y-2">
         <div

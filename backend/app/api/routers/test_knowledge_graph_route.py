@@ -124,7 +124,6 @@ async def _fake_project_ledger_lease(project_id, **_kwargs):
 
 
 @pytest.mark.anyio
-@pytest.mark.skip(reason="Route integration mock test")
 async def test_knowledge_graph_overview_syncs_once_and_returns_graph_plus_threads(monkeypatch):
     _KnowledgeGraphService.last_sync_calls = 0
     _KnowledgeGraphService.last_graph_calls = 0

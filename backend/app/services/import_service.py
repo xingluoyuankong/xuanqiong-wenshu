@@ -18,6 +18,7 @@ from ..services.knowledge_graph_service import KnowledgeGraphService
 from ..services.clue_tracker_service import ClueTrackerService
 from ..services.llm_service import LLMService
 from ..services.novel_service import NovelService
+from ..services.novel_text_format import parse_export_metadata, split_into_chapters
 from ..services.prompt_service import PromptService
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
 
@@ -62,6 +63,7 @@ class ImportService:
             if not content:
                 raise HTTPException(status_code=400, detail="文件内容为空")
             await self._raise_if_import_cancelled(should_cancel)
+            roundtrip_metadata = parse_export_metadata(content) or {}
 
             # 1. 智能分段（分章）
             await self._emit_import_progress(
@@ -157,14 +159,19 @@ class ImportService:
                     "verified_character_count": len(verified_characters),
                 },
             )
-            blueprint_data = await self._analyze_content(
-                user_id,
-                plot_sample_text,
-                chapter_titles,
-                potential_characters, # 依然传入作为备选参考
-                char_highlights_text,
-                verified_characters   # 传入确定的名单
-            )
+            persisted_blueprint = roundtrip_metadata.get("blueprint")
+            if isinstance(persisted_blueprint, dict) and persisted_blueprint.get("title"):
+                # 正式导出包含可信的结构元数据时，优先恢复原蓝图；AI 仅负责旧稿无元数据时的分析。
+                blueprint_data = Blueprint.model_validate(persisted_blueprint)
+            else:
+                blueprint_data = await self._analyze_content(
+                    user_id,
+                    plot_sample_text,
+                    chapter_titles,
+                    potential_characters, # 依然传入作为备选参考
+                    char_highlights_text,
+                    verified_characters   # 传入确定的名单
+                )
 
             # 4. 创建项目
             await self._raise_if_import_cancelled(should_cancel)
@@ -174,11 +181,17 @@ class ImportService:
                 "正在写入项目、蓝图和章节正文",
                 {"chapter_count": len(chapters)},
             )
-            title = blueprint_data.title or file.filename.rsplit('.', 1)[0]
-            initial_prompt = f"导入自文件: {file.filename}"
+            project_metadata = roundtrip_metadata.get("project") if isinstance(roundtrip_metadata.get("project"), dict) else {}
+            title = str(project_metadata.get("title") or blueprint_data.title or file.filename.rsplit('.', 1)[0])
+            initial_prompt = str(project_metadata.get("initial_prompt") or f"导入自文件: {file.filename}")
             project = await self.novel_service.create_project(user_id, title, initial_prompt)
 
             # 5. 保存蓝图
+            # 正式导出的章节大纲元数据优先于重新分析结果，并按正文边界补齐缺失章节。
+            persisted_outlines = roundtrip_metadata.get("chapter_outlines")
+            if isinstance(persisted_outlines, list) and persisted_outlines:
+                from ..schemas.novel import ChapterOutline as ChapterOutlineSchema
+                blueprint_data.chapter_outline = [ChapterOutlineSchema.model_validate(item) for item in persisted_outlines if isinstance(item, dict)]
             # 确保 blueprint_data 中的 chapter_outline 包含所有章节（如果AI没返回全部）
             if blueprint_data.chapter_outline:
                 # 建立映射以合并AI生成的摘要和实际章节列表
@@ -202,16 +215,32 @@ class ImportService:
             await self.novel_service.replace_blueprint(project.id, blueprint_data)
 
             # 6. 保存章节内容
+            version_payloads = roundtrip_metadata.get("formal_ledgers", {}).get("chapter_versions", []) if isinstance(roundtrip_metadata.get("formal_ledgers"), dict) else []
+            versions_by_chapter = {
+                int(item.get("chapter_number")): item
+                for item in version_payloads
+                if isinstance(item, dict) and item.get("chapter_number") is not None
+            }
             for i, (chap_title, chap_content) in enumerate(chapters, 1):
                 chapter = await self.novel_service.get_or_create_chapter(project.id, i)
-                # 创建初始版本
+                version_data = versions_by_chapter.get(i) or {}
+                raw_versions = version_data.get("versions") if isinstance(version_data.get("versions"), list) else []
+                usable_versions = [item for item in raw_versions if isinstance(item, dict) and str(item.get("content") or "").strip()]
+                contents = [str(item.get("content") or "") for item in usable_versions] or [chap_content]
+                version_metadata = [dict(item.get("metadata") or {}, source="file_import") for item in usable_versions] or [{"source": "file_import"}]
                 await self.novel_service.replace_chapter_versions(
                     chapter,
-                    [chap_content],
-                    metadata=[{"source": "file_import"}]
+                    contents,
+                    metadata=version_metadata,
                 )
-                # 自动选择第一个版本（即导入的内容）
-                await self.novel_service.select_chapter_version(chapter, 0)
+                selected_index = version_data.get("selected_index")
+                try:
+                    selected_index = int(selected_index) if selected_index is not None else 0
+                except (TypeError, ValueError):
+                    selected_index = 0
+                await self.novel_service.select_chapter_version(
+                    chapter, max(0, min(selected_index, len(contents) - 1))
+                )
 
             # 更新项目状态
             await self._emit_import_progress(
@@ -220,11 +249,11 @@ class ImportService:
                 "正在重建角色、章节快照、记忆和知识图谱账本",
                 {"chapter_count": len(chapters), "character_count": len(blueprint_data.characters or [])},
             )
+            ledger_kwargs = {"filename": file.filename or ""}
+            if isinstance(roundtrip_metadata.get("formal_ledgers"), dict):
+                ledger_kwargs["formal_ledgers"] = roundtrip_metadata["formal_ledgers"]
             ledger_metrics = await self._rebuild_import_ledgers(
-                project.id,
-                blueprint_data,
-                chapters,
-                filename=file.filename or "",
+                project.id, blueprint_data, chapters, **ledger_kwargs
             )
 
             project.status = "blueprint_ready"
@@ -259,11 +288,16 @@ class ImportService:
         chapters: List[Tuple[str, str]],
         *,
         filename: str,
+        formal_ledgers: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         blueprint_payload = blueprint_data.model_dump(exclude_none=True) if hasattr(blueprint_data, "model_dump") else {}
         character_payloads = list(blueprint_payload.get("characters") or [])
         relationship_payloads = list(blueprint_payload.get("relationships") or [])
-        foreshadowing_payloads = list(blueprint_payload.get("foreshadowing_system") or [])
+        formal_foreshadowings = formal_ledgers.get("foreshadowings") if isinstance(formal_ledgers, dict) else None
+        foreshadowing_payloads = list(
+            formal_foreshadowings if isinstance(formal_foreshadowings, list) and formal_foreshadowings
+            else blueprint_payload.get("foreshadowing_system") or []
+        )
         now = datetime.now(timezone.utc).isoformat()
 
         memory_result = await self.session.execute(select(ProjectMemory).where(ProjectMemory.project_id == project_id))
@@ -362,19 +396,31 @@ class ImportService:
             ))
             state_count += 1
 
+        timeline_payloads = formal_ledgers.get("timeline_events") if isinstance(formal_ledgers, dict) else None
+        timeline_items = timeline_payloads if isinstance(timeline_payloads, list) else [
+            {"chapter_number": chapter_number, "event_title": title,
+             "event_description": self._make_import_chapter_summary(title, content)}
+            for chapter_number, (title, content) in enumerate(chapters[:200], start=1)
+        ]
         timeline_count = 0
-        for chapter_number, (title, content) in enumerate(chapters[:200], start=1):
+        for item in timeline_items[:200]:
+            if not isinstance(item, dict):
+                continue
+            chapter_number = self._coerce_chapter_number(item.get("chapter_number"), default=1, chapter_count=len(chapters))
             self.session.add(TimelineEvent(
                 project_id=project_id,
                 chapter_number=chapter_number,
-                story_time=f"导入章节 {chapter_number}",
-                event_type="imported_chapter",
-                event_title=title or f"第{chapter_number}章",
-                event_description=self._make_import_chapter_summary(title, content),
-                involved_characters=[],
-                importance=5,
-                is_turning_point=False,
-                extra={"source": "file_import"},
+                story_time=item.get("story_time") or f"导入章节 {chapter_number}",
+                story_date=item.get("story_date"),
+                time_elapsed=item.get("time_elapsed"),
+                event_type=item.get("event_type") or "imported_chapter",
+                event_title=item.get("event_title") or f"第{chapter_number}章",
+                event_description=item.get("event_description") or "",
+                involved_characters=item.get("involved_characters") or [],
+                location=item.get("location"),
+                importance=item.get("importance") or 5,
+                is_turning_point=bool(item.get("is_turning_point", False)),
+                extra={**dict(item.get("extra") or {}), "source": "file_import"},
             ))
             timeline_count += 1
 
@@ -773,32 +819,13 @@ class ImportService:
 
     def _split_into_chapters(self, content: str) -> List[Tuple[str, str]]:
         """
-        使用正则匹配章节标题。
-        支持格式：
-        第1章
-        第一章
-        Chapter 1
+        使用共享格式契约切分章节。
+
+        支持格式：第1章 / 第一章 / Chapter 1，并会剥离本系统导出的文件头，
+        使「导出全文 → 重新导入」能还原出相同的章节边界。
+        真实旧稿的序章/前言仍保留为「序章」，不会因为对齐导出格式而丢失。
         """
-        # 正则表达式匹配行首的章节标题
-        # 常见格式：第xxx章、Chapter xxx、xxx、(xxx)
-        pattern = r"(^\s*第[0-9零一二三四五六七八九十百千]+[章卷回节].*|^\s*Chapter\s+[0-9]+.*)"
-        
-        # 使用 split 保留分隔符（即标题）
-        parts = re.split(pattern, content, flags=re.MULTILINE)
-        
-        chapters = []
-        # split 后第一个元素通常是标题前的内容（序章或前言），如果非空也算一章
-        if parts[0].strip():
-             chapters.append(("序章", parts[0].strip()))
-             
-        # 后续元素是 标题, 内容, 标题, 内容...
-        for i in range(1, len(parts), 2):
-            title = parts[i].strip()
-            body = parts[i+1].strip() if i+1 < len(parts) else ""
-            if body:
-                chapters.append((title, body))
-                
-        return chapters
+        return split_into_chapters(content)
 
     async def _filter_characters_only(self, user_id: int, potential_characters: List[str], char_highlights: str) -> List[str]:
         """

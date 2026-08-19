@@ -9,15 +9,18 @@
       </div>
       <div class="absolute inset-0 w-24 h-24 bg-gradient-to-r from-indigo-400 to-purple-500 rounded-full mx-auto animate-ping opacity-30"></div>
     </div>
-    <h2 class="text-2xl font-bold text-gray-800 mb-3">正在为你准备灵感空间...</h2>
+    <h2 class="text-2xl font-bold text-gray-800 mb-3">{{ pick('正在为你准备灵感空间...', 'Preparing your inspiration space…') }}</h2>
     <div class="space-y-2 text-gray-600">
-      <p class="animate-pulse" style="animation-delay: 0.2s">✨ 连接文思泉涌的AI...</p>
-      <p class="animate-pulse" style="animation-delay: 0.6s">🎨 铺开创意的画卷...</p>
-      <p class="animate-pulse" style="animation-delay: 1s;">🚀 准备开启灵感之旅！</p>
+      <p class="animate-pulse" style="animation-delay: 0.2s">{{ pick('✨ 连接文思泉涌的AI...', '✨ Connecting to the AI muse…') }}</p>
+      <p class="animate-pulse" style="animation-delay: 0.6s">{{ pick('🎨 铺开创意的画卷...', '🎨 Unrolling the creative canvas…') }}</p>
+      <p class="animate-pulse" style="animation-delay: 1s;">{{ pick('🚀 准备开启灵感之旅！', '🚀 Ready to start the journey!') }}</p>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-// This is a purely presentational component.
+// 纯展示组件，只需要双语文案
+import { useLocale } from '@/composables/useLocale'
+
+const { pick } = useLocale()
 </script>

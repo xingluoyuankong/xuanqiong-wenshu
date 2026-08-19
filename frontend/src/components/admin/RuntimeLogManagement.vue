@@ -3,28 +3,31 @@
     <template #header>
       <div class="runtime-card__header">
         <div>
-          <span class="runtime-card__title">运行日志</span>
-          <p class="runtime-card__subtitle">左边用短句和小图案看关键阶段；右边直接看生成状态、草稿片段、质量门和修补建议。</p>
+          <span class="runtime-card__title">{{ pick('运行日志', 'Runtime logs') }}</span>
+          <p class="runtime-card__subtitle">{{ pick(
+            '左边用短句和小图案看关键阶段；右边直接看生成状态、草稿片段、质量门和修补建议。',
+            'The left rail summarises milestones with short lines and small glyphs; the right side shows generation state, draft excerpts, quality gates, and patch suggestions.'
+          ) }}</p>
         </div>
         <n-space>
-          <n-button tertiary size="small" @click="refreshNow" :loading="loading">刷新</n-button>
-          <n-button tertiary size="small" @click="autoRefresh = !autoRefresh">{{ autoRefresh ? '停止自动刷新' : '开启自动刷新' }}</n-button>
+          <n-button tertiary size="small" @click="refreshNow" :loading="loading">{{ pick('刷新', 'Refresh') }}</n-button>
+          <n-button tertiary size="small" @click="autoRefresh = !autoRefresh">{{ autoRefresh ? pick('停止自动刷新', 'Stop auto refresh') : pick('开启自动刷新', 'Start auto refresh') }}</n-button>
         </n-space>
       </div>
     </template>
 
     <n-space vertical size="large">
       <n-alert v-if="error" type="error" closable @close="error = null">{{ error }}</n-alert>
-      <n-alert v-if="focusedProjectId" type="info" :bordered="false">当前已从小说入口定位到：{{ focusedProjectTitle }}。<n-button text type="primary" @click="clearFocus">查看全部</n-button></n-alert>
+      <n-alert v-if="focusedProjectId" type="info" :bordered="false">{{ pick('当前已从小说入口定位到：', 'Focused from the novel entry: ') }}{{ focusedProjectTitle }}{{ punct.period }}<n-button text type="primary" @click="clearFocus">{{ pick('查看全部', 'View all') }}</n-button></n-alert>
 
       <n-spin :show="loading">
-        <n-empty v-if="!visibleProjects.length && !loading" description="暂无可展示的运行日志" />
+        <n-empty v-if="!visibleProjects.length && !loading" :description="pick('暂无可展示的运行日志', 'No runtime logs to show yet')" />
 
         <div v-else class="runtime-layout">
           <aside class="project-rail">
             <button v-for="project in visibleProjects" :key="project.project_id" class="project-rail__item" :class="{ 'project-rail__item--active': selectedProjectId === project.project_id }" @click="selectProject(project.project_id)">
               <strong>{{ project.project_title }}</strong>
-              <span>{{ project.chapters.length }} 章 · {{ formatDateTime(project.updated_at) }}</span>
+              <span>{{ pick(`${project.chapters.length} 章`, `${project.chapters.length} ch.`) }} · {{ formatDateTime(project.updated_at) }}</span>
             </button>
           </aside>
 
@@ -32,27 +35,32 @@
             <div class="runtime-main__head">
               <div>
                 <h3>{{ selectedProject.project_title }}</h3>
-                <p>项目 ID：{{ selectedProject.project_id }} · 最近更新：{{ formatDateTime(selectedProject.updated_at) }}</p>
+                <p>{{ pick('项目 ID：', 'Project ID: ') }}{{ selectedProject.project_id }} · {{ pick('最近更新：', 'Updated: ') }}{{ formatDateTime(selectedProject.updated_at) }}</p>
               </div>
               <div class="runtime-main__head-tags">
-                <n-tag type="primary" round>第 {{ selectedChapter.chapter_number }} 章</n-tag>
+                <n-tag type="primary" round>{{ pick(`第 ${selectedChapter.chapter_number} 章`, `Chapter ${selectedChapter.chapter_number}`) }}</n-tag>
                 <n-tag size="small" :type="tagTypeByStatus(selectedChapter.generation_status)" round>{{ selectedChapter.generation_status }}</n-tag>
               </div>
             </div>
 
             <div class="chapter-switcher">
-              <button v-for="chapter in selectedProject.chapters" :key="chapter.chapter_number" :class="{ active: selectedChapterNumber === chapter.chapter_number }" @click="selectedChapterNumber = chapter.chapter_number">第 {{ chapter.chapter_number }} 章</button>
+              <button v-for="chapter in selectedProject.chapters" :key="chapter.chapter_number" :class="{ active: selectedChapterNumber === chapter.chapter_number }" @click="selectedChapterNumber = chapter.chapter_number">{{ pick(`第 ${chapter.chapter_number} 章`, `Ch. ${chapter.chapter_number}`) }}</button>
             </div>
 
             <div class="runtime-content">
               <aside class="brief-panel">
                 <div class="brief-panel__header">
                   <div>
-                    <div class="section-title">简略日志</div>
-                    <p class="brief-panel__tip">显示关键阶段节点，并补充“本步用时 / 累计用时”，快速判断任务卡在哪一步。</p>
+                    <div class="section-title">{{ pick('简略日志', 'Brief log') }}</div>
+                    <p class="brief-panel__tip">{{ pick(
+                      '显示关键阶段节点，并补充“本步用时 / 累计用时”，快速判断任务卡在哪一步。',
+                      'Shows milestone nodes with step and cumulative durations so you can spot where a run stalls.'
+                    ) }}</p>
                   </div>
                   <n-button text type="primary" @click="briefExpanded = !briefExpanded">
-                    {{ briefExpanded ? '收起列表' : `显示全部（${briefLogs.length} 条）` }}
+                    {{ briefExpanded
+                      ? pick('收起列表', 'Collapse')
+                      : pick(`显示全部（${briefLogs.length} 条）`, `Show all (${briefLogs.length})`) }}
                   </n-button>
                 </div>
 
@@ -67,15 +75,15 @@
                     <div class="brief-log-item__meta">
                       <small v-if="item.stage">{{ item.stage }}</small>
                       <small v-if="item.kind">{{ kindLabel(item.kind) }}</small>
-                      <small v-if="item.stepDurationLabel">本步用时：{{ item.stepDurationLabel }}</small>
-                      <small v-if="item.totalDurationLabel">累计：{{ item.totalDurationLabel }}</small>
+                      <small v-if="item.stepDurationLabel">{{ pick('本步用时：', 'Step: ') }}{{ item.stepDurationLabel }}</small>
+                      <small v-if="item.totalDurationLabel">{{ pick('累计：', 'Total: ') }}{{ item.totalDurationLabel }}</small>
                     </div>
                   </li>
                 </ul>
-                <n-empty v-else size="small" description="当前没有可归纳的关键阶段日志" />
+                <n-empty v-else size="small" :description="pick('当前没有可归纳的关键阶段日志', 'No milestone entries to summarise yet')" />
 
                 <div class="brief-summary">
-                  <div class="section-title section-title--small">摘要参数</div>
+                  <div class="section-title section-title--small">{{ pick('摘要参数', 'Summary fields') }}</div>
                   <dl class="summary-grid">
                     <template v-for="item in buildSummaryEntries(selectedChapter)" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></template>
                   </dl>
@@ -83,8 +91,11 @@
               </aside>
 
               <section class="backend-panel">
-                <div class="section-title">详细生成状态日志</div>
-                <p class="backend-panel__tip">这里优先显示小说生成本身：当前阶段、草稿预览、质量门、局部补丁和保存结果；原始 metadata 收进开发者详情。</p>
+                <div class="section-title">{{ pick('详细生成状态日志', 'Detailed generation log') }}</div>
+                <p class="backend-panel__tip">{{ pick(
+                  '这里优先显示小说生成本身：当前阶段、草稿预览、质量门、局部补丁和保存结果；原始 metadata 收进开发者详情。',
+                  'This side leads with the generation itself: current stage, draft preview, quality gates, local patches, and save results. Raw metadata is tucked into developer details.'
+                ) }}</p>
                 <div ref="backendConsoleRef" class="backend-console">
                   <div v-for="(line, index) in backendLines" :key="`${line.at || 'line'}-${index}`" class="backend-line">
                     <div class="backend-line__meta">
@@ -94,7 +105,7 @@
                       <span v-if="line.stage">[{{ line.stage }}]</span>
                       <span v-if="line.stateLabel" class="backend-line__badge" :class="line.stateClass">{{ line.stateLabel }}</span>
                     </div>
-                    <div class="backend-line__message">{{ line.title || line.message || '生成状态更新' }}</div>
+                    <div class="backend-line__message">{{ line.title || line.message || pick('生成状态更新', 'Generation status update') }}</div>
                     <p v-if="line.summary && line.summary !== line.message && line.summary !== line.title" class="backend-line__summary">{{ line.summary }}</p>
 
                     <div v-if="line.metrics.length" class="metric-chips">
@@ -104,12 +115,12 @@
                     </div>
 
                     <div v-if="line.contentPreview" class="content-preview">
-                      <span>生成内容预览</span>
+                      <span>{{ pick('生成内容预览', 'Generated content preview') }}</span>
                       <p>{{ line.contentPreview }}</p>
                     </div>
 
                     <div v-if="patchSuggestions(line).length" class="patch-suggestions">
-                      <span>局部补丁建议</span>
+                      <span>{{ pick('局部补丁建议', 'Local patch suggestions') }}</span>
                       <ul>
                         <li v-for="(patch, patchIndex) in patchSuggestions(line)" :key="`${line.at || 'patch'}-${patchIndex}`">
                           {{ patch }}
@@ -118,19 +129,19 @@
                     </div>
 
                     <div v-if="artifactRefs(line).length" class="artifact-refs">
-                      <span>产物引用</span>
+                      <span>{{ pick('产物引用', 'Artifact references') }}</span>
                       <code v-for="(artifact, artifactIndex) in artifactRefs(line)" :key="`${line.at || 'artifact'}-${artifactIndex}`">{{ artifact }}</code>
                     </div>
 
                     <details v-if="line.metadata && Object.keys(line.metadata).length" class="developer-details">
-                      <summary>开发者详情：metadata</summary>
+                      <summary>{{ pick('开发者详情：metadata', 'Developer details: metadata') }}</summary>
                       <pre>{{ formatJson(line.metadata) }}</pre>
                     </details>
                   </div>
 
                   <div v-if="runtimeSnapshotText" class="backend-snapshot">
                     <details>
-                      <summary class="backend-snapshot__title">开发者详情：runtime snapshot</summary>
+                      <summary class="backend-snapshot__title">{{ pick('开发者详情：runtime snapshot', 'Developer details: runtime snapshot') }}</summary>
                       <pre>{{ runtimeSnapshotText }}</pre>
                     </details>
                   </div>
@@ -146,30 +157,11 @@
 
 <script setup lang="ts">
 
-const stageLabelMap: Record<string, string> = {
-  'provider_preflight': 'Provider预检',
-  'provider_switch': 'Provider自动切换',
-  'context_building': '上下文构建中',
-  'chapter_mission': '章节任务分析',
-  'generating_draft': '正文生成中',
-  'guardrails': '质量门检查',
-  'self_critique': '自动评审',
-  'optimizing': '优化中',
-  'consistency': '一致性检查',
-  'finalizing': '定稿入库',
-  'diagnose_structural': '结构诊断',
-  'diagnose_character': '人物诊断',
-  'diagnose_delivery': '表达诊断',
-  'optimize_structural': '结构优化',
-  'optimize_character': '人物优化', 
-  'optimize_delivery': '表达优化',
-}
-const stageToZh = (stage: string) => STAGE_LABEL_MAP[stage] || stage
-
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NAlert, NButton, NCard, NEmpty, NSpace, NSpin, NTag } from 'naive-ui'
 import { AdminAPI, type ChapterRuntimeLogItem, type NovelRuntimeLogItem } from '@/api/admin'
+import { useLocale } from '@/composables/useLocale'
 // SSE ready: import { connectSSE } from '@/utils/sseStream'
 
 type RuntimeLine = {
@@ -186,6 +178,8 @@ type RuntimeLine = {
   metadata: Record<string, any>
   stateLabel?: string
   stateClass?: string
+  /** 是否属于「关键阶段」，进简略日志。语言无关，避免翻译后匹配失效 */
+  brief?: boolean
   syntheticKey?: string
   stepDurationMs?: number | null
   totalDurationMs?: number | null
@@ -193,6 +187,7 @@ type RuntimeLine = {
 
 const route = useRoute()
 const router = useRouter()
+const { pick, punct, formatNumber: formatLocaleNumber } = useLocale()
 const projects = ref<NovelRuntimeLogItem[]>([])
 const loading = ref(false)
 const refreshing = ref(false)
@@ -218,7 +213,7 @@ const backendLines = computed<RuntimeLine[]>(() => {
 })
 
 const briefLogs = computed<Array<RuntimeLine & { stepDurationLabel: string; totalDurationLabel: string; index: number }>>(() => {
-  const events = backendLines.value.filter(event => event.message && shouldShowAsBriefLog(event.message, String(event.stage || ''), event.stateLabel))
+  const events = backendLines.value.filter(event => event.message && event.brief)
   return events.map((event, index) => ({
     ...event,
     stepDurationLabel: formatDuration(event.stepDurationMs),
@@ -234,42 +229,43 @@ const runtimeSnapshotText = computed(() => {
   return Object.keys(snapshot).length ? formatJson(snapshot) : ''
 })
 
-const METRIC_LABELS: Record<string, string> = {
-  target_word_count: '目标字数',
-  min_word_count: '最低字数',
-  actual_word_count: '实际字数',
-  word_count: '字数',
-  version_count: '候选数',
-  quality_score: '质量分',
-  event_density_score: '事件密度',
-  event_density_per_1000: '每千字推进',
-  progression_unit_count: '推进单元',
-  blocker_count: '阻断项',
-  warning_count: '警告项',
-  stagewide_deferred_count: '延后整章候选',
-  manual_stagewide_confirmation_required: '需人工确认',
-  word_requirement_met: '字数达标',
-  review_status: '评审状态',
-  optimization_strategy: '优化策略',
-  optimization_strategy_phase: '策略阶段',
-  generated_version_count: '候选数',
-  candidate_count: '候选数',
-  best_version_index: '推荐版本',
-  token_budget_records: '预算记录',
-  estimated_generation_tokens: '估算 Token',
-  record_count: '记录数',
-  total_tokens: '总 Token',
-  estimated_cost: '估算成本',
-  active_profile_name: '当前 Provider',
-  recommended_profile_name: '推荐 Provider',
-  planned_character_count: '计划角色',
-  target_character_count: '目标角色',
-  must_resolve_count: '必须回收',
-  should_reinforce_count: '应强化',
-  avoid_forgetting_count: '禁忘',
-  active_clue_count: '活跃线索',
-  timeout_seconds: '超时秒数',
-  max_tokens: '最大 Token',
+// 指标名是展示文案，用函数惰性求值，切换语言后 buildMetrics 会重新取到新语言
+const METRIC_LABELS: Record<string, () => string> = {
+  target_word_count: () => pick('目标字数', 'Target words'),
+  min_word_count: () => pick('最低字数', 'Minimum words'),
+  actual_word_count: () => pick('实际字数', 'Actual words'),
+  word_count: () => pick('字数', 'Word count'),
+  version_count: () => pick('候选数', 'Candidates'),
+  quality_score: () => pick('质量分', 'Quality score'),
+  event_density_score: () => pick('事件密度', 'Event density'),
+  event_density_per_1000: () => pick('每千字推进', 'Progress per 1k words'),
+  progression_unit_count: () => pick('推进单元', 'Progression units'),
+  blocker_count: () => pick('阻断项', 'Blockers'),
+  warning_count: () => pick('警告项', 'Warnings'),
+  stagewide_deferred_count: () => pick('延后整章候选', 'Deferred whole-chapter candidates'),
+  manual_stagewide_confirmation_required: () => pick('需人工确认', 'Manual confirmation required'),
+  word_requirement_met: () => pick('字数达标', 'Word target met'),
+  review_status: () => pick('评审状态', 'Review status'),
+  optimization_strategy: () => pick('优化策略', 'Optimization strategy'),
+  optimization_strategy_phase: () => pick('策略阶段', 'Strategy phase'),
+  generated_version_count: () => pick('候选数', 'Candidates'),
+  candidate_count: () => pick('候选数', 'Candidates'),
+  best_version_index: () => pick('推荐版本', 'Recommended version'),
+  token_budget_records: () => pick('预算记录', 'Budget records'),
+  estimated_generation_tokens: () => pick('估算 Token', 'Estimated tokens'),
+  record_count: () => pick('记录数', 'Records'),
+  total_tokens: () => pick('总 Token', 'Total tokens'),
+  estimated_cost: () => pick('估算成本', 'Estimated cost'),
+  active_profile_name: () => pick('当前 Provider', 'Active provider'),
+  recommended_profile_name: () => pick('推荐 Provider', 'Recommended provider'),
+  planned_character_count: () => pick('计划角色', 'Planned characters'),
+  target_character_count: () => pick('目标角色', 'Target characters'),
+  must_resolve_count: () => pick('必须回收', 'Must resolve'),
+  should_reinforce_count: () => pick('应强化', 'Should reinforce'),
+  avoid_forgetting_count: () => pick('禁忘', 'Do not forget'),
+  active_clue_count: () => pick('活跃线索', 'Active clues'),
+  timeout_seconds: () => pick('超时秒数', 'Timeout (s)'),
+  max_tokens: () => pick('最大 Token', 'Max tokens'),
 }
 
 const PREVIEW_KEYS = [
@@ -292,21 +288,27 @@ const PATCH_KEYS = [
   'warnings',
 ]
 
-function shouldShowAsBriefLog(message: string, stage: string, stateLabel?: string) {
-  const text = `${stage} ${message} ${stateLabel || ''}`
+/**
+ * 判断一条后端事件是否属于「关键阶段」。
+ * 匹配的是后端下发的中文原文（数据），不随界面语言变化；
+ * `degraded` 状态原来靠展示文案「降级失败」命中「失败」，这里改成显式判断。
+ */
+function isBriefWorthyEvent(stage: string, rawMessage: string, degradedKind: '' | 'skip' | 'degraded') {
+  if (degradedKind === 'degraded') return true
+  const text = `${stage} ${rawMessage}`
   return /候选版本|阶段完成|等待确认|正在调用模型|正在写入|开始|完成|失败|评估|优化|补字数|落库|一致性|诊断/i.test(text)
 }
 
 function normalizeStageLabel(stage: string) {
-  const map: Record<string, string> = {
-    review: '评审阶段',
-    ai_review: 'AI 评审',
-    optimize_content: '分阶段优化',
-    consistency: '一致性校验',
-    persist_versions: '候选版本落库',
-    waiting_for_confirm: '等待确认',
+  const map: Record<string, () => string> = {
+    review: () => pick('评审阶段', 'Review stage'),
+    ai_review: () => pick('AI 评审', 'AI review'),
+    optimize_content: () => pick('分阶段优化', 'Staged optimization'),
+    consistency: () => pick('一致性校验', 'Consistency check'),
+    persist_versions: () => pick('候选版本落库', 'Persist candidates'),
+    waiting_for_confirm: () => pick('等待确认', 'Awaiting confirmation'),
   }
-  return map[stage] || stage || '未知阶段'
+  return map[stage]?.() || stage || pick('未知阶段', 'Unknown stage')
 }
 
 function normalizeText(value: unknown, maxLength = 420): string {
@@ -339,6 +341,7 @@ function firstText(record: Record<string, any>, keys: string[], maxLength = 420)
 
 function inferKind(stage: string, level: string, message: string, metadata: Record<string, any>) {
   const text = `${stage} ${level} ${message} ${JSON.stringify(metadata).slice(0, 500)}`.toLowerCase()
+  // 下面的中文关键词来自后端日志文本，是数据匹配，不随界面语言变化
   if (level === 'error' || /失败|error|failed/.test(text)) return 'error'
   if (/草稿|正文|片段|content|draft|preview/.test(text)) return 'content'
   if (/评审|质量|quality|review|blocker|warning/.test(text)) return 'review'
@@ -349,16 +352,16 @@ function inferKind(stage: string, level: string, message: string, metadata: Reco
 }
 
 function kindLabel(kind?: string) {
-  const map: Record<string, string> = {
-    status: '状态',
-    content: '正文片段',
-    review: '质量检查',
-    continuity: '连续性',
-    patch: '局部修补',
-    save: '保存产物',
-    error: '异常',
+  const map: Record<string, () => string> = {
+    status: () => pick('状态', 'Status'),
+    content: () => pick('正文片段', 'Draft excerpt'),
+    review: () => pick('质量检查', 'Quality check'),
+    continuity: () => pick('连续性', 'Continuity'),
+    patch: () => pick('局部修补', 'Local patch'),
+    save: () => pick('保存产物', 'Saved artifact'),
+    error: () => pick('异常', 'Error'),
   }
-  return map[String(kind || '')] || String(kind || '状态')
+  return map[String(kind || '')]?.() || String(kind || pick('状态', 'Status'))
 }
 
 function kindIcon(line: Pick<RuntimeLine, 'kind' | 'level'> | string) {
@@ -390,7 +393,7 @@ function buildMetrics(event: Record<string, any>, metadata: Record<string, any>)
     if (Object.prototype.hasOwnProperty.call(event, key)) source[key] = event[key]
   })
   return Object.entries(source)
-    .map(([key, value]) => ({ label: METRIC_LABELS[key] || key, value: normalizeText(value, 120) }))
+    .map(([key, value]) => ({ label: METRIC_LABELS[key]?.() || key, value: normalizeText(value, 120) }))
     .filter(item => item.value)
     .slice(0, 8)
 }
@@ -406,33 +409,52 @@ function asArray(value: unknown): any[] {
 function formatNumber(value: unknown): string {
   const number = Number(value)
   if (!Number.isFinite(number)) return normalizeText(value, 80)
-  return number.toLocaleString('zh-CN')
+  return formatLocaleNumber(number)
 }
 
 function formatCost(value: unknown): string {
   const number = Number(value)
   if (!Number.isFinite(number) || number <= 0) return '0'
-  return `约 ¥${number.toFixed(number >= 1 ? 2 : 4)}`
+  return pick(`约 ¥${number.toFixed(number >= 1 ? 2 : 4)}`, `approx. ¥${number.toFixed(number >= 1 ? 2 : 4)}`)
 }
 
 function buildProviderAdvice(preflight: Record<string, any>) {
   if (!preflight || !Object.keys(preflight).length) return ''
   if (preflight.auto_switched) {
-    return `已从 ${preflight.current_profile_name || '原 Provider'} 切到 ${preflight.active_profile_name || preflight.recommended_profile_name || '可用 Provider'}，继续生成。`
+    const from = preflight.current_profile_name || pick('原 Provider', 'the previous provider')
+    const to = preflight.active_profile_name || preflight.recommended_profile_name || pick('可用 Provider', 'an available provider')
+    return pick(
+      `已从 ${from} 切到 ${to}，继续生成。`,
+      `Switched from ${from} to ${to} and continued generating.`,
+    )
   }
   if (preflight.checked === false && preflight.reason === 'single_profile_locked_skip_preflight') {
-    return `当前只有一个启用 Provider：${preflight.active_profile_name || preflight.current_profile_name || '未命名配置'}，已跳过切换预检。`
+    const only = preflight.active_profile_name || preflight.current_profile_name || pick('未命名配置', 'an unnamed profile')
+    return pick(
+      `当前只有一个启用 Provider：${only}，已跳过切换预检。`,
+      `Only one provider is enabled (${only}), so the switch preflight was skipped.`,
+    )
   }
   if (preflight.reason === 'preflight_error') {
-    return `预检失败但未阻断生成，后续调用会继续使用运行时重试和降级：${normalizeText(preflight.error, 160)}`
+    return pick(
+      `预检失败但未阻断生成，后续调用会继续使用运行时重试和降级：${normalizeText(preflight.error, 160)}`,
+      `Preflight failed without blocking generation; later calls keep using runtime retries and fallbacks: ${normalizeText(preflight.error, 160)}`,
+    )
   }
   if (preflight.has_usable_profile === false) {
-    return '未找到可用 Provider，需在设置页修复 Key、额度或 base_url。'
+    return pick(
+      '未找到可用 Provider，需在设置页修复 Key、额度或 base_url。',
+      'No usable provider was found. Fix the key, quota, or base_url on the settings page.',
+    )
   }
   if (preflight.checked) {
-    return `预检完成，当前可用 Provider 为 ${preflight.active_profile_name || preflight.current_profile_name || '未命名配置'}。`
+    const active = preflight.active_profile_name || preflight.current_profile_name || pick('未命名配置', 'an unnamed profile')
+    return pick(
+      `预检完成，当前可用 Provider 为 ${active}。`,
+      `Preflight finished; the usable provider is ${active}.`,
+    )
   }
-  return 'Provider 预检信息已记录。'
+  return pick('Provider 预检信息已记录。', 'Provider preflight details were recorded.')
 }
 
 function normalizeArtifactRefs(value: unknown): string[] {
@@ -448,7 +470,7 @@ function enrichRuntimeLine(raw: RuntimeLine): RuntimeLine {
     { ...metadata, title: raw.title, message: raw.message },
     ['title', 'display_title', 'message'],
     180,
-  ) || '生成状态更新'
+  ) || pick('生成状态更新', 'Generation status update')
   const summary = firstText(
     { ...metadata, summary: raw.summary },
     ['summary', 'reason', 'decision', 'progress_message', 'message'],
@@ -486,12 +508,12 @@ function buildSyntheticBackendLines(chapter: ChapterRuntimeLogItem) {
   if (Object.keys(providerPreflight).length) {
     const providerWarning = providerPreflight.reason === 'preflight_error' || providerPreflight.has_usable_profile === false
     const title = providerPreflight.auto_switched
-      ? 'Provider 已自动切换'
+      ? pick('Provider 已自动切换', 'Provider switched automatically')
       : providerWarning
-        ? 'Provider 预检需要关注'
+        ? pick('Provider 预检需要关注', 'Provider preflight needs attention')
         : providerPreflight.checked
-          ? 'Provider 预检完成'
-          : 'Provider 预检已记录'
+          ? pick('Provider 预检完成', 'Provider preflight finished')
+          : pick('Provider 预检已记录', 'Provider preflight recorded')
     lines.push({
       at: chapter.started_at || timestamp,
       stage: 'provider_preflight',
@@ -510,8 +532,14 @@ function buildSyntheticBackendLines(chapter: ChapterRuntimeLogItem) {
       artifactRefs: [],
       message: title,
       metadata: providerPreflight,
-      stateLabel: providerPreflight.auto_switched ? '已切换' : providerWarning ? '需关注' : '已记录',
+      stateLabel: providerPreflight.auto_switched
+        ? pick('已切换', 'Switched')
+        : providerWarning
+          ? pick('需关注', 'Needs attention')
+          : pick('已记录', 'Recorded'),
       stateClass: providerWarning ? 'state-degraded' : '',
+      // 预检完成（非切换、非告警）才算关键阶段节点，与改造前的行为一致
+      brief: Boolean(providerPreflight.checked) && !providerPreflight.auto_switched && !providerWarning,
       syntheticKey: 'provider-preflight',
     })
   }
@@ -523,10 +551,16 @@ function buildSyntheticBackendLines(chapter: ChapterRuntimeLogItem) {
       stage: 'chapter_draft_contract',
       level: 'info',
       kind: 'status',
-      title: '正文长度契约已生效',
+      title: pick('正文长度契约已生效', 'Draft length contract active'),
       summary: tier
-        ? `本章按“${tier}”策略生成：内部可用场景组规划，但最终仍输出连贯整章。`
-        : '本章已记录目标字数、最低字数、超时和 max_tokens，用于首稿质量门与失败归因。',
+        ? pick(
+            `本章按“${tier}”策略生成：内部可用场景组规划，但最终仍输出连贯整章。`,
+            `This chapter follows the “${tier}” strategy: scene groups may be planned internally, but the output stays one coherent chapter.`,
+          )
+        : pick(
+            '本章已记录目标字数、最低字数、超时和 max_tokens，用于首稿质量门与失败归因。',
+            'Target words, minimum words, timeout, and max_tokens are recorded for the first-draft quality gate and failure attribution.',
+          ),
       contentPreview: '',
       metrics: buildMetrics(
         {
@@ -538,8 +572,9 @@ function buildSyntheticBackendLines(chapter: ChapterRuntimeLogItem) {
         { ...draftContract, ...generationLimits },
       ),
       artifactRefs: [],
-      message: '正文长度契约已生效',
+      message: pick('正文长度契约已生效', 'Draft length contract active'),
       metadata: { chapter_draft_contract: draftContract, chapter_generation_limits: generationLimits },
+      brief: false,
       syntheticKey: 'chapter-draft-contract',
     })
   }
@@ -555,13 +590,24 @@ function buildSyntheticBackendLines(chapter: ChapterRuntimeLogItem) {
       stage: 'longform_context',
       level: 'info',
       kind: 'continuity',
-      title: '长期上下文已装配',
+      title: pick('长期上下文已装配', 'Long-form context assembled'),
       summary: [
-        focusNames.length ? `本章关注角色：${focusNames.slice(0, 5).join('、')}` : '',
-        mustResolve.length ? `必须回收 ${mustResolve.length} 个伏笔/线索` : '',
-        shouldReinforce.length ? `应强化 ${shouldReinforce.length} 个伏笔/线索` : '',
-        avoidForgetting.length ? `禁忘 ${avoidForgetting.length} 个长期信息` : '',
-      ].filter(Boolean).join('；') || '已注入角色状态、伏笔/线索账本、记忆摘要、时间线和知识图谱摘要。',
+        focusNames.length
+          ? pick(`本章关注角色：${focusNames.slice(0, 5).join('、')}`, `Focus characters: ${focusNames.slice(0, 5).join(', ')}`)
+          : '',
+        mustResolve.length
+          ? pick(`必须回收 ${mustResolve.length} 个伏笔/线索`, `${mustResolve.length} setups/clues must be resolved`)
+          : '',
+        shouldReinforce.length
+          ? pick(`应强化 ${shouldReinforce.length} 个伏笔/线索`, `${shouldReinforce.length} setups/clues should be reinforced`)
+          : '',
+        avoidForgetting.length
+          ? pick(`禁忘 ${avoidForgetting.length} 个长期信息`, `${avoidForgetting.length} long-term facts must not be dropped`)
+          : '',
+      ].filter(Boolean).join(pick('；', '; ')) || pick(
+        '已注入角色状态、伏笔/线索账本、记忆摘要、时间线和知识图谱摘要。',
+        'Character states, the setup/clue ledger, memory digest, timeline, and knowledge-graph digest were all injected.',
+      ),
       contentPreview: normalizeText([
         ...mustResolve.slice(0, 3),
         ...shouldReinforce.slice(0, 2),
@@ -578,7 +624,7 @@ function buildSyntheticBackendLines(chapter: ChapterRuntimeLogItem) {
         {},
       ),
       artifactRefs: [],
-      message: '长期上下文已装配',
+      message: pick('长期上下文已装配', 'Long-form context assembled'),
       metadata: {
         cast_plan: castPlan,
         foreshadowing_task: foreshadowingTask,
@@ -586,6 +632,7 @@ function buildSyntheticBackendLines(chapter: ChapterRuntimeLogItem) {
         timeline_digest: longformContext.timeline_digest,
         knowledge_digest: longformContext.knowledge_digest,
       },
+      brief: false,
       syntheticKey: 'longform-context',
     })
   }
@@ -596,18 +643,25 @@ function buildSyntheticBackendLines(chapter: ChapterRuntimeLogItem) {
       stage: 'review',
       level: 'warning',
       kind: 'review',
-      title: 'AI 评审已跳过',
-      summary: '当前只有 1 个候选版本，无法执行版本对比评审。',
+      title: pick('AI 评审已跳过', 'AI review skipped'),
+      summary: pick(
+        '当前只有 1 个候选版本，无法执行版本对比评审。',
+        'There is only one candidate version, so a comparative review cannot run.',
+      ),
       contentPreview: '',
       metrics: [],
       artifactRefs: [],
-      message: 'AI 评审已跳过：当前只有 1 个候选版本，无法执行版本对比评审。',
+      message: pick(
+        'AI 评审已跳过：当前只有 1 个候选版本，无法执行版本对比评审。',
+        'AI review skipped: there is only one candidate version, so a comparative review cannot run.',
+      ),
       metadata: {
         review_status: runtime.review_status,
         review_skip_reason: runtime.review_skip_reason || 'single_version',
       },
-      stateLabel: '已跳过',
+      stateLabel: pick('已跳过', 'Skipped'),
       stateClass: 'state-skip',
+      brief: true,
     })
   }
 
@@ -619,18 +673,25 @@ function buildSyntheticBackendLines(chapter: ChapterRuntimeLogItem) {
       stage,
       level: 'warning',
       kind: 'error',
-      title: `${normalizeStageLabel(stage)}降级失败`,
-      summary: '本步骤未正常完成，系统跳过后继续执行后续流程。',
+      title: pick(`${normalizeStageLabel(stage)}降级失败`, `${normalizeStageLabel(stage)} degraded`),
+      summary: pick(
+        '本步骤未正常完成，系统跳过后继续执行后续流程。',
+        'This step did not finish normally; the pipeline skipped it and continued.',
+      ),
       contentPreview: '',
       metrics: [],
       artifactRefs: [],
-      message: `${normalizeStageLabel(stage)}已降级失败：本步骤未正常完成，系统跳过后继续执行后续流程。`,
+      message: pick(
+        `${normalizeStageLabel(stage)}已降级失败：本步骤未正常完成，系统跳过后继续执行后续流程。`,
+        `${normalizeStageLabel(stage)} degraded: this step did not finish normally; the pipeline skipped it and continued.`,
+      ),
       metadata: {
         degraded_stage: stage,
-        degraded_reason: item?.reason || '未记录原因',
+        degraded_reason: item?.reason || pick('未记录原因', 'No reason recorded'),
       },
-      stateLabel: '降级失败',
+      stateLabel: pick('降级失败', 'Degraded'),
       stateClass: 'state-degraded',
+      brief: true,
       syntheticKey: `${stage}-${index}`,
     })
   })
@@ -644,12 +705,25 @@ function buildSyntheticBackendLines(chapter: ChapterRuntimeLogItem) {
       stage: 'token_budget',
       level: hasError ? 'warning' : 'info',
       kind: hasError ? 'error' : 'save',
-      title: hasError ? 'Token 预算记录失败' : (recordCount > 0 ? 'Token 预算已记录' : 'Token 预算无需记录'),
+      title: hasError
+        ? pick('Token 预算记录失败', 'Token budget recording failed')
+        : (recordCount > 0
+            ? pick('Token 预算已记录', 'Token budget recorded')
+            : pick('Token 预算无需记录', 'No token budget to record')),
       summary: hasError
-        ? `预算入账未成功，但章节生成结果已保留：${normalizeText(tokenBudgetUsage.error, 180)}`
+        ? pick(
+            `预算入账未成功，但章节生成结果已保留：${normalizeText(tokenBudgetUsage.error, 180)}`,
+            `Budget accounting failed, but the chapter output was kept: ${normalizeText(tokenBudgetUsage.error, 180)}`,
+          )
         : recordCount > 0
-          ? `已把本章候选生成的估算消耗写入预算账本：${formatNumber(totalTokens)} token，${formatCost(tokenBudgetUsage.estimated_cost)}。`
-          : '本章候选没有可估算的生成调用 token，因此没有新增预算记录。',
+          ? pick(
+              `已把本章候选生成的估算消耗写入预算账本：${formatNumber(totalTokens)} token，${formatCost(tokenBudgetUsage.estimated_cost)}。`,
+              `Estimated usage for this chapter's candidates was written to the budget ledger: ${formatNumber(totalTokens)} tokens, ${formatCost(tokenBudgetUsage.estimated_cost)}.`,
+            )
+          : pick(
+              '本章候选没有可估算的生成调用 token，因此没有新增预算记录。',
+              'No estimable generation tokens for this chapter, so no budget record was added.',
+            ),
       contentPreview: '',
       metrics: buildMetrics(
         {
@@ -661,10 +735,11 @@ function buildSyntheticBackendLines(chapter: ChapterRuntimeLogItem) {
         tokenBudgetUsage,
       ),
       artifactRefs: normalizeArtifactRefs(tokenBudgetUsage.usage_ids),
-      message: 'Token 预算已同步到生成日志',
+      message: pick('Token 预算已同步到生成日志', 'Token budget synced to the generation log'),
       metadata: tokenBudgetUsage,
-      stateLabel: hasError ? '需关注' : '已入账',
+      stateLabel: hasError ? pick('需关注', 'Needs attention') : pick('已入账', 'Recorded'),
       stateClass: hasError ? 'state-degraded' : '',
+      brief: false,
       syntheticKey: 'token-budget',
     })
   }
@@ -674,32 +749,43 @@ function buildSyntheticBackendLines(chapter: ChapterRuntimeLogItem) {
 
 function normalizeEvents(events: Array<Record<string, any>>): RuntimeLine[] {
   const sortedEvents = [...events]
-    .map(event => ({
-      at: event.at,
-      stage: event.stage,
-      level: event.level || 'info',
-      kind: String(event.kind || ''),
-      title: String(event.title || ''),
-      summary: String(event.summary || ''),
-      contentPreview: String(event.content_preview || ''),
-      metrics: [],
-      artifactRefs: normalizeArtifactRefs(event.artifact_refs),
-      message: String(event.message || ''),
-      metadata: {
-        ...(event.metadata && typeof event.metadata === 'object' ? event.metadata : {}),
-        ...(event.developer_detail && typeof event.developer_detail === 'object'
-          ? { developer_detail: event.developer_detail }
-          : {}),
-      },
-      stateLabel: event.level === 'warning' && /降级|跳过/i.test(String(event.message || ''))
-        ? (/跳过/i.test(String(event.message || '')) ? '已跳过' : '降级失败')
-        : '',
-      stateClass: event.level === 'warning' && /跳过/i.test(String(event.message || ''))
-        ? 'state-skip'
-        : event.level === 'warning' && /降级/i.test(String(event.message || ''))
-          ? 'state-degraded'
-          : '',
-    }))
+    .map(event => {
+      const rawMessage = String(event.message || '')
+      // 降级/跳过状态用内部枚举承载，展示文案与配色都从它派生，翻译后不会失配
+      const degradedKind: '' | 'skip' | 'degraded' = event.level === 'warning' && /降级|跳过/i.test(rawMessage)
+        ? (/跳过/i.test(rawMessage) ? 'skip' : 'degraded')
+        : ''
+      const stage = String(event.stage || '')
+      return {
+        at: event.at,
+        stage: event.stage,
+        level: event.level || 'info',
+        kind: String(event.kind || ''),
+        title: String(event.title || ''),
+        summary: String(event.summary || ''),
+        contentPreview: String(event.content_preview || ''),
+        metrics: [],
+        artifactRefs: normalizeArtifactRefs(event.artifact_refs),
+        message: rawMessage,
+        metadata: {
+          ...(event.metadata && typeof event.metadata === 'object' ? event.metadata : {}),
+          ...(event.developer_detail && typeof event.developer_detail === 'object'
+            ? { developer_detail: event.developer_detail }
+            : {}),
+        },
+        stateLabel: degradedKind === 'skip'
+          ? pick('已跳过', 'Skipped')
+          : degradedKind === 'degraded'
+            ? pick('降级失败', 'Degraded')
+            : '',
+        stateClass: degradedKind === 'skip'
+          ? 'state-skip'
+          : degradedKind === 'degraded'
+            ? 'state-degraded'
+            : '',
+        brief: isBriefWorthyEvent(stage, rawMessage, degradedKind),
+      }
+    })
     .sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')))
 
   let previousAt: number | null = null
@@ -786,7 +872,7 @@ async function fetchLogs(options: { silent?: boolean } = {}) {
     syncSelection()
     await restoreBackendConsoleScroll(shouldStickBottom)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '获取运行日志失败'
+    error.value = err instanceof Error ? err.message : pick('获取运行日志失败', 'Failed to load the runtime logs')
   } finally {
     if (!silent) loading.value = false
     else refreshing.value = false
@@ -812,7 +898,7 @@ function stopAutoRefresh() {
 }
 
 const formatDateTime = (value?: string | null) => {
-  if (!value) return '未记录'
+  if (!value) return pick('未记录', 'Not recorded')
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`
@@ -826,7 +912,9 @@ const formatDuration = (value?: number | null) => {
   const totalSeconds = Math.floor(value / 1000)
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds % 60
-  return minutes > 0 ? `${minutes} 分 ${seconds} 秒` : `${seconds} 秒`
+  return minutes > 0
+    ? pick(`${minutes} 分 ${seconds} 秒`, `${minutes} min ${seconds} s`)
+    : pick(`${seconds} 秒`, `${seconds} s`)
 }
 const buildSummaryEntries = (chapter: ChapterRuntimeLogItem) => {
   const runtime = chapter.runtime_snapshot || {}
@@ -839,19 +927,25 @@ const buildSummaryEntries = (chapter: ChapterRuntimeLogItem) => {
     asArray(foreshadowingTask.must_resolve).length +
     asArray(foreshadowingTask.should_reinforce).length +
     asArray(foreshadowingTask.avoid_forgetting).length
+  const notRecorded = pick('未记录', 'Not recorded')
   return [
-    { label: '开始时间', value: formatDateTime(chapter.started_at) },
-    { label: '最近更新', value: formatDateTime(chapter.updated_at) },
-    { label: '当前阶段', value: chapter.progress_stage || '未记录' },
-    { label: '评审状态', value: chapter.summary_snapshot.review_status || '未记录' },
-    { label: '目标字数', value: chapter.summary_snapshot.target_word_count || '未记录' },
-    { label: '实际字数', value: chapter.summary_snapshot.actual_word_count || chapter.word_count || '未记录' },
-    { label: '总耗时', value: chapter.summary_snapshot.pipeline_total_duration_ms ? formatDuration(chapter.summary_snapshot.pipeline_total_duration_ms) : '未记录' },
-    { label: 'Provider', value: preflight.active_profile_name || preflight.current_profile_name || preflight.reason || '未记录' },
-    { label: 'Token预算', value: budget.total_tokens ? `${formatNumber(budget.total_tokens)} token / ${formatCost(budget.estimated_cost)}` : '未记录' },
-    { label: '角色上下文', value: castPlan.planned_character_count ? `${castPlan.planned_character_count} 人计划 / ${asArray(castPlan.chapter_focus_names).length} 人聚焦` : '未记录' },
-    { label: '伏笔任务', value: foreshadowingCount ? `${foreshadowingCount} 项` : '未记录' },
-    { label: '最后错误', value: chapter.summary_snapshot.last_error_summary || '无' },
+    { label: pick('开始时间', 'Started at'), value: formatDateTime(chapter.started_at) },
+    { label: pick('最近更新', 'Last updated'), value: formatDateTime(chapter.updated_at) },
+    { label: pick('当前阶段', 'Current stage'), value: chapter.progress_stage || notRecorded },
+    { label: pick('评审状态', 'Review status'), value: chapter.summary_snapshot.review_status || notRecorded },
+    { label: pick('目标字数', 'Target words'), value: chapter.summary_snapshot.target_word_count || notRecorded },
+    { label: pick('实际字数', 'Actual words'), value: chapter.summary_snapshot.actual_word_count || chapter.word_count || notRecorded },
+    { label: pick('总耗时', 'Total duration'), value: chapter.summary_snapshot.pipeline_total_duration_ms ? formatDuration(chapter.summary_snapshot.pipeline_total_duration_ms) : notRecorded },
+    { label: 'Provider', value: preflight.active_profile_name || preflight.current_profile_name || preflight.reason || notRecorded },
+    { label: pick('Token预算', 'Token budget'), value: budget.total_tokens ? `${formatNumber(budget.total_tokens)} token / ${formatCost(budget.estimated_cost)}` : notRecorded },
+    { label: pick('角色上下文', 'Character context'), value: castPlan.planned_character_count
+      ? pick(
+          `${castPlan.planned_character_count} 人计划 / ${asArray(castPlan.chapter_focus_names).length} 人聚焦`,
+          `${castPlan.planned_character_count} planned / ${asArray(castPlan.chapter_focus_names).length} in focus`,
+        )
+      : notRecorded },
+    { label: pick('伏笔任务', 'Setup tasks'), value: foreshadowingCount ? pick(`${foreshadowingCount} 项`, `${foreshadowingCount} items`) : notRecorded },
+    { label: pick('最后错误', 'Last error'), value: chapter.summary_snapshot.last_error_summary || pick('无', 'None') },
   ]
 }
 

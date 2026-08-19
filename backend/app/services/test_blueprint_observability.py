@@ -41,11 +41,13 @@ from app.api.routers.novels import (
     _resolve_world_bible_timeout_seconds,
     _scan_longform_structure_gaps,
     _serialize_blueprint_job,
+    _schedule_persisted_blueprint_recovery_if_needed,
     _upsert_blueprint_job_record,
     _parse_expected_chapter_range,
     _validate_novel_outline_coherence,
     _validate_novel_outline_depth,
 )
+from app.api.routers import novels as novels_router
 from app.db.base import Base
 from app.models import BlueprintGenerationJob, NovelProject, User
 from app.models.novel import BlueprintCharacter, ChapterOutline, NovelBlueprint
@@ -4403,3 +4405,86 @@ async def test_load_latest_blueprint_job_falls_back_to_history_when_db_missing(m
     loaded = await _load_latest_blueprint_job("project-1", session=None)
 
     assert loaded == history_payload
+
+
+@pytest.mark.anyio
+async def test_blueprint_recovery_schedules_once(monkeypatch):
+    """重启后重复轮询不能为同一持久化任务重复创建 worker。"""
+    class Collector:
+        def __init__(self):
+            self.calls = []
+
+        def add_task(self, fn, *args):
+            self.calls.append((fn, args))
+
+    collector = Collector()
+    run_id = "recover-blueprint-once"
+    novels_router._BLUEPRINT_SCHEDULED_RUNS.discard(run_id)
+    await novels_router._schedule_blueprint_recovery(
+        run_id, "project-recover", 7, "chapter_outline", collector
+    )
+    await novels_router._schedule_blueprint_recovery(
+        run_id, "project-recover", 7, "chapter_outline", collector
+    )
+
+    assert len(collector.calls) == 1
+    assert collector.calls[0][1] == (run_id, "project-recover", 7, "chapter_outline")
+    novels_router._BLUEPRINT_SCHEDULED_RUNS.discard(run_id)
+
+
+@pytest.mark.anyio
+async def test_persisted_blueprint_recovery_is_scheduled_after_restart(monkeypatch):
+    """复用进程重启后的 queued/stale 任务时必须重新派发 worker。"""
+    class Collector:
+        def __init__(self):
+            self.calls = []
+
+        def add_task(self, fn, *args):
+            self.calls.append((fn, args))
+
+    collector = Collector()
+    run_id = "persisted-blueprint-restart"
+    scheduled = []
+
+    async def fake_runtime(run_id_arg, user_id):
+        return type("Runtime", (), {"status": "queued"})()
+
+    async def fake_schedule(run_id_arg, project_id, user_id, force_stage, background_tasks):
+        scheduled.append((run_id_arg, project_id, user_id, force_stage, background_tasks))
+
+    monkeypatch.setattr(novels_router, "_blueprint_runtime_task", fake_runtime)
+    monkeypatch.setattr(novels_router, "_schedule_blueprint_recovery", fake_schedule)
+    novels_router._BLUEPRINT_SCHEDULED_RUNS.discard(run_id)
+
+    await _schedule_persisted_blueprint_recovery_if_needed(
+        {
+            "run_id": run_id,
+            "project_id": "project-restart",
+            "force_stage": "chapter_outline",
+        },
+        project_id="project-restart",
+        user_id=7,
+        background_tasks=collector,
+    )
+
+    assert scheduled == [(run_id, "project-restart", 7, "chapter_outline", collector)]
+
+    async def live_runtime(run_id_arg, user_id):
+        return type("Runtime", (), {"status": "running"})()
+
+    monkeypatch.setattr(novels_router, "_blueprint_runtime_task", live_runtime)
+    await _schedule_persisted_blueprint_recovery_if_needed(
+        {"run_id": "live-blueprint", "force_stage": None},
+        project_id="project-restart",
+        user_id=7,
+        background_tasks=collector,
+    )
+    assert len(scheduled) == 1
+    novels_router._BLUEPRINT_SCHEDULED_RUNS.discard(run_id)
+
+
+def test_blueprint_recovery_worker_is_not_recursive():
+    """调度器必须把 worker 放入 BackgroundTasks，而不是再次调用自身。"""
+    source = novels_router._schedule_blueprint_recovery.__code__.co_names
+    assert "_run_blueprint_generation_job" in source
+    assert "_schedule_blueprint_recovery" not in source

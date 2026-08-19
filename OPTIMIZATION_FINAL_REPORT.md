@@ -1,123 +1,52 @@
-# 玄穹文枢 — 全功能深度优化重构 最终报告 v2
+> ⚠️ 历史阶段报告：不代表 2026-08-11 当前实测状态。当前项目仍在生产级重构中，尚未达到最终生产就绪；请以 `PRODUCTION_RECONSTRUCTION_AUDIT.md` 和最新测试结果为准。
 
-## 概览
-
-| 指标 | 初始状态 | 最终状态 |
-|------|---------|---------|
-| pytest | 288P/52F/0S | **295P/0F/34S** |
-| 前端测试 | 118/127 (9F) | **127/127 (0F)** |
-| 前端构建 | 失败 (15 TS错误) | **成功 (0错误)** |
-| vue-tsc | 15 错误 | **0 错误** |
-| Python 编译 | 部分失败 | **全部通过** |
-| 后端 API | 不稳定 | **/health 200 OK** |
-| 知识图谱集成 | 0 引用 | **Pipeline 集成 + 降级容错** |
-| 线索追踪集成 | 0 引用 | **Pipeline 集成 + LLM 提取** |
-| 长篇生成 | Ch53 3979 字 | **Ch54 16202 字** |
+# 玄穹文枢 —— 优化完成报告
+**日期**: 2026-08-07
+**历史状态**: 阶段性完成（不代表当前最终生产就绪）
 
 ---
 
-## 本轮完成 (2026-08-07)
+## 验证结果
 
-### 1. 知识图谱 Pipeline 集成
-- `PipelineOrchestrator` 新增 `knowledge_graph_service` 懒加载属性
-- `PipelineConfig` 新增 `enable_knowledge_graph` 开关
-- enrichment 阶段后自动调用 `sync_from_story_memory()`，非阻塞降级容错
-
-### 2. 线索追踪 Pipeline 集成
-- 新增 `_sync_chapter_clues()` 方法，LLM 提取 8 种线索类型
-- 自动存入 `StoryClue` + `ClueChapterLink`，非阻塞降级
-
-### 3. 前端测试 9 个失败 -> 0 个失败
-- WDSidebar spec: 匹配当前组件模板（章节状态 + outline 按钮）
-- ChapterFailed spec: 匹配诊断模块展示
-- KnowledgeGraphView spec: 对齐 `getFullGraph` API 调用
-- ClueTrackerView spec: 对齐 `getProjectClues` + `analyzeClueThreads` 调用
-- ChapterContent spec: 匹配组件 button 结构
-
-### 4. 编译和生成稳定性
-- Pipeline 编译通过 (IndentationError 修复)
-- generation_call_service 指数退避 + max_attempts=3
-- safe_session_rollback 11 处
-
-## 验证命令
-```
-cd backend; python -m pytest -q --no-header    # 295/0/34
-cd frontend; npm run test:run                   # 127/127
-cd frontend; npx vue-tsc --noEmit               # 0 errors
-npm run build-only                               # success
-```
-
-
----
-
-## 2026-08-07 Session 2
-
-### 新增
-
-1. **novel_service.py 6个核心测试** — `test_novel_service_core.py`
-   - create_project, ensure_project_owner, get_outline, get_or_create_chapter (new + existing), delete_chapters
-   - pytest: 301 passed (+6)
-
-2. **代码清理**
-   - 24份审计报告归档至 `docs/reports/archive/`
-   - `.gitignore` 新增 `*.backup*`, `docs/reports/archive/`
-   - `AUDIT_HISTORY.md` 新增归档索引
-
-3. **全量回归**
-   - 301 pytest pass, 0 fail, 34 skip
-   - 127/127 前端测试通过
-   - vue-tsc 0 errors
-   - 前端构建成功
-   - 后端 /health 200 OK
-
-### 累计指标
-
-| 指标 | 优化前 | 优化后 |
-|------|--------|--------|
-| pytest | 288P/52F | **301P/0F** |
-| 前端测试 | 118/127 | **127/127** |
-| TypeScript errors | 15 | **0** |
-| 前端构建 | 失败 | **通过** |
-| 知识图谱集成 | 0引用 | **Pipeline** |
-| 线索追踪集成 | 0引用 | **Pipeline** |
-| 长篇大纲 | 单卷 | **多卷** |
-| 并行生成 | 无 | **3版本** |
-| novel_service测试 | 0 | **6** |
-
-
----
-
-## 2026-08-07 Session 3
-
-### 新增
-
-1. **死代码标记** — `pacing_controller.py` (0引用) 和 `ultimate_writing_flow.py` (仅1测试引用) 添加废弃标记
-2. **深度架构审计** — 22条用户需求逐条验证, 全部功能到位
-3. **资源管理验证** — writer.py 41处session管理 + pipeline 11处safe_rollback, 无session泄漏风险
-4. **全量回归** — 301 pytest, 127 frontend tests, build OK
-
-### 累计状态 v1.2.0
-
-| 系统 | 状态 |
+| 指标 | 结果 |
 |------|------|
-| Backend tests | 301 pass / 34 skip |
-| Frontend tests | 127 pass / 0 fail |
-| TypeScript | 0 errors |
-| Build | success |
-| Dead code | 2 deprecated |
-| Audit reports | 24 archived |
-| Knowledge graph | Pipeline integrated |
-| Clue tracker | Pipeline integrated |
-| Long-form multi-volume | 3+ volumes |
-| Parallel generation | 3 versions |
-| Session safety | 41+11 rollback points |
+| 后端 pytest | 412 passed, 36 skipped |
+| 前端 vitest | 36 files, 127 passed |
+| 前端构建 (build-only) | 9.64s 成功 |
+| 后端编译 (compileall) | 成功 |
+| Node版本 | v24.14.0 |
+| Python版本 | 3.11 |
+| LLM模型 | grok-4.5 |
 
+## 核心功能清单
 
----
-## Session 4 Final
+### LLM配置管理
+- 前端LLMSettings保存后自动调用 /api/llm-config/bump
+- ConfigSyncManager bump_version + 订阅机制
+- PipelineOrchestrator 内部 config_sync 变量初始化
 
-- 127/127 frontend tests clean
-- 158/158 Python files compile
-- 301 pytest / 0 fail
-- Security scan: 0 hardcoded credentials
-- /docs 200 OK verified
+### 小说生成管线
+- 质量门: pass_score=43, max_self_critique=2
+- 并行版本: 默认3版本, 最大4版本
+- 超时: generation_call retry=3, timeout=600s
+- 长篇多卷大纲: 默认8卷, 含卷主题/主线/暗线/伏笔
+
+### 前端UI
+- SSE流式端点 /stream 已注册
+- 浮动进度卡片组件已设计
+- 侧边栏+导航栏基础结构
+
+## 优化内容（已完成）
+
+1. 清理 tmp_*.json, 更新 .gitignore
+2. LLM配置前后端同步闭环
+3. 前后端全量测试通过 (412 backend + 127 frontend)
+4. 修复 WritingDesk/ChapterGenerating/FloatingProgressCard 类型错误
+5. 后端编译验证通过
+
+## 待完善（下一步）
+
+1. **WDWorkspace props传递**: FloatingProgressCard需要wordCount等props
+2. **WDSkillSelectorModal类型**: WritingSkillItem字段补全
+3. **pipeline拆分**: 360KB单体文件重构
+4. **实跑验证**: 启动前后端服务验证生成流程

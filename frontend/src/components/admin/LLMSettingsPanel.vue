@@ -4,8 +4,11 @@
       <template #header>
         <div class="admin-section-head">
           <div>
-            <h2>LLM 配置</h2>
-            <p>保持在管理台内部的同级页面，不再跳转到独立页面。保留真实配置能力，同时压缩多余的视觉包装。</p>
+            <h2>{{ pick('LLM 配置', 'LLM configuration') }}</h2>
+            <p>{{ pick(
+              '保持在管理台内部的同级页面，不再跳转到独立页面。保留真实配置能力，同时压缩多余的视觉包装。',
+              'This stays a peer page inside the admin console instead of navigating away — full configuration power, less visual wrapping.'
+            ) }}</p>
           </div>
         </div>
       </template>
@@ -17,6 +20,9 @@
 <script setup lang="ts">
 import { NCard } from 'naive-ui'
 import LLMSettings from '../LLMSettings.vue'
+import { useLocale } from '@/composables/useLocale'
+
+const { pick } = useLocale()
 </script>
 
 <style scoped>

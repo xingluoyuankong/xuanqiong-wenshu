@@ -4,21 +4,21 @@
     <header class="blueprint-confirm__hero">
       <div class="blueprint-confirm__copy">
         <div class="blueprint-confirm__badges">
-          <span>蓝图确认</span>
-          <span :class="isGenerating ? 'is-running' : 'is-ready'">{{ isGenerating ? '后台生成中' : '准备就绪' }}</span>
-          <span>长等待提醒 {{ Math.floor(longWaitNoticeSeconds / 60) }} 分钟</span>
-          <span v-if="isGenerating">已等待 {{ elapsedSeconds }} 秒</span>
+          <span>{{ pick('蓝图确认', 'Blueprint confirmation') }}</span>
+          <span :class="isGenerating ? 'is-running' : 'is-ready'">{{ isGenerating ? pick('后台生成中', 'Generating in background') : pick('准备就绪', 'Ready') }}</span>
+          <span>{{ pick(`长等待提醒 ${Math.floor(longWaitNoticeSeconds / 60)} 分钟`, `Long-wait notice after ${Math.floor(longWaitNoticeSeconds / 60)} min`) }}</span>
+          <span v-if="isGenerating">{{ pick(`已等待 ${elapsedSeconds} 秒`, `Waited ${elapsedSeconds}s`) }}</span>
         </div>
         <h2>{{ heroTitle }}</h2>
         <p>{{ heroDescription }}</p>
       </div>
 
       <div class="blueprint-confirm__actions">
-        <XqButton variant="ghost" :disabled="isGenerating" @click="emit('back')">返回补充</XqButton>
-        <XqButton v-if="isGenerating" variant="secondary" @click="cancelBlueprint">取消生成</XqButton>
-        <XqButton v-if="isGenerating" variant="secondary" loading disabled>正在生成</XqButton>
+        <XqButton variant="ghost" :disabled="isGenerating" @click="emit('back')">{{ pick('返回补充', 'Back to add more') }}</XqButton>
+        <XqButton v-if="isGenerating" variant="secondary" @click="cancelBlueprint">{{ pick('取消生成', 'Cancel generation') }}</XqButton>
+        <XqButton v-if="isGenerating" variant="secondary" loading disabled>{{ pick('正在生成', 'Generating') }}</XqButton>
         <XqButton v-else :disabled="!hasAiMessage" @click="generateBlueprint">
-          {{ hasAiMessage ? '确认蓝图并生成大纲' : '等待可确认内容' }}
+          {{ hasAiMessage ? pick('确认蓝图并生成大纲', 'Confirm the blueprint and generate the outline') : pick('等待可确认内容', 'Waiting for content to confirm') }}
         </XqButton>
       </div>
     </header>
@@ -36,10 +36,16 @@
 
     <div class="blueprint-confirm__body">
       <main class="blueprint-confirm__main">
-        <XqPanel title="即将用于生成蓝图的确认内容" subtitle="请确认下面内容已经表达了你的故事方向；如有遗漏，先返回灵感对话补充。">
-          <template #kicker>确认材料</template>
+        <XqPanel
+          :title="pick('即将用于生成蓝图的确认内容', 'Content that will be used to generate the blueprint')"
+          :subtitle="pick(
+            '请确认下面内容已经表达了你的故事方向；如有遗漏，先返回灵感对话补充。',
+            'Check that the text below captures your story direction. If anything is missing, go back to the inspiration chat first.'
+          )"
+        >
+          <template #kicker>{{ pick('确认材料', 'Confirmation material') }}</template>
           <template #actions>
-            <span class="blueprint-confirm__state">{{ hasAiMessage ? '可生成' : '待补充' }}</span>
+            <span class="blueprint-confirm__state">{{ hasAiMessage ? pick('可生成', 'Ready to generate') : pick('待补充', 'Needs more input') }}</span>
           </template>
           <div class="blueprint-confirm__markdown-shell">
             <div class="blueprint-markdown" v-html="renderedAiMessage"></div>
@@ -47,7 +53,7 @@
         </XqPanel>
 
         <XqPanel v-if="isGenerating" class="blueprint-confirm__progress" :title="loadingText" :subtitle="progressHint">
-          <template #kicker>后台任务</template>
+          <template #kicker>{{ pick('后台任务', 'Background task') }}</template>
           <div class="blueprint-confirm__progress-row">
             <div class="blueprint-confirm__ring" :class="{ 'is-complete': progress >= 100 }" :style="{ '--progress': progress }">
               <span>{{ Math.round(progress) }}%</span>
@@ -56,14 +62,14 @@
               <div class="blueprint-confirm__track">
                 <div :style="{ width: `${progress}%` }"></div>
               </div>
-              <p class="blueprint-confirm__task-log-current">{{ currentProgressMessage }}</p>
+              <p class="blueprint-confirm__task-log-current">{{ currentProgressText }}</p>
               <div class="blueprint-confirm__chips">
-                <span>整理访谈</span>
-                <span>世界骨架</span>
-                <span>总纲骨架</span>
-                <span>总纲细化</span>
-                <span>章节分批</span>
-                <span>保存结果</span>
+                <span>{{ pick('整理访谈', 'Digest interview') }}</span>
+                <span>{{ pick('世界骨架', 'World skeleton') }}</span>
+                <span>{{ pick('总纲骨架', 'Master outline skeleton') }}</span>
+                <span>{{ pick('总纲细化', 'Master outline detailing') }}</span>
+                <span>{{ pick('章节分批', 'Chapter batching') }}</span>
+                <span>{{ pick('保存结果', 'Save result') }}</span>
               </div>
               <ul v-if="progressLogs.length" class="blueprint-confirm__task-log-list">
                 <li v-for="(log, index) in progressLogs" :key="`${index}-${log}`">{{ log }}</li>
@@ -74,15 +80,15 @@
 
         <XqPanel v-else tone="glass" :title="nextStepTitle" :subtitle="nextStepSubtitle">
           <div class="blueprint-confirm__next">
-            <strong>生成完成后</strong>
+            <strong>{{ pick('生成完成后', 'After generation finishes') }}</strong>
             <span>{{ nextStepDescription }}</span>
           </div>
         </XqPanel>
       </main>
 
       <aside class="blueprint-confirm__side">
-        <XqPanel tone="ink" title="生成前检查清单">
-          <template #kicker>质量闸门</template>
+        <XqPanel tone="ink" :title="pick('生成前检查清单', 'Pre-generation checklist')">
+          <template #kicker>{{ pick('质量闸门', 'Quality gate') }}</template>
           <div class="blueprint-confirm__checklist">
             <article v-for="item in preflightItems" :key="item.title">
               <strong>{{ item.title }}</strong>
@@ -91,8 +97,8 @@
           </div>
         </XqPanel>
 
-        <XqPanel title="蓝图生成流程">
-          <template #kicker>流程</template>
+        <XqPanel :title="pick('蓝图生成流程', 'Blueprint generation flow')">
+          <template #kicker>{{ pick('流程', 'Flow') }}</template>
           <div class="blueprint-confirm__flow">
             <article v-for="(step, index) in flowSteps" :key="step.title">
               <span>{{ index + 1 }}</span>
@@ -112,6 +118,7 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useNovelStore } from '@/stores/novel'
 import { globalAlert } from '@/composables/useAlert'
+import { useLocale } from '@/composables/useLocale'
 import { renderSafeMarkdown } from '@/utils/safeMarkdown'
 import { XqButton, XqPanel, XqStatCard } from '@/shared/ui'
 import type { BlueprintGenerationJobResponse } from '@/api/novel'
@@ -130,124 +137,181 @@ const emit = defineEmits<{
 }>()
 
 const novelStore = useNovelStore()
+const { pick } = useLocale()
 const isGenerating = ref(false)
 const progress = ref(0)
 const timeElapsed = ref(0)
-const currentProgressMessage = ref('后台任务已启动，正在等待首条进度日志…')
+const currentProgressMessage = ref('')
 const progressLogs = ref<string[]>([])
 const longWaitNoticeSeconds = 900
 let progressTimer: ReturnType<typeof setInterval> | null = null
 let timeoutTimer: ReturnType<typeof setTimeout> | null = null
 let cancelRequested = false
 const longWaitNotified = ref(false)
-const chapterOutlineBatchLabel = computed(() => '首批可执行章节大纲')
+const chapterOutlineBatchLabel = computed(() => pick('首批可执行章节大纲', 'the first batch of executable chapter outlines'))
+
+// 首条后端进度日志到达前的占位文案；后端下发的 progress_message 是数据，不翻译
+const currentProgressText = computed(() => currentProgressMessage.value || pick(
+  '后台任务已启动，正在等待首条进度日志…',
+  'The background task has started — waiting for the first progress log…'
+))
 
 const preflightItems = computed(() => [
-  { title: '方向清楚', desc: '核心卖点、主角欲望、冲突压力已经说清楚。' },
   {
-    title: isChapterOutlineStage.value ? '继续拆章' : '先看总纲',
-    desc: isChapterOutlineStage.value
-      ? `这一轮会基于已确认的小说总大纲，继续细化出${chapterOutlineBatchLabel.value}。`
-      : '这一轮先产出全书级小说总大纲，不会直接跳到章节大纲。',
+    title: pick('方向清楚', 'Clear direction'),
+    desc: pick('核心卖点、主角欲望、冲突压力已经说清楚。', 'The core hook, the protagonist’s desire, and the conflict pressure are all stated.'),
   },
-  { title: '允许等待', desc: '该任务已改为后台轮询；等待期间不要关闭服务。' },
+  {
+    title: isChapterOutlineStage.value ? pick('继续拆章', 'Continue chapter breakdown') : pick('先看总纲', 'Master outline first'),
+    desc: isChapterOutlineStage.value
+      ? pick(
+          `这一轮会基于已确认的小说总大纲，继续细化出${chapterOutlineBatchLabel.value}。`,
+          `This round builds on the confirmed master outline to detail ${chapterOutlineBatchLabel.value}.`
+        )
+      : pick(
+          '这一轮先产出全书级小说总大纲，不会直接跳到章节大纲。',
+          'This round produces the book-level master outline first; it does not jump straight to chapter outlines.'
+        ),
+  },
+  {
+    title: pick('允许等待', 'Expect some waiting'),
+    desc: pick('该任务已改为后台轮询；等待期间不要关闭服务。', 'This task now runs as a polled background job — keep the service running while you wait.'),
+  },
 ])
 
 const flowSteps = computed(() => [
-  { title: '启动任务', desc: '前端只负责启动并轮询，不再让请求长时间挂起。' },
   {
-    title: isChapterOutlineStage.value ? '生成章节大纲' : '生成总纲',
-    desc: isChapterOutlineStage.value
-      ? '后端会复用已确认的世界骨架与小说总大纲，按批次生成并润色章节大纲。'
-      : '后端整理访谈、补齐蓝图结构，并先生成小说总大纲。',
+    title: pick('启动任务', 'Start the task'),
+    desc: pick('前端只负责启动并轮询，不再让请求长时间挂起。', 'The frontend only starts and polls the job instead of holding a long-running request.'),
   },
   {
-    title: '继续细化',
+    title: isChapterOutlineStage.value ? pick('生成章节大纲', 'Generate chapter outlines') : pick('生成总纲', 'Generate the master outline'),
     desc: isChapterOutlineStage.value
-      ? `成功后回到蓝图展示页，你可以直接检查${chapterOutlineBatchLabel.value}并进入写作台。`
-      : '成功后进入蓝图展示页；你确认总纲后，再继续生成章节大纲。',
+      ? pick(
+          '后端会复用已确认的世界骨架与小说总大纲，按批次生成并润色章节大纲。',
+          'The backend reuses the confirmed world skeleton and master outline, then generates and polishes chapter outlines in batches.'
+        )
+      : pick(
+          '后端整理访谈、补齐蓝图结构，并先生成小说总大纲。',
+          'The backend digests the interview, fills in the blueprint structure, and produces the master outline first.'
+        ),
+  },
+  {
+    title: pick('继续细化', 'Keep refining'),
+    desc: isChapterOutlineStage.value
+      ? pick(
+          `成功后回到蓝图展示页，你可以直接检查${chapterOutlineBatchLabel.value}并进入写作台。`,
+          `On success you return to the blueprint page, where you can review ${chapterOutlineBatchLabel.value} and move on to the writing desk.`
+        )
+      : pick(
+          '成功后进入蓝图展示页；你确认总纲后，再继续生成章节大纲。',
+          'On success you land on the blueprint page; once you confirm the master outline, chapter outlines come next.'
+        ),
   },
 ])
 
 const heroTitle = computed(() => (
-  isChapterOutlineStage.value ? '确认当前总纲，继续生成章节大纲。' : '确认故事方向，先生成小说总大纲。'
+  isChapterOutlineStage.value
+    ? pick('确认当前总纲，继续生成章节大纲。', 'Confirm the current master outline and continue with chapter outlines.')
+    : pick('确认故事方向，先生成小说总大纲。', 'Confirm the story direction and generate the master outline first.')
 ))
 
 const heroDescription = computed(() => (
   isChapterOutlineStage.value
-    ? `系统会基于已确认的世界骨架与小说总大纲，按蓝图长度契约继续拆解${chapterOutlineBatchLabel.value}。生成过程仍采用后台任务，可取消、可轮询、可恢复失败态。`
-    : '系统会先基于已确认的蓝图材料生成全书级小说总大纲；章节大纲会在你确认总大纲后再继续生成。生成过程已改为后台任务，可取消、可轮询、可恢复失败态。'
+    ? pick(
+        `系统会基于已确认的世界骨架与小说总大纲，按蓝图长度契约继续拆解${chapterOutlineBatchLabel.value}。生成过程仍采用后台任务，可取消、可轮询、可恢复失败态。`,
+        `Using the confirmed world skeleton and master outline, the system breaks down ${chapterOutlineBatchLabel.value} according to the blueprint length contract. Generation still runs as a background task: cancellable, pollable, and recoverable from failure.`
+      )
+    : pick(
+        '系统会先基于已确认的蓝图材料生成全书级小说总大纲；章节大纲会在你确认总大纲后再继续生成。生成过程已改为后台任务，可取消、可轮询、可恢复失败态。',
+        'The system first generates the book-level master outline from the confirmed blueprint material; chapter outlines follow once you confirm it. Generation now runs as a background task: cancellable, pollable, and recoverable from failure.'
+      )
 ))
 
-const nextStepTitle = computed(() => (isChapterOutlineStage.value ? '下一步会发生什么' : '下一步会发生什么'))
+const nextStepTitle = computed(() => pick('下一步会发生什么', 'What happens next'))
 const nextStepSubtitle = computed(() => (
   isChapterOutlineStage.value
-    ? '系统会启动后台任务，直接基于当前小说总大纲继续生成章节大纲。'
-    : '确认后系统会启动后台任务，先生成小说总大纲，再进入蓝图展示页。'
+    ? pick(
+        '系统会启动后台任务，直接基于当前小说总大纲继续生成章节大纲。',
+        'The system starts a background task that continues straight from the current master outline into chapter outlines.'
+      )
+    : pick(
+        '确认后系统会启动后台任务，先生成小说总大纲，再进入蓝图展示页。',
+        'Once confirmed, the system starts a background task, generates the master outline, and then opens the blueprint page.'
+      )
 ))
 const nextStepDescription = computed(() => (
   isChapterOutlineStage.value
-    ? `你可以直接检查${chapterOutlineBatchLabel.value}；确认无误后就进入写作台。`
-    : '你可以先检查世界观、人物关系和小说总大纲，确认无误后再继续生成章节大纲。'
+    ? pick(
+        `你可以直接检查${chapterOutlineBatchLabel.value}；确认无误后就进入写作台。`,
+        `You can review ${chapterOutlineBatchLabel.value} directly, then head to the writing desk once everything looks right.`
+      )
+    : pick(
+        '你可以先检查世界观、人物关系和小说总大纲，确认无误后再继续生成章节大纲。',
+        'Review the world setting, character relations, and master outline first; generate chapter outlines once everything looks right.'
+      )
 ))
 
 const confirmationStats = computed(() => [
   {
-    label: '当前状态',
-    value: isGenerating.value ? '生成中' : (hasAiMessage.value ? '待确认' : '待补充'),
-    hint: isGenerating.value ? '后台任务轮询中' : (hasAiMessage.value ? '确认后启动后台任务' : '先返回补充灵感内容'),
+    label: pick('当前状态', 'Current status'),
+    value: isGenerating.value
+      ? pick('生成中', 'Generating')
+      : (hasAiMessage.value ? pick('待确认', 'Awaiting confirmation') : pick('待补充', 'Needs more input')),
+    hint: isGenerating.value
+      ? pick('后台任务轮询中', 'Polling the background task')
+      : (hasAiMessage.value
+          ? pick('确认后启动后台任务', 'Confirming starts the background task')
+          : pick('先返回补充灵感内容', 'Go back and add more inspiration first')),
   },
   {
-    label: '生成模式',
-    value: '后台轮询',
-    hint: '支持取消、失败恢复和状态查询',
+    label: pick('生成模式', 'Generation mode'),
+    value: pick('后台轮询', 'Background polling'),
+    hint: pick('支持取消、失败恢复和状态查询', 'Supports cancellation, failure recovery, and status queries'),
   },
   {
-    label: '已等待',
+    label: pick('已等待', 'Waited'),
     value: isGenerating.value ? `${elapsedSeconds.value}s` : '—',
-    hint: '长时间生成只提醒，不会自动取消后台任务',
+    hint: pick('长时间生成只提醒，不会自动取消后台任务', 'A long run only triggers a notice — the background task is never cancelled automatically'),
   },
   {
-    label: '下一步',
-    value: '蓝图展示',
-    hint: '检查蓝图后进入正文生成',
+    label: pick('下一步', 'Next step'),
+    value: pick('蓝图展示', 'Blueprint view'),
+    hint: pick('检查蓝图后进入正文生成', 'Review the blueprint, then generate the draft'),
   },
 ])
 
 const hasAiMessage = computed(() => optionalText(props.aiMessage).length > 0)
-const renderedAiMessage = ref('<p class="text-sm leading-6 text-slate-500">暂无可确认内容，请返回对话补充后再试。</p>')
-
-const renderAiMessage = (raw: string) => {
-  if (!raw) {
-    renderedAiMessage.value = '<p class="text-sm leading-6 text-slate-500">暂无可确认内容，请返回对话补充后再试。</p>'
-    return
-  }
-  renderedAiMessage.value = renderSafeMarkdown(raw)
-}
-
-watch(
-  () => optionalText(props.aiMessage),
-  (value) => {
-    renderAiMessage(value)
-  },
-  { immediate: true },
-)
+const emptyAiMessageHtml = () => `<p class="text-sm leading-6 text-slate-500">${pick(
+  '暂无可确认内容，请返回对话补充后再试。',
+  'There is nothing to confirm yet — go back to the chat, add more, and try again.'
+)}</p>`
+const renderedAiMessage = computed(() => {
+  const raw = optionalText(props.aiMessage)
+  return raw ? renderSafeMarkdown(raw) : emptyAiMessageHtml()
+})
 
 const loadingText = computed(() => {
-  if (progress.value >= 100) return '小说总大纲已完成，正在准备切换页面'
-  if (longWaitNotified.value) return '生成耗时较长，后台任务仍在继续执行'
-  if (currentProgressMessage.value) return currentProgressMessage.value
-  if (progress.value >= 75) return '正在保存蓝图与总纲结构'
-  if (progress.value >= 40) return '正在生成蓝图结构与小说总大纲'
-  return '正在启动并整理蓝图核心信息'
+  if (progress.value >= 100) return pick('小说总大纲已完成，正在准备切换页面', 'The master outline is done — preparing to switch pages')
+  if (longWaitNotified.value) return pick('生成耗时较长，后台任务仍在继续执行', 'This is taking a while, but the background task is still running')
+  if (currentProgressText.value) return currentProgressText.value
+  if (progress.value >= 75) return pick('正在保存蓝图与总纲结构', 'Saving the blueprint and master outline structure')
+  if (progress.value >= 40) return pick('正在生成蓝图结构与小说总大纲', 'Generating the blueprint structure and master outline')
+  return pick('正在启动并整理蓝图核心信息', 'Starting up and organizing the blueprint essentials')
 })
 
 const progressHint = computed(() => {
-  if (progress.value >= 100) return '生成完成后会自动切换到蓝图展示页。'
-  if (longWaitNotified.value) return '当前只是前端等待时间较长；后台任务没有被自动中断。'
-  if (progress.value >= 75) return '系统正在写入项目蓝图和小说总大纲，并准备更新项目状态。'
-  if (progress.value >= 40) return '当前阶段会补齐世界设定、人物关系、故事弧，并生成全书级小说总大纲。'
-  return '任务已经后台化；页面会持续轮询任务状态。'
+  if (progress.value >= 100) return pick('生成完成后会自动切换到蓝图展示页。', 'You will be taken to the blueprint page automatically once generation finishes.')
+  if (longWaitNotified.value) return pick('当前只是前端等待时间较长；后台任务没有被自动中断。', 'Only the frontend wait is long — the background task has not been interrupted.')
+  if (progress.value >= 75) return pick(
+    '系统正在写入项目蓝图和小说总大纲，并准备更新项目状态。',
+    'The system is writing the project blueprint and master outline, and is about to update the project status.'
+  )
+  if (progress.value >= 40) return pick(
+    '当前阶段会补齐世界设定、人物关系、故事弧，并生成全书级小说总大纲。',
+    'This stage fills in the world setting, character relations, and story arcs, then produces the book-level master outline.'
+  )
+  return pick('任务已经后台化；页面会持续轮询任务状态。', 'The task runs in the background — this page keeps polling its status.')
 })
 
 const elapsedSeconds = computed(() => Math.ceil(timeElapsed.value))
@@ -273,9 +337,10 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const extractJobError = (status: BlueprintGenerationJobResponse): string => {
   const rawError = status.error
-  if (!rawError) return status.progress_message || '蓝图生成失败，请稍后重试'
+  const fallback = pick('蓝图生成失败，请稍后重试', 'Blueprint generation failed — please retry later')
+  if (!rawError) return status.progress_message || fallback
   if (typeof rawError === 'string') return rawError
-  return rawError.detail || rawError.message || status.progress_message || '蓝图生成失败，请稍后重试'
+  return rawError.detail || rawError.message || status.progress_message || fallback
 }
 
 const pushProgressLog = (message: string) => {
@@ -292,6 +357,7 @@ const resolveProgressFromMessage = (message: string, status: BlueprintGeneration
   if (status === 'successful') return 100
   if (status === 'cancelled' || status === 'failed') return progress.value
   if (!text) return status === 'polishing' ? 72 : 24
+  // 以下是对后端下发 progress_message 的中文匹配刻度表，属于数据比较值，不能翻译
   if (text.includes('整理灵感访谈')) return 16
   if (text.includes('锁定设定')) return 24
   if (text.includes('设定锁定包')) return 32
@@ -328,18 +394,18 @@ const pollBlueprintJob = async (initialStatus: BlueprintGenerationJobResponse) =
   }
 
   if (cancelRequested || status.status === 'cancelled') {
-    throw new Error('蓝图生成已取消')
+    throw new Error(pick('蓝图生成已取消', 'Blueprint generation was cancelled'))
   }
   if (status.status === 'failed') {
     throw new Error(extractJobError(status))
   }
   if (status.status !== 'successful' || !status.blueprint) {
-    throw new Error(status.progress_message || '蓝图任务未返回有效结果')
+    throw new Error(status.progress_message || pick('蓝图任务未返回有效结果', 'The blueprint task returned no usable result'))
   }
 
   return {
     blueprint: status.blueprint,
-    ai_message: status.ai_message || '蓝图已生成，请确认后进入写作阶段。',
+    ai_message: status.ai_message || pick('蓝图已生成，请确认后进入写作阶段。', 'The blueprint is ready — confirm it to move on to writing.'),
   }
 }
 
@@ -351,7 +417,7 @@ const generateBlueprint = async () => {
   longWaitNotified.value = false
   progress.value = 0
   timeElapsed.value = 0
-  currentProgressMessage.value = '后台任务已启动，正在等待首条进度日志…'
+  currentProgressMessage.value = ''
   progressLogs.value = []
 
   progressTimer = setInterval(() => {
@@ -363,7 +429,13 @@ const generateBlueprint = async () => {
 
   timeoutTimer = setTimeout(() => {
     longWaitNotified.value = true
-    globalAlert.showInfo('蓝图生成耗时较长，但后台任务仍会继续执行，不会被前端自动取消。你可以继续等待，或手动点击“取消生成”。', '仍在生成')
+    globalAlert.showInfo(
+      pick(
+        '蓝图生成耗时较长，但后台任务仍会继续执行，不会被前端自动取消。你可以继续等待，或手动点击“取消生成”。',
+        'Blueprint generation is taking a while, but the background task keeps running and will not be cancelled automatically. Keep waiting, or click “Cancel generation” yourself.'
+      ),
+      pick('仍在生成', 'Still generating')
+    )
   }, longWaitNoticeSeconds * 1000)
 
   try {
@@ -377,12 +449,13 @@ const generateBlueprint = async () => {
     isGenerating.value = false
     emit('blueprintGenerated', response)
   } catch (error) {
-    console.error('生成蓝图失败:', error)
+    console.error(pick('生成蓝图失败:', 'Failed to generate the blueprint:'), error)
     clearTimers()
     isGenerating.value = false
+    const reason = error instanceof Error ? error.message : pick('未知错误', 'Unknown error')
     globalAlert.showError(
-      `生成蓝图失败：${error instanceof Error ? error.message : '未知错误'}`,
-      '生成失败',
+      pick(`生成蓝图失败：${reason}`, `Failed to generate the blueprint: ${reason}`),
+      pick('生成失败', 'Generation failed'),
     )
   }
 }
@@ -393,9 +466,16 @@ const cancelBlueprint = async () => {
   try {
     const status = await novelStore.cancelBlueprintGeneration()
     progress.value = Math.max(progress.value, 5)
-    globalAlert.showInfo(status.progress_message || '蓝图生成已取消', '已取消')
+    globalAlert.showInfo(
+      status.progress_message || pick('蓝图生成已取消', 'Blueprint generation was cancelled'),
+      pick('已取消', 'Cancelled')
+    )
   } catch (error) {
-    globalAlert.showError(`取消蓝图生成失败：${error instanceof Error ? error.message : '未知错误'}`, '取消失败')
+    const reason = error instanceof Error ? error.message : pick('未知错误', 'Unknown error')
+    globalAlert.showError(
+      pick(`取消蓝图生成失败：${reason}`, `Failed to cancel blueprint generation: ${reason}`),
+      pick('取消失败', 'Cancellation failed')
+    )
   } finally {
     clearTimers()
     isGenerating.value = false

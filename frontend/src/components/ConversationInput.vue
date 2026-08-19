@@ -1,18 +1,20 @@
-<template>
+﻿<template>
   <div class="ci-shell">
     <div v-if="loading || !uiControl" class="ci-loading">
       <div class="ci-loading__spinner"></div>
-      <p>正在准备下一轮问题...</p>
+      <p>{{ pick('正在准备下一轮问题...', 'Preparing the next round of questions…') }}</p>
     </div>
 
     <div v-else-if="isOptionControl" class="ci-stack">
       <section class="ci-section">
         <div class="ci-section__head">
           <div>
-            <p class="ci-section__eyebrow">优先做选择</p>
-            <h3>{{ isMultiChoiceControl ? '可以同时勾多个方向，再补一句你真正想要的效果。' : '先点最接近的方向，再补一句你真正想要的效果。' }}</h3>
+            <p class="ci-section__eyebrow">{{ pick('优先做选择', 'Choose first') }}</p>
+            <h3>{{ isMultiChoiceControl
+              ? pick('可以同时勾多个方向，再补一句你真正想要的效果。', 'Tick several directions at once, then add a line about the effect you actually want.')
+              : pick('先点最接近的方向，再补一句你真正想要的效果。', 'Pick the closest direction, then add a line about the effect you actually want.') }}</h3>
           </div>
-          <span class="ci-counter">已选 {{ selectedOptionIds.length }} 项</span>
+          <span class="ci-counter">{{ pick(`已选 ${selectedOptionIds.length} 项`, `${selectedOptionIds.length} selected`) }}</span>
         </div>
 
         <div class="ci-options">
@@ -25,7 +27,9 @@
             @click="toggleOption(option.id, option.label)"
           >
             <span class="ci-option__title">{{ option.label }}</span>
-            <span class="ci-option__hint">{{ isSelected(option.id) ? '已选择' : (isMultiChoiceControl ? '点击加入' : '点击选择') }}</span>
+            <span class="ci-option__hint">{{ isSelected(option.id)
+              ? pick('已选择', 'Selected')
+              : (isMultiChoiceControl ? pick('点击加入', 'Click to add') : pick('点击选择', 'Click to select')) }}</span>
           </button>
         </div>
       </section>
@@ -33,8 +37,11 @@
       <section class="ci-section ci-section--subtle">
         <div class="ci-section__head">
           <div>
-            <p class="ci-section__eyebrow">灵感快捷推荐</p>
-            <h3>不想手打时，先点几个灵感维度，把世界、人物和冲突先钉住。</h3>
+            <p class="ci-section__eyebrow">{{ pick('灵感快捷推荐', 'Quick inspiration prompts') }}</p>
+            <h3>{{ pick(
+              '不想手打时，先点几个灵感维度，把世界、人物和冲突先钉住。',
+              'When you would rather not type, tap a few inspiration angles to pin down the world, the characters, and the conflict.'
+            ) }}</h3>
           </div>
         </div>
 
@@ -51,18 +58,18 @@
         </div>
 
         <div class="ci-mini-actions">
-          <button type="button" class="ci-mini-btn" @click="selectAllOptions">{{ isMultiChoiceControl ? '全选' : '选第一项' }}</button>
-          <button type="button" class="ci-mini-btn" @click="invertSelection">{{ isMultiChoiceControl ? '反选' : '切换下一项' }}</button>
+          <button type="button" class="ci-mini-btn" @click="selectAllOptions">{{ isMultiChoiceControl ? pick('全选', 'Select all') : pick('选第一项', 'Select the first') }}</button>
+          <button type="button" class="ci-mini-btn" @click="invertSelection">{{ isMultiChoiceControl ? pick('反选', 'Invert selection') : pick('切换下一项', 'Switch to next') }}</button>
           <button
             type="button"
             class="ci-mini-btn"
             :disabled="!selectedOptionLabels.length"
             @click="appendSelectedOptionsToInput"
           >
-            把已选项写进输入框
+            {{ pick('把已选项写进输入框', 'Copy selection into the box') }}
           </button>
           <button type="button" class="ci-mini-btn" :disabled="!selectedOptionLabels.length" @click="clearSelection">
-            清空已选
+            {{ pick('清空已选', 'Clear selection') }}
           </button>
         </div>
 
@@ -74,12 +81,12 @@
       </section>
 
       <form class="ci-composer" @submit.prevent="handleOptionSubmit">
-        <label class="ci-composer__label" for="single-choice-input">补充说明</label>
+        <label class="ci-composer__label" for="single-choice-input">{{ pick('补充说明', 'Extra notes') }}</label>
         <textarea
           id="single-choice-input"
           ref="textInputRef"
           v-model="textInput"
-          :placeholder="uiControl.placeholder || '可以继续补充要求，也可以只发送已选项'"
+          :placeholder="uiControl.placeholder || pick('可以继续补充要求，也可以只发送已选项', 'Add more requirements, or just send what you selected')"
           class="ci-textarea"
           rows="3"
           @input="handleTextareaInput"
@@ -87,10 +94,12 @@
 
         <div class="ci-composer__footer">
           <p class="ci-composer__hint">
-            {{ isMultiChoiceControl ? '可以先组合几个方向，再补一句“为什么这样搭配”。' : '先选方向，再补一句“为什么这样选”通常更稳定。' }}
+            {{ isMultiChoiceControl
+              ? pick('可以先组合几个方向，再补一句“为什么这样搭配”。', 'Combine a few directions first, then add a line on why they fit together.')
+              : pick('先选方向，再补一句“为什么这样选”通常更稳定。', 'Picking a direction and then saying why usually gives steadier results.') }}
           </p>
           <button type="submit" class="ci-submit-btn" :disabled="!canSubmitSingleChoice">
-            发送这一轮
+            {{ pick('发送这一轮', 'Send this round') }}
           </button>
         </div>
       </form>
@@ -99,15 +108,15 @@
     <form v-else-if="uiControl.type === 'text_input'" class="ci-composer ci-composer--single" @submit.prevent="handleTextSubmit">
       <div class="ci-section__head">
         <div>
-          <p class="ci-section__eyebrow">直接补充</p>
-          <h3>这一轮没有选项，直接说你想要的内容就行。</h3>
+          <p class="ci-section__eyebrow">{{ pick('直接补充', 'Just describe it') }}</p>
+          <h3>{{ pick('这一轮没有选项，直接说你想要的内容就行。', 'No options this round — simply say what you want.') }}</h3>
         </div>
       </div>
 
       <textarea
         ref="textInputRef"
         v-model="textInput"
-        :placeholder="uiControl.placeholder || '请输入你的想法...'"
+        :placeholder="uiControl.placeholder || pick('请输入你的想法...', 'Type your idea…')"
         class="ci-textarea"
         rows="3"
         required
@@ -115,8 +124,8 @@
       ></textarea>
 
       <div class="ci-composer__footer">
-        <p class="ci-composer__hint">一句话也行，不需要一次性把所有设定写完。</p>
-        <button type="submit" class="ci-submit-btn" :disabled="!textInput.trim()">发送</button>
+        <p class="ci-composer__hint">{{ pick('一句话也行，不需要一次性把所有设定写完。', 'One sentence is fine — you do not have to write out every setting at once.') }}</p>
+        <button type="submit" class="ci-submit-btn" :disabled="!textInput.trim()">{{ pick('发送', 'Send') }}</button>
       </div>
     </form>
   </div>
@@ -124,6 +133,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import { useLocale } from '@/composables/useLocale'
 import type { UIControl } from '@/api/novel'
 
 interface Props {
@@ -136,23 +146,29 @@ const emit = defineEmits<{
   submit: [userInput: { id: string; value: string; selected_ids?: string[] } | null]
 }>()
 
+const { pick } = useLocale()
+
 const textInput = ref('')
 const textInputRef = ref<HTMLTextAreaElement>()
 const selectedOptionIds = ref<string[]>([])
 const selectedOptionLabels = ref<string[]>([])
 
-const inspirationQuickTags = [
-  '主角最想守住什么？',
-  '这个世界最反常的规则是什么？',
-  '生存压力来自哪里？',
-  '修炼或成长要付出什么代价？',
-  '文明秩序靠什么维持？',
-  '日常生活最依赖哪种资源？',
-  '海域 / 地理环境最危险的地方是什么？',
-  '主角会遇到什么阵营或同盟？',
-  '最想先保住的核心画面是什么？',
-  '这个世界最不能触碰的禁忌是什么？',
-]
+// 快捷推荐问句会被写进输入框并发给后端，属于用户文本；这里按界面语言给出对应语种的问句
+const inspirationQuickTags = computed(() => [
+  pick('主角最想守住什么？', 'What does the protagonist most want to protect?'),
+  pick('这个世界最反常的规则是什么？', 'What is the strangest rule of this world?'),
+  pick('生存压力来自哪里？', 'Where does the survival pressure come from?'),
+  pick('修炼或成长要付出什么代价？', 'What does cultivation or growth cost?'),
+  pick('文明秩序靠什么维持？', 'What holds this civilization’s order together?'),
+  pick('日常生活最依赖哪种资源？', 'Which resource does daily life depend on most?'),
+  pick('海域 / 地理环境最危险的地方是什么？', 'What is the most dangerous part of the seas or terrain?'),
+  pick('主角会遇到什么阵营或同盟？', 'Which factions or alliances will the protagonist meet?'),
+  pick('最想先保住的核心画面是什么？', 'Which core image do you most want to keep?'),
+  pick('这个世界最不能触碰的禁忌是什么？', 'What taboo must never be touched in this world?'),
+])
+
+// 拼接已选项时的分隔符：中文用全角逗号，英文用半角逗号加空格
+const joinSeparator = () => pick('，', ', ')
 
 const MIN_ROWS = 3
 const MAX_ROWS = 5
@@ -242,7 +258,7 @@ const appendQuickTag = (tag: string) => {
   if (!current) {
     textInput.value = tag
   } else if (!current.includes(tag)) {
-    textInput.value = `${current}，${tag}`
+    textInput.value = `${current}${joinSeparator()}${tag}`
   }
   nextTick(() => adjustTextareaHeight())
 }
@@ -253,7 +269,7 @@ const clearSelection = () => {
 }
 
 const appendSelectedOptionsToInput = () => {
-  const selectedText = selectedOptionLabels.value.join('，').trim()
+  const selectedText = selectedOptionLabels.value.join(joinSeparator()).trim()
   if (!selectedText) return
 
   const current = textInput.value.trim()
@@ -262,7 +278,7 @@ const appendSelectedOptionsToInput = () => {
 }
 
 const handleOptionSubmit = () => {
-  const selectedText = selectedOptionLabels.value.join('，')
+  const selectedText = selectedOptionLabels.value.join(joinSeparator())
   const manualText = textInput.value.trim()
   const combined = [selectedText, manualText].filter(Boolean).join('\n')
   if (!combined) return

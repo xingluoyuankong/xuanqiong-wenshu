@@ -48,13 +48,13 @@
     <main class="m3-main writing-desk-main min-h-0 flex-1 w-full px-1 pb-2 pt-1 sm:px-2 lg:px-3">
       <div v-if="novelStore.isLoading" class="skeleton-workspace writing-desk-loading h-full flex gap-3 px-2 pb-3 pt-2 sm:px-3 lg:px-4">
         <!-- Sidebar skeleton -->
-        <div class="skeleton-sidebar w-64 flex-shrink-0 rounded-2xl animate-pulse"></div>
+        <div class="skeleton-sidebar w-64 flex-shrink-0 rounded-lg animate-pulse"></div>
         <!-- Main area skeleton -->
         <div class="skeleton-main flex-1 min-w-0 flex flex-col gap-4">
           <!-- Header skeleton -->
-          <div class="skeleton-header h-14 rounded-2xl animate-pulse"></div>
+          <div class="skeleton-header h-14 rounded-lg animate-pulse"></div>
           <!-- Content skeleton -->
-          <div class="skeleton-content flex-1 rounded-2xl animate-pulse"></div>
+          <div class="skeleton-content flex-1 rounded-lg animate-pulse"></div>
         </div>
       </div>
 
@@ -65,9 +65,9 @@
               <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
             </svg>
           </div>
-          <h3 class="md-title-large mb-2" style="color: var(--md-on-surface);">加载失败</h3>
+          <h3 class="md-title-large mb-2" style="color: var(--md-on-surface);">{{ pick('加载失败', 'Load failed') }}</h3>
           <p class="md-body-medium mb-4" style="color: var(--md-error);">{{ novelStore.error }}</p>
-          <button @click="loadProject" class="md-btn md-btn-tonal md-ripple">重新加载</button>
+          <button @click="loadProject" class="md-btn md-btn-tonal md-ripple">{{ pick('重新加载', 'Reload') }}</button>
         </div>
       </div>
 
@@ -147,8 +147,8 @@
         <div class="md-dialog m3-shortcut-dialog">
           <div class="flex items-center justify-between mb-5 gap-4">
             <div>
-              <h3 class="md-title-large font-semibold">工作台快捷键</h3>
-              <p class="md-body-small md-on-surface-variant mt-1">支持自定义显示方案；当前快捷键会避免在输入框和编辑器里误触发。</p>
+              <h3 class="md-title-large font-semibold">{{ pick('工作台快捷键', 'Workspace shortcuts') }}</h3>
+              <p class="md-body-small md-on-surface-variant mt-1">{{ pick('支持自定义显示方案；当前快捷键会避免在输入框和编辑器里误触发。', 'Display schemes are customizable, and the shortcuts avoid firing inside inputs and editors.') }}</p>
             </div>
             <button class="md-icon-btn md-ripple" @click="showShortcutHelp = false">×</button>
           </div>
@@ -160,36 +160,36 @@
           </div>
           <div class="m3-shortcut-config">
             <div class="m3-shortcut-config__row">
-              <label>主动作</label>
-              <input v-model="shortcutConfig.primaryAction" class="md-text-field-input" type="text" placeholder="例如 Ctrl/Cmd + Enter">
+              <label>{{ pick('主动作', 'Primary action') }}</label>
+              <input v-model="shortcutConfig.primaryAction" class="md-text-field-input" type="text" :placeholder="pick('例如 Ctrl/Cmd + Enter', 'e.g. Ctrl/Cmd + Enter')">
             </div>
             <div class="m3-shortcut-config__row">
-              <label>生成章节</label>
-              <input v-model="shortcutConfig.generateChapter" class="md-text-field-input" type="text" placeholder="例如 Ctrl/Cmd + Shift + G">
+              <label>{{ pick('生成章节', 'Generate chapter') }}</label>
+              <input v-model="shortcutConfig.generateChapter" class="md-text-field-input" type="text" :placeholder="pick('例如 Ctrl/Cmd + Shift + G', 'e.g. Ctrl/Cmd + Shift + G')">
             </div>
             <div class="m3-shortcut-config__row">
-              <label>展开全文</label>
-              <input v-model="shortcutConfig.openReader" class="md-text-field-input" type="text" placeholder="例如 Ctrl/Cmd + Shift + F">
+              <label>{{ pick('展开全文', 'Open full text') }}</label>
+              <input v-model="shortcutConfig.openReader" class="md-text-field-input" type="text" :placeholder="pick('例如 Ctrl/Cmd + Shift + F', 'e.g. Ctrl/Cmd + Shift + F')">
             </div>
             <div class="m3-shortcut-config__row">
-              <label>刷新状态</label>
-              <input v-model="shortcutConfig.refreshStatus" class="md-text-field-input" type="text" placeholder="例如 Ctrl/Cmd + .">
+              <label>{{ pick('刷新状态', 'Refresh status') }}</label>
+              <input v-model="shortcutConfig.refreshStatus" class="md-text-field-input" type="text" :placeholder="pick('例如 Ctrl/Cmd + .', 'e.g. Ctrl/Cmd + .')">
             </div>
             <div class="m3-shortcut-config__row">
-              <label>上一章</label>
-              <input v-model="shortcutConfig.prevChapter" class="md-text-field-input" type="text" placeholder="例如 Alt + P">
+              <label>{{ pick('上一章', 'Previous chapter') }}</label>
+              <input v-model="shortcutConfig.prevChapter" class="md-text-field-input" type="text" :placeholder="pick('例如 Alt + P', 'e.g. Alt + P')">
             </div>
             <div class="m3-shortcut-config__row">
-              <label>下一章</label>
-              <input v-model="shortcutConfig.nextChapter" class="md-text-field-input" type="text" placeholder="例如 Alt + N">
+              <label>{{ pick('下一章', 'Next chapter') }}</label>
+              <input v-model="shortcutConfig.nextChapter" class="md-text-field-input" type="text" :placeholder="pick('例如 Alt + N', 'e.g. Alt + N')">
             </div>
             <div class="m3-shortcut-config__row">
-              <label>打开面板</label>
-              <input v-model="shortcutConfig.openShortcuts" class="md-text-field-input" type="text" placeholder="例如 ?">
+              <label>{{ pick('打开面板', 'Open panel') }}</label>
+              <input v-model="shortcutConfig.openShortcuts" class="md-text-field-input" type="text" :placeholder="pick('例如 ?', 'e.g. ?')">
             </div>
             <div class="m3-shortcut-config__actions">
-              <button class="md-btn md-btn-outlined md-ripple" @click="saveShortcutConfig({ ...DEFAULT_SHORTCUT_CONFIG })">恢复默认</button>
-              <button class="md-btn md-btn-filled md-ripple" @click="saveShortcutConfig(shortcutConfig)">保存显示配置</button>
+              <button class="md-btn md-btn-outlined md-ripple" @click="saveShortcutConfig({ ...DEFAULT_SHORTCUT_CONFIG })">{{ pick('恢复默认', 'Restore defaults') }}</button>
+              <button class="md-btn md-btn-filled md-ripple" @click="saveShortcutConfig(shortcutConfig)">{{ pick('保存显示配置', 'Save display config') }}</button>
             </div>
           </div>
         </div>
@@ -279,9 +279,9 @@
         <div class="md-dialog wd-candidate-optimize-dialog">
           <div class="wd-candidate-optimize-result__head">
             <div>
-              <h3 class="md-title-large font-semibold">优化候选版本</h3>
+              <h3 class="md-title-large font-semibold">{{ pick('优化候选版本', 'Optimize candidate') }}</h3>
               <p class="md-body-small md-on-surface-variant mt-1">
-                先选择一个优化维度，再补充你想强化的方向；生成后会先显示预览，不会直接覆盖正文。
+                {{ pick('先选择一个优化维度，再补充你想强化的方向；生成后会先显示预览，不会直接覆盖正文。', 'Pick an optimization dimension, then describe what to strengthen. The result is shown as a preview and never overwrites the draft directly.') }}
               </p>
             </div>
             <button
@@ -309,7 +309,7 @@
               v-model="candidateAdditionalNotes"
               rows="4"
               class="md-textarea w-full resize-none mt-5"
-              placeholder="补充你想强化的效果，例如：增强压迫感、让潜台词更尖锐、把环境描写再压暗一点。"
+              :placeholder="pick('补充你想强化的效果，例如：增强压迫感、让潜台词更尖锐、把环境描写再压暗一点。', 'Describe the effect you want to strengthen — e.g. raise the pressure, sharpen the subtext, darken the setting a little more.')"
             ></textarea>
           </div>
           <div class="wd-candidate-optimize-result__foot">
@@ -318,7 +318,7 @@
               class="md-btn md-btn-outlined md-ripple"
               @click="closeCandidateOptimizeDialog()"
             >
-              取消
+              {{ pick('取消', 'Cancel') }}
             </button>
             <button
               type="button"
@@ -326,7 +326,7 @@
               :disabled="isOptimizingCandidateVersion"
               @click="generateCandidateOptimization"
             >
-              {{ isOptimizingCandidateVersion ? '生成中...' : '生成优化预览' }}
+              {{ isOptimizingCandidateVersion ? pick('生成中...', 'Generating…') : pick('生成优化预览', 'Generate preview') }}
             </button>
           </div>
         </div>
@@ -342,9 +342,9 @@
         <div class="md-dialog wd-candidate-optimize-result">
           <div class="wd-candidate-optimize-result__head">
             <div>
-              <h3 class="md-title-large font-semibold">候选版本优化结果预览</h3>
+              <h3 class="md-title-large font-semibold">{{ pick('候选版本优化结果预览', 'Candidate optimization preview') }}</h3>
               <p class="md-body-small md-on-surface-variant mt-1">
-                {{ candidateOptimizeResultNotes || '已生成优化稿，请确认是否应用为新的章节版本。' }}
+                {{ candidateOptimizeResultNotes || pick('已生成优化稿，请确认是否应用为新的章节版本。', 'An optimized draft is ready — confirm whether to apply it as a new chapter version.') }}
               </p>
             </div>
             <button
@@ -362,7 +362,7 @@
               class="md-btn md-btn-outlined md-ripple"
               @click="resetCandidateOptimizationState"
             >
-              取消
+              {{ pick('取消', 'Cancel') }}
             </button>
             <button
               type="button"
@@ -370,7 +370,7 @@
               :disabled="isApplyingCandidateOptimization"
               @click="applyCandidateOptimization"
             >
-              {{ isApplyingCandidateOptimization ? '应用中...' : '应用优化结果' }}
+              {{ isApplyingCandidateOptimization ? pick('应用中...', 'Applying…') : pick('应用优化结果', 'Apply result') }}
             </button>
           </div>
         </div>
@@ -403,13 +403,20 @@ import {
   isBusyTask,
   isRecoverableVersionStatus,
   isTrackableTask,
+  isTaskEventForCurrentTask,
   normalizeRuntimeStage,
   resolveChapterActionDecision,
   resolveChapterRuntime,
   resolveProjectTaskContext,
+  taskRuntimeEventToChapterEvent,
 } from '@/utils/chapterGeneration'
 import { globalAlert } from '@/composables/useAlert'
 import { getChapterGenerationStatus } from '@/api/modules/chapterWorkflow'
+import { connectSSE } from '@/utils/sseStream'
+import type { SSEController, StreamStatusData } from '@/utils/sseStream'
+import { TaskRuntimeAPI, type TaskRuntimeEventRead, type TaskRuntimeRead } from '@/api/task-runtime'
+import { useLocale } from '@/composables/useLocale'
+
 import {
   WDHeader,
   WDSidebar,
@@ -434,6 +441,9 @@ interface GenerateOutlinePayload {
   targetTotalChapters?: number
   targetTotalWords?: number
   chapterWordTarget?: number
+  longFormMode?: boolean
+  volumeCount?: number
+  chaptersPerVolume?: number
 }
 
 interface GenerateChapterPayload {
@@ -442,7 +452,15 @@ interface GenerateChapterPayload {
   qualityRequirements?: string
   minWordCount: number
   targetWordCount: number
+  segmentWordLimit?: number
+  generationTimeoutSeconds?: number
   preset?: 'basic' | 'enhanced' | 'longform' | 'ultimate'
+  enableConsistency?: boolean
+  enableEnrichment?: boolean
+  enableSelfCritique?: boolean
+  enableReaderSim?: boolean
+  enableMemory?: boolean
+  enableForeshadowing?: boolean
 }
 
 interface VersionOption {
@@ -455,6 +473,8 @@ const router = useRouter()
 const route = useRoute()
 const authStore = getActivePinia() ? useAuthStore() : null
 const novelStore = useNovelStore()
+
+const { pick } = useLocale()
 
 const selectedChapterNumber = ref<number | null>(null)
 const chapterGenerationResult = ref<ChapterGenerationResponse | null>(null)
@@ -549,12 +569,13 @@ interface ShortcutConfig {
 
 const DEFAULT_MIN_WORD_COUNT = 4500
 const DEFAULT_TARGET_WORD_COUNT = 5000
-const OPTIMIZE_DIMENSIONS = [
-  { key: 'dialogue', label: '对话', description: '让人物声音更有区分度，并强化潜台词。' },
-  { key: 'environment', label: '环境', description: '增强场景氛围，让空间参与叙事。' },
-  { key: 'psychology', label: '心理', description: '深入角色内心，增加真实波动。' },
-  { key: 'rhythm', label: '节奏', description: '优化句式长短和段落推进感。' }
-] as const
+// 包成 computed，维度标签和说明才会随语言切换刷新
+const OPTIMIZE_DIMENSIONS = computed(() => [
+  { key: 'dialogue' as const, label: pick('对话', 'Dialogue'), description: pick('让人物声音更有区分度，并强化潜台词。', 'Make each voice more distinct and sharpen the subtext.') },
+  { key: 'environment' as const, label: pick('环境', 'Environment'), description: pick('增强场景氛围，让空间参与叙事。', 'Strengthen the atmosphere so the space takes part in the narrative.') },
+  { key: 'psychology' as const, label: pick('心理', 'Psychology'), description: pick('深入角色内心，增加真实波动。', 'Go deeper into the character’s interior and add believable turbulence.') },
+  { key: 'rhythm' as const, label: pick('节奏', 'Pacing'), description: pick('优化句式长短和段落推进感。', 'Tune sentence length and the forward drive of paragraphs.') }
+])
 const DEFAULT_SHORTCUT_CONFIG: ShortcutConfig = {
   primaryAction: 'Ctrl/Cmd + Enter',
   generateChapter: 'Ctrl/Cmd + Shift + G',
@@ -579,14 +600,23 @@ const loadShortcutConfig = (): ShortcutConfig => {
   try {
     const raw = localStorage.getItem(shortcutConfigStorageKey)
     if (!raw) return { ...DEFAULT_SHORTCUT_CONFIG }
-    return normalizeShortcutConfig({ ...DEFAULT_SHORTCUT_CONFIG, ...JSON.parse(raw) })
-  } catch (err: unknown) {
-        if (err instanceof TypeError || (err as any)?.code === 'ECONNREFUSED') {
-          // Backend disconnected - show friendly message
-          console.warn('[WritingDesk] Backend connection lost, will retry...')
-          scheduleStatusPolling()  // Retry silently
-          return
-        }
+
+    const parsed: unknown = JSON.parse(raw)
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return { ...DEFAULT_SHORTCUT_CONFIG }
+    }
+
+    const saved = parsed as Partial<ShortcutConfig>
+    return normalizeShortcutConfig({
+      primaryAction: typeof saved.primaryAction === 'string' ? saved.primaryAction : DEFAULT_SHORTCUT_CONFIG.primaryAction,
+      generateChapter: typeof saved.generateChapter === 'string' ? saved.generateChapter : DEFAULT_SHORTCUT_CONFIG.generateChapter,
+      openReader: typeof saved.openReader === 'string' ? saved.openReader : DEFAULT_SHORTCUT_CONFIG.openReader,
+      refreshStatus: typeof saved.refreshStatus === 'string' ? saved.refreshStatus : DEFAULT_SHORTCUT_CONFIG.refreshStatus,
+      prevChapter: typeof saved.prevChapter === 'string' ? saved.prevChapter : DEFAULT_SHORTCUT_CONFIG.prevChapter,
+      nextChapter: typeof saved.nextChapter === 'string' ? saved.nextChapter : DEFAULT_SHORTCUT_CONFIG.nextChapter,
+      openShortcuts: typeof saved.openShortcuts === 'string' ? saved.openShortcuts : DEFAULT_SHORTCUT_CONFIG.openShortcuts,
+    })
+  } catch {
     return { ...DEFAULT_SHORTCUT_CONFIG }
   }
 }
@@ -596,7 +626,7 @@ const saveShortcutConfig = (config: ShortcutConfig) => {
   shortcutConfig.value = normalized
   try {
     localStorage.setItem(shortcutConfigStorageKey, JSON.stringify(normalized))
-    globalAlert.showSuccess('快捷键显示配置已保存', '保存成功')
+    globalAlert.showSuccess(pick('快捷键显示配置已保存', 'Shortcut display config saved'), pick('保存成功', 'Saved'))
   } catch (err: unknown) {
         if (err instanceof TypeError || (err as any)?.code === 'ECONNREFUSED') {
           // Backend disconnected - show friendly message
@@ -604,7 +634,7 @@ const saveShortcutConfig = (config: ShortcutConfig) => {
           scheduleStatusPolling()  // Retry silently
           return
         }
-    globalAlert.showError('保存快捷键配置失败，请检查浏览器存储权限', '保存失败')
+    globalAlert.showError(pick('保存快捷键配置失败，请检查浏览器存储权限', 'Failed to save the shortcut config — check the browser storage permission'), pick('保存失败', 'Save failed'))
   }
 }
 
@@ -652,28 +682,18 @@ const versionOptions = computed<VersionOption[]>(() => {
 
 const availableVersions = computed(() => versionOptions.value.map(({ version }) => version))
 const getOriginalVersionIndex = (versionIndex: number) => versionOptions.value[versionIndex]?.originalIndex
-const legacyShortcutItems = [
-  { key: 'Alt + P', label: '上一章' },
-  { key: 'Alt + N', label: '下一章' },
-  { key: 'Alt + G', label: '生成或重新生成当前章节' },
-  { key: 'Alt + E', label: '评估当前章节' },
-  { key: 'Alt + S', label: '确认当前版本' },
-  { key: 'Alt + L', label: '显示或收起目录' },
-  { key: 'Shift + ?', label: '打开快捷键帮助' },
-  { key: 'Esc', label: '关闭当前弹层' }
-]
 
-const shortcutConfig = ref<ShortcutConfig>(normalizeShortcutConfig(loadShortcutConfig()))
+const shortcutConfig = ref<ShortcutConfig>(loadShortcutConfig())
 
 const shortcutItems = computed(() => [
-  { key: shortcutConfig.value.primaryAction, label: '执行当前主动作' },
-  { key: shortcutConfig.value.generateChapter, label: '生成当前章节' },
-  { key: shortcutConfig.value.openReader, label: '展开全文阅读' },
-  { key: shortcutConfig.value.refreshStatus, label: '刷新当前状态' },
-  { key: 'Patch+Diff', label: '对当前章节进行精细编辑' },
-  { key: '写作技能', label: '打开技能市场并执行技能' },
-  { key: shortcutConfig.value.openShortcuts, label: '打开快捷键面板' },
-  { key: 'Esc', label: '关闭当前弹层或侧栏' }
+  { key: shortcutConfig.value.primaryAction, label: pick('执行当前主动作', 'Run the current primary action') },
+  { key: shortcutConfig.value.generateChapter, label: pick('生成当前章节', 'Generate the current chapter') },
+  { key: shortcutConfig.value.openReader, label: pick('展开全文阅读', 'Open the full-text reader') },
+  { key: shortcutConfig.value.refreshStatus, label: pick('刷新当前状态', 'Refresh the current status') },
+  { key: 'Patch+Diff', label: pick('对当前章节进行精细编辑', 'Fine-tune the current chapter') },
+  { key: pick('写作技能', 'Writing skills'), label: pick('打开技能市场并执行技能', 'Open the skill market and run a skill') },
+  { key: shortcutConfig.value.openShortcuts, label: pick('打开快捷键面板', 'Open the shortcut panel') },
+  { key: 'Esc', label: pick('关闭当前弹层或侧栏', 'Close the current dialog or sidebar') }
 ])
 
 const selectedChapterAction = computed(() => {
@@ -720,16 +740,17 @@ const generateCurrentLabel = computed(() => {
   const status = String(selectedChapter.value?.generation_status || '')
 
   if (selectedChapterNumber.value !== null && ['waiting_for_confirm', 'evaluation_failed', 'failed', 'successful'].includes(status)) {
-    return '重新生成'
+    return pick('重新生成', 'Regenerate')
   }
 
   if (selectedChapterAction.value?.canGenerate && selectedChapterAction.value.label) {
+    // '生成本章' 是 resolveChapterActionDecision 返回的判定值，属于数据，不随语言变化
     return selectedChapterAction.value.label === '生成本章' && target
-      ? `生成第 ${target} 章`
+      ? pick(`生成第 ${target} 章`, `Generate chapter ${target}`)
       : selectedChapterAction.value.label
   }
-  if (target) return `生成第 ${target} 章`
-  return '开始创作'
+  if (target) return pick(`生成第 ${target} 章`, `Generate chapter ${target}`)
+  return pick('开始创作', 'Start writing')
 })
 
 const canEvaluateSelectedChapter = computed(() => selectedChapter.value?.generation_status === 'successful')
@@ -879,18 +900,24 @@ const formatUiDiagnosticsMessage = (
   options: { includeRootCause?: boolean; includeRequestId?: boolean; includeHint?: boolean } = {}
 ) => {
   const lines = [diagnostics.message]
-  if (options.includeRootCause && diagnostics.rootCause) lines.push(`根因：${diagnostics.rootCause}`)
-  if (options.includeRequestId && diagnostics.requestId) lines.push(`请求ID：${diagnostics.requestId}`)
-  if (options.includeHint && diagnostics.hint) lines.push(`建议：${diagnostics.hint}`)
-  if (diagnostics.missingChapters?.length) lines.push(`未通过章节：${diagnostics.missingChapters.join('、')}`)
+  if (options.includeRootCause && diagnostics.rootCause) lines.push(pick(`根因：${diagnostics.rootCause}`, `Root cause: ${diagnostics.rootCause}`))
+  if (options.includeRequestId && diagnostics.requestId) lines.push(pick(`请求ID：${diagnostics.requestId}`, `Request ID: ${diagnostics.requestId}`))
+  if (options.includeHint && diagnostics.hint) lines.push(pick(`建议：${diagnostics.hint}`, `Suggestion: ${diagnostics.hint}`))
+  if (diagnostics.missingChapters?.length) {
+    lines.push(pick(
+      `未通过章节：${diagnostics.missingChapters.join('、')}`,
+      `Chapters that failed: ${diagnostics.missingChapters.join(', ')}`
+    ))
+  }
   if (diagnostics.rejectionSummary) {
     const summary = diagnostics.rejectionSummary
     const missing = Array.isArray(summary.missing_chapters) ? summary.missing_chapters.length : undefined
     const retries = summary.retry_count ?? summary.retries
-    lines.push(`硬筛摘要：${[
-      missing !== undefined ? `${missing} 章未达标` : '',
-      retries !== undefined ? `重试 ${retries} 次` : '',
-    ].filter(Boolean).join('，') || '已返回详细拒绝原因'}`)
+    const detail = [
+      missing !== undefined ? pick(`${missing} 章未达标`, `${missing} chapters below the bar`) : '',
+      retries !== undefined ? pick(`重试 ${retries} 次`, `${retries} retries`) : '',
+    ].filter(Boolean).join(pick('，', '; ')) || pick('已返回详细拒绝原因', 'Detailed rejection reasons returned')
+    lines.push(pick(`硬筛摘要：${detail}`, `Hard-filter summary: ${detail}`))
   }
   return lines.join('\n')
 }
@@ -903,20 +930,99 @@ const clearLatestDiagnostics = () => {
   latestUiDiagnostics.value = null
 }
 
+// 状态同步失败提示的标题：写入与判定共用，切换语言后两种字面都要能识别
+const statusSyncFailureTitle = () => pick('状态同步失败', 'Status sync failed')
+const isStatusSyncFailureTitle = (title?: string) => title === '状态同步失败' || title === 'Status sync failed'
+
 const loadActiveStyleProfile = async () => {
   if (!props.id) return
   try {
     const res = await OptimizerAPI.getActiveStyleProfile(props.id)
     activeStyleProfile.value = res.profile || null
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '加载当前激活文风失败')
-    console.warn('加载当前激活文风失败:', diagnostics)
+    const diagnostics = normalizeUiDiagnostics(error, pick('加载当前激活文风失败', 'Failed to load the active style profile'))
+    console.warn(pick('加载当前激活文风失败:', 'Failed to load the active style profile:'), diagnostics)
     activeStyleProfile.value = null
   }
 }
 
 const markProjectSynced = () => {
   lastStatusSyncAt.value = new Date().toISOString()
+}
+
+const taskIdForChapter = (chapter?: Chapter | null): string | null => {
+  const runtime = resolveChapterRuntime(chapter, project.value?.generation_runtime || null)
+  const candidate = runtime?.task_id || runtime?.run_id
+  return typeof candidate === 'string' && candidate.trim() ? candidate.trim() : null
+}
+
+const applyTaskRuntimeSnapshot = (chapter: Chapter, task: TaskRuntimeRead, events: TaskRuntimeEventRead[] = []) => {
+  const runtime = resolveChapterRuntime(chapter, project.value?.generation_runtime || null) || {}
+  const existingEvents = Array.isArray(runtime.events) ? runtime.events : []
+  const knownEventIds = new Set(existingEvents.map((item) => String(item?.metadata?.task_event_id || '')))
+  const mergedEvents = [...existingEvents]
+  for (const event of events) {
+    if (!knownEventIds.has(String(event.event_id))) {
+      mergedEvents.push(taskRuntimeEventToChapterEvent(event))
+      knownEventIds.add(String(event.event_id))
+    }
+  }
+
+  syncChapterStatusIntoProject({
+    ...chapter,
+    progress_stage: task.stage || chapter.progress_stage,
+    progress_message: task.message || chapter.progress_message,
+    updated_at: task.updated_at || chapter.updated_at,
+    generation_runtime: {
+      ...runtime,
+      task_id: task.task_id,
+      run_id: runtime.run_id || task.task_id,
+      task_status: task.status,
+      task_stage: task.stage,
+      task_message: task.message,
+      progress_stage: task.stage || runtime.progress_stage,
+      progress_message: task.message || runtime.progress_message,
+      progress_percent: typeof task.progress === 'number' ? task.progress : runtime.progress_percent,
+      event_cursor: task.event_cursor,
+      task_event_cursor: task.event_cursor,
+      retry_count: task.retry_count,
+      max_retries: task.max_retries,
+      lease_owner: task.lease_owner,
+      heartbeat_at: task.heartbeat_at,
+      elapsed_ms: task.elapsed_ms,
+      input_tokens: task.input_tokens,
+      output_tokens: task.output_tokens,
+      total_tokens: task.total_tokens,
+      recovered_from_reload: true,
+      events: mergedEvents.slice(-80),
+    },
+  })
+}
+
+const syncTaskRuntimeForChapter = async (chapter: Chapter): Promise<TaskRuntimeRead | null> => {
+  const taskId = taskIdForChapter(chapter)
+  if (!taskId) return null
+  const runtime = resolveChapterRuntime(chapter, project.value?.generation_runtime || null) || {}
+  const cursor = typeof runtime.task_event_cursor === 'number' ? runtime.task_event_cursor : 0
+  const task = await TaskRuntimeAPI.getTask(taskId)
+  const events = await TaskRuntimeAPI.listEvents(taskId, cursor, 500)
+  applyTaskRuntimeSnapshot(chapter, task, events)
+  return task
+}
+
+const hydrateTrackableTaskRuntimes = async () => {
+  const chapters = (project.value?.chapters || []).filter((chapter) => {
+    const runtime = resolveChapterRuntime(chapter, project.value?.generation_runtime || null)
+    return Boolean(taskIdForChapter(chapter)) && isTrackableTask(chapter, runtime)
+  })
+  for (const chapter of chapters) {
+    try {
+      await syncTaskRuntimeForChapter(chapter)
+    } catch (error) {
+      // Legacy chapter status remains usable when a task predates TaskRuntime.
+      console.debug(pick('恢复持久化任务状态失败:', 'Failed to restore the persisted task state:'), error)
+    }
+  }
 }
 
 const syncChapterStatusIntoProject = (chapterStatus: Chapter) => {
@@ -959,21 +1065,34 @@ const syncSingleChapterStatus = async (chapterNumber?: number | null) => {
   }
   const chapterStatus = await getChapterGenerationStatus(project.value.id, chapterNumber)
   syncChapterStatusIntoProject(chapterStatus)
-  return chapterStatus
+  const latestChapter = project.value?.chapters.find((chapter) => chapter.chapter_number === chapterNumber) || chapterStatus
+  try {
+    await syncTaskRuntimeForChapter(latestChapter)
+  } catch (error) {
+    // Do not turn a temporary TaskRuntime outage into a legacy status failure.
+    console.debug(pick('任务中心状态同步失败，保留章节状态:', 'Task-center status sync failed; keeping the chapter status:'), error)
+  }
+  return project.value?.chapters.find((chapter) => chapter.chapter_number === chapterNumber) || chapterStatus
 }
 
 const loadProject = async () => {
   try {
     await refreshProjectState(false, true)
+    await hydrateTrackableTaskRuntimes()
     clearLatestDiagnostics()
     pickInitialChapter()
+    _ensureSSEConnected()
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '加载项目失败，请稍后重试', '加载失败')
+    const diagnostics = normalizeUiDiagnostics(
+      error,
+      pick('加载项目失败，请稍后重试', 'Failed to load the project — please retry later'),
+      pick('加载失败', 'Load failed')
+    )
     setLatestDiagnostics(diagnostics)
-    console.error('加载项目失败:', diagnostics)
+    console.error(pick('加载项目失败:', 'Failed to load the project:'), diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '加载失败'
+      diagnostics.title || pick('加载失败', 'Load failed')
     )
   }
 }
@@ -990,27 +1109,36 @@ const fetchChapterStatus = async () => {
       const targetChapterNumber = selectedChapterNumber.value ?? taskPanelChapterNumber.value
       await syncSingleChapterStatus(targetChapterNumber)
       statusFetchFailureCount.value = 0
-      if (latestUiDiagnostics.value?.title === '状态同步失败') {
+      if (isStatusSyncFailureTitle(latestUiDiagnostics.value?.title)) {
         clearLatestDiagnostics()
       }
     } catch (error) {
-      const diagnostics = normalizeUiDiagnostics(error, '刷新状态失败，请稍后重试', '状态同步失败')
-      console.warn('刷新章节状态失败:', diagnostics)
+      const diagnostics = normalizeUiDiagnostics(
+        error,
+        pick('刷新状态失败，请稍后重试', 'Failed to refresh the status — please retry later'),
+        statusSyncFailureTitle()
+      )
+      console.warn(pick('刷新章节状态失败:', 'Failed to refresh the chapter status:'), diagnostics)
       statusFetchFailureCount.value += 1
       setLatestDiagnostics({
         ...diagnostics,
-        hint: diagnostics.hint || (statusFetchFailureCount.value >= 2 ? '建议直接终止处理后再重试。' : diagnostics.hint),
+        hint: diagnostics.hint || (statusFetchFailureCount.value >= 2
+          ? pick('建议直接终止处理后再重试。', 'Consider stopping the run before retrying.')
+          : diagnostics.hint),
       })
       const now = Date.now()
       if (now - lastStatusFetchErrorAt.value > 10_000) {
         lastStatusFetchErrorAt.value = now
         const suffix =
           statusFetchFailureCount.value >= 2
-            ? `（已连续失败 ${statusFetchFailureCount.value} 次，建议直接终止处理后再重试）`
+            ? pick(
+                `（已连续失败 ${statusFetchFailureCount.value} 次，建议直接终止处理后再重试）`,
+                ` (failed ${statusFetchFailureCount.value} times in a row — consider stopping the run before retrying)`
+              )
             : ''
         globalAlert.showError(
           `${formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true })}${suffix}`,
-          diagnostics.title || '状态同步失败'
+          diagnostics.title || statusSyncFailureTitle()
         )
       }
     } finally {
@@ -1078,7 +1206,7 @@ const syncChapterAfterVersionConfirm = async (chapterNumber: number): Promise<bo
         return true
       }
     } catch (error) {
-      console.debug('确认版本后状态同步失败:', error)
+      console.debug(pick('确认版本后状态同步失败:', 'Status sync after confirming the version failed:'), error)
     }
   }
   return false
@@ -1175,32 +1303,42 @@ const generateChapter = async (
   })
   if (!actionDecision.canGenerate && !isRegeneratingCurrentSelectedChapter) {
     const blockingChapterNumber = getBlockingChapterNumber(project.value, chapterNumber)
-    let message = '当前章节暂时不能直接生成。'
+    let message = pick('当前章节暂时不能直接生成。', 'This chapter cannot be generated directly right now.')
     if (blockingChapterNumber !== null) {
       const blockingChapter = project.value?.chapters?.find((item) => item.chapter_number === blockingChapterNumber)
       const blockingStatus = String(blockingChapter?.generation_status || 'not_generated')
+      // 键是后端 generation_status 枚举保持原文
       const statusLabelMap: Record<string, string> = {
-        not_generated: '还没生成',
-        generating: '正在生成',
-        evaluating: '正在评估',
-        selecting: '正在整理候选版本',
-        waiting_for_confirm: '已生成候选版本，但还没有最终确认',
-        failed: '生成失败',
-        evaluation_failed: '评估失败'
+        not_generated: pick('还没生成', 'not generated yet'),
+        generating: pick('正在生成', 'generating'),
+        evaluating: pick('正在评估', 'being reviewed'),
+        selecting: pick('正在整理候选版本', 'collating candidates'),
+        waiting_for_confirm: pick('已生成候选版本，但还没有最终确认', 'candidates are ready but not confirmed yet'),
+        failed: pick('生成失败', 'generation failed'),
+        evaluation_failed: pick('评估失败', 'review failed')
       }
       const statusLabel = statusLabelMap[blockingStatus] || blockingStatus
       message = [
-        `第 ${chapterNumber} 章现在不能直接开始，因为前面的第 ${blockingChapterNumber} 章还没收口。`,
-        `当前状态：${statusLabel}。`,
+        pick(
+          `第 ${chapterNumber} 章现在不能直接开始，因为前面的第 ${blockingChapterNumber} 章还没收口。`,
+          `Chapter ${chapterNumber} cannot start yet because chapter ${blockingChapterNumber} before it is still open.`
+        ),
+        pick(`当前状态：${statusLabel}。`, `Current status: ${statusLabel}.`),
         blockingStatus === 'waiting_for_confirm'
-          ? '这通常表示系统已经产出了候选内容，但你还没有真正完成确认，或者你看到的是候选预览而不是最终定稿。请先点进该章查看候选版本。'
-          : '请先处理前面这章，再继续往后生成。',
+          ? pick(
+              '这通常表示系统已经产出了候选内容，但你还没有真正完成确认，或者你看到的是候选预览而不是最终定稿。请先点进该章查看候选版本。',
+              'That usually means candidates exist but were never confirmed, or you are looking at a candidate preview rather than the final draft. Open that chapter and review its candidates first.'
+            )
+          : pick('请先处理前面这章，再继续往后生成。', 'Resolve that earlier chapter before generating further.'),
         chapterNumber === selectedChapterNumber.value
-          ? '如果你现在操作的就是当前选中的这一章，请直接点“重新生成当前章节”；当前这次拦截本不该出现。'
+          ? pick(
+              '如果你现在操作的就是当前选中的这一章，请直接点“重新生成当前章节”；当前这次拦截本不该出现。',
+              'If this is the chapter you currently have selected, use “Regenerate current chapter” — this block should not have appeared.'
+            )
           : '',
       ].filter(Boolean).join('\n')
     }
-    globalAlert.showError(message, '生成受限')
+    globalAlert.showError(message, pick('生成受限', 'Generation blocked'))
     return
   }
 
@@ -1213,26 +1351,41 @@ const generateChapter = async (
       qualityRequirements: options?.qualityRequirements,
       minWordCount: options?.minWordCount ?? DEFAULT_MIN_WORD_COUNT,
       targetWordCount: options?.targetWordCount ?? DEFAULT_TARGET_WORD_COUNT,
-      preset: options?.preset
+      segmentWordLimit: options?.segmentWordLimit,
+      generationTimeoutSeconds: options?.generationTimeoutSeconds,
+      preset: options?.preset,
+      enableConsistency: options?.enableConsistency,
+      enableEnrichment: options?.enableEnrichment,
+      enableSelfCritique: options?.enableSelfCritique,
+      enableReaderSim: options?.enableReaderSim,
+      enableMemory: options?.enableMemory,
+      enableForeshadowing: options?.enableForeshadowing
     })
 
     clearLatestDiagnostics()
     resetVersionSelectionState()
     markProjectSynced()
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '生成章节失败，请稍后重试', '生成失败')
+    const diagnostics = normalizeUiDiagnostics(
+      error,
+      pick('生成章节失败，请稍后重试', 'Failed to generate the chapter — please retry later'),
+      pick('生成失败', 'Generation failed')
+    )
     setLatestDiagnostics(diagnostics)
-    console.error('生成章节失败:', diagnostics)
+    console.error(pick('生成章节失败:', 'Failed to generate the chapter:'), diagnostics)
     try {
       await syncSingleChapterStatus(chapterNumber)
       } catch (syncError) {
-        const syncDiagnostics = normalizeUiDiagnostics(syncError, '生成失败后同步项目状态失败')
-        console.warn('生成失败后同步项目状态失败:', syncDiagnostics)
+        const syncDiagnostics = normalizeUiDiagnostics(
+          syncError,
+          pick('生成失败后同步项目状态失败', 'Failed to sync the project status after the generation failure')
+        )
+        console.warn(pick('生成失败后同步项目状态失败:', 'Failed to sync the project status after the generation failure:'), syncDiagnostics)
       }
     generatingChapter.value = null
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '生成失败'
+      diagnostics.title || pick('生成失败', 'Generation failed')
     )
   }
 }
@@ -1321,14 +1474,17 @@ const handleOpenVersionDiff = (payload: { baseVersionIndex: number; compareVersi
   const baseVersion = availableVersions.value[payload.baseVersionIndex]
   const compareVersion = availableVersions.value[payload.compareVersionIndex]
   if (!baseVersion?.id || !compareVersion?.id) {
-    globalAlert.showError('当前版本缺少有效标识，无法执行版本对比。请先刷新状态后重试。', '版本对比失败')
+    globalAlert.showError(
+      pick('当前版本缺少有效标识，无法执行版本对比。请先刷新状态后重试。', 'This version has no valid identifier, so a diff cannot run. Refresh the status and retry.'),
+      pick('版本对比失败', 'Version diff failed')
+    )
     return
   }
   openVersionDiffModal({
     baseVersionId: baseVersion.id,
     compareVersionId: compareVersion.id,
-    baseLabel: `鐗堟湰 ${payload.baseVersionIndex + 1}`,
-    compareLabel: `鐗堟湰 ${payload.compareVersionIndex + 1}`
+    baseLabel: pick(`版本 ${payload.baseVersionIndex + 1}`, `Version ${payload.baseVersionIndex + 1}`),
+    compareLabel: pick(`版本 ${payload.compareVersionIndex + 1}`, `Version ${payload.compareVersionIndex + 1}`)
   })
 }
 
@@ -1406,7 +1562,26 @@ const handlePrimaryShortcutAction = () => {
 
 const regenerateChapter = async (chapterNumber?: number) => {
   const target = chapterNumber ?? selectedChapterNumber.value
-  if (target !== null && target !== undefined) openGenerateChapterModal(target)
+  if (target === null || target === undefined) return
+
+  // 有持久化任务时优先从同一 TaskRuntime 断点恢复，避免丢弃长篇分段进度。
+  const chapter = project.value?.chapters?.find((item) => item.chapter_number === target)
+  const runId = taskIdForChapter(chapter)
+  if (runId && props.id) {
+    try {
+      await novelStore.resumeChapterGeneration(runId)
+      markProjectSynced()
+      globalAlert.showSuccess(
+        pick(`第 ${target} 章已从持久化断点恢复，正在续写正文。`, `Chapter ${target} resumed from its saved checkpoint and is continuing the draft.`),
+        pick('已恢复', 'Resumed')
+      )
+      await fetchChapterStatus()
+      return
+    } catch (error) {
+      console.debug(pick('持久化章节任务恢复失败，回退到全新生成：', 'Failed to resume the persisted chapter task; falling back to a fresh generation:'), error)
+    }
+  }
+  openGenerateChapterModal(target)
 }
 
 const terminateChapter = async (chapterNumber?: number) => {
@@ -1414,8 +1589,11 @@ const terminateChapter = async (chapterNumber?: number) => {
   if (target === null || target === undefined) return
 
   const confirmed = await globalAlert.showConfirm(
-    `这会将第 ${target} 章当前后台任务标记为失败，并停止前端继续等待；如果服务端任务已经接近完成，仍可能在短时间内回写结果。是否继续？`,
-    '确认终止后台处理'
+    pick(
+      `这会将第 ${target} 章当前后台任务标记为失败，并停止前端继续等待；如果服务端任务已经接近完成，仍可能在短时间内回写结果。是否继续？`,
+      `This marks the current background task for chapter ${target} as failed and stops the frontend from waiting. If the server-side task is nearly done, it may still write back a result shortly. Continue?`
+    ),
+    pick('确认终止后台处理', 'Confirm stopping the background run')
   )
   if (!confirmed) return
 
@@ -1424,15 +1602,22 @@ const terminateChapter = async (chapterNumber?: number) => {
     await novelStore.cancelChapterGeneration(target)
     clearLatestDiagnostics()
     markProjectSynced()
-    globalAlert.showSuccess(`第 ${target} 章已标记为失败，前端会停止继续等待该任务。`, '已终止')
+    globalAlert.showSuccess(
+      pick(`第 ${target} 章已标记为失败，前端会停止继续等待该任务。`, `Chapter ${target} is marked as failed; the frontend will stop waiting for that task.`),
+      pick('已终止', 'Stopped')
+    )
     await fetchChapterStatus()
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '终止后台处理失败，请稍后重试', '终止失败')
+    const diagnostics = normalizeUiDiagnostics(
+      error,
+      pick('终止后台处理失败，请稍后重试', 'Failed to stop the background run — please retry later'),
+      pick('终止失败', 'Stop failed')
+    )
     setLatestDiagnostics(diagnostics)
-    console.error('终止章节后台任务失败:', diagnostics)
+    console.error(pick('终止章节后台任务失败:', 'Failed to stop the chapter background task:'), diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '终止失败'
+      diagnostics.title || pick('终止失败', 'Stop failed')
     )
   } finally {
     terminatingChapter.value = null
@@ -1444,7 +1629,10 @@ const handleRegenerateFromEvaluation = (payload: {
   qualityRequirements?: string
 }) => {
   if (selectedChapterNumber.value === null) {
-    globalAlert.showError('当前没有选中章节，无法执行重新生成。', '操作失败')
+    globalAlert.showError(
+      pick('当前没有选中章节，无法执行重新生成。', 'No chapter is selected, so regeneration cannot run.'),
+      pick('操作失败', 'Action failed')
+    )
     return
   }
   const chapter = project.value?.chapters?.find((item) => item.chapter_number === selectedChapterNumber.value)
@@ -1461,7 +1649,10 @@ const handleRegenerateFromEvaluation = (payload: {
 const handleOptimizeFromEvaluation = (payload: { notes: string }) => {
   optimizerSuggestionNotes.value = payload.notes
   showEvaluationDetailModal.value = false
-  globalAlert.showSuccess('优化建议已写入，可直接继续局部优化。', '建议已应用')
+  globalAlert.showSuccess(
+    pick('优化建议已写入，可直接继续局部优化。', 'The optimization notes are saved — you can continue with local polishing.'),
+    pick('建议已应用', 'Suggestion applied')
+  )
 }
 
 const withChapterStatusRollback = async (
@@ -1477,8 +1668,11 @@ const withChapterStatusRollback = async (
       try {
         await syncSingleChapterStatus(chapterNumber)
         } catch (syncError) {
-          const syncDiagnostics = normalizeUiDiagnostics(syncError, '章节动作失败后同步项目状态失败')
-          console.warn('章节动作失败后同步项目状态失败:', syncDiagnostics)
+          const syncDiagnostics = normalizeUiDiagnostics(
+            syncError,
+            pick('章节动作失败后同步项目状态失败', 'Failed to sync the project status after the chapter action failed')
+          )
+          console.warn(pick('章节动作失败后同步项目状态失败:', 'Failed to sync the project status after the chapter action failed:'), syncDiagnostics)
         const fallbackChapter = project.value?.chapters.find((item) => item.chapter_number === chapterNumber)
         if (fallbackChapter && previousStatus) fallbackChapter.generation_status = previousStatus
       }
@@ -1514,28 +1708,35 @@ const selectVersion = async (versionIndex: number) => {
       resetVersionSelectionState(versionIndex)
       markProjectSynced()
     })
-    globalAlert.showSuccess('版本已确认', '操作成功')
+    globalAlert.showSuccess(pick('版本已确认', 'Version confirmed'), pick('操作成功', 'Action succeeded'))
     const synced = await syncChapterAfterVersionConfirm(chapterNumber)
       if (!synced) {
         const diagnostics = {
-          message: '确认已提交，但后台长时间未回写新状态。请立即刷新，或直接终止处理后重试。',
-          title: '状态同步提醒',
+          message: pick(
+            '确认已提交，但后台长时间未回写新状态。请立即刷新，或直接终止处理后重试。',
+            'The confirmation was submitted, but the backend has not written back a new status for a while. Refresh now, or stop the run and retry.'
+          ),
+          title: pick('状态同步提醒', 'Status sync notice'),
           retryable: true,
-          hint: '如果再次刷新仍无回写，请终止处理并重新生成。',
+          hint: pick('如果再次刷新仍无回写，请终止处理并重新生成。', 'If another refresh still shows nothing, stop the run and regenerate.'),
       } satisfies UiDiagnostics
       setLatestDiagnostics(diagnostics)
         globalAlert.showError(
           formatUiDiagnosticsMessage(diagnostics, { includeHint: true }),
-          diagnostics.title || '状态同步提醒'
+          diagnostics.title || pick('状态同步提醒', 'Status sync notice')
         )
     }
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '选择章节版本失败，请稍后重试', '选择失败')
+    const diagnostics = normalizeUiDiagnostics(
+      error,
+      pick('选择章节版本失败，请稍后重试', 'Failed to select the chapter version — please retry later'),
+      pick('选择失败', 'Selection failed')
+    )
     setLatestDiagnostics(diagnostics)
-    console.error('选择章节版本失败:', diagnostics)
+    console.error(pick('选择章节版本失败:', 'Failed to select the chapter version:'), diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '选择失败'
+      diagnostics.title || pick('选择失败', 'Selection failed')
     )
   }
 }
@@ -1583,13 +1784,13 @@ const deleteVersion = async (versionIndex: number) => {
     ((selectedVersionId && versionToCheck.id && selectedVersionId === versionToCheck.id) ||
       (!selectedVersionId && currentContent && currentContent === versionContent))
   ) {
-    globalAlert.showError('不能删除当前生效的版本', '删除失败')
+    globalAlert.showError(pick('不能删除当前生效的版本', 'The active version cannot be deleted'), pick('删除失败', 'Delete failed'))
     return
   }
 
   // 至少保留一个版本
   if (availableVersions.value.length <= 1) {
-    globalAlert.showError('至少需要保留一个版本', '删除失败')
+    globalAlert.showError(pick('至少需要保留一个版本', 'At least one version must remain'), pick('删除失败', 'Delete failed'))
     return
   }
 
@@ -1611,14 +1812,18 @@ const deleteVersion = async (versionIndex: number) => {
     } else if ((compareVersionIndex.value ?? -1) > versionIndex) {
       compareVersionIndex.value = (compareVersionIndex.value ?? 0) - 1
     }
-    globalAlert.showSuccess('版本已删除', '操作成功')
+    globalAlert.showSuccess(pick('版本已删除', 'Version deleted'), pick('操作成功', 'Action succeeded'))
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '删除版本失败，请稍后重试', '删除失败')
+    const diagnostics = normalizeUiDiagnostics(
+      error,
+      pick('删除版本失败，请稍后重试', 'Failed to delete the version — please retry later'),
+      pick('删除失败', 'Delete failed')
+    )
     setLatestDiagnostics(diagnostics)
-    console.error('删除版本失败:', diagnostics)
+    console.error(pick('删除版本失败:', 'Failed to delete the version:'), diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '删除失败'
+      diagnostics.title || pick('删除失败', 'Delete failed')
     )
   } finally {
     deletingVersionIndex.value = null
@@ -1632,7 +1837,10 @@ const openEditChapterModal = (chapter: ChapterOutline) => {
   const outlineToEdit = latestOutline || chapter
 
   if (!outlineToEdit) {
-    globalAlert.showError('当前章节大纲不存在或尚未加载完成。', '无法编辑')
+    globalAlert.showError(
+      pick('当前章节大纲不存在或尚未加载完成。', 'This chapter outline does not exist or has not finished loading.'),
+      pick('无法编辑', 'Cannot edit')
+    )
     return
   }
 
@@ -1654,15 +1862,19 @@ const saveChapterChanges = async (updatedChapter: ChapterOutline) => {
     )
     editingChapter.value = latestOutline ? { ...latestOutline } : { ...updatedChapter }
 
-    globalAlert.showSuccess('章节大纲已更新', '保存成功')
+    globalAlert.showSuccess(pick('章节大纲已更新', 'Chapter outline updated'), pick('保存成功', 'Saved'))
     showEditChapterModal.value = false
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '更新章节大纲失败，请稍后重试', '保存失败')
+    const diagnostics = normalizeUiDiagnostics(
+      error,
+      pick('更新章节大纲失败，请稍后重试', 'Failed to update the chapter outline — please retry later'),
+      pick('保存失败', 'Save failed')
+    )
     setLatestDiagnostics(diagnostics)
-    console.error('更新章节大纲失败:', diagnostics)
+    console.error(pick('更新章节大纲失败:', 'Failed to update the chapter outline:'), diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '保存失败'
+      diagnostics.title || pick('保存失败', 'Save failed')
     )
   } finally {
     isSavingOutline.value = false
@@ -1678,14 +1890,18 @@ const rewriteChapterSummary = async (payload: { chapter: ChapterOutline; directi
       (item) => item.chapter_number === payload.chapter.chapter_number
     )
     if (rewritten) editingChapter.value = { ...rewritten }
-    globalAlert.showSuccess('章节摘要已通过 AI 重写', '重写成功')
+    globalAlert.showSuccess(pick('章节摘要已通过 AI 重写', 'The chapter summary was rewritten by AI'), pick('重写成功', 'Rewrite succeeded'))
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, 'AI 重写章节摘要失败，请稍后重试', '重写失败')
+    const diagnostics = normalizeUiDiagnostics(
+      error,
+      pick('AI 重写章节摘要失败，请稍后重试', 'AI failed to rewrite the chapter summary — please retry later'),
+      pick('重写失败', 'Rewrite failed')
+    )
     setLatestDiagnostics(diagnostics)
-    console.error('AI 重写章节摘要失败:', diagnostics)
+    console.error(pick('AI 重写章节摘要失败:', 'AI failed to rewrite the chapter summary:'), diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '重写失败'
+      diagnostics.title || pick('重写失败', 'Rewrite failed')
     )
   } finally {
     isRewritingOutline.value = false
@@ -1721,15 +1937,19 @@ const evaluateChapter = async (versionIndex?: number) => {
          handleShowEvaluationDetail(version.evaluation)
        }
     } else {
-       globalAlert.showSuccess('章节评估结果已生成', '评估成功')
+       globalAlert.showSuccess(pick('章节评估结果已生成', 'The chapter review is ready'), pick('评估成功', 'Review succeeded'))
     }
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '评估章节失败，请稍后重试', '评估失败')
+    const diagnostics = normalizeUiDiagnostics(
+      error,
+      pick('评估章节失败，请稍后重试', 'Failed to review the chapter — please retry later'),
+      pick('评估失败', 'Review failed')
+    )
     setLatestDiagnostics(diagnostics)
-    console.error('评估章节失败:', diagnostics)
+    console.error(pick('评估章节失败:', 'Failed to review the chapter:'), diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '评估失败'
+      diagnostics.title || pick('评估失败', 'Review failed')
     )
   } finally {
     evaluatingVersionIndex.value = null
@@ -1750,15 +1970,19 @@ const evaluateAllVersions = async () => {
     if (updatedChapter?.evaluation) {
       handleShowEvaluationDetail(updatedChapter.evaluation)
     } else {
-      globalAlert.showSuccess('多版本对比评审结果已生成', '评审成功')
+      globalAlert.showSuccess(pick('多版本对比评审结果已生成', 'The multi-version comparison review is ready'), pick('评审成功', 'Review succeeded'))
     }
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '多版本评审失败，请稍后重试', '评审失败')
+    const diagnostics = normalizeUiDiagnostics(
+      error,
+      pick('多版本评审失败，请稍后重试', 'Multi-version review failed — please retry later'),
+      pick('评审失败', 'Review failed')
+    )
     setLatestDiagnostics(diagnostics)
-    console.error('多版本评审失败:', diagnostics)
+    console.error(pick('多版本评审失败:', 'Multi-version review failed:'), diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '评审失败'
+      diagnostics.title || pick('评审失败', 'Review failed')
     )
   }
 }
@@ -1794,7 +2018,7 @@ const optimizeVersion = async (versionIndex: number) => {
   const version = availableVersions.value[versionIndex]
   const originalVersionIndex = getOriginalVersionIndex(versionIndex)
   if (!version?.content || originalVersionIndex === undefined) {
-    globalAlert.showError('该版本没有可优化的内容', '无法优化')
+    globalAlert.showError(pick('该版本没有可优化的内容', 'This version has no content to optimize'), pick('无法优化', 'Cannot optimize'))
     return
   }
 
@@ -1817,13 +2041,13 @@ const generateCandidateOptimization = async () => {
   const originalVersionIndex = getOriginalVersionIndex(candidateOptimizeVersionIndex.value)
   const candidateVersion = availableVersions.value[candidateOptimizeVersionIndex.value]
   if (originalVersionIndex === undefined) {
-    globalAlert.showError('未找到对应候选版本', '无法优化')
+    globalAlert.showError(pick('未找到对应候选版本', 'The matching candidate was not found'), pick('无法优化', 'Cannot optimize'))
     return
   }
 
   isOptimizingCandidateVersion.value = true
   try {
-    globalAlert.showInfo('正在生成候选版本优化稿...', '请稍候')
+    globalAlert.showInfo(pick('正在生成候选版本优化稿...', 'Generating an optimized draft for the candidate…'), pick('请稍候', 'Please wait'))
     const result = await novelStore.optimizeChapterVersion(
       project.value.id,
       selectedChapterNumber.value,
@@ -1837,14 +2061,18 @@ const generateCandidateOptimization = async () => {
     candidateOptimizeResultNotes.value = normalizeOptimizationNotes(result.optimization_notes)
     closeCandidateOptimizeDialog()
     showCandidateOptimizeResultModal.value = true
-    globalAlert.showSuccess('优化结果已生成，请确认是否应用', '优化完成')
+    globalAlert.showSuccess(pick('优化结果已生成，请确认是否应用', 'The optimized draft is ready — confirm whether to apply it'), pick('优化完成', 'Optimization complete'))
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '优化失败，请稍后重试', '优化失败')
+    const diagnostics = normalizeUiDiagnostics(
+      error,
+      pick('优化失败，请稍后重试', 'Optimization failed — please retry later'),
+      pick('优化失败', 'Optimization failed')
+    )
     setLatestDiagnostics(diagnostics)
-    console.error('优化版本失败:', diagnostics)
+    console.error(pick('优化版本失败:', 'Failed to optimize the version:'), diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '优化失败'
+      diagnostics.title || pick('优化失败', 'Optimization failed')
     )
   } finally {
     isOptimizingCandidateVersion.value = false
@@ -1880,14 +2108,18 @@ const applyCandidateOptimization = async () => {
       }
     }
     resetCandidateOptimizationState()
-    globalAlert.showSuccess('候选版本优化结果已应用', '操作成功')
+    globalAlert.showSuccess(pick('候选版本优化结果已应用', 'The candidate optimization was applied'), pick('操作成功', 'Action succeeded'))
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '应用候选版本优化失败，请稍后重试', '应用失败')
+    const diagnostics = normalizeUiDiagnostics(
+      error,
+      pick('应用候选版本优化失败，请稍后重试', 'Failed to apply the candidate optimization — please retry later'),
+      pick('应用失败', 'Apply failed')
+    )
     setLatestDiagnostics(diagnostics)
-    console.error('应用候选版本优化失败:', diagnostics)
+    console.error(pick('应用候选版本优化失败:', 'Failed to apply the candidate optimization:'), diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '应用失败'
+      diagnostics.title || pick('应用失败', 'Apply failed')
     )
   } finally {
     isApplyingCandidateOptimization.value = false
@@ -1906,25 +2138,35 @@ const handleShowEvaluationDetail = (customEvaluation?: string) => {
 const deleteChapter = async (chapterNumbers: number | number[]) => {
   const numbersToDelete = Array.isArray(chapterNumbers) ? chapterNumbers : [chapterNumbers]
   const confirmationMessage = numbersToDelete.length > 1
-    ? '确定删除选中的 ' + numbersToDelete.length + ' 个章节吗？此操作不可撤销。'
-    : '确定删除第 ' + numbersToDelete[0] + ' 章吗？此操作不可撤销。'
+    ? pick(
+        '确定删除选中的 ' + numbersToDelete.length + ' 个章节吗？此操作不可撤销。',
+        'Delete the ' + numbersToDelete.length + ' selected chapters? This cannot be undone.'
+      )
+    : pick(
+        '确定删除第 ' + numbersToDelete[0] + ' 章吗？此操作不可撤销。',
+        'Delete chapter ' + numbersToDelete[0] + '? This cannot be undone.'
+      )
   if (!window.confirm(confirmationMessage)) return
 
   try {
     await novelStore.deleteChapter(numbersToDelete)
     markProjectSynced()
-    globalAlert.showSuccess('章节已删除', '操作成功')
+    globalAlert.showSuccess(pick('章节已删除', 'Chapter deleted'), pick('操作成功', 'Action succeeded'))
     if (selectedChapterNumber.value && numbersToDelete.includes(selectedChapterNumber.value)) {
       selectedChapterNumber.value = null
       pickInitialChapter()
     }
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '删除章节失败，请稍后重试', '删除失败')
+    const diagnostics = normalizeUiDiagnostics(
+      error,
+      pick('删除章节失败，请稍后重试', 'Failed to delete the chapter — please retry later'),
+      pick('删除失败', 'Delete failed')
+    )
     setLatestDiagnostics(diagnostics)
-    console.error('删除章节失败:', diagnostics)
+    console.error(pick('删除章节失败:', 'Failed to delete the chapter:'), diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '删除失败'
+      diagnostics.title || pick('删除失败', 'Delete failed')
     )
   }
 }
@@ -1949,20 +2191,24 @@ const syncUpdatedChapter = (updatedChapter: Chapter) => {
 
 const editChapterContent = async (data: { chapterNumber: number; content: string }) => {
   if (!project.value) {
-    throw new Error('当前未加载项目，无法保存章节内容')
+    throw new Error(pick('当前未加载项目，无法保存章节内容', 'No project is loaded, so the chapter content cannot be saved'))
   }
   try {
     await novelStore.editChapterContent(project.value.id, data.chapterNumber, data.content)
     clearLatestDiagnostics()
     markProjectSynced()
-    globalAlert.showSuccess('章节内容已更新', '保存成功')
+    globalAlert.showSuccess(pick('章节内容已更新', 'Chapter content updated'), pick('保存成功', 'Saved'))
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '编辑章节内容失败，请稍后重试', '保存失败')
+    const diagnostics = normalizeUiDiagnostics(
+      error,
+      pick('编辑章节内容失败，请稍后重试', 'Failed to edit the chapter content — please retry later'),
+      pick('保存失败', 'Save failed')
+    )
     setLatestDiagnostics(diagnostics)
-    console.error('编辑章节内容失败:', diagnostics)
+    console.error(pick('编辑章节内容失败:', 'Failed to edit the chapter content:'), diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '保存失败'
+      diagnostics.title || pick('保存失败', 'Save failed')
     )
     throw error
   }
@@ -1980,18 +2226,31 @@ const handleGenerateOutline = async (payload: GenerateOutlinePayload) => {
     await novelStore.generateChapterOutline(startChapter, payload.numChapters, {
       targetTotalChapters: payload.targetTotalChapters,
       targetTotalWords: payload.targetTotalWords,
-      chapterWordTarget: payload.chapterWordTarget
+      chapterWordTarget: payload.chapterWordTarget,
+      volumeCount: payload.volumeCount,
+      chaptersPerVolume: payload.chaptersPerVolume,
+      longForm: payload.longFormMode
     })
     clearLatestDiagnostics()
     markProjectSynced()
-    globalAlert.showSuccess('新的章节大纲已生成（新增 ' + payload.numChapters + ' 章）', '操作成功')
+    globalAlert.showSuccess(
+      pick(
+        '新的章节大纲已生成（新增 ' + payload.numChapters + ' 章）',
+        'A new chapter outline was generated (' + payload.numChapters + ' chapters added)'
+      ),
+      pick('操作成功', 'Action succeeded')
+    )
   } catch (error) {
-    const diagnostics = normalizeUiDiagnostics(error, '生成大纲失败，请稍后重试', '生成失败')
+    const diagnostics = normalizeUiDiagnostics(
+      error,
+      pick('生成大纲失败，请稍后重试', 'Failed to generate the outline — please retry later'),
+      pick('生成失败', 'Generation failed')
+    )
     setLatestDiagnostics(diagnostics)
-    console.error('生成大纲失败:', diagnostics)
+    console.error(pick('生成大纲失败:', 'Failed to generate the outline:'), diagnostics)
     globalAlert.showError(
       formatUiDiagnosticsMessage(diagnostics, { includeRootCause: true, includeRequestId: true, includeHint: true }),
-      diagnostics.title || '生成失败'
+      diagnostics.title || pick('生成失败', 'Generation failed')
     )
   } finally {
     isGeneratingOutline.value = false
@@ -2192,6 +2451,7 @@ watch(
   () => props.id,
   async (newId, oldId) => {
     if (!newId || newId === oldId) return
+    _closeSSE()
     resetWorkspaceState()
     await loadProject()
   }
@@ -2207,6 +2467,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   clearStatusPolling()
+  _closeSSE()
   document.body.classList.remove('m3-novel')
   window.removeEventListener('keydown', handleKeydown)
   window.removeEventListener('resize', handleWindowResize)
@@ -2214,22 +2475,80 @@ onUnmounted(() => {
 
 // ===== SSE helpers =====
 const sseController = ref<SSEController | null>(null)
+const chapterGenerationStatuses: readonly Chapter['generation_status'][] = [
+  'not_generated', 'generating', 'evaluating', 'selecting',
+  'failed', 'evaluation_failed', 'waiting_for_confirm', 'successful',
+]
+const isChapterGenerationStatus = (status: string): status is Chapter['generation_status'] => (
+  chapterGenerationStatuses.includes(status as Chapter['generation_status'])
+)
+
 const _ensureSSEConnected = () => {
   if (sseController.value || !props.id) return
   const busyCh = project.value?.chapters?.find((ch: any) =>
     isBusyTask(ch, resolveChapterRuntime(ch, project.value?.generation_runtime || null))
   )
   if (!busyCh?.chapter_number) return
+  const taskId = taskIdForChapter(busyCh)
+  if (taskId) {
+    const runtime = resolveChapterRuntime(busyCh, project.value?.generation_runtime || null) || {}
+    const cursor = typeof runtime.task_event_cursor === 'number' ? runtime.task_event_cursor : 0
+    sseController.value = connectSSE(TaskRuntimeAPI.streamUrl(taskId, cursor), {
+      onRawEvent(_eventType, payload) {
+        if (!payload || typeof payload !== 'object') return
+        const event = payload as TaskRuntimeEventRead
+        if (event.task_id && event.task_id !== taskId) return
+        const currentChapter = project.value?.chapters.find((chapter) => chapter.chapter_number === busyCh.chapter_number)
+        if (!currentChapter) return
+        // 任务重试会复用章节号但更换 task_id；旧连接的迟到事件不能污染新任务。
+        if (!isTaskEventForCurrentTask(taskIdForChapter(currentChapter), taskId)) return
+        const currentRuntime = resolveChapterRuntime(currentChapter, project.value?.generation_runtime || null) || {}
+        const nextRuntime = {
+          ...currentRuntime,
+          task_id: taskId,
+          run_id: currentRuntime.run_id || taskId,
+          task_status: event.status || currentRuntime.task_status,
+          task_stage: event.stage || currentRuntime.task_stage,
+          task_message: event.message || currentRuntime.task_message,
+          progress_stage: event.stage || currentRuntime.progress_stage,
+          progress_message: event.message || currentRuntime.progress_message,
+          progress_percent: typeof event.progress === 'number' ? event.progress : currentRuntime.progress_percent,
+          event_cursor: event.event_id,
+          task_event_cursor: event.event_id,
+          recovered_from_reload: true,
+          events: [
+            ...(Array.isArray(currentRuntime.events) ? currentRuntime.events : []),
+            taskRuntimeEventToChapterEvent(event),
+          ].slice(-80),
+        }
+        syncChapterStatusIntoProject({ ...currentChapter, generation_runtime: nextRuntime })
+        if (['task_completed', 'task_failed', 'task_cancelled', 'task_stale'].includes(event.event_type)) {
+          _closeSSE()
+          void fetchChapterStatus()
+        }
+      },
+    })
+    return
+  }
+
   const url = '/api/writer/novels/' + props.id + '/chapters/' + busyCh.chapter_number + '/stream'
   sseController.value = connectSSE(url, {
-    onStatusUpdate(data) {
+    onStatusUpdate(data: StreamStatusData) {
       if (!project.value) return
-      const idx = project.value.chapters.findIndex((c: any) => c.chapter_number === busyCh.chapter_number)
+      const idx = project.value.chapters.findIndex((chapter) => chapter.chapter_number === busyCh.chapter_number)
       if (idx < 0) return
-      const ch = { ...project.value.chapters[idx] }
-      if (data.runtime) ch.real_summary = JSON.stringify({ generation_runtime: data.runtime })
-      ch.generation_status = data.status
-      ch.word_count = data.word_count || ch.word_count
+
+      const ch: Chapter = { ...project.value.chapters[idx] }
+      if (isChapterGenerationStatus(data.status)) ch.generation_status = data.status
+      ch.word_count = data.word_count ?? ch.word_count
+      ch.generation_runtime = {
+        ...ch.generation_runtime,
+        progress_stage: data.progress_stage,
+        progress_message: data.progress_message,
+        progress_percent: typeof data.runtime.progress_percent === 'number'
+          ? data.runtime.progress_percent
+          : ch.generation_runtime?.progress_percent,
+      }
       project.value.chapters[idx] = ch
     },
     onComplete() { sseController.value?.close(); sseController.value = null; void fetchChapterStatus() },
@@ -2237,6 +2556,14 @@ const _ensureSSEConnected = () => {
   })
 }
 const _closeSSE = () => { sseController.value?.close(); sseController.value = null }
+
+watch(
+  () => taskIdForChapter(selectedChapter.value),
+  () => {
+    _closeSSE()
+    _ensureSSEConnected()
+  },
+)
 
 </script>
 

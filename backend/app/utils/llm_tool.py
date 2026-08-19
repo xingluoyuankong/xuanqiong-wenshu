@@ -5,8 +5,11 @@
 import os
 from dataclasses import asdict, dataclass
 from typing import Any, AsyncGenerator, Dict, List, Optional
+from urllib.parse import urlparse
 
 from openai import AsyncOpenAI
+
+from ..core.config import get_settings
 
 
 def _read_env_value(*names: str) -> Optional[str]:
@@ -29,6 +32,31 @@ class ChatMessage:
 class LLMClient:
     """异步流式调用封装，兼容 OpenAI SDK。"""
 
+    _PROMPT_CACHE_KEY_UNSUPPORTED_HOSTS = {"api.xzxyuan.ccwu.cc"}
+
+    @classmethod
+    def _supports_prompt_cache_key(cls, base_url: Optional[str]) -> bool:
+        host = (urlparse(str(base_url or "")).hostname or "").lower()
+        return host not in cls._PROMPT_CACHE_KEY_UNSUPPORTED_HOSTS
+
+    @classmethod
+    def _sanitize_chat_payload(
+        cls, payload: Dict[str, Any], *, base_url: Optional[str] = None
+    ) -> Dict[str, Any]:
+        cleaned = {key: value for key, value in dict(payload).items() if value is not None}
+        if not cls._supports_prompt_cache_key(base_url):
+            cleaned.pop("prompt_cache_key", None)
+        return cleaned
+
+    @staticmethod
+    def _resolve_model(model: Optional[str]) -> str:
+        """Use the same configured default for every low-level call path."""
+        return (
+            (model or "").strip()
+            or _read_env_value("OPENAI_MODEL_NAME", "MODEL")
+            or get_settings().openai_model_name
+        )
+
     @staticmethod
     def _build_response_format_payload(response_format: Optional[Any]) -> Optional[Dict[str, Any]]:
         if not response_format:
@@ -43,6 +71,7 @@ class LLMClient:
             raise ValueError("缺少 OPENAI_API_KEY 配置，请在数据库或环境变量中补全。")
 
         resolved_base_url = (base_url or "").strip() or _read_env_value("OPENAI_API_BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE")
+        self._base_url = resolved_base_url
         self._client = AsyncOpenAI(api_key=key, base_url=resolved_base_url)
 
     async def stream_chat(
@@ -57,7 +86,7 @@ class LLMClient:
         **kwargs,
     ) -> AsyncGenerator[Dict[str, str], None]:
         payload = {
-            "model": model or os.environ.get("MODEL", "gpt-3.5-turbo"),
+            "model": self._resolve_model(model),
             "messages": [msg.to_dict() for msg in messages],
             "stream": True,
             "timeout": timeout,
@@ -72,15 +101,18 @@ class LLMClient:
             payload["top_p"] = top_p
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
-        payload = {key: value for key, value in payload.items() if value is not None}
+        payload = self._sanitize_chat_payload(payload, base_url=self._base_url)
 
         stream = await self._client.chat.completions.create(**payload)
         async for chunk in stream:
             if not chunk.choices:
                 continue
             choice = chunk.choices[0]
+            delta = choice.delta
+            reasoning_content = getattr(delta, "reasoning_content", None) or getattr(delta, "reasoning", None)
             yield {
-                "content": choice.delta.content,
+                "content": getattr(delta, "content", None),
+                "reasoning_content": reasoning_content,
                 "finish_reason": choice.finish_reason,
             }
 
@@ -138,7 +170,7 @@ class LLMClient:
         **kwargs,
     ) -> Dict[str, Optional[str]]:
         payload = {
-            "model": model or os.environ.get("MODEL", "gpt-3.5-turbo"),
+            "model": self._resolve_model(model),
             "messages": [msg.to_dict() for msg in messages],
             "stream": False,
             "timeout": timeout,
@@ -153,7 +185,7 @@ class LLMClient:
             payload["top_p"] = top_p
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
-        payload = {key: value for key, value in payload.items() if value is not None}
+        payload = self._sanitize_chat_payload(payload, base_url=self._base_url)
 
         completion = await self._client.chat.completions.create(**payload)
         if not completion.choices:

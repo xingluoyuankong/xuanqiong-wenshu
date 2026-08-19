@@ -39,6 +39,11 @@ export default defineConfig(({ command }) => ({
     environment: 'jsdom',
     globals: true,
     css: true,
+    // 大型异步视图会同时触发 Vite/Naive UI 转换；Windows 上两个 worker 会争抢
+    // 文件句柄与转换缓存，造成与业务无关的 20 秒假超时。保持单 worker 串行，
+    // 让每个组件测试使用稳定且独立的转换生命周期，而不是放宽测试超时掩盖问题。
+    maxWorkers: 1,
+    minWorkers: 1,
   },
   plugins: [
     vue(),
@@ -47,6 +52,8 @@ export default defineConfig(({ command }) => ({
     // 自动导入 Naive UI 组件（按需加载，大幅减少打包体积）
     // @ts-ignore - NaiveUiResolver 在新版本中类型定义可能有变化
     Components({
+      // 将自动组件声明写入 src，避免 Windows 根目录文件句柄在生产构建中失败。
+      dts: 'src/components.d.ts',
       resolvers: [
         NaiveUiResolver()
       ],

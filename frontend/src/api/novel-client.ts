@@ -1,9 +1,11 @@
-﻿// AIMETA P=小说API客户端_小说和章节接口|R=小说CRUD_章节管理_生成|NR=不含UI逻辑|E=api:novel-client|X=internal|A=novelApi对象|D=fetch|S=net|RD=./README.ai
+// AIMETA P=小说API客户端_小说和章节接口|R=小说CRUD_章节管理_生成|NR=不含UI逻辑|E=api:novel-client|X=internal|A=novelApi对象|D=fetch|S=net|RD=./README.ai
 // Phase 5.2 重构：从 novel.ts 提取的 API 客户端代码（工具函数 + API 类）
 // 类型定义从 @/api/types/novel 导入
 
 import { API_BASE_URL, API_PREFIX } from '@/api/config'
+import { buildAuthHeaders } from '@/stores/auth'
 import { normalizeChapterContent } from '@/utils/chapterContent'
+import { pick } from '@/composables/useLocale'
 import type {
   ApiErrorDetail,
   NovelProject,
@@ -33,8 +35,13 @@ import type {
   ComprehensiveAnalysis,
   ForeshadowingItem,
   ResearchConfig,
+  ResearchConfigUpdate,
   ResearchArtifact,
-  ResearchRunStatus} from '@/api/types/novel'
+  ResearchJobRead,
+  ResearchRunRequest,
+  ResearchArchive,
+  ResearchArchiveCreate,
+} from '@/api/types/novel'
 
 // ============================================================================
 // 错误处理
@@ -62,10 +69,10 @@ const readText = (value: unknown): string | undefined => {
 }
 
 const getFallbackMessage = (status: number): string => {
-  if (status === 429) return '请求过于频繁，请稍后重试'
-  if (status === 503) return 'AI 服务暂时不可用，请稍后重试'
-  if (status >= 500) return '服务暂时不可用，请稍后重试'
-  return `请求失败，状态码: ${status}`
+  if (status === 429) return pick('请求过于频繁，请稍后重试', 'Too many requests — please retry shortly')
+  if (status === 503) return pick('AI 服务暂时不可用，请稍后重试', 'The AI service is temporarily unavailable — please retry shortly')
+  if (status >= 500) return pick('服务暂时不可用，请稍后重试', 'The service is temporarily unavailable — please retry shortly')
+  return pick(`请求失败，状态码: ${status}`, `Request failed with status ${status}`)
 }
 
 const buildApiErrorDetail = (
@@ -113,11 +120,11 @@ const buildApiErrorDetail = (
 
 const formatApiErrorMessage = (detail: ApiErrorDetail): string => {
   const lines = [detail.message || getFallbackMessage(detail.status)]
-  if (detail.rootCause) lines.push(`根因: ${detail.rootCause}`)
-  if (detail.code) lines.push(`错误码: ${detail.code}`)
-  if (detail.requestId) lines.push(`请求ID: ${detail.requestId}`)
-  if (detail.hint) lines.push(`建议: ${detail.hint}`)
-  if (detail.responseSnippet) lines.push(`响应片段: ${detail.responseSnippet}`)
+  if (detail.rootCause) lines.push(pick(`根因: ${detail.rootCause}`, `Root cause: ${detail.rootCause}`))
+  if (detail.code) lines.push(pick(`错误码: ${detail.code}`, `Error code: ${detail.code}`))
+  if (detail.requestId) lines.push(pick(`请求ID: ${detail.requestId}`, `Request ID: ${detail.requestId}`))
+  if (detail.hint) lines.push(pick(`建议: ${detail.hint}`, `Hint: ${detail.hint}`))
+  if (detail.responseSnippet) lines.push(pick(`响应片段: ${detail.responseSnippet}`, `Response snippet: ${detail.responseSnippet}`))
   return lines.join('\n')
 }
 
@@ -125,7 +132,7 @@ const request = async (url: string, options: RequestInit = {}, retryCount = 0): 
   const MAX_RETRIES = 2
   const RETRY_DELAYS = [800, 2000, 4000]
   
-  const headers = new Headers({
+  const headers = buildAuthHeaders({
     'Content-Type': 'application/json',
     ...options.headers
   })
@@ -143,7 +150,10 @@ const request = async (url: string, options: RequestInit = {}, retryCount = 0): 
       await new Promise(resolve => setTimeout(resolve, delay))
       return request(url, options, retryCount + 1)
     }
-    throw new Error('网络连接失败，请检查后端是否已启动后重试')
+    throw new Error(pick(
+      '网络连接失败，请检查后端是否已启动后重试',
+      'Network request failed — check that the backend is running and retry'
+    ))
   }
 
   // Retry on 502/503/504 (backend temporarily unavailable)
@@ -176,6 +186,7 @@ const request = async (url: string, options: RequestInit = {}, retryCount = 0): 
 // 数据规范化
 // ============================================================================
 
+// 下面 style 兜底值 '标准' 与后端约定的字段值一致，属内部真源，不随界面语言变化
 const normalizeChapterVersion = (value: unknown): ChapterVersion => {
   if (typeof value === 'string') {
     return {
@@ -254,31 +265,35 @@ const NOVEL_IMPORT_MAX_POLL_ATTEMPTS = 900
 const delay = (ms: number) => new Promise((resolve) => globalThis.setTimeout(resolve, ms))
 
 const readBlueprintJobError = (status: BlueprintGenerationJobResponse): string => {
+  const fallback = pick('蓝图生成失败，请稍后重试', 'Blueprint generation failed — please retry shortly')
   const rawError = status.error
-  if (!rawError) return status.progress_message || '蓝图生成失败，请稍后重试'
+  if (!rawError) return status.progress_message || fallback
   if (typeof rawError === 'string') return rawError
-  return rawError.detail || rawError.message || status.progress_message || '蓝图生成失败，请稍后重试'
+  return rawError.detail || rawError.message || status.progress_message || fallback
 }
 
 const readStyleProfileJobError = (status: StyleProfileJobResponse): string => {
+  const fallback = pick('文风画像生成失败，请稍后重试', 'Style profile generation failed — please retry shortly')
   const rawError = status.error
-  if (!rawError) return status.progress_message || '文风画像生成失败，请稍后重试'
+  if (!rawError) return status.progress_message || fallback
   if (typeof rawError === 'string') return rawError
-  return rawError.detail || rawError.message || status.progress_message || '文风画像生成失败，请稍后重试'
+  return rawError.detail || rawError.message || status.progress_message || fallback
 }
 
 const readStyleSourceUploadJobError = (status: StyleSourceUploadJobResponse): string => {
+  const fallback = pick('文风素材导入失败，请稍后重试', 'Style source import failed — please retry shortly')
   const rawError = status.error
-  if (!rawError) return status.progress_message || '文风素材导入失败，请稍后重试'
+  if (!rawError) return status.progress_message || fallback
   if (typeof rawError === 'string') return rawError
-  return rawError.detail || rawError.message || status.progress_message || '文风素材导入失败，请稍后重试'
+  return rawError.detail || rawError.message || status.progress_message || fallback
 }
 
 const readNovelImportJobError = (status: NovelImportJobResponse): string => {
+  const fallback = pick('旧稿导入失败，请稍后重试', 'Manuscript import failed — please retry shortly')
   const rawError = status.error
-  if (!rawError) return status.progress_message || '旧稿导入失败，请稍后重试'
+  if (!rawError) return status.progress_message || fallback
   if (typeof rawError === 'string') return rawError
-  return rawError.detail || rawError.message || status.progress_message || '旧稿导入失败，请稍后重试'
+  return rawError.detail || rawError.message || status.progress_message || fallback
 }
 
 // ============================================================================
@@ -304,14 +319,17 @@ export class NovelAPI {
         throw new Error(readNovelImportJobError(status))
       }
       if (status.status === 'cancelled') {
-        throw new Error(status.progress_message || '旧稿导入已取消')
+        throw new Error(status.progress_message || pick('旧稿导入已取消', 'Manuscript import cancelled'))
       }
 
       await delay(NOVEL_IMPORT_POLL_INTERVAL_MS)
       status = await NovelAPI.getNovelImportStatus(status.run_id)
     }
 
-    throw new Error('旧稿导入后台任务等待超时，请稍后刷新项目列表查看结果。')
+    throw new Error(pick(
+      '旧稿导入后台任务等待超时，请稍后刷新项目列表查看结果。',
+      'Timed out waiting for the manuscript import job — refresh the project list later to see the result.'
+    ))
   }
 
   static async startNovelImport(file: File): Promise<NovelImportJobResponse> {
@@ -379,21 +397,27 @@ export class NovelAPI {
       if (status.status === 'successful' && status.blueprint) {
         return {
           blueprint: status.blueprint,
-          ai_message: status.ai_message || '蓝图已生成，请确认后进入写作阶段。'
+          ai_message: status.ai_message || pick(
+            '蓝图已生成，请确认后进入写作阶段。',
+            'The blueprint is ready — confirm it to move on to writing.'
+          )
         }
       }
       if (status.status === 'failed') {
         throw new Error(readBlueprintJobError(status))
       }
       if (status.status === 'cancelled') {
-        throw new Error(status.progress_message || '蓝图生成已取消')
+        throw new Error(status.progress_message || pick('蓝图生成已取消', 'Blueprint generation cancelled'))
       }
 
       await delay(BLUEPRINT_LEGACY_POLL_INTERVAL_MS)
       status = await NovelAPI.getBlueprintGenerationStatus(projectId)
     }
 
-    throw new Error('蓝图后台任务等待超时，请稍后到生成状态中刷新结果。')
+    throw new Error(pick(
+      '蓝图后台任务等待超时，请稍后到生成状态中刷新结果。',
+      'Timed out waiting for the blueprint job — refresh the generation status later to see the result.'
+    ))
   }
 
   static async startBlueprintGeneration(
@@ -539,6 +563,59 @@ export class NovelAPI {
     }
   }> {
     return request(`${PATCH_DIFF_BASE}/projects/${projectId}/chapters/${chapterNumber}/versions/${v1}/vs/${v2}`)
+  }
+  // ===== Research APIs =====
+  static async getResearchConfig(projectId: string): Promise<ResearchConfig> {
+    return request(`${PROJECTS_BASE}/${projectId}/research/config`)
+  }
+
+  static async updateResearchConfig(projectId: string, config: ResearchConfigUpdate): Promise<ResearchConfig> {
+    return request(`${PROJECTS_BASE}/${projectId}/research/config`, {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    })
+  }
+
+  static async startResearchJob(projectId: string, payload: ResearchRunRequest): Promise<ResearchJobRead> {
+    return request(`${PROJECTS_BASE}/${projectId}/research/run/start`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  }
+
+  static async getResearchJobStatus(projectId: string, runId: string): Promise<ResearchJobRead> {
+    return request(`${PROJECTS_BASE}/${projectId}/research/run/${runId}/status`)
+  }
+
+  static async cancelResearchJob(projectId: string, runId: string): Promise<ResearchJobRead> {
+    return request(`${PROJECTS_BASE}/${projectId}/research/run/${runId}/cancel`, {
+      method: 'POST',
+    })
+  }
+
+  /** @deprecated Use startResearchJob. */
+  static async startResearchRun(projectId: string, payload: ResearchRunRequest): Promise<ResearchJobRead> {
+    return this.startResearchJob(projectId, payload)
+  }
+
+  /** @deprecated Use cancelResearchJob. */
+  static async cancelResearchRun(projectId: string, runId: string): Promise<ResearchJobRead> {
+    return this.cancelResearchJob(projectId, runId)
+  }
+
+  static async listResearchArtifacts(projectId: string): Promise<ResearchArtifact[]> {
+    return request(`${PROJECTS_BASE}/${projectId}/research/artifacts`)
+  }
+
+  static async listResearchArchives(projectId: string): Promise<ResearchArchive[]> {
+    return request(`${PROJECTS_BASE}/${projectId}/research/archives`)
+  }
+
+  static async createResearchArchive(projectId: string, payload: ResearchArchiveCreate): Promise<ResearchArchive> {
+    return request(`${PROJECTS_BASE}/${projectId}/research/archives`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
   }
 }
 
@@ -739,14 +816,17 @@ export class OptimizerAPI {
         throw new Error(readStyleProfileJobError(status))
       }
       if (status.status === 'cancelled') {
-        throw new Error(status.progress_message || '文风画像生成已取消')
+        throw new Error(status.progress_message || pick('文风画像生成已取消', 'Style profile generation cancelled'))
       }
 
       await delay(STYLE_PROFILE_POLL_INTERVAL_MS)
       status = await OptimizerAPI.getStyleProfileGenerationStatus(projectId)
     }
 
-    throw new Error('文风画像后台任务等待超时，请稍后刷新文风中心查看结果。')
+    throw new Error(pick(
+      '文风画像后台任务等待超时，请稍后刷新文风中心查看结果。',
+      'Timed out waiting for the style profile job — refresh the style center later to see the result.'
+    ))
   }
 
   static async startStyleProfileGeneration(
@@ -788,14 +868,17 @@ export class OptimizerAPI {
         throw new Error(readStyleSourceUploadJobError(status))
       }
       if (status.status === 'cancelled') {
-        throw new Error(status.progress_message || '文风素材导入已取消')
+        throw new Error(status.progress_message || pick('文风素材导入已取消', 'Style source import cancelled'))
       }
 
       await delay(STYLE_SOURCE_UPLOAD_POLL_INTERVAL_MS)
       status = await OptimizerAPI.getStyleSourceUploadStatus(projectId, status.run_id)
     }
 
-    throw new Error('文风素材导入后台任务等待超时，请稍后刷新文风中心查看结果。')
+    throw new Error(pick(
+      '文风素材导入后台任务等待超时，请稍后刷新文风中心查看结果。',
+      'Timed out waiting for the style source import job — refresh the style center later to see the result.'
+    ))
   }
 
   static async startStyleSourceUpload(
@@ -1240,46 +1323,6 @@ export class TokenBudgetAPI {
     return request(`${TOKEN_BUDGET_BASE}/${projectId}/token-budget/allocate`, {
       method: 'POST',
       body: JSON.stringify(allocations)
-    })
-  }
-
-  // ===== Research APIs =====
-  static async getResearchConfig(projectId: string): Promise<ResearchConfig> {
-    return request(`${PROJECTS_BASE}/${projectId}/research/config`)
-  }
-  
-  static async updateResearchConfig(projectId: string, config: ResearchConfig): Promise<ResearchConfig> {
-    return request(`${PROJECTS_BASE}/${projectId}/research/config`, {
-      method: 'PUT',
-      body: JSON.stringify(config),
-    })
-  }
-  
-  static async startResearchRun(projectId: string, payload: { scope: string; chapter_number?: number }): Promise<{ run_id: string; status: string }> {
-    return request(`${PROJECTS_BASE}/${projectId}/research/run/start`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    })
-  }
-  
-  static async getResearchJobStatus(projectId: string, runId: string): Promise<ResearchRunStatus> {
-    return request(`${PROJECTS_BASE}/${projectId}/research/run/${runId}/status`)
-  }
-  
-  static async cancelResearchRun(projectId: string, runId: string): Promise<void> {
-    return request(`${PROJECTS_BASE}/${projectId}/research/run/${runId}/cancel`, {
-      method: 'POST',
-    })
-  }
-  
-  static async listResearchArtifacts(projectId: string): Promise<ResearchArtifact[]> {
-    return request(`${PROJECTS_BASE}/${projectId}/research/artifacts`)
-  }
-  
-  static async createResearchPendingArtifact(projectId: string, payload: { title: string; url?: string; notes?: string }): Promise<ResearchArtifact> {
-    return request(`${PROJECTS_BASE}/${projectId}/research/artifacts`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
     })
   }
 }

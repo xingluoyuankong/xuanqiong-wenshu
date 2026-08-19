@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...db.session import get_session
 from ...services.knowledge_graph_service import KnowledgeGraphService, PlotThread
 from ...services.novel_service import NovelService
+from ...services.project_ledger_lease_service import project_ledger_lease
 from ...core.dependencies import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -455,6 +456,28 @@ async def delete_graph_edge(
     except Exception as e:
         logger.error(f"删除事件边失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{project_id}/knowledge-graph/overview")
+async def get_knowledge_graph_overview(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user = Depends(get_current_user),
+):
+    """Return graph and plot-thread data from one serialized ledger snapshot."""
+    await NovelService(session).ensure_project_owner(project_id, current_user.id)
+    service = KnowledgeGraphService(session)
+    async with project_ledger_lease(project_id):
+        sync = await service.sync_from_story_memory(project_id, commit=True)
+        graph = await service.get_project_graph(project_id)
+        threads = await service._analyze_project_threads(project_id)
+    return {
+        "project_id": project_id,
+        "graph": graph,
+        "threads": [thread.to_dict() for thread in threads],
+        "thread_count": len(threads),
+        "sync": sync,
+    }
 
 
 @router.get("/{project_id}/knowledge-graph", response_model=KnowledgeGraphResponse)

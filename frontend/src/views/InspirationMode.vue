@@ -1,28 +1,31 @@
-<template>
+﻿<template>
   <div class="inspiration-shell xq-page-canvas min-h-screen text-slate-900">
     <header class="inspiration-topbar xq-topbar xq-topbar--inspiration sticky top-0 z-30">
       <div class="mx-auto flex w-full max-w-7xl items-center gap-4 px-4 py-4 sm:px-6 lg:px-8">
         <button class="inspiration-back-btn" type="button" @click="goBack">
           <span class="inspiration-back-icon">&larr;</span>
-          <span>{{ '\u8fd4\u56de' }}</span>
+          <span>{{ pick('返回', 'Back') }}</span>
         </button>
 
         <div class="min-w-0 flex-1">
-          <p class="inspiration-kicker">{{ '\u7075\u611f\u6a21\u5f0f' }}</p>
-          <h1 class="mt-1 truncate text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
-            {{ '\u5bf9\u8bdd\u5f0f\u521b\u4f5c\u5de5\u4f5c\u53f0' }}
+          <p class="inspiration-kicker">{{ pick('灵感模式', 'Inspiration mode') }}</p>
+          <h1 class="mt-1 truncate text-xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
+            {{ pick('对话式创作工作台', 'Conversational writing workspace') }}
           </h1>
           <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-600 sm:text-base">
-            {{ '\u5148\u7528\u804a\u5929\u628a\u7075\u611f\u8bf4\u51fa\u6765\uff0c\u518d\u9010\u8f6e\u6536\u675f\u6210\u53ef\u843d\u5730\u7684\u5c0f\u8bf4\u84dd\u56fe\uff0c\u51cf\u5c11\u4e00\u6b21\u6027\u5806\u6ee1\u8868\u5355\u7684\u538b\u8feb\u611f\u3002' }}
+            {{ pick(
+              '先用聊天把灵感说出来，再逐轮收束成可落地的小说蓝图，减少一次性堆满表单的压迫感。',
+              'Talk the idea out in chat first, then narrow it down round by round into a workable novel blueprint, instead of facing one crowded form.',
+            ) }}
           </p>
         </div>
 
         <div class="hidden items-center gap-2 md:flex">
           <button class="inspiration-ghost-btn" type="button" :disabled="isInteractionLocked" @click="handleRestart">
-            {{ '\u91cd\u542f' }}
+            {{ pick('重启', 'Restart') }}
           </button>
           <button class="inspiration-ghost-btn" type="button" :disabled="isInteractionLocked" @click="exitConversation">
-            {{ '\u9000\u51fa' }}
+            {{ pick('退出', 'Exit') }}
           </button>
         </div>
       </div>
@@ -32,16 +35,16 @@
       <section class="inspiration-panel inspiration-stage-strip px-4 py-3 sm:px-4 sm:py-4">
         <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p class="inspiration-kicker">当前阶段</p>
-            <h2 class="mt-2 text-lg font-semibold text-slate-950">{{ stageTitle }}</h2>
+            <p class="inspiration-kicker">{{ pick('当前阶段', 'Current stage') }}</p>
+            <h2 class="mt-2 text-base font-semibold text-slate-950">{{ stageTitle }}</h2>
             <p class="mt-2 text-sm leading-6 text-slate-600">{{ stageDescription }}</p>
           </div>
           <div class="inspiration-stage-strip__actions">
             <button v-if="showReturnToConversation" class="inspiration-mini-btn" type="button" :disabled="isInteractionLocked" @click="backToConversation">
-              返回对话
+              {{ pick('返回对话', 'Back to conversation') }}
             </button>
             <button v-if="showSoftRestart" class="inspiration-mini-btn" type="button" :disabled="isInteractionLocked" @click="handleRestart">
-              重启本轮
+              {{ pick('重启本轮', 'Restart this round') }}
             </button>
           </div>
         </div>
@@ -78,17 +81,20 @@
         <article class="inspiration-panel inspiration-landing-panel flex min-h-0 flex-col justify-between p-5 sm:p-6">
           <div>
             <div class="flex flex-wrap items-center gap-2">
-              <span class="inspiration-pill inspiration-pill--blue">先说一个想法</span>
-              <span class="inspiration-pill inspiration-pill--teal">逐轮收束</span>
-              <span class="inspiration-pill inspiration-pill--slate">不必一次定完</span>
+              <span class="inspiration-pill inspiration-pill--blue">{{ pick('先说一个想法', 'Start with one idea') }}</span>
+              <span class="inspiration-pill inspiration-pill--teal">{{ pick('逐轮收束', 'Narrow round by round') }}</span>
+              <span class="inspiration-pill inspiration-pill--slate">{{ pick('不必一次定完', 'No need to settle it all at once') }}</span>
             </div>
 
-            <h2 class="mt-6 max-w-3xl text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl lg:text-5xl">
-              把灵感先说出来，系统再帮你把它收成故事骨架。
+            <h2 class="mt-6 max-w-3xl text-xl font-semibold tracking-tight text-slate-950 sm:text-4xl lg:text-5xl">
+              {{ pick('把灵感先说出来，系统再帮你把它收成故事骨架。', 'Say the idea out loud first, then let the system shape it into a story skeleton.') }}
             </h2>
 
             <p class="mt-5 max-w-2xl text-base leading-8 text-slate-600 sm:text-lg">
-              这里不是“表单页”，而是一条对话式创作流水线。你只需要给出碎片化想法，AI 会逐轮收束成蓝图，再继续进入写作工作台。
+              {{ pick(
+                '这里不是“表单页”，而是一条对话式创作流水线。你只需要给出碎片化想法，AI 会逐轮收束成蓝图，再继续进入写作工作台。',
+                'This is not a "form page" but a conversational writing pipeline. Just bring fragments of an idea; AI narrows them into a blueprint round by round before you move on to the writing workspace.',
+              ) }}
             </p>
           </div>
 
@@ -96,22 +102,22 @@
             <div class="inspiration-step">
               <span class="inspiration-step__index">1</span>
               <div>
-                <p class="inspiration-step__title">开始对话</p>
-                <p class="inspiration-step__desc">先让系统拿到你最初的想法。</p>
+                <p class="inspiration-step__title">{{ pick('开始对话', 'Start the conversation') }}</p>
+                <p class="inspiration-step__desc">{{ pick('先让系统拿到你最初的想法。', 'Let the system capture your very first idea.') }}</p>
               </div>
             </div>
             <div class="inspiration-step">
               <span class="inspiration-step__index">2</span>
               <div>
-                <p class="inspiration-step__title">逐轮收束</p>
-                <p class="inspiration-step__desc">每一轮只解决一个小问题。</p>
+                <p class="inspiration-step__title">{{ pick('逐轮收束', 'Narrow round by round') }}</p>
+                <p class="inspiration-step__desc">{{ pick('每一轮只解决一个小问题。', 'Each round settles one small question.') }}</p>
               </div>
             </div>
             <div class="inspiration-step">
               <span class="inspiration-step__index">3</span>
               <div>
-                <p class="inspiration-step__title">生成蓝图</p>
-                <p class="inspiration-step__desc">确认后直接进入工作台。</p>
+                <p class="inspiration-step__title">{{ pick('生成蓝图', 'Generate the blueprint') }}</p>
+                <p class="inspiration-step__desc">{{ pick('确认后直接进入工作台。', 'Once confirmed, go straight to the workspace.') }}</p>
               </div>
             </div>
           </div>
@@ -119,27 +125,30 @@
 
         <aside class="inspiration-panel flex min-h-0 flex-col gap-3 p-4 sm:p-5">
           <div class="rounded-[24px] border border-slate-200 bg-slate-950 px-5 py-5 text-white shadow-[0_20px_60px_-30px_rgba(15,23,42,0.55)]">
-            <p class="text-xs uppercase tracking-[0.28em] text-slate-400">当前入口</p>
-            <h3 class="mt-2 text-xl font-semibold">灵感工作流</h3>
+            <p class="text-xs uppercase tracking-[0.28em] text-slate-400">{{ pick('当前入口', 'Current entry') }}</p>
+            <h3 class="mt-2 text-xl font-semibold">{{ pick('灵感工作流', 'Inspiration workflow') }}</h3>
             <p class="mt-3 text-sm leading-6 text-slate-300">
-              适合还没有大纲，或者只想先把一个模糊想法快速变成可写结构的时候。
+              {{ pick(
+                '适合还没有大纲，或者只想先把一个模糊想法快速变成可写结构的时候。',
+                'Best when there is no outline yet, or you just want to turn a vague idea into a writable structure fast.',
+              ) }}
             </p>
           </div>
 
-          <div class="rounded-[24px] border border-slate-200 bg-white/90 p-5 shadow-[0_18px_48px_-32px_rgba(15,23,42,0.35)]">
-            <p class="text-sm font-semibold text-slate-900">这条线的顺序</p>
+          <div class="rounded-[24px] border border-slate-200 bg-white/90 p-3.5 shadow-[0_18px_48px_-32px_rgba(15,23,42,0.35)]">
+            <p class="text-sm font-semibold text-slate-900">{{ pick('这条线的顺序', 'How this flow runs') }}</p>
             <ol class="mt-4 space-y-3 text-sm leading-6 text-slate-600">
               <li class="flex items-start gap-3">
                 <span class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-700">1</span>
-                <span>创建一个临时灵感项目，保留上下文。</span>
+                <span>{{ pick('创建一个临时灵感项目，保留上下文。', 'Create a temporary inspiration project to keep the context.') }}</span>
               </li>
               <li class="flex items-start gap-3">
                 <span class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cyan-100 text-xs font-semibold text-cyan-700">2</span>
-                <span>通过对话逐步澄清题材、人物和冲突。</span>
+                <span>{{ pick('通过对话逐步澄清题材、人物和冲突。', 'Clarify genre, characters, and conflict through the conversation.') }}</span>
               </li>
               <li class="flex items-start gap-3">
                 <span class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-semibold text-emerald-700">3</span>
-                <span>确认蓝图后进入章节写作工作台。</span>
+                <span>{{ pick('确认蓝图后进入章节写作工作台。', 'Confirm the blueprint, then enter the chapter writing workspace.') }}</span>
               </li>
             </ol>
           </div>
@@ -152,7 +161,7 @@
               :disabled="novelStore.isLoading"
               @click="resumeLastConversation"
             >
-              继续上次灵感
+              {{ pick('继续上次灵感', 'Resume last inspiration') }}
             </button>
             <button
               type="button"
@@ -160,7 +169,7 @@
               :disabled="novelStore.isLoading"
               @click="startConversation"
             >
-              {{ novelStore.isLoading ? '正在准备...' : '开始灵感对话' }}
+              {{ novelStore.isLoading ? pick('正在准备...', 'Preparing...') : pick('开始灵感对话', 'Start the inspiration conversation') }}
             </button>
           </div>
         </aside>
@@ -172,9 +181,9 @@
       >
         <div class="mb-4 flex items-center justify-between gap-3">
           <div>
-            <p class="inspiration-kicker">蓝图阶段</p>
+            <p class="inspiration-kicker">{{ pick('蓝图阶段', 'Blueprint stage') }}</p>
             <h2 class="mt-1 text-xl font-semibold text-slate-950 sm:text-2xl">
-              {{ showBlueprintConfirmation ? '确认蓝图' : '查看蓝图' }}
+              {{ showBlueprintConfirmation ? pick('确认蓝图', 'Confirm the blueprint') : pick('查看蓝图', 'View the blueprint') }}
             </h2>
           </div>
           <button
@@ -184,7 +193,7 @@
             :disabled="isInteractionLocked"
             @click="backToConversation"
           >
-            返回对话
+            {{ pick('返回对话', 'Back to conversation') }}
           </button>
         </div>
 
@@ -221,19 +230,19 @@
             <div class="flex flex-wrap items-center gap-2">
               <span class="inspiration-pill inspiration-pill--blue">{{ conversationStateLabel }}</span>
               <span v-if="currentTurn > 0" class="inspiration-pill inspiration-pill--slate">
-                第 {{ currentTurn }} 轮
+                {{ pick(`第 ${currentTurn} 轮`, `Round ${currentTurn}`) }}
               </span>
               <span class="inspiration-pill inspiration-pill--teal">
-                {{ chatMessages.length }} 条消息
+                {{ chatMessages.length }} {{ pick('条消息', 'messages') }}
               </span>
             </div>
 
             <div class="flex items-center gap-2">
               <button class="inspiration-mini-btn" type="button" @click="handleRestart">
-                重启
+                {{ pick('重启', 'Restart') }}
               </button>
               <button class="inspiration-mini-btn" type="button" @click="exitConversation">
-                退出
+                {{ pick('退出', 'Exit') }}
               </button>
             </div>
           </div>
@@ -261,12 +270,12 @@
           <div class="inspiration-input-shell border-t border-slate-200/80 bg-white/95 px-4 py-3 sm:px-5 sm:py-4">
             <div class="mb-3 flex items-center justify-between gap-3">
               <div>
-                <p class="text-sm font-semibold text-slate-900">输入区</p>
+                <p class="text-sm font-semibold text-slate-900">{{ pick('输入区', 'Input area') }}</p>
                 <p class="mt-1 text-xs leading-5 text-slate-500">
-                  先给出最小可用想法即可，后续再逐轮补充。
+                  {{ pick('先给出最小可用想法即可，后续再逐轮补充。', 'A minimal usable idea is enough; add more round by round.') }}
                 </p>
               </div>
-              <span class="inspiration-pill inspiration-pill--slate">支持单选和文本补充</span>
+              <span class="inspiration-pill inspiration-pill--slate">{{ pick('支持单选和文本补充', 'Single choice and free text supported') }}</span>
             </div>
 
             <div class="inspiration-input-scroll">
@@ -281,7 +290,7 @@
 
         <aside class="inspiration-rail flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
           <section class="inspiration-panel inspiration-rail-card p-5">
-            <p class="inspiration-kicker">当前状态</p>
+            <p class="inspiration-kicker">{{ pick('当前状态', 'Current state') }}</p>
             <h3 class="mt-2 text-xl font-semibold text-slate-950">{{ conversationStateLabel }}</h3>
             <p class="mt-3 text-sm leading-6 text-slate-600">
               {{ stateDescription }}
@@ -289,54 +298,66 @@
 
             <div class="mt-5 grid grid-cols-2 gap-3">
               <div class="inspiration-metric">
-                <span class="inspiration-metric__label">当前轮次</span>
+                <span class="inspiration-metric__label">{{ pick('当前轮次', 'Current round') }}</span>
                 <strong class="inspiration-metric__value">{{ currentTurn }}</strong>
               </div>
               <div class="inspiration-metric">
-                <span class="inspiration-metric__label">控制类型</span>
+                <span class="inspiration-metric__label">{{ pick('控制类型', 'Control type') }}</span>
                 <strong class="inspiration-metric__value">{{ controlModeLabel }}</strong>
               </div>
               <div class="inspiration-metric">
-                <span class="inspiration-metric__label">消息数量</span>
+                <span class="inspiration-metric__label">{{ pick('消息数量', 'Messages') }}</span>
                 <strong class="inspiration-metric__value">{{ chatMessages.length }}</strong>
               </div>
               <div class="inspiration-metric">
-                <span class="inspiration-metric__label">选项数量</span>
+                <span class="inspiration-metric__label">{{ pick('选项数量', 'Options') }}</span>
                 <strong class="inspiration-metric__value">{{ currentControlOptionCount }}</strong>
               </div>
             </div>
           </section>
 
           <section class="inspiration-panel inspiration-rail-card p-5">
-            <p class="inspiration-kicker">操作建议</p>
+            <p class="inspiration-kicker">{{ pick('操作建议', 'Tips') }}</p>
             <ul class="mt-4 space-y-3 text-sm leading-6 text-slate-600">
               <li class="flex gap-3">
                 <span class="mt-1 h-2 w-2 rounded-full bg-indigo-500"></span>
-                <span>先看 AI 这轮提示，再只做必要补充，不要一次性把整本书都写完。</span>
+                <span>{{ pick(
+                  '先看 AI 这轮提示，再只做必要补充，不要一次性把整本书都写完。',
+                  'Read the AI prompt for this round, add only what is needed, and do not try to write the whole book at once.',
+                ) }}</span>
               </li>
               <li class="flex gap-3">
                 <span class="mt-1 h-2 w-2 rounded-full bg-cyan-500"></span>
-                <span>单选时直接选最接近的一项，再用文字把偏差补齐。</span>
+                <span>{{ pick(
+                  '单选时直接选最接近的一项，再用文字把偏差补齐。',
+                  'For single choice, take the closest option and close the gap in text.',
+                ) }}</span>
               </li>
               <li class="flex gap-3">
                 <span class="mt-1 h-2 w-2 rounded-full bg-emerald-500"></span>
-                <span>输入区在底部固定分层，不用在一大坨选项里来回找入口。</span>
+                <span>{{ pick(
+                  '输入区在底部固定分层，不用在一大坨选项里来回找入口。',
+                  'The input area stays pinned at the bottom, so you never hunt for it inside a pile of options.',
+                ) }}</span>
               </li>
             </ul>
           </section>
 
           <section class="inspiration-panel inspiration-rail-card p-5">
-            <p class="inspiration-kicker">工作流摘要</p>
+            <p class="inspiration-kicker">{{ pick('工作流摘要', 'Workflow summary') }}</p>
             <div class="mt-4 space-y-3 text-sm leading-6 text-slate-600">
-              <p>如果对话结束，会先进入蓝图确认，再保存到工作台。</p>
+              <p>{{ pick(
+                '如果对话结束，会先进入蓝图确认，再保存到工作台。',
+                'When the conversation ends, you confirm the blueprint first, then it is saved to the workspace.',
+              ) }}</p>
               <p v-if="currentUIControl?.type === 'single_choice' || currentUIControl?.type === 'multi_choice'">
-                这一轮有 {{ currentControlOptionCount }} 个候选选项，{{ currentUIControl?.type === 'multi_choice' ? '可以组合多个方向一起推进。' : '建议先点最接近的那个。' }}
+                {{ pick(`这一轮有 ${currentControlOptionCount} 个候选选项，`, `This round offers ${currentControlOptionCount} candidate options. `) }}{{ currentUIControl?.type === 'multi_choice' ? pick('可以组合多个方向一起推进。', 'You can combine several directions and push them forward together.') : pick('建议先点最接近的那个。', 'Start with the closest one.') }}
               </p>
               <p v-else-if="currentUIControl?.type === 'text_input'">
-                这一轮是文本补充，直接说明你的想法即可。
+                {{ pick('这一轮是文本补充，直接说明你的想法即可。', 'This round takes free text, so just describe your idea.') }}
               </p>
               <p v-else>
-                当前还在等待下一步指令，聊天区会继续给出引导。
+                {{ pick('当前还在等待下一步指令，聊天区会继续给出引导。', 'Waiting for the next instruction; the chat area keeps guiding you.') }}
               </p>
             </div>
           </section>
@@ -358,6 +379,7 @@ import InspirationLoading from '@/components/InspirationLoading.vue'
 const BlueprintConfirmation = defineAsyncComponent(() => import('@/components/BlueprintConfirmation.vue'))
 const BlueprintDisplay = defineAsyncComponent(() => import('@/components/BlueprintDisplay.vue'))
 import { globalAlert } from '@/composables/useAlert'
+import { useLocale } from '@/composables/useLocale'
 
 interface ChatMessage {
   content: string
@@ -367,6 +389,7 @@ interface ChatMessage {
 const router = useRouter()
 const route = useRoute()
 const novelStore = useNovelStore()
+const { pick } = useLocale()
 const ACTIVE_INSPIRATION_PROJECT_KEY = 'xuanqiong_wenshu_active_inspiration_project_id'
 
 const conversationStarted = ref(false)
@@ -430,7 +453,10 @@ const resetInspirationMode = (options?: { preserveResumeProject?: boolean }) => 
 }
 
 const exitConversation = async () => {
-  const confirmed = await globalAlert.showConfirm('确定要退出灵感模式吗？当前会保留，你之后可以继续接着聊。', '退出确认')
+  const confirmed = await globalAlert.showConfirm(
+    pick('确定要退出灵感模式吗？当前会保留，你之后可以继续接着聊。', 'Leave inspiration mode? The session is kept, so you can pick the conversation up later.'),
+    pick('退出确认', 'Confirm exit'),
+  )
   if (confirmed) {
     resetInspirationMode({ preserveResumeProject: true })
     router.push('/')
@@ -438,7 +464,10 @@ const exitConversation = async () => {
 }
 
 const handleRestart = async () => {
-  const confirmed = await globalAlert.showConfirm('确定要重新开始吗？当前对话内容将会丢失。', '重新开始确认')
+  const confirmed = await globalAlert.showConfirm(
+    pick('确定要重新开始吗？当前对话内容将会丢失。', 'Start over? The current conversation will be lost.'),
+    pick('重新开始确认', 'Confirm restart'),
+  )
   if (confirmed) {
     syncActiveInspirationProject(null)
     await startConversation()
@@ -464,25 +493,37 @@ const stageItems = computed(() => {
   const order = ['start', 'conversation', 'confirm', 'blueprint']
   const activeIndex = order.indexOf(currentStageKey.value)
   return [
-    { key: 'start', index: 1, title: '\u5f00\u59cb\u60f3\u6cd5', desc: '\u5148\u7ed9\u51fa\u4e00\u4e2a\u53ef\u4ee5\u7ee7\u7eed\u8ffd\u95ee\u7684\u6838\u5fc3\u7075\u611f\u3002', done: activeIndex > 0 },
-    { key: 'conversation', index: 2, title: '\u9010\u8f6e\u6536\u675f', desc: '\u6309\u8f6e\u6b21\u6f84\u6e05\u9898\u6750\u3001\u4eba\u7269\u548c\u51b2\u7a81\u3002', done: activeIndex > 1 },
-    { key: 'confirm', index: 3, title: '\u786e\u8ba4\u84dd\u56fe', desc: '\u786e\u8ba4\u5f53\u524d\u65b9\u5411\u662f\u5426\u5df2\u7ecf\u8db3\u591f\u7a33\u5b9a\u3002', done: activeIndex > 2 },
-    { key: 'blueprint', index: 4, title: '\u8fdb\u5165\u5f00\u5199', desc: '\u84dd\u56fe\u751f\u6210\u540e\u76f4\u63a5\u5207\u5230\u5199\u4f5c\u53f0\u3002', done: false },
+    { key: 'start', index: 1, title: pick('开始想法', 'Start an idea'), desc: pick('先给出一个可以继续追问的核心灵感。', 'Give one core idea worth digging into.'), done: activeIndex > 0 },
+    { key: 'conversation', index: 2, title: pick('逐轮收束', 'Narrow it down'), desc: pick('按轮次澄清题材、人物和冲突。', 'Clarify genre, characters, and conflict turn by turn.'), done: activeIndex > 1 },
+    { key: 'confirm', index: 3, title: pick('确认蓝图', 'Confirm the blueprint'), desc: pick('确认当前方向是否已经足够稳定。', 'Check whether the current direction is stable enough.'), done: activeIndex > 2 },
+    { key: 'blueprint', index: 4, title: pick('进入开写', 'Start writing'), desc: pick('蓝图生成后直接切到写作台。', 'Jump straight to the writing desk once the blueprint is ready.'), done: false },
   ]
 })
 
 const stageTitle = computed(() => ({
-  start: '\u5148\u628a\u7075\u611f\u8bf4\u51fa\u6765\uff0c\u518d\u8ba9\u7cfb\u7edf\u9010\u6b65\u6536\u675f',
-  conversation: '\u5f53\u524d\u5904\u4e8e\u5bf9\u8bdd\u6536\u675f\u9636\u6bb5',
-  confirm: '\u5f53\u524d\u5904\u4e8e\u84dd\u56fe\u786e\u8ba4\u9636\u6bb5',
-  blueprint: '\u84dd\u56fe\u5df2\u751f\u6210\uff0c\u53ef\u4ee5\u51b3\u5b9a\u662f\u5426\u76f4\u63a5\u5f00\u5199',
+  start: pick('先把灵感说出来，再让系统逐步收束', 'Say the idea out loud first, then let the system narrow it down'),
+  conversation: pick('当前处于对话收束阶段', 'Currently narrowing things down through conversation'),
+  confirm: pick('当前处于蓝图确认阶段', 'Currently confirming the blueprint'),
+  blueprint: pick('蓝图已生成，可以决定是否直接开写', 'The blueprint is ready — decide whether to start writing'),
 }[currentStageKey.value]))
 
 const stageDescription = computed(() => ({
-  start: '\u8fd9\u4e00\u5c4f\u53ea\u8d1f\u8d23\u8d77\u6b65\u3002\u5148\u8bf4\u6700\u5c0f\u60f3\u6cd5\uff0c\u4e0d\u9700\u8981\u4e00\u6b21\u628a\u4e16\u754c\u89c2\u3001\u7ae0\u8282\u548c\u89d2\u8272\u5168\u586b\u5b8c\u3002',
-  conversation: '\u804a\u5929\u533a\u4f1a\u6301\u7eed\u7ed9\u51fa\u5f53\u524d\u8f6e\u6b21\u7684\u5f15\u5bfc\u3002\u4f18\u5148\u5b8c\u6210\u5f53\u524d\u95ee\u9898\uff0c\u518d\u8fdb\u5165\u4e0b\u4e00\u8f6e\u3002',
-  confirm: '\u5148\u786e\u8ba4\u65b9\u5411\uff0c\u518d\u51b3\u5b9a\u662f\u5426\u5f00\u59cb\u751f\u6210\u84dd\u56fe\u3002\u8fd9\u91cc\u4e0d\u5efa\u8bae\u7ee7\u7eed\u5806\u53e0\u65b0\u4fe1\u606f\u3002',
-  blueprint: '\u84dd\u56fe\u5df2\u53ef\u9605\u8bfb\u3002\u786e\u8ba4\u540e\u4f1a\u76f4\u63a5\u8fdb\u5165\u5199\u4f5c\u53f0\uff0c\u91cd\u505a\u5219\u4f1a\u56de\u5230\u84dd\u56fe\u786e\u8ba4\u6d41\u7a0b\u3002',
+  start: pick(
+    '这一屏只负责起步。先说最小想法，不需要一次把世界观、章节和角色全填完。',
+    'This screen is only about getting started. Share the smallest idea — no need to fill in world, chapters, and cast at once.'
+  ),
+  conversation: pick(
+    '聊天区会持续给出当前轮次的引导。优先完成当前问题，再进入下一轮。',
+    'The chat keeps offering guidance for the current turn. Finish the current question before moving on.'
+  ),
+  confirm: pick(
+    '先确认方向，再决定是否开始生成蓝图。这里不建议继续堆叠新信息。',
+    'Confirm the direction before generating the blueprint. This is not the place to pile on new information.'
+  ),
+  blueprint: pick(
+    '蓝图已可阅读。确认后会直接进入写作台，重做则会回到蓝图确认流程。',
+    'The blueprint is readable. Confirming takes you to the writing desk; redoing returns you to the confirmation step.'
+  ),
 }[currentStageKey.value]))
 
 const isInteractionLocked = computed(() => isSavingBlueprint.value)
@@ -497,80 +538,151 @@ const inspirationProgressPercent = computed(() => {
   return 0
 })
 const inspirationProgressTitle = computed(() => {
-  if (isSavingBlueprint.value) return hasCompleteChapterOutline(completedBlueprint.value) ? '\u6b63\u5728\u4fdd\u5b58\u84dd\u56fe\u5e76\u51c6\u5907\u8fdb\u5165\u5199\u4f5c\u53f0' : '\u6b63\u5728\u57fa\u4e8e\u5c0f\u8bf4\u603b\u5927\u7eb2\u751f\u6210\u7ae0\u8282\u5927\u7eb2'
-  if (showBlueprint.value) return '\u84dd\u56fe\u5df2\u751f\u6210\uff0c\u7b49\u5f85\u786e\u8ba4'
-  if (showBlueprintConfirmation.value) return '\u6b63\u5728\u6536\u675f\u84dd\u56fe\u65b9\u5411'
-  if (isInitialLoading.value) return '\u6b63\u5728\u521d\u59cb\u5316\u7075\u611f\u5bf9\u8bdd'
-  if (novelStore.isLoading) return `\u6b63\u5728\u5904\u7406\u7b2c ${Math.max(1, currentTurn.value)} \u8f6e\u7075\u611f\u8f93\u5165`
-  return '\u7075\u611f\u5bf9\u8bdd\u8fdb\u884c\u4e2d'
+  if (isSavingBlueprint.value) {
+    return hasCompleteChapterOutline(completedBlueprint.value)
+      ? pick('正在保存蓝图并准备进入写作台', 'Saving the blueprint and preparing the writing desk')
+      : pick('正在基于小说总大纲生成章节大纲', 'Generating the chapter outline from the novel outline')
+  }
+  if (showBlueprint.value) return pick('蓝图已生成，等待确认', 'The blueprint is ready and awaiting confirmation')
+  if (showBlueprintConfirmation.value) return pick('正在收束蓝图方向', 'Narrowing down the blueprint direction')
+  if (isInitialLoading.value) return pick('正在初始化灵感对话', 'Starting the inspiration conversation')
+  if (novelStore.isLoading) return pick(
+    `正在处理第 ${Math.max(1, currentTurn.value)} 轮灵感输入`,
+    `Processing inspiration turn ${Math.max(1, currentTurn.value)}`
+  )
+  return pick('灵感对话进行中', 'Inspiration conversation in progress')
 })
 const inspirationProgressDescription = computed(() => {
-  if (isSavingBlueprint.value) return hasCompleteChapterOutline(completedBlueprint.value) ? '\u84dd\u56fe\u5199\u5165\u9879\u76ee\u540e\u4f1a\u76f4\u63a5\u8df3\u8f6c\u5230\u5c0f\u8bf4\u5199\u4f5c\u754c\u9762\u3002' : '\u7cfb\u7edf\u6b63\u5728\u8c03\u7528\u6b63\u5f0f\u751f\u6210\u94fe\uff0c\u628a\u5c0f\u8bf4\u603b\u5927\u7eb2\u7ec6\u5316\u6210\u7ae0\u8282\u5927\u7eb2\u3002'
-  if (showBlueprint.value) return '\u53ef\u4ee5\u5148\u901a\u8bfb\u84dd\u56fe\uff0c\u518d\u51b3\u5b9a\u786e\u8ba4\u8fdb\u5165\u5199\u4f5c\u6216\u91cd\u65b0\u751f\u6210\u3002'
-  if (showBlueprintConfirmation.value) return '\u5f53\u524d\u91cd\u70b9\u662f\u786e\u8ba4\u65b9\u5411\uff0c\u4e0d\u8981\u7ee7\u7eed\u5806\u53e0\u8fc7\u591a\u65b0\u4fe1\u606f\u3002'
-  if (isInitialLoading.value) return '\u7cfb\u7edf\u6b63\u5728\u521b\u5efa\u7075\u611f\u9879\u76ee\u5e76\u51c6\u5907\u9996\u8f6e\u5f15\u5bfc\u3002'
-  if (novelStore.isLoading) return '\u672c\u8f6e\u6d88\u606f\u5df2\u53d1\u51fa\uff0c\u6b63\u5728\u7b49\u5f85 AI \u8fd4\u56de\u4e0b\u4e00\u6b65\u5f15\u5bfc\u3002'
-  return '\u4f60\u53ef\u4ee5\u7ee7\u7eed\u8865\u5145\u60f3\u6cd5\uff0c\u7cfb\u7edf\u4f1a\u9010\u6b65\u628a\u5b83\u6536\u675f\u6210\u84dd\u56fe\u3002'
+  if (isSavingBlueprint.value) {
+    return hasCompleteChapterOutline(completedBlueprint.value)
+      ? pick(
+          '蓝图写入项目后会直接跳转到小说写作界面。',
+          'Once the blueprint is written to the project, you go straight to the writing view.'
+        )
+      : pick(
+          '系统正在调用正式生成链，把小说总大纲细化成章节大纲。',
+          'The full generation chain is running, expanding the novel outline into a chapter outline.'
+        )
+  }
+  if (showBlueprint.value) return pick(
+    '可以先通读蓝图，再决定确认进入写作或重新生成。',
+    'Read the blueprint first, then decide whether to start writing or regenerate.'
+  )
+  if (showBlueprintConfirmation.value) return pick(
+    '当前重点是确认方向，不要继续堆叠过多新信息。',
+    'The focus right now is confirming the direction, not adding more information.'
+  )
+  if (isInitialLoading.value) return pick(
+    '系统正在创建灵感项目并准备首轮引导。',
+    'Creating the inspiration project and preparing the first prompt.'
+  )
+  if (novelStore.isLoading) return pick(
+    '本轮消息已发出，正在等待 AI 返回下一步引导。',
+    'This turn has been sent — waiting for the AI to return the next prompt.'
+  )
+  return pick(
+    '你可以继续补充想法，系统会逐步把它收束成蓝图。',
+    'Keep adding to the idea and the system will gradually narrow it into a blueprint.'
+  )
 })
 
 const showReturnToConversation = computed(() => (showBlueprintConfirmation.value || showBlueprint.value) && !showBlueprint.value)
 const showSoftRestart = computed(() => conversationStarted.value && !showBlueprint.value)
 
 const controlModeLabel = computed(() => {
-  if (!conversationStarted.value) return '\u51c6\u5907\u5f00\u59cb'
-  if (showBlueprintConfirmation.value) return '\u84dd\u56fe\u786e\u8ba4'
-  if (showBlueprint.value) return '\u84dd\u56fe\u5c55\u793a'
-  if (isInitialLoading.value) return '\u542f\u52a8\u4e2d'
-  if (currentUIControl.value?.type === 'single_choice') return '\u5355\u9009\u63a8\u8fdb'
-  if (currentUIControl.value?.type === 'multi_choice') return '\u591a\u9009\u7ec4\u5408'
-  if (currentUIControl.value?.type === 'text_input') return '\u6587\u672c\u8865\u5145'
-  return '\u7b49\u5f85\u4e0b\u4e00\u6b65'
+  if (!conversationStarted.value) return pick('准备开始', 'Ready to start')
+  if (showBlueprintConfirmation.value) return pick('蓝图确认', 'Blueprint confirmation')
+  if (showBlueprint.value) return pick('蓝图展示', 'Blueprint preview')
+  if (isInitialLoading.value) return pick('启动中', 'Starting')
+  if (currentUIControl.value?.type === 'single_choice') return pick('单选推进', 'Single choice')
+  if (currentUIControl.value?.type === 'multi_choice') return pick('多选组合', 'Multiple choice')
+  if (currentUIControl.value?.type === 'text_input') return pick('文本补充', 'Free text')
+  return pick('等待下一步', 'Waiting for the next step')
 })
 
 const conversationStateLabel = computed(() => {
-  if (!conversationStarted.value) return '\u672a\u5f00\u59cb'
-  if (isInitialLoading.value) return '\u6b63\u5728\u521d\u59cb\u5316'
-  if (showBlueprintConfirmation.value) return '\u5f85\u786e\u8ba4\u84dd\u56fe'
-  if (showBlueprint.value) return '\u84dd\u56fe\u5df2\u751f\u6210'
-  return '\u5bf9\u8bdd\u8fdb\u884c\u4e2d'
+  if (!conversationStarted.value) return pick('未开始', 'Not started')
+  if (isInitialLoading.value) return pick('正在初始化', 'Initialising')
+  if (showBlueprintConfirmation.value) return pick('待确认蓝图', 'Blueprint pending confirmation')
+  if (showBlueprint.value) return pick('蓝图已生成', 'Blueprint ready')
+  return pick('对话进行中', 'Conversation in progress')
 })
 
 const currentControlTitle = computed(() => {
-  if (!conversationStarted.value) return '\u5148\u5f00\u59cb\u5bf9\u8bdd\uff0c\u518d\u9010\u8f6e\u6536\u675f\u6210\u84dd\u56fe\u3002'
-  if (!currentUIControl.value) return 'AI \u8fd8\u5728\u6574\u7406\u4e0b\u4e00\u6b65\u5f15\u5bfc\u3002'
+  if (!conversationStarted.value) return pick(
+    '先开始对话，再逐轮收束成蓝图。',
+    'Start the conversation first, then narrow it into a blueprint turn by turn.'
+  )
+  if (!currentUIControl.value) return pick('AI 还在整理下一步引导。', 'The AI is still preparing the next prompt.')
   if (currentUIControl.value.type === 'single_choice') {
-    return `\u5355\u9009\u6a21\u5f0f \u00b7 ${currentControlOptionCount.value} \u4e2a\u5019\u9009`
+    return pick(
+      `单选模式 · ${currentControlOptionCount.value} 个候选`,
+      `Single choice · ${currentControlOptionCount.value} options`
+    )
   }
   if (currentUIControl.value.type === 'multi_choice') {
-    return `\u591a\u9009\u6a21\u5f0f \u00b7 ${currentControlOptionCount.value} \u4e2a\u5019\u9009`
+    return pick(
+      `多选模式 · ${currentControlOptionCount.value} 个候选`,
+      `Multiple choice · ${currentControlOptionCount.value} options`
+    )
   }
-  return '\u6587\u672c\u8865\u5145\u6a21\u5f0f \u00b7 \u76f4\u63a5\u8f93\u5165\u4f60\u7684\u60f3\u6cd5'
+  return pick('文本补充模式 · 直接输入你的想法', 'Free text · type your idea directly')
 })
 
 const currentControlHint = computed(() => {
-  if (!conversationStarted.value) return '\u70b9\u51fb“\u5f00\u59cb\u7075\u611f\u5bf9\u8bdd”\u540e\uff0c\u7cfb\u7edf\u4f1a\u5148\u521b\u5efa\u4e00\u4e2a\u7075\u611f\u9879\u76ee\u5e76\u53d1\u8d77\u9996\u8f6e\u5bf9\u8bdd\u3002'
+  if (!conversationStarted.value) return pick(
+    '点击“开始灵感对话”后，系统会先创建一个灵感项目并发起首轮对话。',
+    'Click “Start inspiration chat” and the system creates an inspiration project, then opens the first turn.'
+  )
   if (currentUIControl.value?.type === 'single_choice') {
-    return currentUIControl.value.placeholder || '\u53ef\u4ee5\u5148\u70b9\u6700\u63a5\u8fd1\u7684\u9009\u9879\uff0c\u518d\u8865\u4e00\u53e5\u8bf4\u660e\u3002'
+    return currentUIControl.value.placeholder || pick(
+      '可以先点最接近的选项，再补一句说明。',
+      'Pick the closest option first, then add a sentence of context.'
+    )
   }
   if (currentUIControl.value?.type === 'multi_choice') {
-    return currentUIControl.value.placeholder || '\u53ef\u4ee5\u5148\u7ec4\u5408\u51e0\u4e2a\u6700\u63a5\u8fd1\u7684\u65b9\u5411\uff0c\u518d\u8865\u4e00\u53e5\u4f60\u771f\u6b63\u60f3\u4fdd\u7559\u7684\u6838\u5fc3\u3002'
+    return currentUIControl.value.placeholder || pick(
+      '可以先组合几个最接近的方向，再补一句你真正想保留的核心。',
+      'Combine the closest directions first, then say which core you really want to keep.'
+    )
   }
   if (currentUIControl.value?.type === 'text_input') {
-    return currentUIControl.value.placeholder || '\u76f4\u63a5\u8865\u5145\u4f60\u7684\u60f3\u6cd5\uff0c\u8d8a\u77ed\u8d8a\u597d\u3002'
+    return currentUIControl.value.placeholder || pick(
+      '直接补充你的想法，越短越好。',
+      'Add to the idea directly — shorter is better.'
+    )
   }
-  return '\u5f53\u524d\u56de\u5408\u4f1a\u7ee7\u7eed\u7ed9\u51fa\u4e0b\u4e00\u6b65\u5f15\u5bfc\u3002'
+  return pick('当前回合会继续给出下一步引导。', 'This turn will keep offering the next prompt.')
 })
 
 const stateDescription = computed(() => {
-  if (!conversationStarted.value) return '\u5148\u4e0d\u8981\u8ffd\u6c42\u5b8c\u6574\u7ed3\u6784\uff0c\u628a\u6700\u60f3\u4fdd\u7559\u7684\u6838\u5fc3\u5370\u8c61\u8bf4\u51fa\u6765\u5373\u53ef\u3002'
-  if (showBlueprintConfirmation.value) return '\u7cfb\u7edf\u5df2\u7ecf\u6536\u655b\u5230\u53ef\u4ee5\u751f\u6210\u84dd\u56fe\u7684\u7a0b\u5ea6\uff0c\u73b0\u5728\u5148\u786e\u8ba4\u5173\u952e\u65b9\u5411\u3002'
-  if (showBlueprint.value) return '\u84dd\u56fe\u5df2\u7ecf\u751f\u6210\uff0c\u53ef\u4ee5\u786e\u8ba4\u540e\u8fdb\u5165\u5199\u4f5c\u5de5\u4f5c\u53f0\uff0c\u6216\u8005\u91cd\u65b0\u751f\u6210\u3002'
-  if (isInitialLoading.value) return '\u7cfb\u7edf\u6b63\u5728\u521b\u5efa\u7075\u611f\u9879\u76ee\u5e76\u51c6\u5907\u9996\u8f6e\u5f15\u5bfc\u3002'
-  return '\u6bcf\u4e00\u8f6e\u53ea\u89e3\u51b3\u4e00\u4e2a\u5c0f\u95ee\u9898\uff0c\u907f\u514d\u5728\u8fd9\u4e00\u5c4f\u91cc\u5806\u6ee1\u4e0d\u5fc5\u8981\u7684\u9009\u9879\u3002'
+  if (!conversationStarted.value) return pick(
+    '先不要追求完整结构，把最想保留的核心印象说出来即可。',
+    'Do not chase a complete structure yet — just name the core impression you want to keep.'
+  )
+  if (showBlueprintConfirmation.value) return pick(
+    '系统已经收敛到可以生成蓝图的程度，现在先确认关键方向。',
+    'Things have converged enough to generate a blueprint — confirm the key direction first.'
+  )
+  if (showBlueprint.value) return pick(
+    '蓝图已经生成，可以确认后进入写作工作台，或者重新生成。',
+    'The blueprint is ready: confirm it to enter the writing desk, or regenerate.'
+  )
+  if (isInitialLoading.value) return pick(
+    '系统正在创建灵感项目并准备首轮引导。',
+    'Creating the inspiration project and preparing the first prompt.'
+  )
+  return pick(
+    '每一轮只解决一个小问题，避免在这一屏里堆满不必要的选项。',
+    'Each turn solves one small question, so this screen never fills up with needless options.'
+  )
 })
 
 
-const createFallbackTextControl = (placeholder = '继续补充你的想法，或直接说明你想调整的方向。'): UIControl => ({
+const createFallbackTextControl = (placeholder = pick(
+  '继续补充你的想法，或直接说明你想调整的方向。',
+  'Keep adding to your idea, or say what you want to adjust.'
+)): UIControl => ({
   type: 'text_input',
   placeholder,
 })
@@ -682,7 +794,10 @@ const restoreConversation = async (projectId: string) => {
     const project = novelStore.currentProject
     if (!project) {
       conversationStarted.value = true
-      currentUIControl.value = createFallbackTextControl('旧灵感项目暂未加载到历史记录，可以继续输入补充或重新发起。')
+      currentUIControl.value = createFallbackTextControl(pick(
+        '旧灵感项目暂未加载到历史记录，可以继续输入补充或重新发起。',
+        'This older inspiration project has no history loaded yet — keep typing or start a new run.'
+      ))
       return
     }
 
@@ -714,21 +829,30 @@ const restoreConversation = async (projectId: string) => {
       if (hasPersistedBlueprint) {
         novelStore.currentConversationState.value = payload.conversationState || {}
         completedBlueprint.value = project.blueprint || null
-        blueprintMessage.value = payload.aiMessage || '章节大纲已恢复，你可以继续确认后进入写作。'
+        blueprintMessage.value = payload.aiMessage || pick(
+          '章节大纲已恢复，你可以继续确认后进入写作。',
+          'The chapter outline is restored — confirm it to move on to writing.'
+        )
         showBlueprintConfirmation.value = false
         showBlueprint.value = true
         currentUIControl.value = null
       } else if (project.blueprint && hasPersistedNovelOutline) {
         novelStore.currentConversationState.value = payload.conversationState || {}
         completedBlueprint.value = project.blueprint || null
-        blueprintMessage.value = '已恢复到小说总大纲阶段。请先检查总纲，再使用软件功能继续生成章节大纲。'
+        blueprintMessage.value = pick(
+          '已恢复到小说总大纲阶段。请先检查总纲，再使用软件功能继续生成章节大纲。',
+          'Restored to the novel-outline stage. Review the outline first, then generate the chapter outline.'
+        )
         showBlueprintConfirmation.value = false
         showBlueprint.value = true
         currentUIControl.value = null
       } else if (project.blueprint && !hasPersistedBlueprint) {
         novelStore.currentConversationState.value = payload.conversationState || {}
         completedBlueprint.value = null
-        confirmationMessage.value = '已恢复到蓝图确认阶段。请先生成小说总大纲，再继续正式生成章节大纲。'
+        confirmationMessage.value = pick(
+          '已恢复到蓝图确认阶段。请先生成小说总大纲，再继续正式生成章节大纲。',
+          'Restored to the blueprint confirmation stage. Generate the novel outline first, then the chapter outline.'
+        )
         showBlueprintConfirmation.value = true
         showBlueprint.value = false
         currentUIControl.value = null
@@ -740,17 +864,29 @@ const restoreConversation = async (projectId: string) => {
         currentUIControl.value = null
       } else {
         novelStore.currentConversationState.value = payload.conversationState || {}
-        currentUIControl.value = payload.uiControl || createFallbackTextControl('继续续写这个灵感：补充主角、冲突、世界规则或你想改掉的方向。')
+        currentUIControl.value = payload.uiControl || createFallbackTextControl(pick(
+          '继续续写这个灵感：补充主角、冲突、世界规则或你想改掉的方向。',
+          'Keep building on this idea: add the lead, the conflict, the world rules, or what you want to change.'
+        ))
       }
     } else {
-      currentUIControl.value = createFallbackTextControl('这个旧灵感还没有可恢复的 AI 引导，直接输入一句新想法继续推进。')
+      currentUIControl.value = createFallbackTextControl(pick(
+        '这个旧灵感还没有可恢复的 AI 引导，直接输入一句新想法继续推进。',
+        'This older idea has no AI prompt to restore — type a fresh thought to keep going.'
+      ))
     }
 
     currentTurn.value = visibleAssistantHistory.length
     await scrollToBottom()
   } catch (error) {
     console.error('恢复对话失败:', error)
-    globalAlert.showError(`无法恢复对话: ${error instanceof Error ? error.message : '未知错误'}`, '加载失败')
+    globalAlert.showError(
+      pick(
+        `无法恢复对话: ${error instanceof Error ? error.message : '未知错误'}`,
+        `Could not restore the conversation: ${error instanceof Error ? error.message : 'unknown error'}`
+      ),
+      pick('加载失败', 'Load failed')
+    )
     resetInspirationMode()
   }
 }
@@ -761,12 +897,22 @@ const startConversation = async () => {
   isInitialLoading.value = true
 
   try {
-    const project = await novelStore.createProject('未命名灵感', '开始灵感模式')
+    // 标题与初始想法会持久化到后端，这里取创建时刻的界面语言，之后不随语言切换而变
+    const project = await novelStore.createProject(
+      pick('未命名灵感', 'Untitled idea'),
+      pick('开始灵感模式', 'Start inspiration mode')
+    )
     syncActiveInspirationProject(project?.id || novelStore.currentProject?.id || null)
     await handleUserInput(null)
   } catch (error) {
     console.error('启动灵感模式失败:', error)
-    globalAlert.showError(`无法开始灵感模式: ${error instanceof Error ? error.message : '未知错误'}`, '启动失败')
+    globalAlert.showError(
+      pick(
+        `无法开始灵感模式: ${error instanceof Error ? error.message : '未知错误'}`,
+        `Could not start inspiration mode: ${error instanceof Error ? error.message : 'unknown error'}`
+      ),
+      pick('启动失败', 'Start failed')
+    )
     resetInspirationMode()
   }
 }
@@ -774,7 +920,13 @@ const startConversation = async () => {
 const resumeLastConversation = async () => {
   const projectId = resolveResumeProjectId()
   if (!projectId) {
-    globalAlert.showError('没有可继续的灵感会话，请先开始一轮新的灵感对话。', '无法继续')
+    globalAlert.showError(
+      pick(
+        '没有可继续的灵感会话，请先开始一轮新的灵感对话。',
+        'There is no inspiration session to resume — start a new round first.'
+      ),
+      pick('无法继续', 'Cannot resume')
+    )
     return
   }
 
@@ -817,14 +969,23 @@ const handleUserInput = async (userInput: any) => {
       showBlueprintConfirmation.value = true
       showBlueprint.value = false
     } else {
-      currentUIControl.value = response.ui_control || createFallbackTextControl('AI 没有返回结构化按钮，你可以继续用文本补充设定或要求它换方向。')
+      currentUIControl.value = response.ui_control || createFallbackTextControl(pick(
+        'AI 没有返回结构化按钮，你可以继续用文本补充设定或要求它换方向。',
+        'The AI returned no structured buttons — keep adding details in text or ask it to change direction.'
+      ))
     }
   } catch (error) {
     console.error('对话失败:', error)
     if (isInitialLoading.value) {
       isInitialLoading.value = false
     }
-    globalAlert.showError(`抱歉，与 AI 连接时遇到问题：${error instanceof Error ? error.message : '未知错误'}`, '通信失败')
+    globalAlert.showError(
+      pick(
+        `抱歉，与 AI 连接时遇到问题：${error instanceof Error ? error.message : '未知错误'}`,
+        `Sorry, something went wrong talking to the AI: ${error instanceof Error ? error.message : 'unknown error'}`
+      ),
+      pick('通信失败', 'Connection failed')
+    )
 
     if (wasInitialLoading) {
       resetInspirationMode()
@@ -857,7 +1018,7 @@ const waitForBlueprintGenerationResult = async () => {
       if (typeof record.message === 'string' && record.message.trim()) return record.message
       if (typeof record.detail === 'string' && record.detail.trim()) return record.detail
     }
-    return fallback || '生成失败'
+    return fallback || pick('生成失败', 'Generation failed')
   }
 
   for (let attempt = 0; attempt < 450; attempt += 1) {
@@ -865,23 +1026,26 @@ const waitForBlueprintGenerationResult = async () => {
     if (status.status === 'successful' && status.blueprint) {
       return {
         blueprint: status.blueprint,
-        ai_message: status.ai_message || '生成完成，请继续下一步。',
+        ai_message: status.ai_message || pick('生成完成，请继续下一步。', 'Generation finished — move on to the next step.'),
       }
     }
     if (status.status === 'failed') {
-      throw new Error(readJobError(status.error, status.progress_message || '生成失败'))
+      throw new Error(readJobError(status.error, status.progress_message || pick('生成失败', 'Generation failed')))
     }
     if (status.status === 'cancelled') {
-      throw new Error(status.progress_message || '生成已取消')
+      throw new Error(status.progress_message || pick('生成已取消', 'Generation cancelled'))
     }
     await new Promise((resolve) => window.setTimeout(resolve, 2000))
   }
-  throw new Error('等待生成结果超时，请稍后重试。')
+  throw new Error(pick('等待生成结果超时，请稍后重试。', 'Timed out waiting for the generation result — please retry shortly.'))
 }
 
 const handleRegenerateBlueprint = () => {
   pendingBlueprintForceStage.value = 'novel_outline'
-  confirmationMessage.value = '你正在重生小说总大纲。确认后会覆盖当前总纲与其下游章节大纲，并重新生成一版更完整的新结构。'
+  confirmationMessage.value = pick(
+    '你正在重生小说总大纲。确认后会覆盖当前总纲与其下游章节大纲，并重新生成一版更完整的新结构。',
+    'You are regenerating the novel outline. Confirming overwrites the current outline and its downstream chapter outline, then rebuilds a fuller structure.'
+  )
   showBlueprint.value = false
   showBlueprintConfirmation.value = true
 }
@@ -890,13 +1054,19 @@ const handleConfirmBlueprint = async () => {
   if (isSavingBlueprint.value) return
 
   if (!completedBlueprint.value) {
-    globalAlert.showError('缺少蓝图数据，请先完成生成。', '进入失败')
+    globalAlert.showError(
+      pick('缺少蓝图数据，请先完成生成。', 'Blueprint data is missing — finish generating it first.'),
+      pick('进入失败', 'Cannot continue')
+    )
     return
   }
 
   const targetProjectId = novelStore.currentProject?.id || resolveResumeProjectId()
   if (!targetProjectId) {
-    globalAlert.showError('当前灵感项目不存在，请从工作区重新打开。', '进入失败')
+    globalAlert.showError(
+      pick('当前灵感项目不存在，请从工作区重新打开。', 'This inspiration project no longer exists — reopen it from the workspace.'),
+      pick('进入失败', 'Cannot continue')
+    )
     return
   }
 
@@ -906,7 +1076,10 @@ const handleConfirmBlueprint = async () => {
   try {
     if (!readyForWriting) {
       pendingBlueprintForceStage.value = 'chapter_outline'
-      confirmationMessage.value = '正在基于当前小说总大纲继续生成章节大纲。页面会直接切换到后台任务视图，显示实时进度与日志。'
+      confirmationMessage.value = pick(
+        '正在基于当前小说总大纲继续生成章节大纲。页面会直接切换到后台任务视图，显示实时进度与日志。',
+        'Generating the chapter outline from the current novel outline. The page switches to the background job view with live progress and logs.'
+      )
       showBlueprint.value = false
       showBlueprintConfirmation.value = true
       return
@@ -916,9 +1089,12 @@ const handleConfirmBlueprint = async () => {
     await router.push(`/novel/${targetProjectId}`)
   } catch (error) {
     console.error(readyForWriting ? 'Enter writing desk failed:' : '生成章节大纲失败:', error)
+    const reason = error instanceof Error ? error.message : pick('未知错误', 'unknown error')
     globalAlert.showError(
-      `${readyForWriting ? '进入写作台失败' : '生成章节大纲失败'}：${error instanceof Error ? error.message : '未知错误'}`,
-      readyForWriting ? '进入失败' : '生成失败',
+      readyForWriting
+        ? pick(`进入写作台失败：${reason}`, `Could not open the writing desk: ${reason}`)
+        : pick(`生成章节大纲失败：${reason}`, `Chapter outline generation failed: ${reason}`),
+      readyForWriting ? pick('进入失败', 'Cannot continue') : pick('生成失败', 'Generation failed'),
     )
   } finally {
     isSavingBlueprint.value = false

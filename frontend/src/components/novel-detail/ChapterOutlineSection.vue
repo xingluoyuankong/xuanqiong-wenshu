@@ -3,8 +3,8 @@
   <div class="space-y-6">
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
       <div>
-        <h2 class="text-2xl font-bold text-slate-900">章节大纲</h2>
-        <p class="text-sm text-slate-500">故事结构与章节节奏一目了然</p>
+        <h2 class="text-2xl font-bold text-slate-900">{{ pick('章节大纲', 'Chapter outline') }}</h2>
+        <p class="text-sm text-slate-500">{{ pick('故事结构与章节节奏一目了然', 'Story structure and chapter pacing at a glance') }}</p>
       </div>
       <div v-if="editable" class="flex items-center gap-2">
         <button
@@ -15,18 +15,18 @@
           <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
             <path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd" />
           </svg>
-          新增章节
+          {{ pick('新增章节', 'Add chapter') }}
         </button>
         <button
           type="button"
           class="flex items-center gap-1 px-3 py-2 text-sm text-gray-500 hover:text-indigo-600 transition-colors"
-          @click="emitEdit('chapter_outline', '章节大纲', outline)"
+          @click="emitEdit('chapter_outline', pick('章节大纲', 'Chapter outline'), outline)"
         >
           <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
             <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
             <path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd" />
           </svg>
-          编辑大纲
+          {{ pick('编辑大纲', 'Edit outline') }}
         </button>
         <button
           type="button"
@@ -36,7 +36,7 @@
           <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
             <path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" />
           </svg>
-          剧情推演
+          {{ pick('剧情推演', 'Evolve plot') }}
         </button>
       </div>
     </div>
@@ -52,18 +52,19 @@
         </span>
         <div class="bg-white/95 rounded-2xl border border-slate-200 shadow-sm p-5">
           <div class="flex items-center justify-between gap-4">
-            <h3 class="text-lg font-semibold text-slate-900">{{ chapter.title || `第${chapter.chapter_number}章` }}</h3>
+            <h3 class="text-lg font-semibold text-slate-900">{{ chapter.title || pick(`第${chapter.chapter_number}章`, `Chapter ${chapter.chapter_number}`) }}</h3>
             <span class="text-xs text-slate-400">#{{ chapter.chapter_number }}</span>
           </div>
-          <p class="mt-3 text-sm text-slate-600 leading-6 whitespace-pre-line">{{ chapter.summary || '暂无摘要' }}</p>
+          <p class="mt-3 text-sm text-slate-600 leading-6 whitespace-pre-line">{{ chapter.summary || pick('暂无摘要', 'No summary') }}</p>
         </div>
       </li>
-      <li v-if="!outline.length" class="ml-6 text-slate-400 text-sm">暂无章节大纲</li>
+      <li v-if="!outline.length" class="ml-6 text-slate-400 text-sm">{{ pick('暂无章节大纲', 'No chapter outline yet') }}</li>
     </ol>
   </div>
 </template>
 
 <script setup lang="ts">
+import { useLocale } from '@/composables/useLocale'
 
 interface OutlineItem {
   chapter_number: number
@@ -81,6 +82,8 @@ const emit = defineEmits<{
   (e: 'add'): void
   (e: 'evolve'): void
 }>()
+
+const { pick } = useLocale()
 
 const emitEdit = (field: string, title: string, value: any) => {
   if (!props.editable) return

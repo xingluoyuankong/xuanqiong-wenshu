@@ -1,5 +1,7 @@
 # AIMETA P=伏笔分析任务_异步伏笔检测|R=异步伏笔分析_提醒生成|NR=不含同步分析|E=celery_task:analyze_foreshadowing|X=job|A=Celery任务|D=celery,redis|S=db,cache|RD=./README.ai
 """伏笔管理异步任务"""
+import asyncio
+import concurrent.futures
 import logging
 import re
 from typing import List, Dict, Any
@@ -7,6 +9,19 @@ from app.config.celery_config import app
 from app.services.foreshadowing_service import ForeshadowingService
 
 logger = logging.getLogger(__name__)
+
+
+def _run_in_new_loop(coro):
+    """Run a coroutine in a brand-new event loop inside a worker thread.
+
+    Using a ThreadPoolExecutor ensures the new loop is fully isolated from
+    any event loop already attached to the calling (Celery worker) thread,
+    avoiding 'This event loop is already running' errors.
+    """
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(asyncio.run, coro)
+        return future.result()
+
 
 # 伏笔检测规则
 QUESTION_PATTERNS = [
@@ -216,23 +231,11 @@ def check_reminders(
     try:
         logger.info(f"检查伏笔提醒: novel={novel_id}, chapter={current_chapter_number}/{total_chapters}")
         
-        # 创建会话
-        import asyncio
-        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-        from sqlalchemy.orm import sessionmaker
-        from app.core.config import settings
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        try:
-            result = loop.run_until_complete(
-                _check_reminders_impl(novel_id, current_chapter_number, total_chapters)
-            )
-            logger.info(f"提醒检查完成: novel={novel_id}, reminders={result['reminders_created']}")
-            return result
-        finally:
-            loop.close()
+        result = _run_in_new_loop(
+            _check_reminders_impl(novel_id, current_chapter_number, total_chapters)
+        )
+        logger.info(f"提醒检查完成: novel={novel_id}, reminders={result['reminders_created']}")
+        return result
     
     except Exception as exc:
         logger.exception(f"提醒检查失败: {exc}")

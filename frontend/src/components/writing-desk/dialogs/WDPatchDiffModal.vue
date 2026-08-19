@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <TransitionRoot as="template" :show="show">
     <Dialog as="div" class="relative z-50" @close="handleClose">
       <TransitionChild
@@ -29,19 +29,19 @@
               <div class="xq-dialog-header m3-patchdiff-dialog__head">
                 <div class="min-w-0 flex-1">
                   <div class="m3-patchdiff-dialog__chips">
-                    <span class="m3-reader-chip">精细编辑</span>
-                    <span class="m3-reader-chip">第 {{ activeChapterNumber }} 章</span>
+                    <span class="m3-reader-chip">{{ pick('精细编辑', 'Fine editing') }}</span>
+                    <span class="m3-reader-chip">{{ pick(`第 ${activeChapterNumber} 章`, `Chapter ${activeChapterNumber}`) }}</span>
                   </div>
                   <DialogTitle as="h3" class="m3-patchdiff-title">
-                    Patch+Diff 精细编辑
+                    {{ pick('Patch+Diff 精细编辑', 'Patch + Diff fine editing') }}
                   </DialogTitle>
                   <p class="m3-patchdiff-subtitle">
-                    对比原始文本与修改后文本，行级别高亮显示差异
+                    {{ pick('对比原始文本与修改后文本，行级别高亮显示差异', 'Compare the original and revised text with line-level diff highlighting') }}
                   </p>
                 </div>
 
                 <div class="m3-patchdiff-dialog__actions">
-                  <button type="button" class="xq-dialog-close md-ripple" @click="handleClose" aria-label="关闭">
+                  <button type="button" class="xq-dialog-close md-ripple" @click="handleClose" :aria-label="t('common.close')">
                     ×
                   </button>
                 </div>
@@ -55,33 +55,33 @@
                     <!-- 原始文本 -->
                     <div class="flex flex-col">
                       <label class="md-text-field-label mb-2 flex items-center gap-2">
-                        <span class="text-red-500">●</span> 原始文本
+                        <span class="text-red-500">●</span> {{ pick('原始文本', 'Original text') }}
                       </label>
                       <textarea
                         v-model="originalText"
                         class="md-textarea flex-1 w-full resize-none bg-slate-50"
-                        placeholder="请输入原始文本..."
+                        :placeholder="pick('请输入原始文本...', 'Enter the original text...')"
                         :disabled="true"
                         rows="6"
                       />
                       <div class="md-body-small md-on-surface-variant mt-1 text-right">
-                        {{ originalText.length }} 字
+                        {{ formatWords(originalText.length) }}
                       </div>
                     </div>
                     <!-- 修改后文本 -->
                     <div class="flex flex-col">
                       <label class="md-text-field-label mb-2 flex items-center gap-2">
-                        <span class="text-green-500">●</span> 修改后文本
+                        <span class="text-green-500">●</span> {{ pick('修改后文本', 'Revised text') }}
                       </label>
                       <textarea
                         v-model="patchedText"
                         class="md-textarea flex-1 w-full resize-none"
-                        placeholder="请输入修改后的文本..."
+                        :placeholder="pick('请输入修改后的文本...', 'Enter the revised text...')"
                         :disabled="isApplying"
                         rows="6"
                       />
                       <div class="md-body-small md-on-surface-variant mt-1 text-right">
-                        {{ patchedText.length }} 字
+                        {{ formatWords(patchedText.length) }}
                       </div>
                     </div>
                   </div>
@@ -92,7 +92,7 @@
                       :disabled="isApplying"
                       @click="resetPatchedText"
                     >
-                      重置修改稿
+                      {{ pick('重置修改稿', 'Reset revision') }}
                     </button>
                     <button
                       type="button"
@@ -103,7 +103,7 @@
                       <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                       </svg>
-                      生成差异预览
+                      {{ pick('生成差异预览', 'Generate diff preview') }}
                     </button>
                   </div>
                 </div>
@@ -111,20 +111,20 @@
                 <!-- 差异预览区 -->
                 <div v-if="diffLines.length > 0" class="patchdiff-preview flex-1 overflow-hidden">
                   <div class="flex items-center justify-between mb-2">
-                    <label class="md-text-field-label">差异预览</label>
+                    <label class="md-text-field-label">{{ pick('差异预览', 'Diff preview') }}</label>
                     <div class="flex items-center gap-2 text-xs">
-                      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-500"></span> 新增 {{ diffSummary.added }}</span>
-                      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500"></span> 删除 {{ diffSummary.deleted }}</span>
-                      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-sky-500"></span> 修改 {{ diffSummary.modified }}</span>
+                      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-500"></span> {{ pick(`新增 ${diffSummary.added}`, `${diffSummary.added} added`) }}</span>
+                      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500"></span> {{ pick(`删除 ${diffSummary.deleted}`, `${diffSummary.deleted} deleted`) }}</span>
+                      <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-sky-500"></span> {{ pick(`修改 ${diffSummary.modified}`, `${diffSummary.modified} modified`) }}</span>
                     </div>
                   </div>
                   <div class="patchdiff-diff-container overflow-y-auto border rounded-lg">
                     <table class="w-full text-sm">
                       <thead class="sticky top-0 bg-slate-100 dark:bg-slate-800">
                         <tr>
-                          <th class="w-12 px-2 py-1 text-center">行号</th>
-                          <th class="px-2 py-1 text-left">原始内容</th>
-                          <th class="px-2 py-1 text-left">修改后内容</th>
+                          <th class="w-12 px-2 py-1 text-center">{{ pick('行号', 'Line') }}</th>
+                          <th class="px-2 py-1 text-left">{{ pick('原始内容', 'Original') }}</th>
+                          <th class="px-2 py-1 text-left">{{ pick('修改后内容', 'Revised') }}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -156,7 +156,7 @@
                     <svg class="w-12 h-12 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
-                    <p>点击"生成差异预览"查看文本差异</p>
+                    <p>{{ pick('点击"生成差异预览"查看文本差异', 'Click "Generate diff preview" to see the text differences') }}</p>
                   </div>
                 </div>
               </div>
@@ -164,16 +164,19 @@
               <!-- Footer -->
               <div class="xq-dialog-footer m3-patchdiff-dialog__foot">
                 <div class="m3-patchdiff-dialog__foot-note">
-                  <span v-if="isApplying">正在应用 Patch...</span>
+                  <span v-if="isApplying">{{ pick('正在应用 Patch...', 'Applying patch...') }}</span>
                   <span v-else-if="diffLines.length > 0">
-                    共 {{ diffSummary.total_lines }} 行，{{ diffSummary.added + diffSummary.modified }} 处变更
+                    {{ pick(
+                      `共 ${diffSummary.total_lines} 行，${diffSummary.added + diffSummary.modified} 处变更`,
+                      `${diffSummary.total_lines} lines, ${diffSummary.added + diffSummary.modified} changes`
+                    ) }}
                   </span>
-                  <span v-else>输入原始文本和修改后文本，然后生成差异预览</span>
+                  <span v-else>{{ pick('输入原始文本和修改后文本，然后生成差异预览', 'Enter the original and revised text, then generate the diff preview') }}</span>
                 </div>
 
                 <div class="m3-patchdiff-dialog__foot-actions">
                   <button type="button" class="md-btn md-btn-outlined md-ripple" @click="handleClose">
-                    取消
+                    {{ t('common.cancel') }}
                   </button>
                   <button
                     type="button"
@@ -181,7 +184,7 @@
                     :disabled="isApplying || diffLines.length === 0"
                     @click="applyPatch"
                   >
-                    {{ isApplying ? '应用中...' : '应用 Patch' }}
+                    {{ isApplying ? pick('应用中...', 'Applying...') : pick('应用 Patch', 'Apply patch') }}
                   </button>
                 </div>
               </div>
@@ -199,6 +202,9 @@ import { Dialog, DialogPanel, DialogTitle, TransitionChild, TransitionRoot } fro
 import { ApiError } from '@/api/novel'
 import { applyChapterPatch, getChapterDiff } from '@/api/modules/chapterDiff'
 import { globalAlert } from '@/composables/useAlert'
+import { useLocale } from '@/composables/useLocale'
+
+const { pick, t, punct, formatWords } = useLocale()
 
 interface DiffLine {
   line_number: number
@@ -264,7 +270,10 @@ const diffSummary = computed(() => {
 // 生成差异预览
 const generateDiffPreview = async () => {
   if (!originalText.value.trim() || !patchedText.value.trim()) {
-    globalAlert.showError('请输入原始文本和修改后文本', '输入不完整')
+    globalAlert.showError(
+      pick('请输入原始文本和修改后文本', 'Enter both the original and the revised text'),
+      pick('输入不完整', 'Incomplete input')
+    )
     return
   }
 
@@ -279,15 +288,21 @@ const generateDiffPreview = async () => {
     diffLines.value = result.diff_lines
     hasGeneratedDiff.value = true
   } catch (error) {
-    console.error('生成差异失败:', error)
+    console.error(pick('生成差异失败:', 'Failed to generate diff:'), error)
     if (error instanceof ApiError) {
       globalAlert.showError([
-        error.detail.message || '生成差异失败',
-        error.detail.rootCause ? `根因：${error.detail.rootCause}` : '',
-        error.detail.requestId ? `请求ID：${error.detail.requestId}` : '',
-      ].filter(Boolean).join('\n'), '错误')
+        error.detail.message || pick('生成差异失败', 'Failed to generate diff'),
+        error.detail.rootCause ? `${pick('根因', 'Root cause')}${punct.colon}${error.detail.rootCause}` : '',
+        error.detail.requestId ? `${pick('请求ID', 'Request ID')}${punct.colon}${error.detail.requestId}` : '',
+      ].filter(Boolean).join('\n'), pick('错误', 'Error'))
     } else {
-      globalAlert.showError(`生成差异失败: ${error instanceof Error ? error.message : '未知错误'}`, '错误')
+      globalAlert.showError(
+        pick(
+          `生成差异失败: ${error instanceof Error ? error.message : '未知错误'}`,
+          `Failed to generate diff: ${error instanceof Error ? error.message : 'Unknown error'}`
+        ),
+        pick('错误', 'Error')
+      )
     }
   } finally {
     isGeneratingDiff.value = false
@@ -304,7 +319,10 @@ const resetPatchedText = () => {
 // 应用 Patch
 const applyPatch = async () => {
   if (!originalText.value.trim() || !patchedText.value.trim()) {
-    globalAlert.showError('请输入原始文本和修改后文本', '输入不完整')
+    globalAlert.showError(
+      pick('请输入原始文本和修改后文本', 'Enter both the original and the revised text'),
+      pick('输入不完整', 'Incomplete input')
+    )
     return
   }
 
@@ -318,27 +336,33 @@ const applyPatch = async () => {
     )
 
     if (result.status === 'success') {
-      globalAlert.showSuccess(`Patch 应用成功，已创建新版本`, '应用成功')
+      globalAlert.showSuccess(
+        pick('Patch 应用成功，已创建新版本', 'Patch applied. A new version has been created'),
+        pick('应用成功', 'Applied')
+      )
       emit('applied', {
         original: originalText.value,
         patched: patchedText.value,
       })
       handleClose()
     } else {
-      globalAlert.showError(result.message || '应用失败', '错误')
+      globalAlert.showError(result.message || pick('应用失败', 'Apply failed'), pick('错误', 'Error'))
     }
   } catch (error) {
-    console.error('应用 Patch 失败:', error)
+    console.error(pick('应用 Patch 失败:', 'Failed to apply patch:'), error)
     if (error instanceof ApiError) {
       globalAlert.showError([
-        error.detail.message || '应用 Patch 失败',
-        error.detail.rootCause ? `根因：${error.detail.rootCause}` : '',
-        error.detail.requestId ? `请求ID：${error.detail.requestId}` : '',
-      ].filter(Boolean).join('\n'), '错误')
+        error.detail.message || pick('应用 Patch 失败', 'Failed to apply patch'),
+        error.detail.rootCause ? `${pick('根因', 'Root cause')}${punct.colon}${error.detail.rootCause}` : '',
+        error.detail.requestId ? `${pick('请求ID', 'Request ID')}${punct.colon}${error.detail.requestId}` : '',
+      ].filter(Boolean).join('\n'), pick('错误', 'Error'))
     } else {
       globalAlert.showError(
-        `应用 Patch 失败: ${error instanceof Error ? error.message : '未知错误'}`,
-        '错误'
+        pick(
+          `应用 Patch 失败: ${error instanceof Error ? error.message : '未知错误'}`,
+          `Failed to apply patch: ${error instanceof Error ? error.message : 'Unknown error'}`
+        ),
+        pick('错误', 'Error')
       )
     }
   } finally {

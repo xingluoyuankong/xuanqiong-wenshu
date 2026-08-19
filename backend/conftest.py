@@ -4,6 +4,10 @@ import types
 from pathlib import Path
 
 import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
+
+from app.db.base import Base
 
 
 TEST_STORAGE = Path(__file__).resolve().parent / "storage" / "pytest.db"
@@ -19,6 +23,22 @@ os.environ.setdefault("ALLOW_USER_REGISTRATION", "true")
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.fixture
+async def task_session():
+    """Provide an isolated async database session for task-runtime tests."""
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        yield session
+    await engine.dispose()
 
 
 if "langchain_text_splitters" not in sys.modules:

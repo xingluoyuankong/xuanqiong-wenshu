@@ -1,35 +1,35 @@
-<template>
+﻿<template>
   <Teleport to="body">
     <div v-if="show" class="xq-dialog-overlay eval-overlay" @click.self="emit('close')">
       <div class="xq-dialog-shell xq-dialog-shell--xl eval-dialog">
       <header class="xq-dialog-header eval-header">
         <div>
-          <p class="eval-kicker">AI 综合评审</p>
-          <h3>候选版本评审详情</h3>
-          <p class="eval-subtitle">会明确写清楚推荐的是哪个候选版本、每个版本各自的优缺点，以及可直接回填的优化建议。</p>
+          <p class="eval-kicker">{{ pick('AI 综合评审', 'AI review') }}</p>
+          <h3>{{ pick('候选版本评审详情', 'Candidate review details') }}</h3>
+          <p class="eval-subtitle">{{ pick('会明确写清楚推荐的是哪个候选版本、每个版本各自的优缺点，以及可直接回填的优化建议。', 'Shows which candidate is recommended, the strengths and weaknesses of each one, and suggestions you can send straight back.') }}</p>
         </div>
-        <button type="button" class="xq-dialog-close md-ripple" aria-label="关闭评审详情" @click="emit('close')">×</button>
+        <button type="button" class="xq-dialog-close md-ripple" :aria-label="pick('关闭评审详情', 'Close review details')" @click="emit('close')">×</button>
       </header>
 
       <div class="xq-dialog-body eval-body">
         <section v-if="parsedEvaluation" class="eval-overview">
           <div class="eval-overview__summary">
             <div>
-              <p class="eval-kicker">推荐结论</p>
-              <h4>推荐优先查看：候选版本 {{ recommendedVersionLabel }}</h4>
+              <p class="eval-kicker">{{ pick('推荐结论', 'Recommendation') }}</p>
+              <h4>{{ pick(`推荐优先查看：候选版本 ${recommendedVersionLabel}`, `Start with candidate ${recommendedVersionLabel}`) }}</h4>
               <p>{{ recommendationText }}</p>
             </div>
             <div class="eval-overview__stats">
               <div class="eval-stat">
-                <span>推荐版本</span>
-                <strong>候选版本 {{ recommendedVersionLabel }}</strong>
+                <span>{{ pick('推荐版本', 'Recommended version') }}</span>
+                <strong>{{ pick(`候选版本 ${recommendedVersionLabel}`, `Candidate ${recommendedVersionLabel}`) }}</strong>
               </div>
               <div class="eval-stat">
-                <span>评审结果数</span>
+                <span>{{ pick('评审结果数', 'Reviews') }}</span>
                 <strong>{{ versionEvaluations.length }}</strong>
               </div>
               <div v-if="parsedEvaluation?.content_to_evaluate?.total_versions" class="eval-stat">
-                <span>候选版本总数</span>
+                <span>{{ pick('候选版本总数', 'Total candidates') }}</span>
                 <strong>{{ parsedEvaluation.content_to_evaluate.total_versions }}</strong>
               </div>
             </div>
@@ -43,27 +43,27 @@
             >
               <div class="eval-card__head">
                 <div>
-                  <p class="eval-card__code">候选版本 {{ item.label }}</p>
+                  <p class="eval-card__code">{{ pick(`候选版本 ${item.label}`, `Candidate ${item.label}`) }}</p>
                   <h5>{{ item.title }}</h5>
                 </div>
-                <span v-if="item.isRecommended" class="eval-badge">推荐采用</span>
+                <span v-if="item.isRecommended" class="eval-badge">{{ pick('推荐采用', 'Recommended') }}</span>
               </div>
 
-              <p class="eval-card__review">{{ item.overallReview || '该版本暂无完整总评。' }}</p>
+              <p class="eval-card__review">{{ item.overallReview || pick('该版本暂无完整总评。', 'No full review for this candidate yet.') }}</p>
 
               <div class="eval-card__lists">
                 <div>
-                  <p class="eval-list-title">优点</p>
+                  <p class="eval-list-title">{{ pick('优点', 'Strengths') }}</p>
                   <ul>
                     <li v-for="pro in item.pros" :key="`${item.key}-pro-${pro}`">{{ pro }}</li>
-                    <li v-if="!item.pros.length" class="eval-empty">当前没有提炼出明确优点。</li>
+                    <li v-if="!item.pros.length" class="eval-empty">{{ pick('当前没有提炼出明确优点。', 'No clear strengths were identified.') }}</li>
                   </ul>
                 </div>
                 <div>
-                  <p class="eval-list-title">问题 / 待补强</p>
+                  <p class="eval-list-title">{{ pick('问题 / 待补强', 'Issues / to improve') }}</p>
                   <ul>
                     <li v-for="con in item.cons" :key="`${item.key}-con-${con}`">{{ con }}</li>
-                    <li v-if="!item.cons.length" class="eval-empty">当前没有列出明显短板，可重点查看总评。</li>
+                    <li v-if="!item.cons.length" class="eval-empty">{{ pick('当前没有列出明显短板，可重点查看总评。', 'No obvious weaknesses were listed; read the overall review instead.') }}</li>
                   </ul>
                 </div>
               </div>
@@ -71,7 +71,7 @@
           </div>
 
           <div v-if="additionalInsights.length" class="eval-insights">
-            <p class="eval-kicker">补充提示</p>
+            <p class="eval-kicker">{{ pick('补充提示', 'Extra notes') }}</p>
             <ul>
               <li v-for="note in additionalInsights" :key="note">{{ note }}</li>
             </ul>
@@ -79,20 +79,20 @@
         </section>
 
         <section v-else class="eval-fallback">
-          <p class="eval-kicker">原始评审文本</p>
+          <p class="eval-kicker">{{ pick('原始评审文本', 'Raw review text') }}</p>
           <pre>{{ normalizedEvaluationText }}</pre>
         </section>
 
         <section class="eval-suggestion-panel">
           <div class="eval-suggestion-panel__head">
             <div>
-              <p class="eval-kicker">直接可用的建议</p>
-              <h4>选中后可以直接带回重写或局部优化</h4>
+              <p class="eval-kicker">{{ pick('直接可用的建议', 'Ready-to-use suggestions') }}</p>
+              <h4>{{ pick('选中后可以直接带回重写或局部优化', 'Pick tags to carry into a rewrite or a local optimization') }}</h4>
             </div>
             <div class="eval-target-tabs">
-              <button type="button" :class="['eval-target-tab', activeTarget === 'writing' ? 'eval-target-tab--active' : '']" @click="activeTarget = 'writing'">重写方向</button>
-              <button type="button" :class="['eval-target-tab', activeTarget === 'quality' ? 'eval-target-tab--active' : '']" @click="activeTarget = 'quality'">质量要求</button>
-              <button type="button" :class="['eval-target-tab', activeTarget === 'optimize' ? 'eval-target-tab--active' : '']" @click="activeTarget = 'optimize'">局部优化</button>
+              <button type="button" :class="['eval-target-tab', activeTarget === 'writing' ? 'eval-target-tab--active' : '']" @click="activeTarget = 'writing'">{{ pick('重写方向', 'Rewrite focus') }}</button>
+              <button type="button" :class="['eval-target-tab', activeTarget === 'quality' ? 'eval-target-tab--active' : '']" @click="activeTarget = 'quality'">{{ pick('质量要求', 'Quality requirements') }}</button>
+              <button type="button" :class="['eval-target-tab', activeTarget === 'optimize' ? 'eval-target-tab--active' : '']" @click="activeTarget = 'optimize'">{{ pick('局部优化', 'Local optimization') }}</button>
             </div>
           </div>
 
@@ -102,25 +102,25 @@
 
           <div class="eval-draft-grid">
             <div>
-              <label class="md-text-field-label mb-2">重写方向</label>
-              <textarea v-model="writingNotesDraft" rows="4" class="md-textarea w-full" placeholder="例如：加强前半章压迫感，让尾声钩子更狠。" />
+              <label class="md-text-field-label mb-2">{{ pick('重写方向', 'Rewrite focus') }}</label>
+              <textarea v-model="writingNotesDraft" rows="4" class="md-textarea w-full" :placeholder="pick('例如：加强前半章压迫感，让尾声钩子更狠。', 'For example: tighten the pressure in the first half and sharpen the closing hook.')" />
             </div>
             <div>
-              <label class="md-text-field-label mb-2">质量要求</label>
-              <textarea v-model="qualityNotesDraft" rows="4" class="md-textarea w-full" placeholder="例如：让主角心理变化更自然，对话带更多潜台词。" />
+              <label class="md-text-field-label mb-2">{{ pick('质量要求', 'Quality requirements') }}</label>
+              <textarea v-model="qualityNotesDraft" rows="4" class="md-textarea w-full" :placeholder="pick('例如：让主角心理变化更自然，对话带更多潜台词。', 'For example: make the protagonist\'s shift feel natural and add subtext to the dialogue.')" />
             </div>
             <div class="eval-draft-grid__wide">
-              <label class="md-text-field-label mb-2">局部优化说明</label>
-              <textarea v-model="optimizeNotesDraft" rows="3" class="md-textarea w-full" placeholder="例如：只优化节奏和心理层，不动核心剧情。" />
+              <label class="md-text-field-label mb-2">{{ pick('局部优化说明', 'Local optimization notes') }}</label>
+              <textarea v-model="optimizeNotesDraft" rows="3" class="md-textarea w-full" :placeholder="pick('例如：只优化节奏和心理层，不动核心剧情。', 'For example: only improve pacing and inner state, leave the core plot untouched.')" />
             </div>
           </div>
         </section>
       </div>
 
       <footer class="eval-footer">
-        <button type="button" class="md-btn md-btn-outlined md-ripple" @click="emit('close')">关闭</button>
-        <button type="button" class="md-btn md-btn-tonal md-ripple" :disabled="!canUseOptimizeSuggestion" @click="emitOptimizeSuggestion">用于局部优化</button>
-        <button type="button" class="md-btn md-btn-filled md-ripple" :disabled="!canRegenerate" @click="emitRegenerate">带着这些建议重写</button>
+        <button type="button" class="md-btn md-btn-outlined md-ripple" @click="emit('close')">{{ t('common.close') }}</button>
+        <button type="button" class="md-btn md-btn-tonal md-ripple" :disabled="!canUseOptimizeSuggestion" @click="emitOptimizeSuggestion">{{ pick('用于局部优化', 'Use for local optimization') }}</button>
+        <button type="button" class="md-btn md-btn-filled md-ripple" :disabled="!canRegenerate" @click="emitRegenerate">{{ pick('带着这些建议重写', 'Regenerate with these notes') }}</button>
       </footer>
     </div>
   </div>
@@ -129,6 +129,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useLocale } from '@/composables/useLocale'
 
 interface Props {
   show: boolean
@@ -157,10 +158,12 @@ const qualityNotesDraft = ref('')
 const optimizeNotesDraft = ref('')
 const activeTarget = ref<'writing' | 'quality' | 'optimize'>('writing')
 
+const { pick, t } = useLocale()
+
 const normalizeText = (value: unknown): string => {
   if (value == null) return ''
   if (typeof value === 'string') return value.trim()
-  if (Array.isArray(value)) return value.map(item => normalizeText(item)).filter(Boolean).join('；')
+  if (Array.isArray(value)) return value.map(item => normalizeText(item)).filter(Boolean).join(pick('；', '; '))
   if (typeof value === 'object') return JSON.stringify(value, null, 2)
   return String(value)
 }
@@ -198,7 +201,7 @@ const tryParseEvaluation = (raw: string | null): Record<string, any> | null => {
 
 const parsedEvaluation = computed(() => tryParseEvaluation(props.evaluation))
 const normalizedEvaluationText = computed(() =>
-  props.evaluation ? stripCodeFence(props.evaluation).replace(/\\n/g, '\n').trim() : '暂无评审结果。'
+  props.evaluation ? stripCodeFence(props.evaluation).replace(/\\n/g, '\n').trim() : pick('暂无评审结果。', 'No review result yet.')
 )
 
 const recommendedVersionIndex = computed(() => {
@@ -211,10 +214,10 @@ const recommendedVersionIndex = computed(() => {
   return null
 })
 
-const recommendedVersionLabel = computed(() => recommendedVersionIndex.value ?? '未指定')
+const recommendedVersionLabel = computed(() => recommendedVersionIndex.value ?? pick('未指定', 'Not specified'))
 const recommendationText = computed(() => {
   const parsed = parsedEvaluation.value
-  return normalizeText(parsed?.reason_for_choice) || normalizeText(parsed?.final_recommendation) || normalizeText(parsed?.summary) || '当前评审已返回，但没有给出一句明确结论。建议先看各版本优缺点再决定。'
+  return normalizeText(parsed?.reason_for_choice) || normalizeText(parsed?.final_recommendation) || normalizeText(parsed?.summary) || pick('当前评审已返回，但没有给出一句明确结论。建议先看各版本优缺点再决定。', 'The review came back without a single clear verdict. Compare the strengths and weaknesses of each candidate first.')
 })
 
 const versionEvaluations = computed<EvaluationVersionView[]>(() => {
@@ -225,9 +228,9 @@ const versionEvaluations = computed<EvaluationVersionView[]>(() => {
       return [{
         key: 'version1',
         label: '1',
-        title: '单版本评审结果',
+        title: pick('单版本评审结果', 'Single-candidate review'),
         isRecommended: true,
-        overallReview: normalizeText(parsed.overall_evaluation) || '该版本已完成评审。',
+        overallReview: normalizeText(parsed.overall_evaluation) || pick('该版本已完成评审。', 'This candidate has been reviewed.'),
         pros: Array.isArray(parsed.pros) ? parsed.pros.map((item: string) => normalizeText(item)).filter(Boolean) : [],
         cons: Array.isArray(parsed.cons) ? parsed.cons.map((item: string) => normalizeText(item)).filter(Boolean) : [],
       }]
@@ -241,9 +244,9 @@ const versionEvaluations = computed<EvaluationVersionView[]>(() => {
     return {
       key,
       label,
-      title: recommendedVersionIndex.value === Number(label) ? '综合表现最佳' : '可参考候选版本',
+      title: recommendedVersionIndex.value === Number(label) ? pick('综合表现最佳', 'Best overall') : pick('可参考候选版本', 'Worth a look'),
       isRecommended: recommendedVersionIndex.value === Number(label),
-      overallReview: normalizeText(data.overall_review) || normalizeText(data.summary) || normalizeText(data.reason) || '该版本暂无完整总评。',
+      overallReview: normalizeText(data.overall_review) || normalizeText(data.summary) || normalizeText(data.reason) || pick('该版本暂无完整总评。', 'No full review for this candidate yet.'),
       pros: Array.isArray(data.pros) ? data.pros.map(item => normalizeText(item)).filter(Boolean) : [],
       cons: Array.isArray(data.cons) ? data.cons.map(item => normalizeText(item)).filter(Boolean) : [],
     }
@@ -258,10 +261,14 @@ const additionalInsights = computed(() => {
   return Array.from(new Set(notes)).slice(0, 6)
 })
 
-const fallbackTags = ['加强章节开场冲突', '让角色心理变化更自然', '尾声钩子更狠', '对话增加潜台词', '压缩解释性叙述', '强化前后文承接']
+// 兜底标签含文案，必须放进 computed 里求值，切换语言后才会重新生成
+const fallbackTags = computed(() => pick(
+  ['加强章节开场冲突', '让角色心理变化更自然', '尾声钩子更狠', '对话增加潜台词', '压缩解释性叙述', '强化前后文承接'],
+  ['Sharpen the opening conflict', 'Make the inner shift feel natural', 'Harden the closing hook', 'Add subtext to dialogue', 'Trim expository narration', 'Strengthen continuity with the previous chapter'],
+))
 const suggestionTags = computed(() => {
   const dynamicTags = versionEvaluations.value.flatMap(item => [...item.pros, ...item.cons]).map(text => text.trim()).filter(Boolean).slice(0, 8)
-  return Array.from(new Set([...dynamicTags, ...fallbackTags])).slice(0, 12)
+  return Array.from(new Set([...dynamicTags, ...fallbackTags.value])).slice(0, 12)
 })
 
 const appendSuggestion = (tag: string) => {

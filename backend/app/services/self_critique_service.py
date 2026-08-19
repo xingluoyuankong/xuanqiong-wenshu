@@ -2104,7 +2104,7 @@ class SelfCritiqueService:
             deferred_stage_names: List[str] = []
             iteration_index = 0
 
-            while iteration_index < iteration_limit:
+            while iteration_index < min(iteration_limit, self.ABSOLUTE_MAX_ITERATIONS + 1):
                 # --- HARD SAFETY GUARD ---
                 if iteration_index > self.ABSOLUTE_MAX_ITERATIONS:
                     logger.warning("ABSOLUTE_MAX_ITERATIONS (%d) reached — forcing loop exit", self.ABSOLUTE_MAX_ITERATIONS)

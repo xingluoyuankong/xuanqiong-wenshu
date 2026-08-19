@@ -4,8 +4,11 @@
       <template #header>
         <div class="admin-section-head">
           <div>
-            <h2>系统配置</h2>
-            <p>和数据总览、故障诊断一样，直接作为管理台内部页面展示。按分类查看并就地修改布尔值、数字值和选项值。</p>
+            <h2>{{ pick('系统配置', 'System configuration') }}</h2>
+            <p>{{ pick(
+              '和数据总览、故障诊断一样，直接作为管理台内部页面展示。按分类查看并就地修改布尔值、数字值和选项值。',
+              'Like Overview and Diagnostics, this renders inside the admin console. Browse parameters by category and edit booleans, numbers, and options in place.'
+            ) }}</p>
           </div>
         </div>
       </template>
@@ -17,6 +20,9 @@
 <script setup lang="ts">
 import { NCard } from 'naive-ui'
 import SettingsManagement from './SettingsManagement.vue'
+import { useLocale } from '@/composables/useLocale'
+
+const { pick } = useLocale()
 </script>
 
 <style scoped>

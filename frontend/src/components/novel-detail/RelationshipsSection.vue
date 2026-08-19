@@ -3,14 +3,14 @@
   <div class="space-y-6">
     <div class="flex items-center justify-between">
       <div>
-        <h2 class="text-2xl font-bold text-slate-900">人物关系</h2>
-        <p class="text-sm text-slate-500">同时显示蓝图关系、最近关系变化和共同事件，不再只停留在最初设定</p>
+        <h2 class="text-2xl font-bold text-slate-900">{{ pick('人物关系', 'Character relationships') }}</h2>
+        <p class="text-sm text-slate-500">{{ pick('同时显示蓝图关系、最近关系变化和共同事件，不再只停留在最初设定', 'Shows blueprint relationships, recent changes, and shared events instead of only the initial setup') }}</p>
       </div>
       <button
         v-if="editable"
         type="button"
         class="text-gray-400 hover:text-indigo-600 transition-colors"
-        @click="emitEdit('relationships', '人物关系', data?.relationships)">
+        @click="emitEdit('relationships', pick('人物关系', 'Character relationships'), data?.relationships)">
         <svg class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
           <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
           <path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd" />
@@ -20,16 +20,16 @@
 
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
       <div class="bg-slate-50 rounded-2xl border border-slate-200 p-4">
-        <p class="text-xs text-slate-500">当前关系数</p>
+        <p class="text-xs text-slate-500">{{ pick('当前关系数', 'Relationships') }}</p>
         <p class="text-2xl font-bold text-slate-900">{{ data?.relationship_count || 0 }}</p>
       </div>
       <div class="bg-slate-50 rounded-2xl border border-slate-200 p-4">
-        <p class="text-xs text-slate-500">有互动的关系</p>
+        <p class="text-xs text-slate-500">{{ pick('有互动的关系', 'With interactions') }}</p>
         <p class="text-2xl font-bold text-slate-900">{{ data?.active_relationship_count || 0 }}</p>
       </div>
       <div class="bg-slate-50 rounded-2xl border border-slate-200 p-4">
-        <p class="text-xs text-slate-500">对生成的实际作用</p>
-        <p class="text-sm leading-6 text-slate-700">{{ data?.generation_usage || '后续写作会读取关系变化。' }}</p>
+        <p class="text-xs text-slate-500">{{ pick('对生成的实际作用', 'Effect on generation') }}</p>
+        <p class="text-sm leading-6 text-slate-700">{{ data?.generation_usage || pick('后续写作会读取关系变化。', 'Later writing reads relationship changes.') }}</p>
       </div>
     </div>
 
@@ -41,25 +41,25 @@
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-3">
             <div class="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-semibold">
-              {{ relation.character_from?.slice(0, 1) || '角' }}
+              {{ relation.character_from?.slice(0, 1) || pick('角', 'C') }}
             </div>
-            <span class="font-semibold text-slate-900 truncate">{{ relation.character_from || '未知角色' }}</span>
+            <span class="font-semibold text-slate-900 truncate">{{ relation.character_from || pick('未知角色', 'Unknown character') }}</span>
           </div>
           <svg class="text-slate-400" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
           <div class="flex items-center space-x-3">
-            <span class="font-semibold text-slate-900 truncate">{{ relation.character_to || '未知角色' }}</span>
+            <span class="font-semibold text-slate-900 truncate">{{ relation.character_to || pick('未知角色', 'Unknown character') }}</span>
             <div class="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 font-semibold">
-              {{ relation.character_to?.slice(0, 1) || '角' }}
+              {{ relation.character_to?.slice(0, 1) || pick('角', 'C') }}
             </div>
           </div>
         </div>
         <div class="mt-4 bg-slate-50 border border-slate-100 rounded-xl p-4 text-center">
-          <p class="text-sm font-semibold text-slate-700">{{ relation.relationship_type || '关系' }}</p>
-          <p class="text-xs text-slate-500 leading-5 mt-1">{{ relation.description || '暂无描述' }}</p>
-          <p v-if="relation.last_changed_chapter" class="text-xs text-slate-400 mt-2">最近变化：第 {{ relation.last_changed_chapter }} 章</p>
-          <p v-if="relation.interaction_count" class="text-xs text-slate-400 mt-1">共同事件：{{ relation.interaction_count }} 次</p>
+          <p class="text-sm font-semibold text-slate-700">{{ relation.relationship_type || pick('关系', 'Relationship') }}</p>
+          <p class="text-xs text-slate-500 leading-5 mt-1">{{ relation.description || pick('暂无描述', 'No description') }}</p>
+          <p v-if="relation.last_changed_chapter" class="text-xs text-slate-400 mt-2">{{ pick(`最近变化：第 ${relation.last_changed_chapter} 章`, `Last change: chapter ${relation.last_changed_chapter}`) }}</p>
+          <p v-if="relation.interaction_count" class="text-xs text-slate-400 mt-1">{{ pick(`共同事件：${relation.interaction_count} 次`, `Shared events: ${relation.interaction_count}`) }}</p>
           <div v-if="relation.recent_events?.length" class="mt-2 text-left">
-            <p class="text-xs font-semibold text-slate-600 mb-1">最近事件</p>
+            <p class="text-xs font-semibold text-slate-600 mb-1">{{ pick('最近事件', 'Recent events') }}</p>
             <ul class="space-y-1 text-xs text-slate-500">
               <li v-for="(event, eventIndex) in relation.recent_events" :key="eventIndex">- {{ event }}</li>
             </ul>
@@ -67,7 +67,7 @@
         </div>
       </div>
       <div v-if="!relationships.length" class="bg-white/95 rounded-2xl border border-dashed border-slate-300 p-10 text-center text-slate-400">
-        暂无人际关系信息
+        {{ pick('暂无人际关系信息', 'No relationship data yet') }}
       </div>
     </div>
   </div>
@@ -75,6 +75,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+
+import { useLocale } from '@/composables/useLocale'
 
 interface RelationshipItem {
   character_from?: string
@@ -101,6 +103,8 @@ const emit = defineEmits<{
 }>()
 
 const relationships = computed(() => props.data?.relationships || [])
+
+const { pick } = useLocale()
 
 const emitEdit = (field: string, title: string, value: any) => {
   if (!props.editable) return

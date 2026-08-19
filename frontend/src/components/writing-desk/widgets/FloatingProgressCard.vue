@@ -1,65 +1,58 @@
-﻿<template>
+<template>
   <Transition name="float-card">
-    <div
+    <aside
       v-if="visible"
       class="floating-progress-card"
       :class="statusToneClass"
+      role="status"
+      aria-live="polite"
     >
-      <div class="floating-progress-card__header">
-        <div class="floating-progress-card__icon">
-          <span v-if="isComplete" class="floating-progress-card__icon--complete">✓</span>
-          <span v-else-if="isError" class="floating-progress-card__icon--error">✗</span>
-          <span v-else class="floating-progress-card__icon--loading">
-            <span class="floating-progress-card__spinner"></span>
-          </span>
-        </div>
-        <div class="floating-progress-card__info">
-          <strong class="floating-progress-card__title">{{ title }}</strong>
+      <header class="floating-progress-card__header">
+        <div class="floating-progress-card__heading">
+          <strong class="floating-progress-card__title">{{ titleText }}</strong>
           <span class="floating-progress-card__stage">{{ stageLabel }}</span>
         </div>
         <button
           type="button"
           class="floating-progress-card__close"
+          :aria-label="closeLabel"
+          :title="closeLabel"
           @click="$emit('close')"
-          aria-label="关闭"
         >×</button>
-      </div>
-      
-      <div class="floating-progress-card__body">
-        <div class="floating-progress-card__progress-row">
-          <span class="floating-progress-card__progress-label">{{ progressLabel }}</span>
-          <strong class="floating-progress-card__progress-value">{{ progressPercent }}%</strong>
+      </header>
+
+      <div class="floating-progress-card__meter">
+        <div
+          class="floating-progress-card__track"
+          role="progressbar"
+          :aria-label="progressLabel"
+          :aria-valuenow="displayPercent"
+          aria-valuemin="0"
+          aria-valuemax="100"
+        >
+          <div class="floating-progress-card__bar" :class="barClass" :style="barStyle"></div>
+          <span class="floating-progress-card__mascot" :style="mascotStyle">
+            <PixelMascot :mascot-id="mascotId" :color="mascotColor" :size="26" :moving="isRunning" />
+          </span>
         </div>
-        <div class="floating-progress-card__track">
-          <div
-            class="floating-progress-card__bar"
-            :class="barClass"
-            :style="barStyle"
-          ></div>
-          <span
-            v-if="!isComplete && !isError"
-            class="floating-progress-card__runner"
-            :style="{ left: (progressPercent || 0) + '%' }"
-          >{{ runnerEmoji }}</span>
-        </div>
-        <div v-if="wordCount > 0" class="floating-progress-card__stats">
-          <span>已生成 {{ wordCount.toLocaleString() }} 字</span>
-        </div>
+        <strong class="floating-progress-card__percent">{{ displayPercent }}%</strong>
       </div>
 
-      <div v-if="funMessage" class="floating-progress-card__fun">
-        <span class="floating-progress-card__fun-text">{{ funMessage }}</span>
-      </div>
-
-      <div v-if="detailMessage && !isComplete && !isError" class="floating-progress-card__detail">
-        <span class="floating-progress-card__detail-text">{{ detailMessage }}</span>
-      </div>
-    </div>
+      <p v-if="metaLine" class="floating-progress-card__meta">{{ metaLine }}</p>
+      <p v-if="funMessage" class="floating-progress-card__fun">{{ funMessage }}</p>
+      <p v-if="detailText" class="floating-progress-card__detail">{{ detailText }}</p>
+    </aside>
   </Transition>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from "vue"
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+
+import PixelMascot from '@/components/shared/PixelMascot.vue'
+import { useLocale } from '@/composables/useLocale'
+import { usePixelMascot } from '@/composables/usePixelMascot'
+import { useSmoothProgress } from '@/composables/useSmoothProgress'
+import { normalizeRuntimeStage } from '@/utils/chapterGeneration'
 
 const props = defineProps<{
   visible: boolean
@@ -69,399 +62,388 @@ const props = defineProps<{
   wordCount?: number
   status?: string
   detailMessage?: string
+  taskId?: string | null
+  taskStatus?: string | null
+  retryCount?: number | null
+  taskRecovered?: boolean
 }>()
 
 defineEmits<{
   close: []
 }>()
 
+const { pick } = useLocale()
+const { mascotId, color: mascotColor, beginRun, endRun } = usePixelMascot()
+
 const statusTone = computed(() => {
-  if (props.status === "successful") return "success"
-  if (props.status === "failed" || props.status === "evaluation_failed") return "error"
-  if (props.status === "generating" || props.status === "evaluating") return "active"
-  return "neutral"
+  if (props.status === 'successful') return 'success'
+  if (props.status === 'failed' || props.status === 'evaluation_failed') return 'error'
+  if (props.status === 'generating' || props.status === 'evaluating') return 'active'
+  return 'neutral'
 })
 
-const isComplete = computed(() => props.status === "successful")
-const isError = computed(() => props.status === "failed" || props.status === "evaluation_failed")
+const isComplete = computed(() => statusTone.value === 'success')
+const isError = computed(() => statusTone.value === 'error')
+const isRunning = computed(() => !isComplete.value && !isError.value)
 
-const runnerEmoji = computed(() => {
-  const emojis = ['bike','rocket','sparkle','bolt','flame','star']
-  const idx = Math.floor((props.progressPercent || 0) / 16) % emojis.length
-  return emojis[idx]
+// 后端按阶段跳变上报，这里换成按时间均匀插值的百分比。
+const { percent: displayPercent } = useSmoothProgress({
+  stage: () => props.stage,
+  status: () => props.status,
+  rawPercent: () => props.progressPercent,
+  active: () => props.visible,
+  taskId: () => props.taskId,
 })
 
-const statusToneClass = computed(() => {
-  return "floating-progress-card--" + statusTone.value
-})
+const statusToneClass = computed(() => `floating-progress-card--${statusTone.value}`)
+const barClass = computed(() => `floating-progress-card__bar--${statusTone.value}`)
+const barStyle = computed(() => ({ width: `${Math.max(displayPercent.value, 2)}%` }))
+const mascotStyle = computed(() => ({ left: `${displayPercent.value}%` }))
 
-const barClass = computed(() => {
-  return "floating-progress-card__bar--" + statusTone.value
-})
+/** 卡片可见且任务仍在推进时，吉祥物才动；进入该状态随机换一种可爱姿态 */
+const mascotAdvancing = computed(() => props.visible && isRunning.value)
+let mascotCounted = false
 
-const barStyle = computed(() => {
-  return { width: (props.progressPercent || 0) + "%" }
-})
+watch(
+  mascotAdvancing,
+  (advancing) => {
+    if (advancing && !mascotCounted) {
+      mascotCounted = true
+      beginRun()
+    } else if (!advancing && mascotCounted) {
+      mascotCounted = false
+      endRun()
+    }
+  },
+  { immediate: true },
+)
 
-const stageLabel = computed(() => {
-  const stageMap: Record<string, string> = {
-queued: "🚦 排队等候",
-    prepare_context: "📚 整理上下文",
-    audit_context: "🔍 审计长期记忆",
-    cast_plan: "👥 装配角色阵容",
-    foreshadowing_plan: "🔮 规划伏笔回收",
-    foreshadowing_chapter_task: "🕵️ 检测伏笔线索",
-    longform_context: "📖 装配长篇上下文",
-    enhanced_context: "⚙️ 装配增强约束",
-    generate_mission: "📝 编写导演脚本",
-    generate_variants: "✍️ AI奋笔疾书中",
-    ai_review: "🤖 AI评审中",
-    optimize_content: "✨ 诊断优化中",
-    reader_simulator: "👓 读者模拟中",
-    consistency: "🔗 一致性检查",
-    enrichment: "📈 字数扩写",
-    continuity_gate: "🚪 连续性校验",
-    persist_versions: "💾 保存版本",
-    diagnose_once: "🔬 单次诊断",
-    diagnose_structural: "🏗️ 结构诊断",
-    diagnose_character: "🧑 角色诊断",
-    diagnose_previous_chapter: "⏪ 回溯前章",
-    diagnose_context_bundle: "📦 汇总上下文",
-    optimize_character: "🎭 角色优化",
-    diagnose_continuity: "⛓️ 连续性诊断",
-    generate_variants_candidate: "📄 生成候选稿",
-    generating: "⏳ 正在生成",
-    evaluating: "🔎 正在评审",
-    selecting: "🎯 等待选择",
-    successful: "✅ 已完成",
-    failed: "❌ 生成失败",
-    waiting_for_confirm: "🤔 等待确认",
-    evaluation_failed: "⚠️ 评审未通过",
-  }
-  return stageMap[props.stage || props.status || ""] || "处理中"
-})
+const titleText = computed(() => props.title || pick('生成进度', 'Generation progress'))
+const closeLabel = computed(() => pick('关闭进度卡片', 'Close progress card'))
+const detailText = computed(() => (isRunning.value ? String(props.detailMessage || '').trim() : ''))
 
 const progressLabel = computed(() => {
-  if (isComplete.value) return "生成完成"
-  if (isError.value) return "生成遇到问题"
-  return "生成进度"
+  if (isComplete.value) return pick('生成完成', 'Generation complete')
+  if (isError.value) return pick('生成遇到问题', 'Generation needs attention')
+  return pick('生成进度', 'Generation progress')
+})
+const taskStatusLabel = computed<string>(() => {
+  const labels: Record<string, string> = {
+    queued: pick('已排队', 'Queued'),
+    running: pick('运行中', 'Running'),
+    cancelling: pick('取消中', 'Cancelling'),
+    cancelled: pick('已取消', 'Cancelled'),
+    succeeded: pick('已完成', 'Completed'),
+    failed: pick('失败', 'Failed'),
+    stale: pick('已中断', 'Stale'),
+  }
+  const status = String(props.taskStatus || '').trim()
+  return labels[status] || status
 })
 
-const funMessages = [
-  "正在奋笔疾书...",
-  "文思泉涌中...",
-  "妙笔生花...",
-  "才高八斗...",
-  "笔下生风...",
-  "灵感爆棚...",
-  "正在构思惊天反转...",
-  "角色们正在自己演起来了...",
-  "伏笔回收计划启动...",
-  "AI正在脑补宏大场景...",
-  "键盘都要冒烟了...",
-  "故事正在自己成长...",
-  "文曲星附体中...",
-  "万物皆可写...",
-  "这一章绝对精彩...",
-  "正在给角色安排命运...",
-  "文字的力量在汇聚...",
-  "脑中剧场已经开演...",
-  "连标点符号都在发光...",
-  "作文之神降临了...",
-  "角色在纸上活过来了...",
-  "大纲正在延展为画面...",
-  "剧情线正在收束...",
-  "冲突在升温...",
-  "这一段的张力拉满了...",
-  "读者们已经等不及了...",
-  "每一个字都在燃烧...",
-  "反转正在酝酿中...",
-  "情绪曲线在攀升...",
-  "场景画面正在渲染...",
-]
+const stageLabel = computed<string>(() => {
+  const labels: Record<string, string> = {
+    queued: pick('排队等候', 'Queued'),
+    prepare_context: pick('整理上下文', 'Preparing context'),
+    audit_context: pick('审计长期记忆', 'Auditing memory'),
+    cast_plan: pick('装配角色阵容', 'Planning cast'),
+    foreshadowing_plan: pick('规划伏笔回收', 'Planning foreshadowing'),
+    foreshadowing_chapter_task: pick('检测伏笔线索', 'Checking clues'),
+    longform_context: pick('装配长篇上下文', 'Preparing long-form context'),
+    enhanced_context: pick('装配增强约束', 'Preparing constraints'),
+    generate_mission: pick('编写导演脚本', 'Building writing plan'),
+    generate_variants: pick('正在生成正文', 'Writing draft'),
+    generate_variants_candidate: pick('生成候选稿', 'Generating candidate'),
+    multi_round_continuation: pick('多轮续写', 'Continuing draft'),
+    ai_review: pick('正在评审', 'Reviewing draft'),
+    review: pick('正在评审', 'Reviewing draft'),
+    reader_simulation: pick('读者视角模拟', 'Simulating reader'),
+    reader_simulator: pick('读者模拟中', 'Simulating reader'),
+    diagnose_once: pick('单次诊断', 'Running diagnosis'),
+    diagnose_previous_chapter: pick('回溯前章', 'Reviewing previous chapter'),
+    diagnose_context_bundle: pick('汇总上下文', 'Collecting context'),
+    diagnose_structural: pick('结构诊断', 'Structural diagnosis'),
+    diagnose_character: pick('角色诊断', 'Character diagnosis'),
+    diagnose_delivery: pick('表达诊断', 'Delivery diagnosis'),
+    diagnose_continuity: pick('连续性诊断', 'Continuity diagnosis'),
+    optimize_content: pick('正在优化', 'Optimizing'),
+    optimize_structural: pick('结构优化', 'Optimizing structure'),
+    optimize_character: pick('角色优化', 'Optimizing characters'),
+    optimize_delivery: pick('表达优化', 'Optimizing delivery'),
+    enrichment: pick('字数扩写', 'Enriching draft'),
+    consistency: pick('一致性检查', 'Checking consistency'),
+    continuity_gate: pick('连续性校验', 'Checking continuity'),
+    persist_versions: pick('保存版本', 'Saving versions'),
+    finalize: pick('定稿快照', 'Finalizing'),
+    ledger_memory: pick('记忆层更新', 'Updating memory'),
+    ledger_foreshadowing: pick('伏笔闭环', 'Closing foreshadowing'),
+    ledger_graph: pick('线索图谱同步', 'Syncing knowledge graph'),
+    finalized: pick('定稿完成', 'Finalized'),
+    generating: pick('正在生成', 'Generating'),
+    evaluating: pick('正在评审', 'Evaluating'),
+    selecting: pick('等待选择', 'Waiting for selection'),
+    waiting_for_confirm: pick('等待确认', 'Waiting for confirmation'),
+    successful: pick('已完成', 'Completed'),
+    ready: pick('已就绪', 'Ready'),
+    failed: pick('生成失败', 'Generation failed'),
+    evaluation_failed: pick('评审未通过', 'Review failed'),
+  }
+  const raw = String(props.stage || props.status || '').trim().toLowerCase()
+  if (!raw) return pick('处理中', 'Working')
+  return labels[raw] || labels[normalizeRuntimeStage(raw)] || pick('处理中', 'Working')
+})
+// 字数、任务号、任务状态、重试次数合并成一行，避免卡片被碎片信息撑开。
+const metaLine = computed<string>(() => {
+  const parts: string[] = []
+  const words = props.wordCount ?? 0
+  if (words > 0) parts.push(`${words.toLocaleString()} ${pick('字', 'chars')}`)
+  if (props.taskId) parts.push(`${pick('任务', 'Task')} ${props.taskId.slice(0, 8)}`)
+  if (taskStatusLabel.value) parts.push(taskStatusLabel.value)
+  if (typeof props.retryCount === 'number' && props.retryCount > 0) {
+    parts.push(`${pick('重试', 'Retries')} ${props.retryCount}`)
+  }
+  if (props.taskRecovered) parts.push(pick('已恢复', 'Recovered'))
+  return parts.join(' · ')
+})
 
-// Use a reactive counter that updates every 3 seconds for smoother rotation
-import { ref, onMounted, onUnmounted } from "vue"
+const FUN_MESSAGES: ReadonlyArray<readonly [string, string]> = [
+  ['奋笔疾书中', 'Writing at full speed'],
+  ['文思泉涌', 'Ideas are flowing'],
+  ['正在埋伏笔', 'Planting a hint'],
+  ['角色自己演起来了', 'Characters take over'],
+  ['冲突升温中', 'Tension is rising'],
+  ['反转正在酝酿', 'A twist is brewing'],
+  ['线索开始收束', 'Threads converging'],
+  ['画面逐渐清晰', 'The scene comes into focus'],
+]
 
 const messageIndex = ref(0)
 let messageTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
   messageTimer = setInterval(() => {
-    messageIndex.value = (messageIndex.value + 1) % funMessages.length
-  }, 3000)
+    messageIndex.value = (messageIndex.value + 1) % FUN_MESSAGES.length
+  }, 3600)
 })
 
 onUnmounted(() => {
   if (messageTimer) clearInterval(messageTimer)
+  messageTimer = null
+  if (mascotCounted) {
+    mascotCounted = false
+    endRun()
+  }
 })
 
 const funMessage = computed(() => {
-  if (isComplete.value || isError.value) return ""
-  return funMessages[messageIndex.value] || funMessages[0]
+  if (!isRunning.value) return ''
+  const message = FUN_MESSAGES[messageIndex.value] || FUN_MESSAGES[0]
+  return pick(message[0], message[1])
 })
 </script>
 
 <style scoped>
-/* Runner animations with 6 cycling characters */
-@keyframes runner-spin { 0%{transform:translateY(-50%) rotate(0deg)} 100%{transform:translateY(-50%) rotate(360deg)} }
-@keyframes runner-bounce { 0%,100%{transform:translateY(-50%) scale(1)} 50%{transform:translateY(-65%) scale(1.15)} }
-@keyframes runner-pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
-@keyframes runner-wiggle { 0%,100%{transform:translateY(-50%) rotate(0deg)} 25%{transform:translateY(-60%) rotate(-5deg)} 75%{transform:translateY(-40%) rotate(5deg)} }
-
+/* 整块重写：一个选择器只出现一次，不再靠尾部追加规则互相覆盖。 */
 .floating-progress-card {
   position: fixed;
-  top: 68px;
-  right: 12px;
+  top: var(--xq-space-4);
+  right: var(--xq-space-4);
   z-index: 1000;
-  width: 280px;
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(16px);
-  border-radius: 10px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.1), 0 1px 4px rgba(0, 0, 0, 0.06);
-  border: 1px solid rgba(148, 163, 184, 0.15);
-  overflow: hidden;
-  transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  gap: var(--xq-space-3);
+  width: min(320px, calc(100vw - var(--xq-space-8)));
+  padding: var(--xq-space-4);
+  border: 1px solid var(--xq-border);
+  border-left: 3px solid var(--xq-border-strong);
+  border-radius: var(--xq-radius-lg);
+  background: var(--xq-surface);
+  box-shadow: var(--xq-shadow-lg);
+  color: var(--xq-text-body);
+  font-family: var(--xq-font-sans);
 }
 
+/* 状态只用左侧 3px 语义色条区分，整卡保持白底。 */
 .floating-progress-card--active {
-  border-left: 3px solid #3b82f6;
+  border-left-color: var(--xq-accent);
 }
 
 .floating-progress-card--success {
-  border-left: 3px solid #10b981;
+  border-left-color: var(--xq-success);
 }
 
 .floating-progress-card--error {
-  border-left: 3px solid #ef4444;
+  border-left-color: var(--xq-danger);
 }
 
 .floating-progress-card--neutral {
-  border-left: 3px solid #94a3b8;
+  border-left-color: var(--xq-border-strong);
 }
 
 .floating-progress-card__header {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  align-items: flex-start;
+  gap: var(--xq-space-2);
 }
 
-.floating-progress-card__icon {
-  width: 24px;
-  height: 24px;
+.floating-progress-card__heading {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
-.floating-progress-card__icon--complete {
-  background: rgba(16, 185, 129, 0.12);
-  color: #10b981;
-}
-
-.floating-progress-card__icon--error {
-  background: rgba(239, 68, 68, 0.12);
-  color: #ef4444;
-}
-
-.floating-progress-card__icon--loading {
-  background: rgba(59, 130, 246, 0.12);
-}
-
-.floating-progress-card__spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(59, 130, 246, 0.25);
-  border-top-color: #3b82f6;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.floating-progress-card__info {
-  flex: 1;
   min-width: 0;
-  display: flex;
+  flex: 1;
   flex-direction: column;
-  gap: 1px;
+  gap: var(--xq-space-1);
 }
-
 .floating-progress-card__title {
-  font-size: 11px;
-  font-weight: 600;
-  color: #1e293b;
-  white-space: nowrap;
   overflow: hidden;
+  color: var(--xq-text);
+  font-size: var(--xq-text-base);
+  font-weight: var(--xq-weight-semibold);
+  line-height: var(--xq-leading-tight);
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .floating-progress-card__stage {
-  font-size: 10px;
-  color: #64748b;
+  overflow: hidden;
+  color: var(--xq-text-muted);
+  font-size: var(--xq-text-xs);
+  line-height: var(--xq-leading-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .floating-progress-card__close {
-  width: 18px;
-  height: 18px;
-  display: flex;
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
+  padding: 0;
   border: none;
+  border-radius: var(--xq-radius-sm);
   background: transparent;
-  color: #94a3b8;
-  font-size: 14px;
+  color: var(--xq-text-faint);
+  font-size: var(--xq-text-md);
+  line-height: 1;
   cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.2s;
+  transition: background-color var(--xq-fast), color var(--xq-fast);
 }
 
 .floating-progress-card__close:hover {
-  background: rgba(148, 163, 184, 0.12);
-  color: #475569;
+  background: var(--xq-surface-hover);
+  color: var(--xq-text-body);
 }
 
-.floating-progress-card__body {
-  padding: 8px 10px;
+.floating-progress-card__close:focus-visible {
+  outline: none;
+  box-shadow: var(--xq-ring);
 }
 
-.floating-progress-card__progress-row {
+.floating-progress-card__meter {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 4px;
+  gap: var(--xq-space-3);
 }
-
-.floating-progress-card__progress-label {
-  font-size: 10px;
-  color: #64748b;
-  font-weight: 500;
-}
-
-.floating-progress-card__progress-value {
-  font-size: 11px;
-  font-weight: 700;
-  color: #1e293b;
-}
-
 .floating-progress-card__track {
   position: relative;
-  width: 100%;
-  height: 8px;
-  background: rgba(148, 163, 184, 0.15);
-  border-radius: 999px;
-  overflow: visible;
+  height: 10px;
+  min-width: 0;
+  flex: 1;
+  border-radius: var(--xq-radius-pill);
+  background: var(--xq-surface-3);
 }
 
 .floating-progress-card__bar {
   height: 100%;
-  border-radius: 999px;
-  transition: width 0.5s ease;
+  border-radius: inherit;
+  /* linear 才是均匀推进，ease 会让每次刷新先快后慢，看起来一顿一顿。 */
+  transition: width 300ms linear;
 }
 
 .floating-progress-card__bar--active {
-  background: linear-gradient(90deg, #3b82f6, #6366f1);
+  background: var(--xq-accent);
 }
 
 .floating-progress-card__bar--success {
-  background: linear-gradient(90deg, #10b981, #34d399);
+  background: var(--xq-success);
 }
 
 .floating-progress-card__bar--error {
-  background: linear-gradient(90deg, #ef4444, #f87171);
+  background: var(--xq-danger);
 }
 
 .floating-progress-card__bar--neutral {
-  background: linear-gradient(90deg, #94a3b8, #cbd5e1);
+  background: var(--xq-border-strong);
 }
 
-.floating-progress-card__runner {
+/* 吉祥物骑在进度点上，本身就是「还在跑」的指示器，不再另加 spinner。 */
+.floating-progress-card__mascot {
   position: absolute;
   top: 50%;
+  display: grid;
+  place-items: center;
   transform: translate(-50%, -50%);
-  font-size: 14px;
+  transition: left 300ms linear;
+  pointer-events: none;
+}
+
+.floating-progress-card__percent {
+  flex: 0 0 auto;
+  color: var(--xq-text);
+  font-size: var(--xq-text-base);
+  font-weight: var(--xq-weight-bold);
+  font-variant-numeric: tabular-nums;
   line-height: 1;
-  transition: left 0.5s ease;
-  animation: runner-bounce 0.6s ease-in-out infinite;
-  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1));
-  z-index: 2;
 }
-
-@keyframes runner-bounce {
-  0%, 100% { transform: translate(-50%, -50%) scaleX(1); }
-  50% { transform: translate(-50%, -60%) scaleX(1.1); }
-}
-
-.floating-progress-card__stats {
-  margin-top: 6px;
-  font-size: 9px;
-  color: #64748b;
-  text-align: center;
+.floating-progress-card__meta {
+  overflow: hidden;
+  margin: 0;
+  color: var(--xq-text-faint);
+  font-size: var(--xq-text-2xs);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--xq-leading-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .floating-progress-card__fun {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 10px;
-  background: rgba(59, 130, 246, 0.04);
-  border-top: 1px solid rgba(148, 163, 184, 0.08);
-}
-
-.floating-progress-card__fun-text {
-  font-size: 10px;
-  color: #64748b;
+  overflow: hidden;
+  margin: 0;
+  color: var(--xq-text-muted);
+  font-size: var(--xq-text-2xs);
   font-style: italic;
+  line-height: var(--xq-leading-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.float-card-enter-active,
+.floating-progress-card__detail {
+  overflow: hidden;
+  margin: 0;
+  color: var(--xq-text-body);
+  font-size: var(--xq-text-xs);
+  line-height: var(--xq-leading-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.float-card-enter-active {
+  transition: opacity var(--xq-normal), transform var(--xq-normal);
+}
+
 .float-card-leave-active {
-  transition: all 0.3s ease;
+  transition: opacity var(--xq-fast), transform var(--xq-fast);
 }
 
-.float-card-enter-from,
+.float-card-enter-from {
+  opacity: 0;
+  transform: translateX(var(--xq-space-3));
+}
+
 .float-card-leave-to {
   opacity: 0;
-  transform: translateX(20px);
+  transform: translateX(var(--xq-space-3));
 }
-
-/* Enhanced animations */
-@keyframes bar-shimmer {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-@keyframes bar-shimmer-active {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-.floating-progress-card__bar--active {
-  background: linear-gradient(90deg, #3b82f6, #60a5fa, #93c5fd, #60a5fa, #3b82f6) !important;
-  background-size: 300% 100% !important;
-  animation: bar-shimmer-active 1.5s ease-in-out infinite;
-}
-
-.floating-progress-card__runner {
-  transition: left 0.3s ease-out;
-}
-
-@keyframes runner-bounce {
-  0%, 100% { transform: translateX(-50%) translateY(0); }
-  50% { transform: translateX(-50%) translateY(-5px); }
-}
-
-.floating-progress-card__runner {
-  animation: runner-bounce 0.8s ease-in-out infinite;
-}
-
 </style>
+

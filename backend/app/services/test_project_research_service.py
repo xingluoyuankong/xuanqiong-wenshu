@@ -359,9 +359,8 @@ async def test_prompt_context_keeps_latest_artifact_per_scope(tmp_path):
             assert metadata["artifact_run_ids"] == ["global-latest", "enhanced-latest", "chapter-9"]
     finally:
         await engine.dispose()
-@pytest.mark.skip(reason="API refactored: AsyncSessionLocal removed from pipeline")
 @pytest.mark.anyio
-async def test_pipeline_archive_loader_keeps_existing_context_when_new_research_is_skipped(tmp_path, monkeypatch):
+async def test_prompt_context_keeps_archived_context_when_new_research_is_skipped(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'pipeline-archive.db'}")
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as conn:
@@ -376,45 +375,30 @@ async def test_pipeline_archive_loader_keeps_existing_context_when_new_research_
                 summary="可复用的全局文化资料",
             ))
             await session.commit()
-
-        import app.services.pipeline_orchestrator as pipeline_module
-        monkeypatch.setattr(pipeline_module, "AsyncSessionLocal", factory)
-        text, metadata = await pipeline_module.PipelineOrchestrator._load_archived_research_context(
-            "project-pipeline-archive", 12,
-        )
-
-        assert "可复用的全局文化资料" in text
-        assert metadata["artifact_count"] == 1
-        assert metadata["artifact_scopes"] == ["global"]
+            text, metadata = await ProjectResearchService(session).build_prompt_context(
+                "project-pipeline-archive", 12,
+            )
+            assert "可复用的全局文化资料" in text
+            assert metadata["artifact_count"] == 1
+            assert metadata["artifact_scopes"] == ["global"]
     finally:
         await engine.dispose()
 
 
-@pytest.mark.skip(reason="API refactored: AsyncSessionLocal removed from pipeline")
 @pytest.mark.anyio
-async def test_pipeline_archive_loader_degrades_without_interrupting_generation(monkeypatch):
-    class BrokenSessionContext:
-        async def __aenter__(self):
+async def test_prompt_context_degrades_without_interrupting_generation():
+    class BrokenSession:
+        async def execute(self, *_args, **_kwargs):
             raise RuntimeError("archive database unavailable")
 
-        async def __aexit__(self, *_args):
-            return False
-
-    import app.services.pipeline_orchestrator as pipeline_module
-    monkeypatch.setattr(pipeline_module, "AsyncSessionLocal", lambda: BrokenSessionContext())
-
-    text, metadata = await pipeline_module.PipelineOrchestrator._load_archived_research_context("project-1", 3)
-
+    text, metadata = await ProjectResearchService(BrokenSession()).build_prompt_context("project-1", 3)
     assert text == ""
     assert metadata["artifact_count"] == 0
     assert "archive database unavailable" in metadata["archive_error"]
 
 
-@pytest.mark.skip(reason="API refactored: AsyncSessionLocal removed from pipeline")
 @pytest.mark.anyio
-async def test_blueprint_archive_loader_filters_requested_scope(tmp_path, monkeypatch):
-    from app.api.routers import novels as novels_router
-
+async def test_prompt_context_filters_requested_research_scope(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'blueprint-archive.db'}")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
@@ -428,16 +412,14 @@ async def test_blueprint_archive_loader_filters_requested_scope(tmp_path, monkey
                 ResearchArtifact(run_id="enhanced-run", project_id="p-blueprint-archive", user_id=1, scope="enhanced", status="successful", trigger="test", summary="强化章节结构资料"),
             ])
             await session.commit()
-
-        monkeypatch.setattr(novels_router, "AsyncSessionLocal", session_factory)
-        global_text, global_meta = await novels_router._load_blueprint_research_archive("p-blueprint-archive", scope="global")
-        enhanced_text, enhanced_meta = await novels_router._load_blueprint_research_archive("p-blueprint-archive", scope="enhanced")
-
-        assert "全局历史文化资料" in global_text
-        assert "强化章节结构资料" not in global_text
-        assert global_meta["artifact_run_ids"] == ["global-run"]
-        assert "强化章节结构资料" in enhanced_text
-        assert "全局历史文化资料" not in enhanced_text
-        assert enhanced_meta["artifact_run_ids"] == ["enhanced-run"]
+            service = ProjectResearchService(session)
+            global_text, global_meta = await service.build_prompt_context("p-blueprint-archive", 1, scope="global")
+            enhanced_text, enhanced_meta = await service.build_prompt_context("p-blueprint-archive", 1, scope="enhanced")
+            assert "全局历史文化资料" in global_text
+            assert "强化章节结构资料" not in global_text
+            assert global_meta["artifact_run_ids"] == ["global-run"]
+            assert "强化章节结构资料" in enhanced_text
+            assert "全局历史文化资料" not in enhanced_text
+            assert enhanced_meta["artifact_run_ids"] == ["enhanced-run"]
     finally:
         await engine.dispose()

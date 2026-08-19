@@ -1,32 +1,32 @@
-<template>
+﻿<template>
   <div class="version-selector-shell">
     <section class="version-selector-head">
       <div>
         <div class="version-selector-head__chips">
-          <span class="vs-chip vs-chip--primary">候选版本评审区</span>
-          <span class="vs-chip">共 {{ availableVersions.length }} 个版本</span>
-          <span v-if="selectedChapter?.content" class="vs-chip">当前正文已存在</span>
+          <span class="vs-chip vs-chip--primary">{{ pick('候选版本评审区', 'Candidate review area') }}</span>
+          <span class="vs-chip">{{ versionCountLabel }}</span>
+          <span v-if="selectedChapter?.content" class="vs-chip">{{ pick('当前正文已存在', 'Draft already exists') }}</span>
         </div>
-        <h4>先横向浏览候选版本，再决定对比、评审还是确认采用</h4>
-        <p>每个卡片都会明确标出版本编号、当前正文、当前查看和对比对象，不再让你猜 AI 在说哪一版。</p>
+        <h4>{{ pick('先横向浏览候选版本，再决定对比、评审还是确认采用', 'Browse candidates side by side, then compare, review, or confirm') }}</h4>
+        <p>{{ pick('每个卡片都会明确标出版本编号、当前正文、当前查看和对比对象，不再让你猜 AI 在说哪一版。', 'Every card marks the version number, the current draft, what you are viewing, and the compare target, so you never need to guess which version the AI means.') }}</p>
       </div>
 
       <div class="version-selector-head__actions">
-        <button type="button" class="md-btn md-btn-text md-ripple" @click="emit('hideVersionSelector')">返回正文</button>
+        <button type="button" class="md-btn md-btn-text md-ripple md-btn--compact" @click="emit('hideVersionSelector')">{{ pick('返回正文', 'Back to draft') }}</button>
         <button
           v-if="selectedChapter?.evaluation"
           type="button"
           class="md-btn md-btn-filled md-ripple version-selector-head__action version-selector-head__action--primary"
           @click="emit('showEvaluationDetail')"
         >
-          查看综合评审
+          {{ pick('查看综合评审', 'View overall review') }}
         </button>
       </div>
     </section>
 
-    <section class="version-decision-panel" aria-label="候选版本决策面板">
+    <section class="version-decision-panel" :aria-label="pick('候选版本决策面板', 'Candidate decision panel')">
       <div class="version-decision-panel__lead">
-        <p class="version-selector-list__kicker">决策辅助</p>
+        <p class="version-selector-list__kicker">{{ pick('决策辅助', 'Decision support') }}</p>
         <h5>{{ decisionTitle }}</h5>
         <p>{{ decisionHint }}</p>
       </div>
@@ -41,8 +41,8 @@
 
     <section v-if="evaluatingChapter === selectedChapter?.chapter_number" class="version-selector-progress">
       <div class="progress-row">
-        <span>AI 评审处理中</span>
-        <strong>正在等待评审结果返回</strong>
+        <span>{{ pick('AI 评审处理中', 'AI review in progress') }}</span>
+        <strong>{{ pick('正在等待评审结果返回', 'Waiting for review results') }}</strong>
       </div>
       <div class="progress-track" aria-label="ai-review-progress">
         <div class="progress-bar progress-bar--phase progress-bar--indeterminate"></div>
@@ -54,12 +54,12 @@
       :class="['version-selector-banner', isEvaluationFailed ? 'version-selector-banner--error' : 'version-selector-banner--success']"
     >
       <div>
-        <h4>{{ isEvaluationFailed ? 'AI 评审未完整返回' : 'AI 评审已生成' }}</h4>
+        <h4>{{ isEvaluationFailed ? pick('AI 评审未完整返回', 'AI review returned incomplete') : pick('AI 评审已生成', 'AI review is ready') }}</h4>
         <p>
           {{
             isEvaluationFailed
-              ? '候选版本仍然可以继续查看和确认，你也可以重新发起 AI 评审。'
-              : '综合评审入口已经收口到上方“查看综合评审”，避免这里再放一颗重复按钮。'
+              ? pick('候选版本仍然可以继续查看和确认，你也可以重新发起 AI 评审。', 'You can still view and confirm candidates, or start the AI review again.')
+              : pick('综合评审入口已经收口到上方“查看综合评审”，避免这里再放一颗重复按钮。', 'The overall review entry now lives in “View overall review” above, so there is no duplicate button here.')
           }}
         </p>
       </div>
@@ -70,25 +70,25 @@
         :disabled="evaluatingChapter === selectedChapter?.chapter_number"
         @click="emit('evaluateAllVersions')"
       >
-        重新发起评审
+        {{ pick('重新发起评审', 'Start review again') }}
       </button>
-      <span v-else class="version-selector-banner__note">先看综合结论，再决定确认哪一版。</span>
+      <span v-else class="version-selector-banner__note">{{ pick('先看综合结论，再决定确认哪一版。', 'Read the overall verdict first, then decide which version to confirm.') }}</span>
     </section>
 
     <section v-if="renderedGenerationMessage" class="version-selector-note">
-      <div class="version-selector-note__badge">本轮生成说明</div>
+      <div class="version-selector-note__badge">{{ pick('本轮生成说明', 'Notes for this run') }}</div>
       <div class="version-selector-note__content" v-html="renderedGenerationMessage"></div>
     </section>
 
     <section class="version-selector-list">
       <div class="version-selector-list__head">
         <div>
-          <p class="version-selector-list__kicker">候选版本横向总览</p>
-          <h5>左右滑动并点击选择候选版本</h5>
+          <p class="version-selector-list__kicker">{{ pick('候选版本横向总览', 'Candidate overview') }}</p>
+          <h5>{{ pick('左右滑动并点击选择候选版本', 'Scroll sideways and click to pick a candidate') }}</h5>
         </div>
         <div class="version-selector-nav">
-          <button type="button" class="version-selector-nav__btn" :disabled="!hasPrevVersion" @click="selectPrevVersion">上一个版本</button>
-          <button type="button" class="version-selector-nav__btn" :disabled="!hasNextVersion" @click="selectNextVersion">下一个版本</button>
+          <button type="button" class="version-selector-nav__btn version-pill-btn transition-all duration-200 hover:scale-105 active:scale-95" :disabled="!hasPrevVersion" @click="selectPrevVersion">{{ pick('上一个版本', 'Previous version') }}</button>
+          <button type="button" class="version-selector-nav__btn version-pill-btn transition-all duration-200 hover:scale-105 active:scale-95" :disabled="!hasNextVersion" @click="selectNextVersion">{{ pick('下一个版本', 'Next version') }}</button>
         </div>
       </div>
 
@@ -106,15 +106,15 @@
           >
             <div class="version-card__head">
               <div>
-                <p class="version-card__code">候选版本 {{ card.index + 1 }}</p>
-                <strong>{{ card.version.style || '标准版本' }}</strong>
+                <p class="version-card__code">{{ candidateLabel(card.index) }}</p>
+                <strong>{{ card.version.style || pick('标准版本', 'Standard version') }}</strong>
               </div>
               <div class="version-card__tags">
-                <span class="vs-chip">约 {{ card.approxWordCount }} 字</span>
-                <span v-if="card.isAiRecommended" class="vs-chip vs-chip--recommend">AI 推荐</span>
-                <span v-if="card.isCurrent" class="vs-chip vs-chip--success">当前正文</span>
-                <span v-else-if="selectedVersionIndex === card.index" class="vs-chip vs-chip--accent">当前查看</span>
-                <span v-if="compareVersionIndex === card.index" class="vs-chip vs-chip--warn">对比对象</span>
+                <span class="vs-chip">{{ approxWordsLabel(card.approxWordCount) }}</span>
+                <span v-if="card.isAiRecommended" class="vs-chip vs-chip--recommend">{{ pick('AI 推荐', 'AI recommended') }}</span>
+                <span v-if="card.isCurrent" class="vs-chip vs-chip--success">{{ pick('当前正文', 'Current draft') }}</span>
+                <span v-else-if="selectedVersionIndex === card.index" class="vs-chip vs-chip--accent">{{ pick('当前查看', 'Viewing') }}</span>
+                <span v-if="compareVersionIndex === card.index" class="vs-chip vs-chip--warn">{{ pick('对比对象', 'Compare target') }}</span>
               </div>
             </div>
             <p class="version-card__excerpt">{{ card.preview }}</p>
@@ -131,23 +131,23 @@
           <div class="version-card__actions">
             <button
               type="button"
-              class="md-btn md-btn-text md-ripple"
+              class="md-btn md-btn-text md-ripple md-btn--compact"
               :disabled="evaluatingVersionIndex === card.index"
               @click.stop="card.version.evaluation ? emit('showEvaluationDetail', card.index) : emit('evaluateVersion', card.index)"
             >
-              {{ evaluatingVersionIndex === card.index ? '评审中…' : card.version.evaluation ? '查看评审' : 'AI 评审' }}
+              {{ evaluatingVersionIndex === card.index ? pick('评审中…', 'Reviewing…') : card.version.evaluation ? pick('查看评审', 'View review') : pick('AI 评审', 'AI review') }}
             </button>
-            <button type="button" class="md-btn md-btn-text md-ripple" @click.stop="setCompareVersion(card.index)">
-              {{ compareVersionIndex === card.index ? '取消对比' : '加入对比' }}
+            <button type="button" class="md-btn md-btn-text md-ripple md-btn--compact" @click.stop="setCompareVersion(card.index)">
+              {{ compareVersionIndex === card.index ? pick('取消对比', 'Cancel compare') : pick('加入对比', 'Add to compare') }}
             </button>
             <button
               v-if="!card.isCurrent && availableVersions.length > 1"
               type="button"
-              class="md-btn md-btn-text md-ripple version-card__delete"
+              class="md-btn md-btn-text md-ripple md-btn--compact version-card__delete"
               :disabled="deletingVersionIndex === card.index"
               @click.stop="handleDeleteVersion(card.index)"
             >
-              {{ deletingVersionIndex === card.index ? '删除中…' : '删除' }}
+              {{ deletingVersionIndex === card.index ? pick('删除中…', 'Deleting…') : t('common.delete') }}
             </button>
           </div>
         </article>
@@ -157,18 +157,18 @@
     <section class="version-preview">
       <div class="version-preview__top">
         <div>
-          <p class="version-preview__kicker">当前预览</p>
-          <h5>候选版本 {{ selectedVersionIndex + 1 }}</h5>
+          <p class="version-preview__kicker">{{ pick('当前预览', 'Current preview') }}</p>
+          <h5>{{ candidateLabel(selectedVersionIndex) }}</h5>
           <p class="version-preview__meta">
-            {{ activeVersion?.style || '标准版本' }} · {{ Math.max(1, Math.round(selectedVersionContent.length / 100)) * 100 }} 字
+            {{ activeVersion?.style || pick('标准版本', 'Standard version') }} · {{ Math.max(1, Math.round(selectedVersionContent.length / 100)) * 100 }} {{ pick('字', 'words') }}
           </p>
         </div>
         <div class="version-preview__tags">
-          <span v-if="activeVersionCard?.isAiRecommended" class="vs-chip vs-chip--recommend">AI 推荐采用</span>
-          <span v-if="isCurrentVersion(selectedVersionIndex)" class="vs-chip vs-chip--success">这就是当前正文</span>
-          <span v-else class="vs-chip vs-chip--accent">待确认候选版本</span>
+          <span v-if="activeVersionCard?.isAiRecommended" class="vs-chip vs-chip--recommend">{{ pick('AI 推荐采用', 'AI recommends this one') }}</span>
+          <span v-if="isCurrentVersion(selectedVersionIndex)" class="vs-chip vs-chip--success">{{ pick('这就是当前正文', 'This is the current draft') }}</span>
+          <span v-else class="vs-chip vs-chip--accent">{{ pick('待确认候选版本', 'Candidate pending confirmation') }}</span>
           <span v-if="compareVersionIndex !== null && compareVersionIndex !== undefined" class="vs-chip">
-            当前对比对象：候选版本 {{ compareVersionIndex + 1 }}
+            {{ pick('当前对比对象', 'Compare target') }}{{ punct.colon }}{{ candidateLabel(compareVersionIndex) }}
           </span>
         </div>
       </div>
@@ -187,14 +187,14 @@
           </ul>
         </div>
         <div class="version-preview__excerpt">{{ selectedVersionPreview }}</div>
-        <p v-if="previewHintVisible" class="version-preview__hint">这里只保留预览摘要，点击“查看全文”会跳到完整阅读页。</p>
+        <p v-if="previewHintVisible" class="version-preview__hint">{{ pick('这里只保留预览摘要，点击“查看全文”会跳到完整阅读页。', 'This is only a preview excerpt; “View full text” opens the full reading page.') }}</p>
       </div>
 
       <div class="version-preview__actions">
         <div class="version-preview__tools">
-          <span class="version-preview__tools-label">辅助工具</span>
-          <button type="button" class="md-btn md-btn-text md-ripple" :disabled="!activeVersion?.content" @click="openVersionReader(selectedVersionIndex)">查看全文</button>
-          <button type="button" class="md-btn md-btn-text md-ripple" :disabled="!activeVersion?.content" @click="emit('optimizeVersion', selectedVersionIndex)">优化这一版</button>
+          <span class="version-preview__tools-label">{{ pick('辅助工具', 'Tools') }}</span>
+          <button type="button" class="md-btn md-btn-text md-ripple md-btn--compact" :disabled="!activeVersion?.content" @click="openVersionReader(selectedVersionIndex)">{{ pick('查看全文', 'View full text') }}</button>
+          <button type="button" class="md-btn md-btn-text md-ripple md-btn--compact" :disabled="!activeVersion?.content" @click="emit('optimizeVersion', selectedVersionIndex)">{{ pick('优化这一版', 'Optimize this version') }}</button>
         </div>
         <div class="version-preview__decision">
           <button
@@ -203,7 +203,7 @@
             :disabled="compareVersionIndex === null || compareVersionIndex === undefined || !activeVersion?.content"
             @click="openVersionDiff"
           >
-            对比候选版本
+            {{ pick('对比候选版本', 'Compare candidates') }}
           </button>
           <button
             type="button"
@@ -211,10 +211,10 @@
             :disabled="!activeVersion?.content || isCurrentVersion(selectedVersionIndex) || isSelectingVersion"
             @click="emit('confirmVersionSelection')"
           >
-            {{ isSelectingVersion ? '确认中…' : isCurrentVersion(selectedVersionIndex) ? '当前正文已选中' : `确认候选版本 ${selectedVersionIndex + 1}` }}
+            {{ isSelectingVersion ? pick('确认中…', 'Confirming…') : isCurrentVersion(selectedVersionIndex) ? pick('当前正文已选中', 'Current draft selected') : pick(`确认候选版本 ${selectedVersionIndex + 1}`, `Confirm candidate ${selectedVersionIndex + 1}`) }}
           </button>
           <p v-if="activeQualitySummary?.tone === 'danger'" class="version-preview__confirm-warning">
-            确认前注意：当前候选仍有明显质量风险，建议先优化或改选质量更稳的版本。
+            {{ pick('确认前注意：当前候选仍有明显质量风险，建议先优化或改选质量更稳的版本。', 'Before you confirm: this candidate still has clear quality risks. Optimize it or switch to a steadier version.') }}
           </p>
         </div>
       </div>
@@ -228,6 +228,7 @@ import type { Chapter, ChapterGenerationResponse, ChapterVersion } from '@/api/n
 import { renderSafeMarkdown } from '@/utils/safeMarkdown'
 import { buildChapterPreview, normalizeChapterContent } from '@/utils/chapterContent'
 import { buildChapterQualitySummary, type ChapterQualitySummary } from '@/utils/chapterQuality'
+import { useLocale } from '@/composables/useLocale'
 
 interface Props {
   selectedChapter: Chapter | null
@@ -270,6 +271,13 @@ const emit = defineEmits<{
 }>()
 
 const cardRowRef = ref<HTMLElement | null>(null)
+const { pick, t, punct } = useLocale()
+const candidateLabel = (versionIndex: number) => pick(`候选版本 ${versionIndex + 1}`, `Candidate ${versionIndex + 1}`)
+const approxWordsLabel = (count: number) => pick(`约 ${count} 字`, `~${count} words`)
+const versionCountLabel = computed(() => {
+  const count = props.availableVersions.length
+  return pick(`共 ${count} 个版本`, `${count} version${count === 1 ? '' : 's'}`)
+})
 const hasConfirmedSelection = computed(() => props.selectedChapter?.generation_status === 'successful')
 const normalizedSelectedChapterContent = computed(() => normalizeChapterContent(props.selectedChapter?.content || ''))
 const selectedVersionId = computed(() => props.selectedChapter?.selected_version_id ?? null)
@@ -326,8 +334,8 @@ const activeVersion = computed(() => activeVersionCard.value?.version || null)
 const activeQualitySummary = computed(() => activeVersionCard.value?.qualitySummary || null)
 const activeQualityHint = computed(() => {
   if (!activeQualitySummary.value) return ''
-  if (activeQualitySummary.value.tone === 'success') return '这一版在场景兑现、对白推进、章末递压和静态描写风险上暂未触发硬风险。'
-  return '这些问题会直接影响章节推进感和连续性，确认前建议优先处理。'
+  if (activeQualitySummary.value.tone === 'success') return pick('这一版在场景兑现、对白推进、章末递压和静态描写风险上暂未触发硬风险。', 'This version has not triggered hard risks on scene fulfillment, dialogue progression, ending pressure, or static description.')
+  return pick('这些问题会直接影响章节推进感和连续性，确认前建议优先处理。', 'These issues directly affect chapter momentum and continuity, so fix them before confirming.')
 })
 const selectedVersionContent = computed(() => activeVersionCard.value?.normalizedContent || '')
 const selectedVersionPreview = computed(() => buildChapterPreview(activeVersion.value?.content || '', 1400))
@@ -342,23 +350,26 @@ const averageVersionLength = computed(() => {
   return Math.round(total / versionCardModels.value.length)
 })
 const decisionTitle = computed(() => {
-  if (props.isEvaluationFailed) return 'AI 评审异常，但候选稿仍可人工确认'
-  if (props.selectedChapter?.evaluation) return '综合评审已就绪，建议先看结论再确认'
-  if (props.availableVersions.length > 1) return '多版本对照中，先选基准再设对比对象'
-  return '单版本确认中，重点检查正文完整度'
+  if (props.isEvaluationFailed) return pick('AI 评审异常，但候选稿仍可人工确认', 'AI review failed, but you can still confirm a candidate manually')
+  if (props.selectedChapter?.evaluation) return pick('综合评审已就绪，建议先看结论再确认', 'Overall review is ready; read the verdict before confirming')
+  if (props.availableVersions.length > 1) return pick('多版本对照中，先选基准再设对比对象', 'Comparing versions: pick a baseline first, then set a compare target')
+  return pick('单版本确认中，重点检查正文完整度', 'Single candidate: focus on whether the draft is complete')
 })
 const decisionHint = computed(() => {
   if (props.compareVersionIndex !== null && props.compareVersionIndex !== undefined) {
-    return `正在用候选版本 ${props.selectedVersionIndex + 1} 对比候选版本 ${props.compareVersionIndex + 1}。`
+    return pick(
+      `正在用候选版本 ${props.selectedVersionIndex + 1} 对比候选版本 ${props.compareVersionIndex + 1}。`,
+      `Comparing candidate ${props.selectedVersionIndex + 1} with candidate ${props.compareVersionIndex + 1}.`,
+    )
   }
-  if (props.availableVersions.length > 1) return '建议选中最顺的一版，再设置另一个候选为对比对象，最后确认采用。'
-  return '当前只有一个候选版本，如质量不足可先优化或重新生成。'
+  if (props.availableVersions.length > 1) return pick('建议选中最顺的一版，再设置另一个候选为对比对象，最后确认采用。', 'Select the smoothest version, set another candidate as the compare target, then confirm it.')
+  return pick('当前只有一个候选版本，如质量不足可先优化或重新生成。', 'Only one candidate is available; optimize or regenerate it if the quality is not good enough.')
 })
 const decisionMetrics = computed(() => [
-  { label: '候选版本', value: props.availableVersions.length, hint: '可选择稿件', tone: props.availableVersions.length > 1 ? 'info' : 'warn' },
-  { label: '已评审', value: evaluatedVersionCount.value, hint: '单版评审', tone: evaluatedVersionCount.value ? 'success' : 'warn' },
-  { label: '当前正文', value: currentVersionCount.value, hint: '已采用标记', tone: currentVersionCount.value ? 'success' : 'info' },
-  { label: '均字数', value: averageVersionLength.value, hint: '候选平均', tone: averageVersionLength.value >= 600 ? 'success' : 'warn' }
+  { label: pick('候选版本', 'Candidates'), value: props.availableVersions.length, hint: pick('可选择稿件', 'Selectable drafts'), tone: props.availableVersions.length > 1 ? 'info' : 'warn' },
+  { label: pick('已评审', 'Reviewed'), value: evaluatedVersionCount.value, hint: pick('单版评审', 'Per-version review'), tone: evaluatedVersionCount.value ? 'success' : 'warn' },
+  { label: pick('当前正文', 'Current draft'), value: currentVersionCount.value, hint: pick('已采用标记', 'Adopted marker'), tone: currentVersionCount.value ? 'success' : 'info' },
+  { label: pick('均字数', 'Avg. words'), value: averageVersionLength.value, hint: pick('候选平均', 'Candidate average'), tone: averageVersionLength.value >= 600 ? 'success' : 'warn' }
 ])
 
 const cleanVersionContent = (content: string) => normalizeChapterContent(content)
@@ -393,8 +404,8 @@ const openVersionReader = (versionIndex: number) => {
 
   emit('update:selectedVersionIndex', versionIndex)
   emit('openReader', {
-    title: props.selectedChapter?.title?.trim() || `第 ${props.selectedChapter?.chapter_number || ''} 章`,
-    subtitle: version.style ? `候选版本 ${versionIndex + 1} · ${version.style}` : `候选版本 ${versionIndex + 1}`,
+    title: props.selectedChapter?.title?.trim() || pick(`第 ${props.selectedChapter?.chapter_number || ''} 章`, `Chapter ${props.selectedChapter?.chapter_number || ''}`),
+    subtitle: version.style ? `${candidateLabel(versionIndex)} · ${version.style}` : candidateLabel(versionIndex),
     content: cleanVersionContent(version.content),
     source: 'candidate-version',
     chapterNumber: props.selectedChapter?.chapter_number || undefined,
@@ -700,10 +711,18 @@ watch(() => props.selectedVersionIndex, index => { void scrollCardIntoView(index
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: #fff;
   color: #334155;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 10px;
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-size: 0.76rem;
+  font-weight: 600;
   cursor: pointer;
+  transition: all 0.2s;
+}
+.version-selector-nav__btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.06);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #2563eb;
+  transform: translateY(-1px);
 }
 
 .version-selector-nav__btn:disabled {

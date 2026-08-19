@@ -13,12 +13,24 @@ class _FakeStreamClient:
             yield part
 
 
+class _EmptyStreamFallbackClient(_FakeStreamClient):
+    def __init__(self, parts, fallback):
+        super().__init__(parts)
+        self.fallback = fallback
+        self.chat_kwargs = None
+        self.chat_calls = 0
+
+    async def chat(self, **kwargs):
+        self.chat_calls += 1
+        self.chat_kwargs = kwargs
+        return self.fallback
+
+
 async def _async_noop(*_a, **_k):
     return None
 
 
 @pytest.mark.anyio
-@pytest.mark.skip(reason="API refactored")
 async def test_stream_single_model_falls_back_to_reasoning_content():
     service = object.__new__(LLMService)
     service._wait_for_provider_cooldown = _async_noop
@@ -71,3 +83,61 @@ async def test_stream_single_model_prefers_content_when_present():
     )
     assert text == "正文结果"
     assert finish == "stop"
+
+
+@pytest.mark.anyio
+async def test_empty_stream_fallback_keeps_prompt_cache_key_on_formal_non_stream_path():
+    service = object.__new__(LLMService)
+    service._wait_for_provider_cooldown = _async_noop
+    client = _EmptyStreamFallbackClient(
+        [{"content": "", "reasoning_content": "", "finish_reason": "stop"}],
+        {"content": "兜底正文", "finish_reason": "stop"},
+    )
+
+    text, finish = await service._stream_single_model(
+        client=client,
+        chat_messages=[],
+        model_name="m",
+        provider_key="test",
+        temperature=0.2,
+        user_id=1,
+        timeout=30,
+        response_format=None,
+        max_tokens=64,
+        top_p=None,
+        prompt_cache_key="project:p1:writer",
+        retry_same_model_once=False,
+    )
+
+    assert text == "兜底正文"
+    assert finish == "stop"
+    assert client.chat_kwargs["prompt_cache_key"] == "project:p1:writer"
+
+
+@pytest.mark.anyio
+async def test_empty_stream_can_disable_non_stream_fallback_for_long_form_budget():
+    service = object.__new__(LLMService)
+    service._wait_for_provider_cooldown = _async_noop
+    client = _EmptyStreamFallbackClient(
+        [{"content": "", "reasoning_content": "", "finish_reason": "stop"}],
+        {"content": "不应发送的隐式重试", "finish_reason": "stop"},
+    )
+
+    text, finish = await service._stream_single_model(
+        client=client,
+        chat_messages=[],
+        model_name="m",
+        provider_key="test",
+        temperature=0.2,
+        user_id=1,
+        timeout=30,
+        response_format=None,
+        max_tokens=20000,
+        prompt_cache_key="project:p1:writer",
+        retry_same_model_once=False,
+        allow_non_stream_fallback=False,
+    )
+
+    assert text == ""
+    assert finish == "stop"
+    assert client.chat_calls == 0

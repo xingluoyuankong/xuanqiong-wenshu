@@ -7,17 +7,20 @@
           <span class="cf-visual__icon">!</span>
         </div>
         <div class="cf-copy">
-          <p class="cf-kicker">章节异常恢复</p>
-          <h3>第 {{ chapterNumber }} 章处理失败</h3>
+          <p class="cf-kicker">{{ pick('章节异常恢复', 'Chapter failure recovery') }}</p>
+          <h3>{{ pick(`第 ${chapterNumber} 章处理失败`, `Chapter ${chapterNumber} failed`) }}</h3>
         </div>
       </div>
       <p class="cf-desc">
-        当前章节没有形成可交付正文。刷新状态确认原因后，请用顶部主操作栏重新生成。
+        {{ pick(
+          '当前章节没有形成可交付正文。刷新状态确认原因后，请用顶部主操作栏重新生成。',
+          'This chapter produced no deliverable text. Refresh to confirm the cause, then regenerate from the command bar at the top.'
+        ) }}
       </p>
 
       <div v-if="failureSummary || diagnosticRows.length" class="cf-diagnostics">
         <div v-if="failureSummary" class="cf-diagnostics__summary">
-          <strong>后端错误摘要</strong>
+          <strong>{{ pick('后端错误摘要', 'Backend error summary') }}</strong>
           <p>{{ failureSummary }}</p>
         </div>
         <div v-if="diagnosticRows.length" class="cf-diagnostics__grid">
@@ -29,8 +32,12 @@
       </div>
 
       <div class="cf-hint" :class="generatingChapter === chapterNumber ? 'cf-hint--busy' : ''">
-        <strong>{{ generatingChapter === chapterNumber ? '顶部主操作执行中' : '主操作已收口到顶部' }}</strong>
-        <span>{{ generatingChapter === chapterNumber ? '处理中...' : '去顶部操作' }}</span>
+        <strong>{{ generatingChapter === chapterNumber
+          ? pick('顶部主操作执行中', 'The top command is running')
+          : pick('主操作已收口到顶部', 'The main action lives in the top bar') }}</strong>
+        <span>{{ generatingChapter === chapterNumber
+          ? pick('处理中...', 'Working…')
+          : pick('去顶部操作', 'Go to the top bar') }}</span>
       </div>
     </section>
   </div>
@@ -38,7 +45,10 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useLocale } from '@/composables/useLocale'
 import type { Chapter, GenerationRuntime } from '@/api/novel'
+
+const { pick } = useLocale()
 
 interface Props {
   chapterNumber: number
@@ -66,11 +76,11 @@ const diagnostics = computed<Record<string, any>>(() => {
 })
 const diagnosticRows = computed(() => {
   const rows = [
-    diagnostics.value.code ? { label: '错误码', value: String(diagnostics.value.code) } : null,
-    diagnostics.value.rootCause ? { label: '根因', value: String(diagnostics.value.rootCause) } : null,
-    diagnostics.value.status ? { label: '状态码', value: String(diagnostics.value.status) } : null,
-    diagnostics.value.requestId ? { label: '请求ID', value: String(diagnostics.value.requestId) } : null,
-    diagnostics.value.hint ? { label: '建议', value: String(diagnostics.value.hint) } : null,
+    diagnostics.value.code ? { label: pick('错误码', 'Error code'), value: String(diagnostics.value.code) } : null,
+    diagnostics.value.rootCause ? { label: pick('根因', 'Root cause'), value: String(diagnostics.value.rootCause) } : null,
+    diagnostics.value.status ? { label: pick('状态码', 'Status code'), value: String(diagnostics.value.status) } : null,
+    diagnostics.value.requestId ? { label: pick('请求ID', 'Request ID'), value: String(diagnostics.value.requestId) } : null,
+    diagnostics.value.hint ? { label: pick('建议', 'Suggestion'), value: String(diagnostics.value.hint) } : null,
   ]
   return rows.filter(Boolean) as Array<{ label: string; value: string }>
 })

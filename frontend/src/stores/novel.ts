@@ -27,10 +27,12 @@ import {
   generateChapter as generateChapterRequest,
   generateChapterOutline as generateChapterOutlineRequest,
   rewriteChapterOutline as rewriteChapterOutlineRequest,
+  resumeChapterGeneration as resumeChapterGenerationRequest,
   selectChapterVersion as selectChapterVersionRequest,
   updateChapterOutline as updateChapterOutlineRequest,
 } from '@/api/modules/chapterWorkflow'
 import { useNotificationStore } from '@/stores/notification'
+import { pick } from '@/composables/useLocale'
 
 export const useNovelStore = defineStore('novel', () => {
   // State
@@ -112,7 +114,7 @@ export const useNovelStore = defineStore('novel', () => {
     try {
       projects.value = await fetchProjectsOnce()
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '加载项目失败'
+      error.value = err instanceof Error ? err.message : pick('加载项目失败', 'Failed to load the project')
     } finally {
       isLoading.value = false
     }
@@ -127,12 +129,15 @@ export const useNovelStore = defineStore('novel', () => {
       syncProjectSummary(project)
       currentConversationState.value = {}
       const notif = useNotificationStore()
-      notif.success(`小说《${title}》创建成功！`)
+      notif.success(pick(`小说《${title}》创建成功！`, `Novel “${title}” created.`))
       return project
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '创建项目失败'
+      error.value = err instanceof Error ? err.message : pick('创建项目失败', 'Failed to create the project')
       const notif = useNotificationStore()
-      notif.error(`创建失败：${err instanceof Error ? err.message : '未知错误'}`)
+      notif.error(pick(
+        `创建失败：${err instanceof Error ? err.message : '未知错误'}`,
+        `Creation failed: ${err instanceof Error ? err.message : 'unknown error'}`
+      ))
       throw err
     } finally {
       isLoading.value = false
@@ -157,7 +162,7 @@ export const useNovelStore = defineStore('novel', () => {
       currentProject.value = project
       syncProjectSummary(project)
     } catch (err) {
-      const message = err instanceof Error ? err.message : '加载项目失败'
+      const message = err instanceof Error ? err.message : pick('加载项目失败', 'Failed to load the project')
       if (requestId !== latestLoadProjectRequestId) {
         return
       }
@@ -176,7 +181,7 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('没有当前项目')
+        throw new Error(pick('没有当前项目', 'No active project'))
       }
       const chapter = await NovelAPI.getChapter(currentProject.value.id, chapterNumber)
       const project = currentProject.value
@@ -192,7 +197,7 @@ export const useNovelStore = defineStore('novel', () => {
       project.chapters.sort((a, b) => a.chapter_number - b.chapter_number)
       return chapter
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '加载章节失败'
+      error.value = err instanceof Error ? err.message : pick('加载章节失败', 'Failed to load the chapter')
       throw err
     }
   }
@@ -202,7 +207,7 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('没有当前项目')
+        throw new Error(pick('没有当前项目', 'No active project'))
       }
       const response = await NovelAPI.converseConcept(
         currentProject.value.id,
@@ -212,7 +217,7 @@ export const useNovelStore = defineStore('novel', () => {
       currentConversationState.value = response.conversation_state
       return response
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '对话失败'
+      error.value = err instanceof Error ? err.message : pick('对话失败', 'The conversation request failed')
       throw err
     } finally {
       isLoading.value = false
@@ -226,11 +231,11 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('没有当前项目')
+        throw new Error(pick('没有当前项目', 'No active project'))
       }
       return await NovelAPI.generateBlueprint(currentProject.value.id)
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '生成蓝图失败'
+      error.value = err instanceof Error ? err.message : pick('生成蓝图失败', 'Failed to generate the blueprint')
       throw err
     } finally {
       isLoading.value = false
@@ -244,11 +249,11 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('没有当前项目')
+        throw new Error(pick('没有当前项目', 'No active project'))
       }
       return await NovelAPI.startBlueprintGeneration(currentProject.value.id, options)
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '启动蓝图生成失败'
+      error.value = err instanceof Error ? err.message : pick('启动蓝图生成失败', 'Failed to start blueprint generation')
       throw err
     } finally {
       isLoading.value = false
@@ -257,14 +262,14 @@ export const useNovelStore = defineStore('novel', () => {
 
   async function getBlueprintGenerationStatus(): Promise<BlueprintGenerationJobResponse> {
     if (!currentProject.value) {
-      throw new Error('没有当前项目')
+      throw new Error(pick('没有当前项目', 'No active project'))
     }
     return await NovelAPI.getBlueprintGenerationStatus(currentProject.value.id)
   }
 
   async function cancelBlueprintGeneration(): Promise<BlueprintGenerationJobResponse> {
     if (!currentProject.value) {
-      throw new Error('没有当前项目')
+      throw new Error(pick('没有当前项目', 'No active project'))
     }
     return await NovelAPI.cancelBlueprintGeneration(currentProject.value.id)
   }
@@ -274,18 +279,21 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('没有当前项目')
+        throw new Error(pick('没有当前项目', 'No active project'))
       }
       if (!blueprint) {
-        throw new Error('缺少蓝图数据')
+        throw new Error(pick('缺少蓝图数据', 'Blueprint data is missing'))
       }
       currentProject.value = await NovelAPI.saveBlueprint(currentProject.value.id, blueprint)
       const notif = useNotificationStore()
-      notif.success('小说蓝图已保存！')
+      notif.success(pick('小说蓝图已保存！', 'Blueprint saved.'))
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '保存蓝图失败'
+      error.value = err instanceof Error ? err.message : pick('保存蓝图失败', 'Failed to save the blueprint')
       const notif = useNotificationStore()
-      notif.error(`保存失败：${err instanceof Error ? err.message : '未知错误'}`)
+      notif.error(pick(
+        `保存失败：${err instanceof Error ? err.message : '未知错误'}`,
+        `Save failed: ${err instanceof Error ? err.message : 'unknown error'}`
+      ))
       throw err
     } finally {
       isLoading.value = false
@@ -300,14 +308,15 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('没有当前项目')
+        throw new Error(pick('没有当前项目', 'No active project'))
       }
       const updatedProject = await generateChapterRequest(currentProject.value.id, chapterNumber, options)
-      currentProject.value = updatedProject // 更新当前项目缓存
+      // 更新当前项目缓存
+      currentProject.value = updatedProject
       syncProjectSummary(updatedProject)
       return updatedProject
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '生成章节失败'
+      error.value = err instanceof Error ? err.message : pick('生成章节失败', 'Failed to generate the chapter')
       throw err
     }
   }
@@ -319,14 +328,32 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('没有当前项目')
+        throw new Error(pick('没有当前项目', 'No active project'))
       }
       const updatedProject = await cancelChapterGenerationRequest(currentProject.value.id, chapterNumber, options)
       currentProject.value = updatedProject
       syncProjectSummary(updatedProject)
       return updatedProject
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '终止章节任务失败'
+      error.value = err instanceof Error ? err.message : pick('终止章节任务失败', 'Failed to stop the chapter job')
+      throw err
+    }
+  }
+
+  async function resumeChapterGeneration(
+    runId: string,
+  ): Promise<NovelProject> {
+    error.value = null
+    try {
+      if (!currentProject.value) {
+        throw new Error(pick('没有当前项目', 'No active project'))
+      }
+      const updatedProject = await resumeChapterGenerationRequest(currentProject.value.id, runId)
+      currentProject.value = updatedProject
+      syncProjectSummary(updatedProject)
+      return updatedProject
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : pick('恢复章节任务失败', 'Failed to resume the chapter job')
       throw err
     }
   }
@@ -335,14 +362,14 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('没有当前项目')
+        throw new Error(pick('没有当前项目', 'No active project'))
       }
       const updatedProject = await evaluateChapterRequest(currentProject.value.id, chapterNumber, versionIndex, versionId)
       currentProject.value = updatedProject
       syncProjectSummary(updatedProject)
       return updatedProject
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '评估章节失败'
+      error.value = err instanceof Error ? err.message : pick('评估章节失败', 'Failed to evaluate the chapter')
       throw err
     }
   }
@@ -351,14 +378,14 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('没有当前项目')
+        throw new Error(pick('没有当前项目', 'No active project'))
       }
       const updatedProject = await evaluateChapterRequest(currentProject.value.id, chapterNumber, undefined, undefined, true)
       currentProject.value = updatedProject
       syncProjectSummary(updatedProject)
       return updatedProject
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '多版本评审失败'
+      error.value = err instanceof Error ? err.message : pick('多版本评审失败', 'Failed to review all versions')
       throw err
     }
   }
@@ -374,7 +401,7 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('没有当前项目')
+        throw new Error(pick('没有当前项目', 'No active project'))
       }
 
       const chapter = currentProject.value.chapters.find((c) => c.chapter_number === chapterNumber)
@@ -383,7 +410,7 @@ export const useNovelStore = defineStore('novel', () => {
         : chapter?.versions?.[versionIndex]
 
       if (!version?.content) {
-        throw new Error('版本内容为空')
+        throw new Error(pick('版本内容为空', 'The version content is empty'))
       }
 
       const versionSelector = typeof versionId === 'number'
@@ -398,12 +425,12 @@ export const useNovelStore = defineStore('novel', () => {
       })
 
       if (!result.optimized_content?.trim()) {
-        throw new Error('优化结果为空')
+        throw new Error(pick('优化结果为空', 'The optimization result is empty'))
       }
 
       return result
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '优化版本失败'
+      error.value = err instanceof Error ? err.message : pick('优化版本失败', 'Failed to optimize the version')
       throw err
     }
   }
@@ -413,7 +440,7 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('没有当前项目')
+        throw new Error(pick('没有当前项目', 'No active project'))
       }
       const updatedProject = await selectChapterVersionRequest(
         currentProject.value.id,
@@ -421,10 +448,11 @@ export const useNovelStore = defineStore('novel', () => {
         versionIndex,
         versionId
       )
-      currentProject.value = updatedProject // 更新当前项目缓存
+      // 更新当前项目缓存
+      currentProject.value = updatedProject
       syncProjectSummary(updatedProject)
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '选择章节版本失败'
+      error.value = err instanceof Error ? err.message : pick('选择章节版本失败', 'Failed to select the chapter version')
       throw err
     }
   }
@@ -433,7 +461,7 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('没有当前项目')
+        throw new Error(pick('没有当前项目', 'No active project'))
       }
       const updatedProject = await deleteChapterVersionRequest(
         currentProject.value.id,
@@ -441,10 +469,11 @@ export const useNovelStore = defineStore('novel', () => {
         versionIndex,
         versionId
       )
-      currentProject.value = updatedProject // 更新当前项目缓存
+      // 更新当前项目缓存
+      currentProject.value = updatedProject
       syncProjectSummary(updatedProject)
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '删除章节版本失败'
+      error.value = err instanceof Error ? err.message : pick('删除章节版本失败', 'Failed to delete the chapter version')
       throw err
     }
   }
@@ -465,13 +494,16 @@ export const useNovelStore = defineStore('novel', () => {
       }
 
       const notif = useNotificationStore()
-      notif.success(`已删除 ${projectIds.length} 个项目`)
+      notif.success(pick(`已删除 ${projectIds.length} 个项目`, `Deleted ${projectIds.length} project(s)`))
 
       return response
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '删除项目失败'
+      error.value = err instanceof Error ? err.message : pick('删除项目失败', 'Failed to delete the projects')
       const notif = useNotificationStore()
-      notif.error(`删除失败：${err instanceof Error ? err.message : '未知错误'}`)
+      notif.error(pick(
+        `删除失败：${err instanceof Error ? err.message : '未知错误'}`,
+        `Deletion failed: ${err instanceof Error ? err.message : 'unknown error'}`
+      ))
       throw err
     } finally {
       isLoading.value = false
@@ -483,16 +515,17 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('没有当前项目')
+        throw new Error(pick('没有当前项目', 'No active project'))
       }
       const updatedProject = await updateChapterOutlineRequest(
         currentProject.value.id,
         chapterOutline
       )
-      currentProject.value = updatedProject // 更新当前项目缓存
+      // 更新当前项目缓存
+      currentProject.value = updatedProject
       syncProjectSummary(updatedProject)
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '更新章节大纲失败'
+      error.value = err instanceof Error ? err.message : pick('更新章节大纲失败', 'Failed to update the chapter outline')
       throw err
     }
   }
@@ -504,7 +537,7 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('没有当前项目')
+        throw new Error(pick('没有当前项目', 'No active project'))
       }
       const updatedProject = await rewriteChapterOutlineRequest(
         currentProject.value.id,
@@ -515,7 +548,7 @@ export const useNovelStore = defineStore('novel', () => {
       syncProjectSummary(updatedProject)
       return updatedProject
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'AI 重写章节大纲失败'
+      error.value = err instanceof Error ? err.message : pick('AI 重写章节大纲失败', 'AI failed to rewrite the chapter outline')
       throw err
     }
   }
@@ -524,17 +557,18 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('没有当前项目')
+        throw new Error(pick('没有当前项目', 'No active project'))
       }
       const numbersToDelete = Array.isArray(chapterNumbers) ? chapterNumbers : [chapterNumbers]
       const updatedProject = await deleteChapterRequest(
         currentProject.value.id,
         numbersToDelete
       )
-      currentProject.value = updatedProject // 更新当前项目缓存
+      // 更新当前项目缓存
+      currentProject.value = updatedProject
       syncProjectSummary(updatedProject)
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '删除章节失败'
+      error.value = err instanceof Error ? err.message : pick('删除章节失败', 'Failed to delete the chapter')
       throw err
     }
   }
@@ -547,7 +581,7 @@ export const useNovelStore = defineStore('novel', () => {
     error.value = null
     try {
       if (!currentProject.value) {
-        throw new Error('没有当前项目')
+        throw new Error(pick('没有当前项目', 'No active project'))
       }
       const updatedProject = await generateChapterOutlineRequest(
         currentProject.value.id,
@@ -555,9 +589,10 @@ export const useNovelStore = defineStore('novel', () => {
         numChapters,
         options
       )
-      currentProject.value = updatedProject // 更新当前项目缓存
+      // 更新当前项目缓存
+      currentProject.value = updatedProject
     } catch (err) {
-      error.value = err instanceof Error ? err.message : '生成大纲失败'
+      error.value = err instanceof Error ? err.message : pick('生成大纲失败', 'Failed to generate the outline')
       throw err
     }
   }
@@ -587,6 +622,7 @@ export const useNovelStore = defineStore('novel', () => {
         if (versionIndex >= 0) {
           const currentVersion = chapter.versions[versionIndex]
           chapter.versions.splice(versionIndex, 1, {
+            // '标准' 是后端约定的 style 字段值，属内部真源，不随界面语言变化
             ...(currentVersion || ({ style: '标准' } as ChapterVersion)),
             content,
           })
@@ -621,7 +657,7 @@ export const useNovelStore = defineStore('novel', () => {
             : previousSnapshot.versions ?? null
         }
       }
-      error.value = err instanceof Error ? err.message : '编辑章节内容失败'
+      error.value = err instanceof Error ? err.message : pick('编辑章节内容失败', 'Failed to save the chapter content')
       throw err
     }
   }
@@ -657,6 +693,7 @@ export const useNovelStore = defineStore('novel', () => {
     saveBlueprint,
     generateChapter,
     cancelChapterGeneration,
+    resumeChapterGeneration,
     evaluateChapter,
     evaluateAllVersions,
     optimizeChapterVersion,

@@ -12,6 +12,8 @@
 这是"生成后闭环"的核心服务，确保长程一致性。
 """
 import logging
+import copy
+import hashlib
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
@@ -28,8 +30,11 @@ from .llm_service import LLMService
 from .vector_store_service import VectorStoreService
 from .generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
+from ..utils.chapter_summary_utils import set_summary_text_on_chapter
 
 logger = logging.getLogger(__name__)
+
+FINALIZE_PLOT_ARCS_TIMEOUT_SECONDS = 30.0
 
 
 # ==================== 提示词模板 ====================
@@ -169,10 +174,13 @@ class FinalizeService:
             self.db.commit()
 
     async def _rollback(self) -> None:
-        if self._is_async_session:
-            await self.db.rollback()
-        else:
-            self.db.rollback()
+        try:
+            if self._is_async_session:
+                await self.db.rollback()
+            else:
+                self.db.rollback()
+        except Exception as exc:  # best effort: never mask the generation result
+            logger.warning("定稿阶段回滚失败，继续使用隔离的计算结果: %s", exc)
 
     async def _flush(self) -> None:
         if self._is_async_session:
@@ -276,6 +284,18 @@ class FinalizeService:
                 )
 
                 # 3. 持久化阶段：短事务统一落库
+                chapter = await self._first(
+                    select(Chapter).where(
+                        Chapter.project_id == project_id,
+                        Chapter.chapter_number == chapter_number,
+                    )
+                )
+                selected_version_id = chapter.selected_version_id if chapter is not None else None
+                chapter_content_hash = hashlib.sha256(chapter_text.encode("utf-8")).hexdigest()
+                if chapter is not None:
+                    summary_changed = set_summary_text_on_chapter(chapter, chapter_summary)
+                    result["updates"]["chapter_real_summary"] = "updated" if summary_changed else "unchanged"
+
                 project_memory = await self._get_or_create_project_memory(project_id)
                 if new_summary:
                     project_memory.global_summary = new_summary
@@ -300,7 +320,13 @@ class FinalizeService:
                     plot_arcs=new_plot_arcs or project_memory.plot_arcs or old_plot_arcs,
                     chapter_summary=chapter_summary,
                     word_count=len(chapter_text),
-                    extra={"chapter_overview": chapter_overview_extra},
+                    version_id=selected_version_id,
+                    content_hash=chapter_content_hash,
+                    extra={
+                        "chapter_overview": chapter_overview_extra,
+                        "version_id": selected_version_id,
+                        "content_hash": chapter_content_hash,
+                    },
                 )
                 result["updates"]["snapshot"] = "created"
 
@@ -419,6 +445,29 @@ class FinalizeService:
         
         return "\n\n".join(text_parts)
     
+    def _local_fallback_character_state(self, chapter_text: str, old_state: str) -> str:
+        """Keep prior state and append a bounded chapter-local note when LLM state update fails."""
+        prior = str(old_state or "").strip()
+        excerpt = " ".join(str(chapter_text or "").split())[:700]
+        note = f"【本章本地回退】第{getattr(self, '_fallback_chapter_number', '?')}章：{excerpt}"
+        if not prior:
+            return ("角色状态\n" + note)[:2500]
+        return (prior + "\n" + note)[:2500]
+
+    def _fallback_plot_arcs(self, chapter_text: str, chapter_number: int, old_plot_arcs: Dict) -> Dict[str, Any]:
+        """Preserve the ledger when the provider cannot update plot arcs."""
+        fallback = copy.deepcopy(old_plot_arcs or {})
+        hooks = list(fallback.get("unresolved_hooks") or [])
+        marker = f"第{chapter_number}章已定稿：剧情线更新暂由本地账本保留"
+        if not any(marker in str(item) for item in hooks):
+            hooks.append(marker)
+        fallback["unresolved_hooks"] = hooks
+        fallback["main_conflicts"] = list(fallback.get("main_conflicts") or [])
+        fallback["character_arcs"] = list(fallback.get("character_arcs") or [])
+        fallback["last_updated_chapter"] = chapter_number
+        fallback["update_source"] = "local_fallback"
+        return fallback
+
     async def _update_character_state(
         self,
         chapter_text: str,
@@ -450,8 +499,9 @@ class FinalizeService:
             cleaned = remove_think_tags(result.text) if result.text else ""
             return cleaned.strip() if cleaned else None
         except Exception as e:
-            logger.error(f"更新角色状态失败: {e}")
-            return None
+            logger.error(f"更新角色状态失败，使用本地降级状态: {e}")
+            self._fallback_chapter_number = getattr(self, "_fallback_chapter_number", "?")
+            return self._local_fallback_character_state(chapter_text, old_state)
     
     async def _save_character_state(
         self,
@@ -502,9 +552,9 @@ class FinalizeService:
         except json.JSONDecodeError as e:
             logger.error(f"解析剧情线JSON失败: {e}")
         except Exception as e:
-            logger.error(f"更新剧情线失败: {e}")
-        
-        return None
+            logger.error(f"更新剧情线失败，使用本地账本回退: {e}")
+
+        return self._fallback_plot_arcs(chapter_text, chapter_number, old_plot_arcs)
     
     async def _update_vector_store(
         self,
@@ -576,12 +626,16 @@ class FinalizeService:
         plot_arcs: Optional[Dict],
         chapter_summary: Optional[str],
         word_count: int,
+        version_id: Optional[int] = None,
+        content_hash: Optional[str] = None,
         extra: Optional[Dict[str, Any]] = None,
     ):
         """创建章节快照"""
         snapshot = ChapterSnapshot(
             project_id=project_id,
             chapter_number=chapter_number,
+            version_id=version_id,
+            content_hash=content_hash,
             global_summary_snapshot=global_summary,
             character_states_snapshot={"raw_text": character_states} if character_states else None,
             plot_arcs_snapshot=plot_arcs,

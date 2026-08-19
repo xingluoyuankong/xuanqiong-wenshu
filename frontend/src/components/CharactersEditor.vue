@@ -10,39 +10,42 @@
       
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label class="block text-sm font-medium text-gray-600 mb-1">姓名</label>
+          <label class="block text-sm font-medium text-gray-600 mb-1">{{ pick('姓名', 'Name') }}</label>
           <input type="text" v-model="character.name" class="w-full p-1 border-b-2 border-gray-300 focus:border-indigo-500 outline-none transition bg-transparent" />
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-600 mb-1">身份</label>
+          <label class="block text-sm font-medium text-gray-600 mb-1">{{ pick('身份', 'Identity') }}</label>
           <input type="text" v-model="character.identity" class="w-full p-1 border-b-2 border-gray-300 focus:border-indigo-500 outline-none transition bg-transparent" />
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-600 mb-1">性格</label>
+          <label class="block text-sm font-medium text-gray-600 mb-1">{{ pick('性格', 'Personality') }}</label>
           <input type="text" v-model="character.personality" class="w-full p-1 border-b-2 border-gray-300 focus:border-indigo-500 outline-none transition bg-transparent" />
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-600 mb-1">目标</label>
+          <label class="block text-sm font-medium text-gray-600 mb-1">{{ pick('目标', 'Goals') }}</label>
           <input type="text" v-model="character.goals" class="w-full p-1 border-b-2 border-gray-300 focus:border-indigo-500 outline-none transition bg-transparent" />
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-600 mb-1">能力</label>
+          <label class="block text-sm font-medium text-gray-600 mb-1">{{ pick('能力', 'Abilities') }}</label>
           <input type="text" v-model="character.abilities" class="w-full p-1 border-b-2 border-gray-300 focus:border-indigo-500 outline-none transition bg-transparent" />
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-600 mb-1">与主角关系</label>
+          <label class="block text-sm font-medium text-gray-600 mb-1">{{ pick('与主角关系', 'Relation to protagonist') }}</label>
           <input type="text" v-model="character.relationship_to_protagonist" class="w-full p-1 border-b-2 border-gray-300 focus:border-indigo-500 outline-none transition bg-transparent" />
         </div>
       </div>
     </div>
     <button @click="addCharacter" class="w-full mt-4 px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-md hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-      + 添加新角色
+      {{ pick('+ 添加新角色', '+ Add a character') }}
     </button>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue';
+import { useLocale } from '@/composables/useLocale';
+
+const { pick } = useLocale();
 
 interface Character {
   name: string;

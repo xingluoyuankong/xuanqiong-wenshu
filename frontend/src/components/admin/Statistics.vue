@@ -4,11 +4,14 @@
     <template #header>
       <div class="card-header">
         <div>
-          <span class="card-title">数据总览</span>
-          <p class="card-subtitle">先看累计规模，再结合刷新时间判断当前后台数据是否可信。</p>
+          <span class="card-title">{{ pick('数据总览', 'Data overview') }}</span>
+          <p class="card-subtitle">{{ pick(
+            '先看累计规模，再结合刷新时间判断当前后台数据是否可信。',
+            'Read the cumulative totals first, then check the refresh time to judge how current this data is.'
+          ) }}</p>
         </div>
         <n-button quaternary size="small" @click="fetchStats" :loading="loading">
-          刷新
+          {{ pick('刷新', 'Refresh') }}
         </n-button>
       </div>
     </template>
@@ -20,23 +23,23 @@
 
       <n-spin :show="loading">
         <div class="stats-meta-row">
-          <span class="stats-meta-pill">口径：累计统计</span>
-          <span class="stats-meta-pill">最近刷新：{{ lastUpdatedAt }}</span>
+          <span class="stats-meta-pill">{{ pick('口径：累计统计', 'Scope: cumulative') }}</span>
+          <span class="stats-meta-pill">{{ pick(`最近刷新：${lastUpdatedAt}`, `Last refreshed: ${lastUpdatedAt}`) }}</span>
         </div>
         <n-grid :cols="gridCols" :x-gap="16" :y-gap="16">
           <n-gi>
             <n-card class="stat-card" :bordered="false">
               <div class="stat-icon">📚</div>
-              <n-statistic label="小说总数" :value="stats?.novel_count ?? 0" show-separator>
-                <template #suffix>部</template>
+              <n-statistic :label="pick('小说总数', 'Novels')" :value="stats?.novel_count ?? 0" show-separator>
+                <template #suffix>{{ pick('部', ' total') }}</template>
               </n-statistic>
             </n-card>
           </n-gi>
           <n-gi>
             <n-card class="stat-card" :bordered="false">
               <div class="stat-icon">⚡</div>
-              <n-statistic label="API 请求总数" :value="stats?.api_request_count ?? 0" show-separator>
-                <template #suffix>次</template>
+              <n-statistic :label="pick('API 请求总数', 'API requests')" :value="stats?.api_request_count ?? 0" show-separator>
+                <template #suffix>{{ pick('次', ' calls') }}</template>
               </n-statistic>
             </n-card>
           </n-gi>
@@ -61,23 +64,32 @@ import {
 
 import { AdminAPI, type Statistics } from '@/api/admin'
 import { useResponsiveFlag } from '@/composables/admin/useResponsiveFlag'
+import { useLocale } from '@/composables/useLocale'
+
+const { pick, formatDateTime } = useLocale()
 
 const stats = ref<Statistics | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
-const lastUpdatedAt = ref('尚未刷新')
+// 存原始时间戳而不是格式化后的字符串，切换语言时才能重新格式化
+const lastRefreshedAt = ref<string | null>(null)
 const { matched: isMobile } = useResponsiveFlag(768)
 
 const gridCols = computed(() => (isMobile.value ? 1 : 2))
+
+const lastUpdatedAt = computed(() => {
+  if (!lastRefreshedAt.value) return pick('尚未刷新', 'Not refreshed yet')
+  return formatDateTime(lastRefreshedAt.value) || lastRefreshedAt.value
+})
 
 const fetchStats = async () => {
   loading.value = true
   error.value = null
   try {
     stats.value = await AdminAPI.getStatistics()
-    lastUpdatedAt.value = new Date().toLocaleString('zh-CN', { hour12: false })
+    lastRefreshedAt.value = new Date().toISOString()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '获取统计数据失败'
+    error.value = err instanceof Error ? err.message : pick('获取统计数据失败', 'Failed to load the statistics')
   } finally {
     loading.value = false
   }

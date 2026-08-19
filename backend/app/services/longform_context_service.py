@@ -711,6 +711,7 @@ class LongformContextService:
         content: str,
         package: Optional[LongformContextPackage],
         chapter_mission: Optional[Dict[str, Any]] = None,
+        chapter_number: Optional[int] = None,
     ) -> ContinuityQualityGate:
         if package is None:
             return ContinuityQualityGate(
@@ -722,6 +723,13 @@ class LongformContextService:
         warnings: List[Dict[str, Any]] = []
         blockers: List[Dict[str, Any]] = []
         patch_suggestions: List[Dict[str, Any]] = []
+        if chapter_number is not None and int(chapter_number) != int(package.chapter_number):
+            blockers.append({
+                "code": "longform_context_chapter_mismatch",
+                "message": "长篇上下文包与当前章节号不一致，禁止用错章节上下文继续生成。",
+                "expected_chapter": int(chapter_number),
+                "package_chapter": int(package.chapter_number),
+            })
 
         missing_focus = [
             name for name in package.cast_plan.chapter_focus_names

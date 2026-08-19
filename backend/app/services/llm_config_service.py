@@ -1,4 +1,5 @@
 # AIMETA P=LLM配置服务_模型配置业务逻辑|R=配置管理_模型选择|NR=不含模型调用|E=LLMConfigService|X=internal|A=服务类|D=sqlalchemy|S=db|RD=./README.ai
+import hashlib
 import logging
 import json
 from datetime import datetime, timezone
@@ -37,6 +38,27 @@ class LLMConfigService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.repo = LLMConfigRepository(session)
+
+    @staticmethod
+    def _config_version(instance: LLMConfig) -> int:
+        """Derive a stable persisted version without relying on process memory.
+
+        The digest intentionally uses the canonical stored representation, so the
+        version survives process restarts and remains identical across workers.
+        It is only a change token; it is not exposed secret material.
+        """
+        canonical = json.dumps(
+            {
+                "url": instance.llm_provider_url,
+                "model": instance.llm_provider_model,
+                "api_key": instance.llm_provider_api_key,
+                "profiles": instance.llm_provider_profiles,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return int.from_bytes(hashlib.sha256(canonical).digest()[:8], "big", signed=False)
 
     def _identify_provider(self, base_url: Optional[str]) -> str:
         """根据 base_url 识别 LLM 提供商"""
@@ -119,9 +141,20 @@ class LLMConfigService:
             api_keys: List[LLMProfileItem] = []
             for item in profile.api_keys or []:
                 value = (item.value or "").strip()
-                if not value:
+                # The UI intentionally sends an empty masked item with
+                # retain_existing=True. Keep that marker until the merge step;
+                # dropping it here would silently delete the stored secret.
+                # Preserve an empty masked item until profile merging can
+                # recover the stored secret by index/id.
+                if not value and not item.retain_existing:
                     continue
-                api_keys.append(LLMProfileItem(value=value, enabled=bool(item.enabled)))
+                api_keys.append(
+                    LLMProfileItem(
+                        value=value,
+                        enabled=bool(item.enabled),
+                        retain_existing=bool(item.retain_existing),
+                    )
+                )
 
             models: List[LLMProfileItem] = []
             for item in profile.models or []:
@@ -334,12 +367,16 @@ class LLMConfigService:
         await self.session.commit()
         try:
             sync_manager = get_config_sync_manager()
-            await sync_manager.bump_version(user_id)
+            await sync_manager.bump_version(
+                user_id,
+                persisted_version=self._config_version(instance),
+            )
 
         except Exception:
             pass
         return (await self.get_config(user_id)) or LLMConfigRead(
             user_id=user_id,
+            version=0,
             llm_provider_url=data.get("llm_provider_url"),
             llm_provider_model=data.get("llm_provider_model"),
             llm_provider_api_key_masked=self._mask_api_key(data.get("llm_provider_api_key") or "") if data.get("llm_provider_api_key") else None,
@@ -383,6 +420,7 @@ class LLMConfigService:
         primary_masked_key = self._mask_api_key(instance.llm_provider_api_key or "") if instance.llm_provider_api_key else None
         return LLMConfigRead(
             user_id=instance.user_id,
+            version=self._config_version(instance),
             llm_provider_url=instance.llm_provider_url,
             llm_provider_model=instance.llm_provider_model,
             llm_provider_api_key_masked=primary_masked_key,
@@ -486,12 +524,60 @@ class LLMConfigService:
         except Exception as exc:
             return False, False, None, f"探测异常：{exc}"
 
+    async def _probe_chat_completion(
+        self,
+        base_url: Optional[str],
+        api_key: str,
+        model: str,
+    ) -> tuple[bool, bool, Optional[int], str]:
+        """验证当前模型确实能完成最小生成，而不是只验证 /models。"""
+        url = f"{(base_url or 'https://api.openai.com/v1').rstrip('/')}/chat/completions"
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": "请只回复：OK"}],
+            "temperature": 0,
+            "max_tokens": 1,
+            "stream": False,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=4.0)) as client:
+                response = await client.post(url, headers=headers, json=payload)
+            status_code = response.status_code
+            if status_code != 200:
+                if status_code in (401, 403):
+                    detail = "chat 接口鉴权失败，请检查 API Key"
+                elif status_code == 429:
+                    detail = "chat 接口被限流或额度不足"
+                elif status_code >= 500:
+                    detail = f"当前模型 chat 接口异常（HTTP {status_code}）"
+                else:
+                    detail = f"当前模型 chat 接口返回 HTTP {status_code}"
+                return True, False, status_code, detail
+            try:
+                body = response.json()
+            except Exception:
+                return True, False, status_code, "chat 接口返回了无法解析的响应"
+            choices = body.get("choices") if isinstance(body, dict) else None
+            if not isinstance(choices, list) or not choices:
+                return True, False, status_code, "chat 接口成功但未返回有效 choices"
+            return True, True, status_code, f"当前模型 {model} 可完成最小 chat 请求"
+        except httpx.ConnectError:
+            return False, False, None, "chat 连接失败，无法访问 Provider"
+        except httpx.ReadError:
+            return False, False, None, "chat 读取响应失败，连接被中断"
+        except httpx.TimeoutException:
+            return True, False, None, "当前模型 chat 探针超时"
+        except Exception as exc:
+            return False, False, None, f"chat 探测异常：{type(exc).__name__}"
+
     async def _probe_key_health(
         self,
         base_url: Optional[str],
         api_key: str,
         key_index: int,
         enabled: bool,
+        models: Optional[List[str]] = None,
     ) -> LLMProviderKeyHealth:
         started = perf_counter()
         model_count = 0
@@ -501,14 +587,22 @@ class LLMConfigService:
         usable = False
 
         try:
-            models = await self.get_available_models(api_key=api_key, base_url=base_url)
-            model_count = len(models)
+            available_models = await self.get_available_models(api_key=api_key, base_url=base_url)
+            model_count = len(available_models)
             if model_count > 0:
                 reachable = True
-                usable = True
-                detail = f"可用，拉取到 {model_count} 个模型"
+                probe_model = next((item for item in (models or []) if item), None) or available_models[0]
+                chat_reachable, chat_usable, chat_status, chat_detail = await self._probe_chat_completion(
+                    base_url=base_url, api_key=api_key, model=probe_model
+                )
+                usable = chat_usable
+                status_code = chat_status
+                detail = f"模型列表可用（{model_count} 个），{chat_detail}" if chat_reachable else chat_detail
             else:
-                reachable, usable, status_code, detail = await self._probe_models_endpoint(base_url, api_key)
+                reachable, _, status_code, detail = await self._probe_models_endpoint(base_url, api_key)
+                usable = False
+                if reachable and not detail:
+                    detail = "models 接口可达，但没有可用于 chat 探针的模型"
         except Exception as exc:
             detail = f"探测失败：{exc}"
 
@@ -557,6 +651,7 @@ class LLMConfigService:
                     api_key=key_value,
                     key_index=key_index,
                     enabled=key_enabled,
+                    models=[item.value.strip() for item in (profile.models or []) if item.enabled and item.value.strip()],
                 )
             )
 

@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 import logging
 from logging.config import dictConfig
@@ -15,6 +16,7 @@ from .core.config import settings
 from .db.init_db import init_db
 from .db.session import AsyncSessionLocal
 from .services.prompt_service import PromptService
+from .services.task_reconciliation import TaskReconciliationService
 
 
 _logging_boot_error: str | None = None
@@ -304,9 +306,61 @@ async def lifespan(app: FastAPI):
         prompt_service = PromptService(session)
         await prompt_service.preload()
 
+    await _startup_reconcile()
+    sweeper = asyncio.create_task(_periodic_sweeper())
+
     app_logger.info("应用启动完成")
-    yield
-    app_logger.info("应用已关闭")
+    try:
+        yield
+    finally:
+        sweeper.cancel()
+        try:
+            await sweeper
+        except (asyncio.CancelledError, Exception):
+            pass
+        app_logger.info("应用已关闭")
+
+
+async def _startup_reconcile() -> None:
+    """启动时以租约为准，释放孤立 busy 章节并标记心跳超时任务为 stale。"""
+    _recon_log = logging.getLogger("startup_reconcile")
+    try:
+        async with AsyncSessionLocal() as session:
+            report = await TaskReconciliationService(session).reconcile(
+                stale_after_seconds=settings.task_reconcile_stale_seconds
+            )
+        _recon_log.info(
+            "启动巡检完成：stale任务=%d 释放章节=%d 保留章节=%d",
+            len(report.stale_task_ids),
+            len(report.released_chapter_ids),
+            len(report.preserved_chapter_ids),
+        )
+    except Exception:
+        _recon_log.warning("启动任务巡检失败，跳过（不影响服务启动）", exc_info=True)
+
+
+async def _periodic_sweeper() -> None:
+    """按配置间隔巡检：标记心跳超时任务为 stale，释放孤立章节。"""
+    _sweep_log = logging.getLogger("task_sweeper")
+    interval = settings.task_reconcile_interval_seconds
+    await asyncio.sleep(interval)
+    while True:
+        try:
+            async with AsyncSessionLocal() as session:
+                report = await TaskReconciliationService(session).reconcile(
+                    stale_after_seconds=settings.task_reconcile_stale_seconds
+                )
+            if report.stale_task_ids or report.released_chapter_ids:
+                _sweep_log.info(
+                    "定期巡检：stale任务=%d 释放章节=%d",
+                    len(report.stale_task_ids),
+                    len(report.released_chapter_ids),
+                )
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            _sweep_log.debug("定期任务巡检异常，将在下次继续", exc_info=True)
+        await asyncio.sleep(interval)
 
 
 app = FastAPI(
@@ -482,35 +536,6 @@ class RequestTimeoutMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(RequestTimeoutMiddleware)
 
-
-@app.on_event("startup")
-async def cleanup_stuck_chapters_on_startup():
-    """在服务启动时自动清理所有卡在generating状态的章节。
-    这确保服务重启后用户可以立即重新生成之前卡住的章节。"""
-    try:
-        from .db.session import AsyncSessionLocal
-        from .models.novel import Chapter
-        from sqlalchemy import select, update
-        import logging
-        logger = logging.getLogger("startup_cleanup")
-        
-        async with AsyncSessionLocal() as session:
-            result = await session.execute(
-                select(Chapter).where(Chapter.status == "generating")
-            )
-            stuck = result.scalars().all()
-            if stuck:
-                logger.warning("发现 %d 个卡在generating状态的章节，正在重置...", len(stuck))
-                for ch in stuck:
-                    logger.warning("  重置: project=%s chapter=%s", ch.project_id[:20], ch.chapter_number)
-                    ch.status = "draft"
-                    session.add(ch)
-                await session.commit()
-                logger.warning("已重置 %d 个卡住的章节为draft状态", len(stuck))
-            else:
-                logger.info("未发现卡住的章节，启动清理完毕")
-    except Exception as exc:
-        logging.getLogger("startup_cleanup").warning("启动清理busy章节失败: %s", exc)
 
 app.include_router(api_router)
 

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <TransitionRoot as="template" :show="show">
     <Dialog as="div" class="relative z-50" @close="emit('close')">
       <TransitionChild
@@ -28,34 +28,34 @@
               <div class="xq-dialog-header wd-version-diff-dialog__head">
                 <div class="min-w-0 flex-1">
                   <div class="wd-version-diff-dialog__chips">
-                    <span class="wd-chip wd-chip--primary">候选版本对比</span>
-                    <span class="wd-chip">第 {{ chapterNumber }} 章</span>
-                    <span class="wd-chip">{{ baseLabel }}</span>
-                    <span class="wd-chip">{{ compareLabel }}</span>
+                    <span class="wd-chip wd-chip--primary">{{ pick('候选版本对比', 'Candidate diff') }}</span>
+                    <span class="wd-chip">{{ pick(`第 ${chapterNumber} 章`, `Chapter ${chapterNumber}`) }}</span>
+                    <span class="wd-chip">{{ baseLabelText }}</span>
+                    <span class="wd-chip">{{ compareLabelText }}</span>
                   </div>
                   <DialogTitle as="h3" class="wd-version-diff-dialog__title">
-                    候选版本差异对比
+                    {{ pick('候选版本差异对比', 'Candidate version diff') }}
                   </DialogTitle>
                   <p class="wd-version-diff-dialog__subtitle">
-                    只读对比两个候选版本的文本差异，不会修改正文，也不会创建新版本。
+                    {{ pick('只读对比两个候选版本的文本差异，不会修改正文，也不会创建新版本。', 'Read-only text diff between two candidate versions. It never changes the draft or creates a new version.') }}
                   </p>
                 </div>
-                <button type="button" class="xq-dialog-close md-ripple" @click="emit('close')" aria-label="关闭">
+                <button type="button" class="xq-dialog-close md-ripple" @click="emit('close')" :aria-label="t('common.close')">
                   ×
                 </button>
               </div>
 
               <div class="xq-dialog-body wd-version-diff-dialog__body">
                 <div class="wd-version-diff-dialog__summary">
-                  <span>总行数 {{ diffSummary.total_lines }}</span>
-                  <span>新增 {{ diffSummary.added }}</span>
-                  <span>删除 {{ diffSummary.deleted }}</span>
-                  <span>修改 {{ diffSummary.modified }}</span>
-                  <span>未变 {{ diffSummary.unchanged }}</span>
+                  <span>{{ pick(`总行数 ${diffSummary.total_lines}`, `${diffSummary.total_lines} lines total`) }}</span>
+                  <span>{{ pick(`新增 ${diffSummary.added}`, `${diffSummary.added} added`) }}</span>
+                  <span>{{ pick(`删除 ${diffSummary.deleted}`, `${diffSummary.deleted} deleted`) }}</span>
+                  <span>{{ pick(`修改 ${diffSummary.modified}`, `${diffSummary.modified} modified`) }}</span>
+                  <span>{{ pick(`未变 ${diffSummary.unchanged}`, `${diffSummary.unchanged} unchanged`) }}</span>
                 </div>
 
                 <div v-if="isLoading" class="wd-version-diff-dialog__empty">
-                  <p>正在加载版本差异...</p>
+                  <p>{{ pick('正在加载版本差异...', 'Loading version diff...') }}</p>
                 </div>
 
                 <div v-else-if="errorMessage" class="wd-version-diff-dialog__empty wd-version-diff-dialog__empty--error">
@@ -63,16 +63,16 @@
                 </div>
 
                 <div v-else-if="diffLines.length === 0" class="wd-version-diff-dialog__empty">
-                  <p>两个版本目前没有可展示的差异。</p>
+                  <p>{{ pick('两个版本目前没有可展示的差异。', 'These two versions have no differences to show.') }}</p>
                 </div>
 
                 <div v-else class="wd-version-diff-dialog__table-wrap">
                   <table class="wd-version-diff-table">
                     <thead>
                       <tr>
-                        <th class="wd-version-diff-table__line">行号</th>
-                        <th>{{ baseLabel }}</th>
-                        <th>{{ compareLabel }}</th>
+                        <th class="wd-version-diff-table__line">{{ pick('行号', 'Line') }}</th>
+                        <th>{{ baseLabelText }}</th>
+                        <th>{{ compareLabelText }}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -94,9 +94,9 @@
               </div>
 
               <div class="xq-dialog-footer wd-version-diff-dialog__foot">
-                <span>当前仅做只读候选版本对比；需要修改正文请使用“精细编辑”。</span>
+                <span>{{ pick('当前仅做只读候选版本对比；需要修改正文请使用“精细编辑”。', 'Read-only candidate diff. To change the draft, use fine editing.') }}</span>
                 <button type="button" class="md-btn md-btn-outlined md-ripple" @click="emit('close')">
-                  关闭
+                  {{ t('common.close') }}
                 </button>
               </div>
             </DialogPanel>
@@ -113,6 +113,7 @@ import { Dialog, DialogPanel, DialogTitle, TransitionChild, TransitionRoot } fro
 import { ApiError } from '@/api/novel'
 import { getChapterVersionDiff } from '@/api/modules/chapterDiff'
 import { globalAlert } from '@/composables/useAlert'
+import { useLocale } from '@/composables/useLocale'
 
 interface DiffLine {
   line_number: number
@@ -132,13 +133,19 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  baseLabel: '基准版本',
-  compareLabel: '对比版本'
+  baseLabel: '',
+  compareLabel: ''
 })
 
 const emit = defineEmits<{
   (e: 'close'): void
 }>()
+
+const { pick, t, punct } = useLocale()
+
+// 默认标签延后到 computed 里取值，切换语言时才能跟着刷新
+const baseLabelText = computed(() => props.baseLabel || pick('基准版本', 'Base version'))
+const compareLabelText = computed(() => props.compareLabel || pick('对比版本', 'Compare version'))
 
 const diffLines = ref<DiffLine[]>([])
 const isLoading = ref(false)
@@ -159,7 +166,7 @@ const loadVersionDiff = async () => {
   if (!props.show) return
   if (!props.projectId || !props.baseVersionId || !props.compareVersionId) {
     diffLines.value = []
-    errorMessage.value = '缺少可对比的版本信息。'
+    errorMessage.value = pick('缺少可对比的版本信息。', 'Missing version information for the diff.')
     return
   }
 
@@ -178,14 +185,14 @@ const loadVersionDiff = async () => {
     diffLines.value = []
     if (error instanceof ApiError) {
       errorMessage.value = [
-        error.detail.message || '加载版本差异失败',
-        error.detail.rootCause ? `根因：${error.detail.rootCause}` : '',
-        error.detail.requestId ? `请求ID：${error.detail.requestId}` : '',
+        error.detail.message || pick('加载版本差异失败', 'Failed to load the version diff'),
+        error.detail.rootCause ? `${pick('根因', 'Root cause')}${punct.colon}${error.detail.rootCause}` : '',
+        error.detail.requestId ? `${pick('请求ID', 'Request ID')}${punct.colon}${error.detail.requestId}` : '',
       ].filter(Boolean).join('\n')
     } else {
-      errorMessage.value = error instanceof Error ? error.message : '加载版本差异失败'
+      errorMessage.value = error instanceof Error ? error.message : pick('加载版本差异失败', 'Failed to load the version diff')
     }
-    globalAlert.showError(errorMessage.value, '版本对比失败')
+    globalAlert.showError(errorMessage.value, pick('版本对比失败', 'Version diff failed'))
   } finally {
     isLoading.value = false
   }

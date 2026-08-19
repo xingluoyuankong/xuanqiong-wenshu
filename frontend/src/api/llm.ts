@@ -1,9 +1,11 @@
-﻿import { API_BASE_URL, API_PREFIX } from '@/api/config'
+import { API_BASE_URL, API_PREFIX } from '@/api/config'
+import { buildAuthHeaders } from '@/stores/auth'
 
 const LLM_BASE = `${API_BASE_URL}${API_PREFIX}/llm-config`
 
 export interface LLMConfig {
   user_id: number
+  version: number
   llm_provider_url: string | null
   llm_provider_model: string | null
   llm_provider_api_key_masked: string | null
@@ -121,9 +123,7 @@ export interface LLMAutoSwitchResponse {
   config?: LLMConfig | null
 }
 
-const getHeaders = () => ({
-  'Content-Type': 'application/json',
-})
+const getHeaders = () => buildAuthHeaders({ 'Content-Type': 'application/json' })
 
 const parseLLMApiError = async (response: Response, fallbackMessage: string): Promise<LLMApiError> => {
   let payload: any = null
@@ -171,6 +171,23 @@ export const createOrUpdateLLMConfig = async (config: LLMConfigCreate): Promise<
     throw await parseLLMApiError(response, '保存 LLM 配置失败')
   }
   return response.json()
+}
+
+export interface LLMConfigSyncResponse {
+  version: number
+  message: string
+  sync_version?: number
+}
+
+export const bumpLLMConfigVersion = async (): Promise<LLMConfigSyncResponse> => {
+  const response = await fetch(`${LLM_BASE}/bump`, {
+    method: 'POST',
+    headers: getHeaders(),
+  })
+  if (!response.ok) {
+    throw await parseLLMApiError(response, '通知后端刷新 LLM 配置失败')
+  }
+  return response.json() as Promise<LLMConfigSyncResponse>
 }
 
 export const deleteLLMConfig = async (): Promise<void> => {

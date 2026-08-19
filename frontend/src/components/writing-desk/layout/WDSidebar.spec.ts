@@ -2,6 +2,8 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
 import WDSidebar from './WDSidebar.vue'
+// 排版骨架是纯 CSS 契约，jsdom 不注入 scoped 样式，只能对源码本身做回归断言
+import sidebarSource from './WDSidebar.vue?raw'
 
 const buildProject = (
   status: 'waiting_for_confirm' | 'successful' | 'failed' | 'not_generated' = 'waiting_for_confirm'
@@ -105,5 +107,51 @@ describe('WDSidebar', () => {
     await outlineButton!.trigger('click')
 
     expect(wrapper.emitted('generateOutline')).toBeTruthy()
+  })
+})
+
+describe('WDSidebar 排版骨架', () => {
+  it('样式块存在，且覆盖外壳/列表/当前章节/底部四段', () => {
+    expect(sidebarSource).toContain('<style scoped>')
+    for (const selector of [
+      '.wd-sidebar {',
+      '.wd-sidebar.is-closed {',
+      '.wd-sidebar__scrim {',
+      '.wd-sidebar__head {',
+      '.wd-sidebar__list {',
+      '.wd-chapter {',
+      '.wd-chapter.is-active {',
+      '.wd-chapter__dot {',
+      '.wd-sidebar__current {',
+      '.wd-sidebar__foot {',
+    ]) {
+      expect(sidebarSource, `缺少样式定义：${selector}`).toContain(selector)
+    }
+  })
+
+  it('侧栏定宽 280px，章节行 40px 高、状态点 8px', () => {
+    expect(sidebarSource).toMatch(/\.wd-sidebar\s*\{[^}]*width:\s*280px/)
+    // 40px 行高走 --xq-space-10 令牌，不写死数值
+    expect(sidebarSource).toMatch(/\.wd-chapter\s*\{[^}]*height:\s*var\(--xq-space-10\)/)
+    expect(sidebarSource).toMatch(/\.wd-chapter__dot\s*\{[^}]*width:\s*8px/)
+  })
+
+  it('四种状态点各有语义色，且全部引用令牌', () => {
+    for (const tone of ['success', 'warning', 'danger', 'muted']) {
+      expect(sidebarSource, `缺少状态点配色：${tone}`).toContain(`.wd-chapter__dot--${tone} {`)
+    }
+    const styleBlock = sidebarSource.slice(sidebarSource.indexOf('<style scoped>'))
+    // 颜色只能来自令牌：不允许十六进制、rgb()、渐变、磨砂
+    expect(styleBlock).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
+    expect(styleBlock).not.toMatch(/\brgba?\(/)
+    expect(styleBlock).not.toMatch(/gradient\(/)
+    expect(styleBlock).not.toMatch(/backdrop-filter/)
+  })
+
+  it('窄屏把侧栏降级为抽屉，避免挤压正文宽度', () => {
+    expect(sidebarSource).toMatch(/@media \(max-width: 1023px\)/)
+    const narrow = sidebarSource.slice(sidebarSource.indexOf('@media (max-width: 1023px)'))
+    expect(narrow).toMatch(/\.wd-sidebar__scrim\s*\{[^}]*display:\s*block/)
+    expect(narrow).toMatch(/\.wd-sidebar\s*\{[^}]*position:\s*fixed/)
   })
 })

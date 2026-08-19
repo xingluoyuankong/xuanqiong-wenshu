@@ -1,7 +1,10 @@
 ﻿<template>
   <n-space vertical size="large" class="admin-settings">
     <n-alert type="info" :show-icon="false" class="settings-risk-alert">
-      这里只做“修改参数”，不再提供前端删除入口。每个参数都给出中文名称、参数分类、当前值和用途说明。
+      {{ pick(
+        '这里只做“修改参数”，不再提供前端删除入口。每个参数都给出中文名称、参数分类、当前值和用途说明。',
+        'This page only edits parameters — deleting them from the front end is no longer offered. Every parameter shows a readable name, its category, the current value, and what it does.'
+      ) }}
     </n-alert>
 
     <DailyLimitCard
@@ -44,6 +47,9 @@ import DailyLimitCard from './settings/DailyLimitCard.vue'
 import SystemConfigModal from './settings/SystemConfigModal.vue'
 import SystemConfigTable from './settings/SystemConfigTable.vue'
 import { useAdminSettings } from '@/composables/admin/useAdminSettings'
+import { useLocale } from '@/composables/useLocale'
+
+const { pick } = useLocale()
 
 const {
   dailyLimit,

@@ -6,6 +6,7 @@ import math
 import re
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Response, UploadFile, status
@@ -37,6 +38,13 @@ from ...services.generation_call_service import GenerationCallPolicy, Generation
 from ...services.llm_service import LLMService
 from ...services.long_novel_outline_generator import LongNovelOutlineGenerator
 from ...services.novel_service import NovelService
+from ...schemas.task_runtime import TaskRuntimeEventType, TaskRuntimeStatus
+from ...services.task_runtime import (
+    TERMINAL_STATUSES,
+    TaskRuntimeConflict,
+    TaskRuntimeNotFound,
+    TaskRuntimeService,
+)
 from ...services.prompt_service import PromptService
 from ...utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
 
@@ -49,6 +57,8 @@ _BLUEPRINT_PROJECT_RUNS: Dict[str, str] = {}
 _BLUEPRINT_JOB_LOCK = asyncio.Lock()
 _BLUEPRINT_JOB_STALE_SECONDS = 2 * 60 * 60
 _BLUEPRINT_JOB_HEARTBEAT_SECONDS = 45
+_BLUEPRINT_LEASE_STALE_SECONDS = 180
+_BLUEPRINT_SCHEDULED_RUNS: set[str] = set()
 _BLUEPRINT_ACTIVE_STATUSES = {
     "queued",
     "generating",
@@ -75,6 +85,15 @@ _IMPORT_RUNNING_STATUSES = {
     "import_ledger_rebuild",
 }
 _IMPORT_CANCELABLE_STATUSES = _IMPORT_RUNNING_STATUSES - {"import_saving", "import_ledger_rebuild"}
+_IMPORT_RUNTIME_ACTIVE_STATUSES = {
+    TaskRuntimeStatus.QUEUED.value,
+    TaskRuntimeStatus.RUNNING.value,
+    TaskRuntimeStatus.CANCELLING.value,
+    TaskRuntimeStatus.STALE.value,
+}
+_IMPORT_STORAGE_ROOT = Path(__file__).resolve().parents[3] / "storage" / "novel_imports"
+_IMPORT_SCHEDULED_RUNS: set[str] = set()
+_IMPORT_LEASE_OWNER = f"novel-import-worker:{uuid.uuid4().hex}"
 
 JSON_RESPONSE_INSTRUCTION = """
 IMPORTANT: 你的回复必须是合法的 JSON 对象，并严格包含以下字段：
@@ -1101,6 +1120,7 @@ async def _call_llm_with_stage_retries(
     progress_callback: Callable[[str, str], Awaitable[None]] | None = None,
     progress_stage: str = "generating",
     retry_attempts: int = 2,
+    soft_timeout_seconds: Optional[float] = None,
 ) -> str:
     result = await call_generation_text(
         llm_service=llm_service,
@@ -1118,6 +1138,7 @@ async def _call_llm_with_stage_retries(
             top_p=top_p,
             allow_truncated_response=allow_truncated_response,
             retry_same_model_once=retry_same_model_once,
+            soft_timeout_seconds=soft_timeout_seconds,
         ),
         progress_callback=progress_callback,
     )
@@ -1142,6 +1163,7 @@ async def _call_llm_json_with_stage_retries(
     progress_stage: str = "generating",
     retry_attempts: int = 2,
     json_repair_attempts: int = 1,
+    soft_timeout_seconds: Optional[float] = None,
 ) -> Dict[str, Any]:
     try:
         result = await call_generation_json(
@@ -1161,6 +1183,7 @@ async def _call_llm_json_with_stage_retries(
                 allow_truncated_response=allow_truncated_response,
                 retry_same_model_once=retry_same_model_once,
                 json_repair_attempts=json_repair_attempts,
+                soft_timeout_seconds=soft_timeout_seconds,
             ),
             progress_callback=progress_callback,
         )
@@ -1836,6 +1859,9 @@ async def _generate_novel_outline(
     user_id: int,
     progress_callback: Callable[[str, str], Awaitable[None]] | None = None,
     checkpoint_callback: Callable[[Dict[str, Any], str, str], Awaitable[None]] | None = None,
+    volume_count_override: int | None = None,
+    chapters_per_volume_override: int | None = None,
+    long_form_override: bool | None = None,
 ) -> Dict[str, Any]:
     length_contract = _resolve_blueprint_length_contract(blueprint_data)
     length_contract_instruction = _format_length_contract_instruction(length_contract)
@@ -2470,6 +2496,24 @@ def _import_job_error(code: str, message: str, *, detail: Any = None, retryable:
     return {"code": code, "message": message, "detail": detail_text, "retryable": retryable}
 
 
+def _import_storage_path(user_id: int, run_id: str) -> Path:
+    return _IMPORT_STORAGE_ROOT / str(int(user_id)) / f"{run_id}.bin"
+
+
+def _validated_import_storage_path(user_id: int, run_id: str, storage_value: Any) -> Optional[Path]:
+    """仅允许读取当前用户、当前任务对应的规范导入文件。"""
+    if not isinstance(storage_value, str) or not storage_value.strip():
+        return None
+    expected = _import_storage_path(user_id, run_id).resolve()
+    try:
+        candidate = Path(storage_value).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if candidate != expected or not candidate.is_file():
+        return None
+    return candidate
+
+
 def _serialize_import_job(job: Dict[str, Any]) -> ImportNovelJobResponse:
     return ImportNovelJobResponse(
         run_id=str(job.get("run_id") or ""),
@@ -2485,11 +2529,293 @@ def _serialize_import_job(job: Dict[str, Any]) -> ImportNovelJobResponse:
     )
 
 
-async def _set_import_job_state(run_id: str, **updates: Any) -> Dict[str, Any]:
+def _import_runtime_job_snapshot(job: Dict[str, Any]) -> Dict[str, Any]:
+    """返回可持久化的旧稿导入状态快照，不保存上传正文或其他大对象。"""
+    fields = (
+        "run_id",
+        "user_id",
+        "status",
+        "progress_stage",
+        "progress_message",
+        "started_at",
+        "updated_at",
+        "filename",
+        "project_id",
+        "metrics",
+        "error",
+        "storage_path",
+    )
+    snapshot = {key: job.get(key) for key in fields if key in job}
+    snapshot["task_domain"] = "novel_import"
+    return snapshot
+
+
+def _import_runtime_datetime(value: Any) -> Optional[str]:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value if isinstance(value, str) else None
+
+
+def _rebuild_import_job_from_runtime(task: Any, events: List[Any]) -> Dict[str, Any]:
+    """从 TaskRuntime 的快照/事件恢复旧稿导入路由状态。"""
+    task_payload = dict(getattr(task, "payload", None) or {})
+    snapshot: Dict[str, Any] = {}
+    for key in ("legacy_job", "novel_import_job", "job"):
+        candidate = task_payload.get(key)
+        if isinstance(candidate, dict) and candidate.get("task_domain", "novel_import") == "novel_import":
+            snapshot.update(candidate)
+    for event in events:
+        payload = dict(getattr(event, "payload", None) or {})
+        candidate = payload.get("legacy_job") or payload.get("novel_import_job") or payload.get("job")
+        if isinstance(candidate, dict) and candidate.get("task_domain", "novel_import") == "novel_import":
+            snapshot.update(candidate)
+
+    runtime_status = str(getattr(task, "status", TaskRuntimeStatus.QUEUED.value) or TaskRuntimeStatus.QUEUED.value)
+    stage = str(snapshot.get("progress_stage") or getattr(task, "stage", None) or runtime_status)
+    message = str(snapshot.get("progress_message") or getattr(task, "message", None) or "")
+    persisted_status = str(snapshot.get("status") or "")
+    if runtime_status == TaskRuntimeStatus.QUEUED.value:
+        legacy_status = "queued"
+    elif runtime_status == TaskRuntimeStatus.RUNNING.value:
+        legacy_status = persisted_status if persisted_status in _IMPORT_RUNNING_STATUSES else (
+            stage if stage in _IMPORT_RUNNING_STATUSES else "import_reading"
+        )
+    elif runtime_status in {TaskRuntimeStatus.CANCELLING.value, TaskRuntimeStatus.STALE.value}:
+        legacy_status = persisted_status if persisted_status in _IMPORT_RUNNING_STATUSES else "queued"
+    elif runtime_status == TaskRuntimeStatus.SUCCEEDED.value:
+        legacy_status = "successful"
+    elif runtime_status == TaskRuntimeStatus.CANCELLED.value:
+        legacy_status = "cancelled"
+    elif runtime_status == TaskRuntimeStatus.FAILED.value:
+        legacy_status = "failed"
+    else:
+        legacy_status = persisted_status or "queued"
+
+    snapshot.update(
+        {
+            "run_id": str(snapshot.get("run_id") or getattr(task, "task_id", "")),
+            "user_id": int(snapshot.get("user_id") or getattr(task, "owner_user_id", 0) or 0),
+            "status": legacy_status,
+            "progress_stage": stage,
+            "progress_message": message,
+            "started_at": _import_runtime_datetime(
+                snapshot.get("started_at") or getattr(task, "started_at", None)
+            ),
+            "updated_at": _import_runtime_datetime(
+                snapshot.get("updated_at") or getattr(task, "updated_at", None)
+            ),
+            "runtime_task_registered": True,
+            "_runtime_status": runtime_status,
+            "_runtime_retry_count": int(getattr(task, "retry_count", 0) or 0),
+            "_runtime_payload": task_payload,
+        }
+    )
+    if not snapshot.get("filename") and isinstance(task_payload.get("filename"), str):
+        snapshot["filename"] = task_payload["filename"]
+    if not snapshot.get("project_id"):
+        snapshot["project_id"] = getattr(task, "project_id", None) or getattr(task, "result_ref", None)
+    if legacy_status == "failed" and not snapshot.get("error"):
+        snapshot["error"] = _import_job_error(
+            "import_failed",
+            "旧稿导入失败",
+            detail=getattr(task, "error_detail", None),
+            retryable=True,
+        )
+    elif legacy_status == "cancelled" and not snapshot.get("error"):
+        snapshot["error"] = _import_job_error(
+            "import_cancelled", "旧稿导入任务已取消", retryable=True
+        )
+    return snapshot
+
+
+async def _claim_import_runtime(run_id: str, user_id: int) -> bool:
+    """通过持久化租约领取恢复任务，避免多进程重复导入。"""
+    async with AsyncSessionLocal() as session:
+        if not hasattr(session, "execute"):
+            return True
+        try:
+            await TaskRuntimeService(session).claim(
+                run_id,
+                lease_owner=_IMPORT_LEASE_OWNER,
+                stale_after_seconds=180,
+                owner_user_id=int(user_id),
+            )
+            return True
+        except (TaskRuntimeNotFound, TaskRuntimeConflict):
+            return False
+        except Exception:
+            logger.warning("领取旧稿导入任务失败：run_id=%s", run_id, exc_info=True)
+            return False
+
+
+def _schedule_import_recovery(job: Dict[str, Any]) -> bool:
+    run_id = str(job.get("run_id") or "")
+    user_id = int(job.get("user_id") or 0)
+    runtime_payload = job.get("_runtime_payload") if isinstance(job.get("_runtime_payload"), dict) else {}
+    storage_value = runtime_payload.get("storage_path") or job.get("storage_path")
+    storage = _validated_import_storage_path(user_id, run_id, storage_value)
+    runtime_status = str(job.get("_runtime_status") or "")
+    if not run_id or user_id <= 0 or storage is None:
+        return False
+    if runtime_status not in {TaskRuntimeStatus.QUEUED.value, TaskRuntimeStatus.STALE.value}:
+        return False
+    if run_id in _IMPORT_SCHEDULED_RUNS:
+        return False
+    _IMPORT_SCHEDULED_RUNS.add(run_id)
+    asyncio.create_task(
+        _run_import_novel_job(
+            run_id,
+            user_id,
+            str(runtime_payload.get("filename") or job.get("filename") or "import.txt"),
+            storage_path=str(storage),
+        )
+    )
+    return True
+
+
+def _import_job_has_active_runtime(job: Dict[str, Any]) -> bool:
+    runtime_status = str(job.get("_runtime_status") or "")
+    if runtime_status:
+        return runtime_status in _IMPORT_RUNTIME_ACTIVE_STATUSES
+    return str(job.get("status") or "") in _IMPORT_RUNNING_STATUSES
+
+
+async def _load_persisted_import_job(
+    session: Any,
+    *,
+    user_id: int,
+    run_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """按用户和任务类型从 TaskRuntime 查找旧稿导入任务。"""
+    if not hasattr(session, "execute"):
+        return None
+    runtime = TaskRuntimeService(session)
+    if run_id:
+        try:
+            task = await runtime.get_task(run_id, int(user_id))
+        except TaskRuntimeNotFound:
+            return None
+        if task.task_type != "novel_import":
+            return None
+    else:
+        tasks = await runtime.list_tasks(owner_user_id=int(user_id), limit=100)
+        matching = [task for task in tasks if task.task_type == "novel_import"]
+        if not matching:
+            return None
+        task = matching[0]
+    try:
+        events = await runtime.list_events(task.task_id, owner_user_id=int(user_id), limit=500)
+    except TaskRuntimeNotFound:
+        events = []
+    return _rebuild_import_job_from_runtime(task, events)
+
+
+async def _append_import_task_runtime_event(
+    job: Dict[str, Any],
+    *,
+    session: Any = None,
+) -> None:
+    if not job.get("runtime_task_registered"):
+        return
+    run_id = str(job.get("run_id") or "")
+    user_id = job.get("user_id")
+    if not run_id or user_id is None:
+        return
+    status_raw = str(job.get("status") or "queued")
+    terminal_map = {
+        "successful": (TaskRuntimeStatus.SUCCEEDED.value, TaskRuntimeEventType.TASK_COMPLETED.value),
+        "failed": (TaskRuntimeStatus.FAILED.value, TaskRuntimeEventType.TASK_FAILED.value),
+        "cancelled": (TaskRuntimeStatus.CANCELLED.value, TaskRuntimeEventType.TASK_CANCELLED.value),
+    }
+    runtime_status, event_type = terminal_map.get(
+        status_raw,
+        (
+            TaskRuntimeStatus.QUEUED.value
+            if status_raw == "queued"
+            else TaskRuntimeStatus.CANCELLING.value
+            if status_raw == "cancelling"
+            else TaskRuntimeStatus.RUNNING.value,
+            TaskRuntimeEventType.PROGRESS.value,
+        ),
+    )
+    async def persist(runtime_session: AsyncSession) -> None:
+        service = TaskRuntimeService(runtime_session)
+        await service.get_task(run_id, int(user_id))
+        snapshot = _import_runtime_job_snapshot(job)
+        await service.merge_payload(
+            run_id,
+            {"legacy_job": snapshot, "task_domain": "novel_import"},
+            owner_user_id=int(user_id),
+        )
+        await service.append_event(
+            run_id,
+            event_type=event_type,
+            status=runtime_status,
+            stage=str(job.get("progress_stage") or status_raw),
+            progress=100.0 if runtime_status in TERMINAL_STATUSES else 0.0,
+            message=str(job.get("progress_message") or ""),
+            idempotency_key=f"import-state:{job.get('updated_at') or _import_job_now_iso()}",
+            payload={
+                "task_domain": "novel_import",
+                "legacy_status": status_raw,
+                "filename": job.get("filename"),
+                "legacy_job": snapshot,
+            },
+            owner_user_id=int(user_id),
+        )
+        task = await service.get_task(run_id, int(user_id))
+        if runtime_status == TaskRuntimeStatus.SUCCEEDED.value and job.get("project_id"):
+            task.project_id = str(job["project_id"])
+            task.result_ref = str(job["project_id"])
+        if runtime_status == TaskRuntimeStatus.FAILED.value:
+            error = job.get("error") or {}
+            task.error_code = str(error.get("code") or "import_failed")
+            task.error_detail = str(error.get("detail") or error.get("message") or "")
+        elif runtime_status == TaskRuntimeStatus.CANCELLED.value:
+            task.error_code = "import_cancelled"
+            task.error_detail = str((job.get("error") or {}).get("message") or "旧稿导入任务已取消")
+        await runtime_session.commit()
+
+    try:
+        if hasattr(session, "execute"):
+            await persist(session)
+        else:
+            async with AsyncSessionLocal() as runtime_session:
+                await persist(runtime_session)
+    except Exception:
+        logger.warning("写入导入 TaskRuntime 事件失败：run_id=%s", run_id, exc_info=True)
+
+
+async def _set_import_job_state(
+    run_id: str,
+    *,
+    user_id: Optional[int] = None,
+    **updates: Any,
+) -> Dict[str, Any]:
     async with _IMPORT_JOB_LOCK:
-        job = _IMPORT_JOBS.get(run_id)
+        job = dict(_IMPORT_JOBS.get(run_id) or {})
+    if not job and user_id is not None:
+        try:
+            async with AsyncSessionLocal() as runtime_session:
+                restored = await _load_persisted_import_job(
+                    runtime_session,
+                    user_id=int(user_id),
+                    run_id=run_id,
+                )
+            if restored:
+                job = restored
+        except Exception:
+            logger.warning("恢复导入任务状态失败：run_id=%s", run_id, exc_info=True)
+    async with _IMPORT_JOB_LOCK:
+        job = _IMPORT_JOBS.get(run_id) or job
         if not job:
-            job = {"run_id": run_id, "status": "idle", "progress_stage": "idle"}
+            job = {
+                "run_id": run_id,
+                "user_id": user_id,
+                "status": "idle",
+                "progress_stage": "idle",
+                "runtime_task_registered": user_id is not None,
+            }
             _IMPORT_JOBS[run_id] = job
         if job.get("status") == "cancelled" and updates.get("status") != "cancelled":
             return dict(job)
@@ -2499,12 +2825,25 @@ async def _set_import_job_state(run_id: str, **updates: Any) -> Dict[str, Any]:
             updates["metrics"] = merged_metrics
         job.update(updates)
         job["updated_at"] = _import_job_now_iso()
-        return dict(job)
+        snapshot = dict(job)
+    await _append_import_task_runtime_event(snapshot)
+    return snapshot
 
 
-async def _is_import_job_cancelled(run_id: str) -> bool:
-    async with _IMPORT_JOB_LOCK:
-        return (_IMPORT_JOBS.get(run_id) or {}).get("status") == "cancelled"
+async def _is_import_job_cancelled(run_id: str, user_id: Optional[int] = None) -> bool:
+    try:
+        async with AsyncSessionLocal() as runtime_session:
+            task = await TaskRuntimeService(runtime_session).get_task(run_id, user_id)
+            if task.task_type != "novel_import":
+                return False
+            if task.status in {TaskRuntimeStatus.CANCELLING.value, TaskRuntimeStatus.CANCELLED.value}:
+                return True
+            legacy_job = dict(task.payload or {}).get("legacy_job")
+            return isinstance(legacy_job, dict) and legacy_job.get("status") == "cancelled"
+    except Exception:
+        async with _IMPORT_JOB_LOCK:
+            job = _IMPORT_JOBS.get(run_id) or {}
+            return job.get("status") in {"cancelled", "import_cancelled", "cancelling"}
 
 
 class _BufferedImportUpload:
@@ -2516,10 +2855,18 @@ class _BufferedImportUpload:
         return self._content
 
 
-async def _run_import_novel_job(run_id: str, user_id: int, filename: str, content: bytes) -> None:
+async def _run_import_novel_job(
+    run_id: str,
+    user_id: int,
+    filename: str,
+    content: Optional[bytes] = None,
+    *,
+    storage_path: Optional[str] = None,
+) -> None:
     async def progress(stage: str, message: str, metrics: Optional[Dict[str, Any]] = None) -> None:
         await _set_import_job_state(
             run_id,
+            user_id=user_id,
             status=stage,
             progress_stage=stage,
             progress_message=message,
@@ -2527,7 +2874,16 @@ async def _run_import_novel_job(run_id: str, user_id: int, filename: str, conten
         )
 
     try:
-        if await _is_import_job_cancelled(run_id):
+        if not await _claim_import_runtime(run_id, user_id):
+            return
+        if storage_path is not None:
+            validated = _validated_import_storage_path(user_id, run_id, storage_path)
+            if validated is None:
+                raise ValueError("旧稿导入文件路径无效")
+            content = validated.read_bytes()
+        if content is None:
+            raise ValueError("旧稿导入正文缺失")
+        if await _is_import_job_cancelled(run_id, user_id):
             return
         await progress("import_reading", "正在读取旧稿文件", {"filename": filename, "bytes": len(content)})
         async with AsyncSessionLocal() as job_session:
@@ -2536,10 +2892,11 @@ async def _run_import_novel_job(run_id: str, user_id: int, filename: str, conten
                 user_id,
                 _BufferedImportUpload(filename, content),  # type: ignore[arg-type]
                 progress_callback=progress,
-                should_cancel=lambda: _is_import_job_cancelled(run_id),
+                should_cancel=lambda: _is_import_job_cancelled(run_id, user_id),
             )
         await _set_import_job_state(
             run_id,
+            user_id=user_id,
             status="successful",
             progress_stage="successful",
             progress_message="旧稿导入完成，已创建项目",
@@ -2549,6 +2906,7 @@ async def _run_import_novel_job(run_id: str, user_id: int, filename: str, conten
     except ImportCancelledError:
         await _set_import_job_state(
             run_id,
+            user_id=user_id,
             status="cancelled",
             progress_stage="cancelled",
             progress_message="旧稿导入任务已取消",
@@ -2557,6 +2915,7 @@ async def _run_import_novel_job(run_id: str, user_id: int, filename: str, conten
     except HTTPException as exc:
         await _set_import_job_state(
             run_id,
+            user_id=user_id,
             status="failed",
             progress_stage="failed",
             progress_message="旧稿导入失败",
@@ -2571,11 +2930,14 @@ async def _run_import_novel_job(run_id: str, user_id: int, filename: str, conten
         logger.exception("旧稿导入后台任务失败: run_id=%s filename=%s", run_id, filename)
         await _set_import_job_state(
             run_id,
+            user_id=user_id,
             status="failed",
             progress_stage="failed",
             progress_message="旧稿导入失败",
             error=_import_job_error("import_failed", "旧稿导入失败", detail=exc, retryable=True),
         )
+    finally:
+        _IMPORT_SCHEDULED_RUNS.discard(run_id)
 
 
 @router.post("", response_model=NovelProjectSchema, status_code=status.HTTP_201_CREATED)
@@ -2597,6 +2959,7 @@ async def create_novel(
 async def start_import_novel(
     background_tasks: BackgroundTasks,
     file: UploadFile,
+    session: AsyncSession | None = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> ImportNovelJobResponse:
     """启动旧稿导入后台任务。"""
@@ -2609,10 +2972,21 @@ async def start_import_novel(
     async with _IMPORT_JOB_LOCK:
         existing_run_id = _IMPORT_USER_RUNS.get(user_id)
         existing = _IMPORT_JOBS.get(existing_run_id or "")
-        if existing and existing.get("status") in _IMPORT_RUNNING_STATUSES:
+        if existing and _import_job_has_active_runtime(existing):
             return _serialize_import_job(existing)
 
+        # 进程重启后内存索引为空时，先从 TaskRuntime 恢复活动任务，避免重复导入。
+        if session is not None and hasattr(session, "execute"):
+            restored = await _load_persisted_import_job(session, user_id=user_id)
+            if restored and _import_job_has_active_runtime(restored):
+                _IMPORT_JOBS[restored["run_id"]] = dict(restored)
+                _IMPORT_USER_RUNS[user_id] = restored["run_id"]
+                return _serialize_import_job(restored)
+
         run_id = str(uuid.uuid4())
+        storage_path = _import_storage_path(user_id, run_id)
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+        storage_path.write_bytes(content)
         now = _import_job_now_iso()
         job = {
             "run_id": run_id,
@@ -2626,7 +3000,24 @@ async def start_import_novel(
             "project_id": None,
             "metrics": {"bytes": len(content)},
             "error": None,
+            "storage_path": str(storage_path),
         }
+        if session is not None and hasattr(session, "execute"):
+            await TaskRuntimeService(session).create_task(
+                task_id=run_id,
+                task_type="novel_import",
+                idempotency_key=f"novel-import:{run_id}",
+                owner_user_id=user_id,
+                payload={
+                    "run_id": run_id,
+                    "filename": filename,
+                    "bytes": len(content),
+                    "storage_path": str(storage_path),
+                    "task_domain": "novel_import",
+                    "legacy_job": _import_runtime_job_snapshot(job),
+                },
+            )
+            job["runtime_task_registered"] = True
         _IMPORT_JOBS[run_id] = job
         _IMPORT_USER_RUNS[user_id] = run_id
 
@@ -2638,23 +3029,33 @@ async def start_import_novel(
 async def get_import_novel_status(
     run_id: Optional[str] = Query(default=None),
     current_user: UserInDB = Depends(get_current_user),
+    session: AsyncSession | None = Depends(get_session),
 ) -> ImportNovelJobResponse:
     """读取当前用户最近一次旧稿导入任务状态。"""
     user_id = int(current_user.id)
+    requested_run_id = run_id if isinstance(run_id, str) else None
     async with _IMPORT_JOB_LOCK:
-        resolved_run_id = run_id or _IMPORT_USER_RUNS.get(user_id)
+        resolved_run_id = requested_run_id or _IMPORT_USER_RUNS.get(user_id)
         job = dict(_IMPORT_JOBS.get(resolved_run_id or "") or {})
         if job and job.get("user_id") not in {None, user_id}:
             job = {}
-        if job and job.get("status") not in _IMPORT_RUNNING_STATUSES:
-            _IMPORT_JOBS.pop(str(job.get("run_id") or ""), None)
-            if _IMPORT_USER_RUNS.get(user_id) == job.get("run_id"):
-                _IMPORT_USER_RUNS.pop(user_id, None)
-
+    # 数据库可用时，TaskRuntime 是唯一状态真相源；内存快照可能落后于取消/失败终态。
+    restored = await _load_persisted_import_job(
+        session,
+        user_id=user_id,
+        run_id=requested_run_id or resolved_run_id,
+    ) if hasattr(session, "execute") else None
+    if restored:
+        async with _IMPORT_JOB_LOCK:
+            _IMPORT_JOBS[restored["run_id"]] = dict(restored)
+            _IMPORT_USER_RUNS[user_id] = restored["run_id"]
+        job = restored
     if job:
+        if _import_job_has_active_runtime(job):
+            _schedule_import_recovery(job)
         return _serialize_import_job(job)
     return ImportNovelJobResponse(
-        run_id=run_id or "",
+        run_id=requested_run_id or "",
         status="idle",
         progress_stage="idle",
         progress_message="暂无旧稿导入任务",
@@ -2665,22 +3066,55 @@ async def get_import_novel_status(
 async def cancel_import_novel(
     run_id: Optional[str] = Query(default=None),
     current_user: UserInDB = Depends(get_current_user),
+    session: AsyncSession | None = Depends(get_session),
 ) -> ImportNovelJobResponse:
     """取消当前用户最近一次旧稿导入任务。"""
     user_id = int(current_user.id)
+    requested_run_id = run_id if isinstance(run_id, str) else None
     async with _IMPORT_JOB_LOCK:
-        resolved_run_id = run_id or _IMPORT_USER_RUNS.get(user_id)
+        resolved_run_id = requested_run_id or _IMPORT_USER_RUNS.get(user_id)
         job = _IMPORT_JOBS.get(resolved_run_id or "")
-        if not job:
-            return ImportNovelJobResponse(
-                run_id=run_id or "",
-                status="idle",
-                progress_stage="idle",
-                progress_message="暂无可取消的旧稿导入任务",
-            )
+    # 取消操作也必须先读取持久化状态，不能让旧 worker 的内存快照遮蔽数据库。
+    restored = await _load_persisted_import_job(
+        session,
+        user_id=user_id,
+        run_id=requested_run_id or resolved_run_id,
+    ) if hasattr(session, "execute") else None
+    if restored:
+        async with _IMPORT_JOB_LOCK:
+            _IMPORT_JOBS[restored["run_id"]] = dict(restored)
+            _IMPORT_USER_RUNS[user_id] = restored["run_id"]
+        job = restored
+    if not job:
+        return ImportNovelJobResponse(
+            run_id=requested_run_id or "",
+            status="idle",
+            progress_stage="idle",
+            progress_message="暂无可取消的旧稿导入任务",
+        )
+    runtime_status = str(job.get("_runtime_status") or "")
+    runtime_payload = job.get("_runtime_payload") if isinstance(job.get("_runtime_payload"), dict) else {}
+    # _rebuild_import_job_from_runtime exposes the durable lease indirectly
+    # through the task payload only for compatibility; a running row without a
+    # live lease is an unclaimed orphan and can be finalized immediately.
+    worker_active = runtime_status == TaskRuntimeStatus.CANCELLING.value or (
+        runtime_status == TaskRuntimeStatus.RUNNING.value
+        and bool(runtime_payload.get("lease_owner"))
+    )
+    async with _IMPORT_JOB_LOCK:
         if job.get("user_id") not in {None, user_id}:
             raise HTTPException(status_code=404, detail="导入任务不存在")
-        if job.get("status") in _IMPORT_CANCELABLE_STATUSES:
+        if worker_active:
+            job.update({
+                "status": "cancelling",
+                "progress_stage": "cancelling",
+                "progress_message": "已请求取消旧稿导入任务，等待后台安全收敛",
+                "updated_at": _import_job_now_iso(),
+                "error": _import_job_error(
+                    "import_cancelling", "已请求取消旧稿导入任务，等待后台安全收敛", retryable=True
+                ),
+            })
+        elif job.get("status") in _IMPORT_CANCELABLE_STATUSES:
             job.update({
                 "status": "cancelled",
                 "progress_stage": "cancelled",
@@ -2695,6 +3129,26 @@ async def cancel_import_novel(
             })
         snapshot = dict(job)
 
+    if hasattr(session, "execute") and runtime_status in {
+        TaskRuntimeStatus.QUEUED.value,
+        TaskRuntimeStatus.RUNNING.value,
+        TaskRuntimeStatus.CANCELLING.value,
+    }:
+        try:
+            await TaskRuntimeService(session).request_cancel(
+                str(snapshot["run_id"]),
+                owner_user_id=user_id,
+                finalize_unclaimed=runtime_status == TaskRuntimeStatus.QUEUED.value,
+            )
+        except (TaskRuntimeNotFound, TaskRuntimeConflict):
+            logger.info("导入任务取消请求发生状态竞争：run_id=%s", snapshot["run_id"])
+    await _append_import_task_runtime_event(snapshot, session=session if hasattr(session, "execute") else None)
+    if hasattr(session, "execute") and runtime_status == TaskRuntimeStatus.QUEUED.value:
+        refreshed = await _load_persisted_import_job(
+            session, user_id=user_id, run_id=str(snapshot["run_id"])
+        )
+        if refreshed:
+            snapshot = refreshed
     return _serialize_import_job(snapshot)
 
 
@@ -3172,11 +3626,50 @@ async def _append_blueprint_job_history(job: Dict[str, Any]) -> None:
         )
 
 
+async def _append_blueprint_task_runtime_event(job: Dict[str, Any]) -> None:
+    run_id = str(job.get("run_id") or "")
+    project_id = str(job.get("project_id") or "")
+    user_id = job.get("user_id")
+    if not run_id or not project_id or user_id is None:
+        return
+    status_raw = str(job.get("status") or "queued")
+    terminal_map = {
+        "successful": (TaskRuntimeStatus.SUCCEEDED.value, TaskRuntimeEventType.TASK_COMPLETED.value),
+        "failed": (TaskRuntimeStatus.FAILED.value, TaskRuntimeEventType.TASK_FAILED.value),
+        "cancelled": (TaskRuntimeStatus.CANCELLED.value, TaskRuntimeEventType.TASK_CANCELLED.value),
+    }
+    runtime_status, event_type = terminal_map.get(
+        status_raw, (TaskRuntimeStatus.RUNNING.value if status_raw != "queued" else TaskRuntimeStatus.QUEUED.value, TaskRuntimeEventType.PROGRESS.value)
+    )
+    try:
+        async with AsyncSessionLocal() as runtime_session:
+            service = TaskRuntimeService(runtime_session)
+            await service.get_task(run_id, int(user_id))
+            await service.append_event(
+                run_id,
+                event_type=event_type,
+                status=runtime_status,
+                stage=str(job.get("progress_stage") or status_raw),
+                progress=100.0 if runtime_status in {TaskRuntimeStatus.SUCCEEDED.value, TaskRuntimeStatus.FAILED.value, TaskRuntimeStatus.CANCELLED.value} else 0.0,
+                message=str(job.get("progress_message") or ""),
+                idempotency_key=f"blueprint-state:{job.get('updated_at') or _utc_now_iso()}",
+                payload={
+                    "task_domain": "blueprint",
+                    "legacy_status": status_raw,
+                    "force_stage": job.get("force_stage"),
+                },
+                owner_user_id=int(user_id),
+            )
+    except Exception:
+        logger.warning("写入蓝图 TaskRuntime 事件失败：project=%s run_id=%s", project_id, run_id, exc_info=True)
+
+
 async def _persist_blueprint_job_state(job: Dict[str, Any]) -> None:
     try:
         async with AsyncSessionLocal() as persist_session:
             await _upsert_blueprint_job_record(persist_session, job)
         await _append_blueprint_job_history(job)
+        await _append_blueprint_task_runtime_event(job)
     except Exception:
         logger.exception("保存蓝图任务状态失败：project=%s run_id=%s", job.get("project_id"), job.get("run_id"))
 
@@ -3237,8 +3730,23 @@ async def _recover_finished_blueprint_job_from_project(
     )
     return recovered
 
-async def _persist_blueprint_job_state(job): pass
-async def _load_active_blueprint_job_from_db(project_id, user_id): return None
+async def _load_active_blueprint_job_from_db(
+    project_id: str,
+    user_id: int,
+) -> Dict[str, Any] | None:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(BlueprintGenerationJob)
+            .where(
+                BlueprintGenerationJob.project_id == project_id,
+                BlueprintGenerationJob.user_id == user_id,
+                BlueprintGenerationJob.status.in_(_BLUEPRINT_ACTIVE_STATUSES),
+            )
+            .order_by(BlueprintGenerationJob.updated_at.desc())
+            .limit(1)
+        )
+        record = result.scalar_one_or_none()
+        return _db_blueprint_job_to_payload(record) if record is not None else None
 
 
 async def _set_blueprint_job_state(run_id: str, **updates: Any) -> None:
@@ -3256,12 +3764,138 @@ async def _set_blueprint_job_state(run_id: str, **updates: Any) -> None:
         await _persist_blueprint_job_state(snapshot)
 
 
+async def _blueprint_runtime_task(run_id: str, user_id: int) -> Any | None:
+    """Load the TaskRuntime record used as the blueprint worker's source of truth."""
+    async with AsyncSessionLocal() as session:
+        try:
+            return await TaskRuntimeService(session).get_task(run_id, int(user_id))
+        except TaskRuntimeNotFound:
+            return None
+
+
+async def _blueprint_is_cancelled(run_id: str, user_id: int) -> bool:
+    task = await _blueprint_runtime_task(run_id, user_id)
+    return task is not None and task.status in {
+        TaskRuntimeStatus.CANCELLING.value,
+        TaskRuntimeStatus.CANCELLED.value,
+    }
+
+
+async def _claim_blueprint_runtime(run_id: str, user_id: int) -> bool:
+    """Claim the durable task before starting work; a second worker must not run it."""
+    async with AsyncSessionLocal() as session:
+        try:
+            await TaskRuntimeService(session).claim(
+                run_id,
+                lease_owner=f"blueprint:{run_id}",
+                stale_after_seconds=_BLUEPRINT_LEASE_STALE_SECONDS,
+                owner_user_id=int(user_id),
+            )
+            return True
+        except (TaskRuntimeNotFound, TaskRuntimeConflict):
+            return False
+
+
+async def _blueprint_heartbeat(run_id: str, user_id: int, stage: str, message: str) -> None:
+    async with AsyncSessionLocal() as session:
+        try:
+            await TaskRuntimeService(session).heartbeat(
+                run_id,
+                lease_owner=f"blueprint:{run_id}",
+                message=message,
+                owner_user_id=int(user_id),
+            )
+            await TaskRuntimeService(session).update_progress(
+                run_id,
+                progress=0.0,
+                stage=stage,
+                message=message,
+                owner_user_id=int(user_id),
+            )
+        except (TaskRuntimeNotFound, TaskRuntimeConflict):
+            logger.info("蓝图任务心跳未写入：run_id=%s", run_id)
+
+
+async def _finish_blueprint_runtime(
+    run_id: str,
+    user_id: int,
+    *,
+    status: str,
+    event_type: str,
+    stage: str,
+    message: str,
+    payload: Optional[dict[str, Any]] = None,
+) -> None:
+    async with AsyncSessionLocal() as session:
+        try:
+            await TaskRuntimeService(session).append_event(
+                run_id,
+                event_type=event_type,
+                status=status,
+                stage=stage,
+                progress=100.0 if status in TERMINAL_STATUSES else None,
+                message=message,
+                payload=payload,
+                owner_user_id=int(user_id),
+                idempotency_key=f"blueprint-terminal:{run_id}:{status}",
+            )
+        except (TaskRuntimeNotFound, TaskRuntimeConflict):
+            logger.warning("蓝图任务终态未写入：run_id=%s status=%s", run_id, status)
+
+
+async def _schedule_blueprint_recovery(
+    run_id: str,
+    project_id: str,
+    user_id: int,
+    force_stage: str | None,
+    background_tasks: BackgroundTasks,
+) -> None:
+    """Schedule a persisted queued/stale blueprint exactly once per process."""
+    if run_id in _BLUEPRINT_SCHEDULED_RUNS:
+        return
+    _BLUEPRINT_SCHEDULED_RUNS.add(run_id)
+    background_tasks.add_task(
+        _run_blueprint_generation_job, run_id, project_id, user_id, force_stage
+    )
+
+
+async def _schedule_persisted_blueprint_recovery_if_needed(
+    job: Dict[str, Any],
+    *,
+    project_id: str,
+    user_id: int,
+    background_tasks: BackgroundTasks,
+) -> None:
+    """复用旧任务时，确保 queued/stale 任务不会因进程重启永久停留。"""
+    run_id = str(job.get("run_id") or "")
+    if not run_id:
+        return
+    runtime_task = await _blueprint_runtime_task(run_id, user_id)
+    if runtime_task is None:
+        return
+    if runtime_task.status in {
+        TaskRuntimeStatus.QUEUED.value,
+        TaskRuntimeStatus.STALE.value,
+    }:
+        await _schedule_blueprint_recovery(
+            run_id,
+            project_id,
+            user_id,
+            job.get("force_stage"),
+            background_tasks,
+        )
+
+
 async def _run_blueprint_generation_job(
     run_id: str,
     project_id: str,
     user_id: int,
     force_stage: str | None = None,
 ) -> None:
+    if not await _claim_blueprint_runtime(run_id, user_id):
+        logger.info("蓝图任务未获得持久化租约，跳过执行：run_id=%s", run_id)
+        return
+
     await _set_blueprint_job_state(
         run_id,
         status="generating",
@@ -3270,12 +3904,15 @@ async def _run_blueprint_generation_job(
     )
 
     async def progress_callback(stage: str, message: str) -> None:
+        if await _blueprint_is_cancelled(run_id, user_id):
+            raise asyncio.CancelledError()
         await _set_blueprint_job_state(
             run_id,
             status=stage,
             progress_stage=stage,
             progress_message=message,
         )
+        await _blueprint_heartbeat(run_id, user_id, stage, message)
 
     async def heartbeat() -> None:
         while True:
@@ -3288,16 +3925,21 @@ async def _run_blueprint_generation_job(
                     return
                 stage = str(job.get("progress_stage") or job.get("status") or "generating")
                 message = str(job.get("progress_message") or "蓝图生成进行中")
-            await _set_blueprint_job_state(
-                run_id,
-                status=stage,
-                progress_stage=stage,
-                progress_message=message,
-            )
+            if await _blueprint_is_cancelled(run_id, user_id):
+                return
+            await _set_blueprint_job_state(run_id, status=stage, progress_stage=stage, progress_message=message)
+            await _blueprint_heartbeat(run_id, user_id, stage, message)
 
     heartbeat_task = asyncio.create_task(heartbeat())
 
     try:
+        if await _blueprint_is_cancelled(run_id, user_id):
+            await _finish_blueprint_runtime(
+                run_id, user_id, status=TaskRuntimeStatus.CANCELLED.value,
+                event_type=TaskRuntimeEventType.TASK_CANCELLED.value,
+                stage="cancelled", message="蓝图生成任务已取消",
+            )
+            return
         async with AsyncSessionLocal() as job_session:
             with LLMService.daily_limit_scope(f"blueprint:{project_id}:{force_stage or 'full'}:{user_id}"):
                 response = await _generate_blueprint_impl(
@@ -3307,6 +3949,13 @@ async def _run_blueprint_generation_job(
                     progress_callback=progress_callback,
                     force_stage=force_stage,
                 )
+        if await _blueprint_is_cancelled(run_id, user_id):
+            await _finish_blueprint_runtime(
+                run_id, user_id, status=TaskRuntimeStatus.CANCELLED.value,
+                event_type=TaskRuntimeEventType.TASK_CANCELLED.value,
+                stage="cancelled", message="蓝图生成任务已取消",
+            )
+            return
         async with _BLUEPRINT_JOB_LOCK:
             current_job = _BLUEPRINT_JOBS.get(run_id)
             if current_job and current_job.get("status") == "cancelled":
@@ -3321,6 +3970,24 @@ async def _run_blueprint_generation_job(
             ai_message=response.ai_message,
             error=None,
         )
+        await _finish_blueprint_runtime(
+            run_id, user_id, status=TaskRuntimeStatus.SUCCEEDED.value,
+            event_type=TaskRuntimeEventType.TASK_COMPLETED.value,
+            stage="successful", message="蓝图生成完成",
+        )
+    except asyncio.CancelledError:
+        await _set_blueprint_job_state(
+            run_id,
+            status="cancelled",
+            progress_stage="cancelled",
+            progress_message="蓝图生成任务已取消",
+        )
+        await _finish_blueprint_runtime(
+            run_id, user_id, status=TaskRuntimeStatus.CANCELLED.value,
+            event_type=TaskRuntimeEventType.TASK_CANCELLED.value,
+            stage="cancelled", message="蓝图生成任务已取消",
+        )
+        raise
     except Exception as exc:  # noqa: BLE001 - background task must not crash silently
         logger.exception("蓝图后台生成失败：project=%s run_id=%s", project_id, run_id)
         async with _BLUEPRINT_JOB_LOCK:
@@ -3339,6 +4006,12 @@ async def _run_blueprint_generation_job(
                 detail=exc,
                 retryable=True,
             ),
+        )
+        await _finish_blueprint_runtime(
+            run_id, user_id, status=TaskRuntimeStatus.FAILED.value,
+            event_type=TaskRuntimeEventType.TASK_FAILED.value,
+            stage="failed", message="蓝图生成失败",
+            payload={"error": str(exc)[:500]},
         )
     finally:
         heartbeat_task.cancel()
@@ -3380,6 +4053,12 @@ async def start_blueprint_generation(
                 if existing.get("run_id"):
                     _BLUEPRINT_PROJECT_RUNS[project_id] = existing["run_id"]
                     _BLUEPRINT_JOBS.setdefault(existing["run_id"], dict(existing))
+            await _schedule_persisted_blueprint_recovery_if_needed(
+                existing,
+                project_id=project_id,
+                user_id=user_id,
+                background_tasks=background_tasks,
+            )
             return _serialize_blueprint_job(existing)
 
         if not force_stage:
@@ -3401,6 +4080,12 @@ async def start_blueprint_generation(
                 if existing.get("run_id"):
                     _BLUEPRINT_PROJECT_RUNS[project_id] = existing["run_id"]
                     _BLUEPRINT_JOBS.setdefault(existing["run_id"], dict(existing))
+            await _schedule_persisted_blueprint_recovery_if_needed(
+                existing,
+                project_id=project_id,
+                user_id=user_id,
+                background_tasks=background_tasks,
+            )
             return _serialize_blueprint_job(existing)
 
     async with _BLUEPRINT_JOB_LOCK:
@@ -3423,14 +4108,26 @@ async def start_blueprint_generation(
         _BLUEPRINT_JOBS[run_id] = job
         _BLUEPRINT_PROJECT_RUNS[project_id] = run_id
 
+    if hasattr(session, "execute"):
+        await TaskRuntimeService(session).create_task(
+            task_id=run_id,
+            task_type="blueprint_generation",
+            idempotency_key=f"blueprint-generation:{run_id}",
+            owner_user_id=user_id,
+            project_id=project_id,
+            payload={"run_id": run_id, "force_stage": force_stage},
+        )
     await _persist_blueprint_job_state(job)
-    background_tasks.add_task(_run_blueprint_generation_job, run_id, project_id, user_id, force_stage)
+    await _schedule_blueprint_recovery(
+        run_id, project_id, user_id, force_stage, background_tasks
+    )
     return _serialize_blueprint_job(job)
 
 
 @router.get("/{project_id}/blueprint/generate/status", response_model=BlueprintGenerationJobResponse)
 async def get_blueprint_generation_status(
     project_id: str,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> BlueprintGenerationJobResponse:
@@ -3457,11 +4154,34 @@ async def get_blueprint_generation_status(
                 current = dict(persisted)
                 if run_id:
                     _BLUEPRINT_PROJECT_RUNS[project_id] = run_id
+                    # 进程重启后先回填内存快照，恢复 worker 的进度回调仍能
+                    # 持久化到同一条 BlueprintGenerationJob 记录。
+                    _BLUEPRINT_JOBS[run_id] = dict(current)
 
         if snapshot:
             await _persist_blueprint_job_state(snapshot)
             current = snapshot
 
+        # TaskRuntime 是运行状态唯一真相源；内存快照只保留编排句柄和兼容元数据。
+        # 查询时重新读取同一 run 的持久化任务，避免旧 worker 的内存状态覆盖取消/失败/恢复状态。
+        if run_id:
+            runtime_task = await _blueprint_runtime_task(run_id, user_id)
+            if runtime_task is not None:
+                current["_runtime_status"] = runtime_task.status
+                runtime_to_legacy = {
+                    TaskRuntimeStatus.QUEUED.value: "queued",
+                    TaskRuntimeStatus.RUNNING.value: current.get("status") if current.get("status") in _BLUEPRINT_ACTIVE_STATUSES else "generating",
+                    TaskRuntimeStatus.CANCELLING.value: "cancelling",
+                    TaskRuntimeStatus.CANCELLED.value: "cancelled",
+                    TaskRuntimeStatus.SUCCEEDED.value: "successful",
+                    TaskRuntimeStatus.FAILED.value: "failed",
+                    TaskRuntimeStatus.STALE.value: "queued",
+                }
+                current["status"] = runtime_to_legacy.get(runtime_task.status, current.get("status", "queued"))
+                if getattr(runtime_task, "stage", None):
+                    current["progress_stage"] = runtime_task.stage
+                if getattr(runtime_task, "message", None):
+                    current["progress_message"] = runtime_task.message
         if current.get("status") in _BLUEPRINT_ACTIVE_STATUSES:
             recovered_success = await _recover_finished_blueprint_job_from_project(
                 project_id,
@@ -3478,12 +4198,32 @@ async def get_blueprint_generation_status(
                 return _serialize_blueprint_job(recovered_success)
 
             if run_id and not memory_job:
-                current = _fail_orphaned_blueprint_job(current)
-                await _persist_blueprint_job_state(current)
-                async with _BLUEPRINT_JOB_LOCK:
-                    _BLUEPRINT_JOBS.pop(run_id, None)
-                    _BLUEPRINT_PROJECT_RUNS.pop(project_id, None)
-                return _serialize_blueprint_job(current)
+                runtime_task = await _blueprint_runtime_task(run_id, user_id)
+                if runtime_task is not None and runtime_task.status in {
+                    TaskRuntimeStatus.QUEUED.value,
+                    TaskRuntimeStatus.STALE.value,
+                }:
+                    await _schedule_blueprint_recovery(
+                        run_id,
+                        project_id,
+                        user_id,
+                        current.get("force_stage"),
+                        background_tasks,
+                    )
+                elif runtime_task is not None and runtime_task.status in {
+                    TaskRuntimeStatus.RUNNING.value,
+                    TaskRuntimeStatus.CANCELLING.value,
+                }:
+                    # 另一个 worker 仍持有活租约：不重复启动，也不把任务
+                    # 改写为“孤儿”，让其继续通过轮询/SSE 汇报状态。
+                    pass
+                else:
+                    current = _fail_orphaned_blueprint_job(current)
+                    await _persist_blueprint_job_state(current)
+                    async with _BLUEPRINT_JOB_LOCK:
+                        _BLUEPRINT_JOBS.pop(run_id, None)
+                        _BLUEPRINT_PROJECT_RUNS.pop(project_id, None)
+                    return _serialize_blueprint_job(current)
 
         if current.get("run_id") and current.get("status") not in _BLUEPRINT_ACTIVE_STATUSES:
             async with _BLUEPRINT_JOB_LOCK:
@@ -3522,10 +4262,24 @@ async def cancel_blueprint_generation(
         )
 
     run_id = str(persisted.get("run_id") or "")
+    runtime_status = ""
+    if run_id and hasattr(session, "execute"):
+        runtime_task = await _blueprint_runtime_task(run_id, user_id)
+        runtime_status = str(getattr(runtime_task, "status", "") or "")
     async with _BLUEPRINT_JOB_LOCK:
         job = _BLUEPRINT_JOBS.get(run_id or "")
         current = job if job else persisted
-        if current.get("status") in _BLUEPRINT_ACTIVE_STATUSES:
+        if runtime_status in {
+            TaskRuntimeStatus.RUNNING.value,
+            TaskRuntimeStatus.CANCELLING.value,
+        }:
+            current.update({
+                "status": "cancelling",
+                "progress_stage": "cancelling",
+                "progress_message": "已请求取消蓝图生成任务，等待后台安全收敛",
+                "updated_at": _utc_now_iso(),
+            })
+        elif current.get("status") in _BLUEPRINT_ACTIVE_STATUSES:
             current.update({
                 "status": "cancelled",
                 "progress_stage": "cancelled",
@@ -3542,6 +4296,17 @@ async def cancel_blueprint_generation(
             _BLUEPRINT_PROJECT_RUNS[project_id] = run_id
             if job:
                 _BLUEPRINT_JOBS[run_id] = current
+
+    if run_id:
+        async with AsyncSessionLocal() as runtime_session:
+            try:
+                await TaskRuntimeService(runtime_session).request_cancel(
+                    run_id,
+                    owner_user_id=user_id,
+                    finalize_unclaimed=runtime_status == TaskRuntimeStatus.QUEUED.value,
+                )
+            except TaskRuntimeNotFound:
+                pass
 
     await _persist_blueprint_job_state(snapshot)
     return _serialize_blueprint_job(snapshot)
@@ -3733,7 +4498,7 @@ async def _generate_blueprint_impl(
             ],
             temperature=0.25,
             user_id=user_id,
-            timeout=max(420.0, _resolve_novel_outline_timeout_seconds(blueprint_data={
+            timeout=min(180.0, _resolve_novel_outline_timeout_seconds(blueprint_data={
                 "full_synopsis": "",
                 "characters": existing_blueprint.characters if existing_blueprint else [],
                 "relationships": existing_blueprint.relationships if existing_blueprint else [],
@@ -3747,7 +4512,8 @@ async def _generate_blueprint_impl(
             stage_label="蓝图主结构生成",
             progress_callback=progress_callback,
             progress_stage="blueprint_concept",
-            retry_attempts=2,
+            retry_attempts=1,
+            soft_timeout_seconds=75.0,
         )
 
     if not isinstance(blueprint_data, dict):

@@ -8,7 +8,26 @@ export interface User {
   must_change_password: boolean
 }
 
-export const buildAuthHeaders = (headers?: HeadersInit) => new Headers(headers || {})
+const AUTH_TOKEN_KEY = 'xuanqiong.auth.access_token'
+
+export const getAccessToken = (): string | null => {
+  try { return window.localStorage.getItem(AUTH_TOKEN_KEY) }
+  catch { return null }
+}
+
+export const setAccessToken = (token: string | null): void => {
+  try {
+    if (token) window.localStorage.setItem(AUTH_TOKEN_KEY, token)
+    else window.localStorage.removeItem(AUTH_TOKEN_KEY)
+  } catch { /* storage may be unavailable in private/SSR contexts */ }
+}
+
+export const buildAuthHeaders = (headers?: HeadersInit): Headers => {
+  const result = new Headers(headers || {})
+  const token = getAccessToken()
+  if (token) result.set('Authorization', `Bearer ${token}`)
+  return result
+}
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
@@ -26,13 +45,29 @@ export const useAuthStore = defineStore('auth', {
     },
     clearUser() {
       this.user = null
+      setAccessToken(null)
+    },
+    async login(username: string, password: string): Promise<User> {
+      const body = new URLSearchParams({ username, password })
+      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+      })
+      if (!response.ok) throw new Error('用户名或密码错误')
+      const payload = await response.json() as { access_token?: string }
+      if (!payload.access_token) throw new Error('登录响应缺少访问令牌')
+      setAccessToken(payload.access_token)
+      await this.bootstrapUser()
+      if (!this.user) throw new Error('登录后无法读取用户信息')
+      return this.user
     },
     async bootstrapUser() {
       if (this.isBootstrapping) return
       this.isBootstrapping = true
       this.bootstrapError = ''
       try {
-        const response = await fetch(`${API_BASE_URL}${API_PREFIX}/novels/current-user`)
+        const response = await fetch(`${API_BASE_URL}${API_PREFIX}/novels/current-user`, { headers: buildAuthHeaders() })
         if (!response.ok) {
           throw new Error(`status=${response.status}`)
         }

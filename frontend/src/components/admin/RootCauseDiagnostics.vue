@@ -3,15 +3,18 @@
     <template #header>
       <div class="card-header">
         <div>
-          <div class="card-title">故障诊断</div>
-          <p class="card-subtitle">直接聚焦最近的后端异常，给出中文根因、处理建议、关联请求信息和近期异常轨迹。</p>
+          <div class="card-title">{{ pick('故障诊断', 'Failure diagnostics') }}</div>
+          <p class="card-subtitle">{{ pick(
+            '直接聚焦最近的后端异常，给出中文根因、处理建议、关联请求信息和近期异常轨迹。',
+            'Focuses on the latest backend exception: root cause, suggested fix, related request info, and the recent error trail.'
+          ) }}</p>
         </div>
         <n-space align="center" :size="12">
           <n-switch v-model:value="autoRefresh" size="small">
-            <template #checked>自动刷新</template>
-            <template #unchecked>自动刷新</template>
+            <template #checked>{{ pick('自动刷新', 'Auto refresh') }}</template>
+            <template #unchecked>{{ pick('自动刷新', 'Auto refresh') }}</template>
           </n-switch>
-          <n-button quaternary size="small" :loading="loading" @click="fetchDiagnostics">刷新</n-button>
+          <n-button quaternary size="small" :loading="loading" @click="fetchDiagnostics">{{ pick('刷新', 'Refresh') }}</n-button>
         </n-space>
       </div>
     </template>
@@ -20,13 +23,13 @@
       <n-alert v-if="error" type="error" closable @close="error = null">{{ error }}</n-alert>
 
       <n-spin :show="loading">
-        <n-empty v-if="!diagnostics" description="暂无可用诊断结果" />
+        <n-empty v-if="!diagnostics" :description="pick('暂无可用诊断结果', 'No diagnostics available yet')" />
 
         <template v-else>
           <n-card :bordered="false" class="primary-card">
             <div class="primary-header">
               <div>
-                <p class="primary-label">主要异常</p>
+                <p class="primary-label">{{ pick('主要异常', 'Primary exception') }}</p>
                 <h3 class="primary-title">{{ translatedPrimaryErrorType }}</h3>
               </div>
               <n-tag :type="statusTagType" :bordered="false" round>{{ statusLabel }}</n-tag>
@@ -36,21 +39,27 @@
 
             <div class="diagnosis-blocks">
               <div class="diagnosis-block">
-                <span class="meta-key">根因判断</span>
-                <p>{{ diagnostics.root_cause || '当前日志未给出明确根因，需要结合堆栈和时间线继续排查。' }}</p>
+                <span class="meta-key">{{ pick('根因判断', 'Root cause') }}</span>
+                <p>{{ diagnostics.root_cause || pick(
+                  '当前日志未给出明确根因，需要结合堆栈和时间线继续排查。',
+                  'The logs give no clear root cause — keep digging through the stack trace and the timeline.'
+                ) }}</p>
               </div>
               <div class="diagnosis-block diagnosis-block--accent">
-                <span class="meta-key">处理建议</span>
-                <p>{{ diagnostics.hint || '建议先按时间线复盘，再结合请求 ID、接口路径和堆栈片段定位同批次错误。' }}</p>
+                <span class="meta-key">{{ pick('处理建议', 'Suggested fix') }}</span>
+                <p>{{ diagnostics.hint || pick(
+                  '建议先按时间线复盘，再结合请求 ID、接口路径和堆栈片段定位同批次错误。',
+                  'Walk the timeline first, then use the request ID, endpoint path, and stack excerpt to find errors from the same batch.'
+                ) }}</p>
               </div>
             </div>
 
             <n-grid :cols="24" :x-gap="12" :y-gap="12" class="meta-grid">
-              <n-gi :span="8"><MetaItem label="请求 ID" :value="diagnostics.request_id || '-'" mono /></n-gi>
-              <n-gi :span="8"><MetaItem label="接口路径" :value="diagnostics.path || '-'" mono /></n-gi>
-              <n-gi :span="8"><MetaItem label="状态码" :value="diagnostics.status_code ?? '-'" /></n-gi>
-              <n-gi :span="12"><MetaItem label="发生时间" :value="formatDateTime(diagnostics.occurred_at)" /></n-gi>
-              <n-gi :span="12"><MetaItem label="来源日志" :value="diagnostics.source_log || '-'" mono /></n-gi>
+              <n-gi :span="8"><MetaItem :label="pick('请求 ID', 'Request ID')" :value="diagnostics.request_id || '-'" mono /></n-gi>
+              <n-gi :span="8"><MetaItem :label="pick('接口路径', 'Endpoint path')" :value="diagnostics.path || '-'" mono /></n-gi>
+              <n-gi :span="8"><MetaItem :label="pick('状态码', 'Status code')" :value="diagnostics.status_code ?? '-'" /></n-gi>
+              <n-gi :span="12"><MetaItem :label="pick('发生时间', 'Occurred at')" :value="formatDateTime(diagnostics.occurred_at)" /></n-gi>
+              <n-gi :span="12"><MetaItem :label="pick('来源日志', 'Source log')" :value="diagnostics.source_log || '-'" mono /></n-gi>
             </n-grid>
           </n-card>
 
@@ -59,8 +68,8 @@
               <n-card v-if="diagnostics.stack_excerpt" :bordered="false" class="stack-card">
                 <template #header>
                   <div class="section-header">
-                    <span>堆栈片段</span>
-                    <n-button tertiary size="tiny" @click="copyStack">复制</n-button>
+                    <span>{{ pick('堆栈片段', 'Stack excerpt') }}</span>
+                    <n-button tertiary size="tiny" @click="copyStack">{{ pick('复制', 'Copy') }}</n-button>
                   </div>
                 </template>
                 <n-scrollbar x-scrollable style="max-height: 360px">
@@ -72,26 +81,26 @@
               <n-card :bordered="false" class="summary-card">
                 <template #header>
                   <div class="section-header">
-                    <span>诊断摘要</span>
-                    <span class="small-note">中文解释</span>
+                    <span>{{ pick('诊断摘要', 'Diagnostics summary') }}</span>
+                    <span class="small-note">{{ pick('中文解释', 'Plain-language notes') }}</span>
                   </div>
                 </template>
                 <ul class="summary-list">
                   <li>
-                    <strong>异常类型</strong>
+                    <strong>{{ pick('异常类型', 'Exception type') }}</strong>
                     <span>{{ translatedPrimaryErrorType }}</span>
                   </li>
                   <li>
-                    <strong>日志覆盖</strong>
-                    <span>已扫描 {{ diagnostics.scanned_logs.length }} 份日志</span>
+                    <strong>{{ pick('日志覆盖', 'Log coverage') }}</strong>
+                    <span>{{ pick(`已扫描 ${diagnostics.scanned_logs.length} 份日志`, `Scanned ${diagnostics.scanned_logs.length} log files`) }}</span>
                   </li>
                   <li>
-                    <strong>最近刷新</strong>
+                    <strong>{{ pick('最近刷新', 'Last refreshed') }}</strong>
                     <span>{{ formatDateTime(diagnostics.generated_at) }}</span>
                   </li>
                   <li>
-                    <strong>近期异常数</strong>
-                    <span>{{ diagnostics.incidents.length }} 条</span>
+                    <strong>{{ pick('近期异常数', 'Recent exceptions') }}</strong>
+                    <span>{{ pick(`${diagnostics.incidents.length} 条`, `${diagnostics.incidents.length} entries`) }}</span>
                   </li>
                 </ul>
               </n-card>
@@ -101,8 +110,8 @@
           <n-card :bordered="false" class="timeline-card">
             <template #header>
               <div class="section-header">
-                <span>近期异常时间线</span>
-                <span class="small-note">共 {{ diagnostics.incidents.length }} 条</span>
+                <span>{{ pick('近期异常时间线', 'Recent exception timeline') }}</span>
+                <span class="small-note">{{ pick(`共 ${diagnostics.incidents.length} 条`, `${diagnostics.incidents.length} entries in total`) }}</span>
               </div>
             </template>
             <n-space vertical size="small">
@@ -120,10 +129,10 @@
                 <div class="incident-meta">
                   <span v-if="incident.path" class="mono">{{ incident.path }}</span>
                   <span v-if="incident.source_log" class="mono">{{ incident.source_log }}</span>
-                  <span v-if="incident.request_id" class="mono">请求 ID {{ incident.request_id }}</span>
+                  <span v-if="incident.request_id" class="mono">{{ pick(`请求 ID ${incident.request_id}`, `Request ID ${incident.request_id}`) }}</span>
                 </div>
-                <p v-if="incident.root_cause" class="incident-extra"><strong>根因：</strong>{{ incident.root_cause }}</p>
-                <p v-if="incident.hint" class="incident-extra"><strong>建议：</strong>{{ incident.hint }}</p>
+                <p v-if="incident.root_cause" class="incident-extra"><strong>{{ pick('根因：', 'Root cause: ') }}</strong>{{ incident.root_cause }}</p>
+                <p v-if="incident.hint" class="incident-extra"><strong>{{ pick('建议：', 'Suggestion: ') }}</strong>{{ incident.hint }}</p>
               </div>
             </n-space>
           </n-card>
@@ -138,6 +147,7 @@ import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, watch } 
 import { NAlert, NButton, NCard, NEmpty, NGi, NGrid, NScrollbar, NSpace, NSpin, NSwitch, NTag } from 'naive-ui'
 import { AdminAPI, type RootCauseDiagnosticsResponse, type RootCauseIncident } from '@/api/admin'
 import { useAlert } from '@/composables/useAlert'
+import { useLocale } from '@/composables/useLocale'
 import { translateErrorType } from './adminI18n'
 
 const MetaItem = defineComponent({
@@ -155,6 +165,7 @@ const MetaItem = defineComponent({
 })
 
 const { showAlert } = useAlert()
+const { pick, formatDateTime: formatLocaleDateTime } = useLocale()
 
 const diagnostics = ref<RootCauseDiagnosticsResponse | null>(null)
 const loading = ref(false)
@@ -168,7 +179,7 @@ const fetchDiagnostics = async () => {
   try {
     diagnostics.value = await AdminAPI.getRootCauseDiagnostics()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '获取故障诊断失败'
+    error.value = err instanceof Error ? err.message : pick('获取故障诊断失败', 'Failed to load the failure diagnostics')
   } finally {
     loading.value = false
   }
@@ -185,13 +196,11 @@ const tagTypeByStatus = (status?: number | null): 'default' | 'error' | 'warning
 
 const translatedPrimaryErrorType = computed(() => translateErrorType(diagnostics.value?.primary_error_type))
 const statusTagType = computed(() => tagTypeByStatus(diagnostics.value?.status_code))
-const statusLabel = computed(() => typeof diagnostics.value?.status_code === 'number' ? `HTTP ${diagnostics.value.status_code}` : '未标注状态码')
+const statusLabel = computed(() => typeof diagnostics.value?.status_code === 'number' ? `HTTP ${diagnostics.value.status_code}` : pick('未标注状态码', 'No status code recorded'))
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('zh-CN', { hour12: false })
+  return formatLocaleDateTime(value) || value
 }
 
 const incidentKey = (incident: RootCauseIncident) =>
@@ -200,14 +209,14 @@ const incidentKey = (incident: RootCauseIncident) =>
 const copyStack = async () => {
   const stack = diagnostics.value?.stack_excerpt
   if (!stack) {
-    showAlert('没有可复制的堆栈内容', 'info')
+    showAlert(pick('没有可复制的堆栈内容', 'There is no stack content to copy'), 'info')
     return
   }
   try {
     await navigator.clipboard.writeText(stack)
-    showAlert('堆栈片段已复制', 'success')
+    showAlert(pick('堆栈片段已复制', 'Stack excerpt copied'), 'success')
   } catch {
-    showAlert('复制失败，请手动复制', 'error')
+    showAlert(pick('复制失败，请手动复制', 'Copy failed — please copy it manually'), 'error')
   }
 }
 

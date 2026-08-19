@@ -1,16 +1,16 @@
-<!-- AIMETA P=版本详情弹窗_版本信息展示|R=版本对比_历史|NR=不含版本管理|E=component:WDVersionDetailModal|X=ui|A=版本弹窗|D=vue|S=dom|RD=./README.ai -->
+﻿<!-- AIMETA P=版本详情弹窗_版本信息展示|R=版本对比_历史|NR=不含版本管理|E=component:WDVersionDetailModal|X=ui|A=版本弹窗|D=vue|S=dom|RD=./README.ai -->
 <template>
   <div v-if="show" class="xq-dialog-overlay" @click.self="$emit('close')">
     <div class="xq-dialog-shell xq-dialog-shell--wide m3-detail-dialog flex flex-col">
       <div class="xq-dialog-header" style="border-bottom-color: var(--md-outline-variant);">
         <div>
-          <h3 class="xq-dialog-title">版本详情</h3>
+          <h3 class="xq-dialog-title">{{ pick('版本详情', 'Version details') }}</h3>
           <p class="xq-dialog-subtitle">
-            版本 {{ detailVersionIndex + 1 }}
+            {{ pick('版本', 'Version') }} {{ detailVersionIndex + 1 }}
             <span class="md-on-surface-variant">•</span>
-            {{ version?.style || '标准' }}风格
+            {{ version?.style || pick('标准', 'Standard') }}{{ pick('风格', ' style') }}
             <span class="md-on-surface-variant">•</span>
-            约 {{ Math.round(normalizedVersionContent.length / 100) * 100 }} 字
+            {{ pick('约', 'About') }} {{ Math.round(normalizedVersionContent.length / 100) * 100 }} {{ pick('字', 'words') }}
           </p>
         </div>
         <button
@@ -24,31 +24,31 @@
         </button>
       </div>
 
-      <div class="xq-dialog-body space-y-5">
+      <div class="xq-dialog-body space-y-3">
         <section v-if="hasReviewInsights" class="m3-review-summary">
           <div class="m3-review-summary__head">
             <div>
-              <p class="m3-kicker">生成链路摘要</p>
-              <h4 class="md-title-medium font-semibold">这一版经过了哪些修订与把关</h4>
+              <p class="m3-kicker">{{ pick('生成链路摘要', 'Generation pipeline summary') }}</p>
+              <h4 class="md-title-medium font-semibold">{{ pick('这一版经过了哪些修订与把关', 'Revisions and checks applied to this version') }}</h4>
             </div>
             <div class="m3-review-badges">
-              <span v-if="selfCritiqueSummary" class="m3-mini-badge">自我批评 {{ selfCritiqueSummary.final_score ?? '—' }} 分</span>
-              <span v-if="consistencySummary" class="m3-mini-badge">一致性 {{ consistencyIssueCount }} 项</span>
-              <span v-if="optimizerSummary" class="m3-mini-badge">专项优化 {{ optimizerStepCount }} 步</span>
+              <span v-if="selfCritiqueSummary" class="m3-mini-badge">{{ pick('自我批评', 'Self-critique') }} {{ selfCritiqueSummary.final_score ?? '—' }} {{ pick('分', 'pts') }}</span>
+              <span v-if="consistencySummary" class="m3-mini-badge">{{ pick('一致性', 'Continuity') }} {{ consistencyIssueCount }} {{ pick('项', 'issue(s)') }}</span>
+              <span v-if="optimizerSummary" class="m3-mini-badge">{{ pick('专项优化', 'Targeted optimization') }} {{ optimizerStepCount }} {{ pick('步', 'step(s)') }}</span>
             </div>
           </div>
 
           <div class="m3-review-grid">
             <article v-if="selfCritiqueSummary" class="m3-review-card">
-              <p class="m3-kicker">自我批评</p>
+              <p class="m3-kicker">{{ pick('自我批评', 'Self-critique') }}</p>
               <ul>
-                <li>最终分：{{ selfCritiqueSummary.final_score ?? '—' }}</li>
-                <li>迭代次数：{{ selfCritiqueSummary.iterations ?? 0 }}</li>
-                <li>提升分：{{ selfCritiqueSummary.improvement ?? 0 }}</li>
-                <li>关键问题：{{ selfCritiqueSummary.critical_count ?? 0 }} 严重 / {{ selfCritiqueSummary.major_count ?? 0 }} 主要</li>
+                <li>{{ pick('最终分', 'Final score') }}{{ punct.colon }}{{ selfCritiqueSummary.final_score ?? '—' }}</li>
+                <li>{{ pick('迭代次数', 'Iterations') }}{{ punct.colon }}{{ selfCritiqueSummary.iterations ?? 0 }}</li>
+                <li>{{ pick('提升分', 'Score gain') }}{{ punct.colon }}{{ selfCritiqueSummary.improvement ?? 0 }}</li>
+                <li>{{ pick('关键问题', 'Key issues') }}{{ punct.colon }}{{ selfCritiqueSummary.critical_count ?? 0 }} {{ pick('严重', 'critical') }} / {{ selfCritiqueSummary.major_count ?? 0 }} {{ pick('主要', 'major') }}</li>
               </ul>
               <div v-if="selfCritiquePriorityFixes.length" class="m3-review-card__notes">
-                <p class="m3-list-title">优先修复项</p>
+                <p class="m3-list-title">{{ pick('优先修复项', 'Priority fixes') }}</p>
                 <ul>
                   <li v-for="item in selfCritiquePriorityFixes" :key="item">{{ item }}</li>
                 </ul>
@@ -56,37 +56,40 @@
             </article>
 
             <article v-if="consistencySummary" class="m3-review-card">
-              <p class="m3-kicker">一致性检查</p>
+              <p class="m3-kicker">{{ pick('一致性检查', 'Continuity check') }}</p>
               <ul>
-                <li>状态：{{ consistencySummary.is_consistent ? '通过' : '发现问题' }}</li>
-                <li>问题数：{{ consistencyIssueCount }}</li>
-                <li>自动修复：{{ consistencySummary.auto_fix_applied ? '已执行' : '未执行' }}</li>
+                <li>{{ pick('状态', 'Status') }}{{ punct.colon }}{{ consistencySummary.is_consistent ? pick('通过', 'Passed') : pick('发现问题', 'Issues found') }}</li>
+                <li>{{ pick('问题数', 'Issue count') }}{{ punct.colon }}{{ consistencyIssueCount }}</li>
+                <li>{{ pick('自动修复', 'Auto fix') }}{{ punct.colon }}{{ consistencySummary.auto_fix_applied ? pick('已执行', 'Applied') : pick('未执行', 'Not applied') }}</li>
               </ul>
               <p v-if="consistencySummary.summary" class="m3-review-card__desc">{{ consistencySummary.summary }}</p>
             </article>
 
             <article v-if="optimizerSummary" class="m3-review-card">
-              <p class="m3-kicker">专项优化</p>
+              <p class="m3-kicker">{{ pick('专项优化', 'Targeted optimization') }}</p>
               <ul>
-                <li>优化步数：{{ optimizerStepCount }}</li>
-                <li v-if="targetedDimensionsText">定向维度：{{ targetedDimensionsText }}</li>
+                <li>{{ pick('优化步数', 'Optimization steps') }}{{ punct.colon }}{{ optimizerStepCount }}</li>
+                <li v-if="targetedDimensionsText">{{ pick('定向维度', 'Targeted dimensions') }}{{ punct.colon }}{{ targetedDimensionsText }}</li>
                 <li v-for="step in optimizerSteps" :key="step">{{ step }}</li>
               </ul>
             </article>
 
             <article v-if="qualityMetrics" class="m3-review-card">
-              <p class="m3-kicker">质量快照</p>
+              <p class="m3-kicker">{{ pick('质量快照', 'Quality snapshot') }}</p>
               <ul>
-                <li>字数：{{ qualityMetricValue('word_count') }}</li>
-                <li>场景兑现：{{ formatPercent(qualityMetrics.scene_fulfillment_rate) }}（{{ qualityMetricValue('fulfilled_scene_count') }}/{{ qualityMetricValue('scene_count') }}）</li>
-                <li>对白改局势：{{ qualityMetrics.dialogue_changes_state ? '通过' : '未通过' }}</li>
-                <li>章末递压：{{ qualityMetrics.ending_pressure_passed ? '通过' : '未通过' }}</li>
-                <li>静态描写风险：{{ qualityMetrics.static_description_risk ? '偏高' : '可控' }}</li>
+                <li>{{ pick('字数', 'Word count') }}{{ punct.colon }}{{ qualityMetricValue('word_count') }}</li>
+                <li>{{ pick('场景兑现', 'Scene fulfillment') }}{{ punct.colon }}{{ formatPercent(qualityMetrics.scene_fulfillment_rate) }}{{ punct.paren(`${qualityMetricValue('fulfilled_scene_count')}/${qualityMetricValue('scene_count')}`) }}</li>
+                <li>{{ pick('对白改局势', 'Dialogue changes state') }}{{ punct.colon }}{{ formatTriState(qualityMetrics.dialogue_changes_state, pick('通过', 'Passed'), pick('未通过', 'Not passed')) }}</li>
+                <li>{{ pick('章末递压', 'Ending pressure') }}{{ punct.colon }}{{ qualityMetrics.ending_pressure_passed ? pick('通过', 'Passed') : pick('未通过', 'Not passed') }}</li>
+                <li>{{ pick('静态描写风险', 'Static description risk') }}{{ punct.colon }}{{ qualityMetrics.static_description_risk ? pick('偏高', 'High') : pick('可控', 'Under control') }}</li>
+                <!-- D-22 相关：事件密度此前完全没进这份快照，用户在版本详情里看不到它。 -->
+                <li>{{ pick('事件密度', 'Event density') }}{{ punct.colon }}{{ formatTriState(qualityMetrics.event_density_passed, pick('达标', 'Passed'), pick('不足', 'Too low')) }}</li>
+                <li>{{ pick('局势变化间隔', 'State change interval') }}{{ punct.colon }}{{ formatTriState(qualityMetrics.state_change_interval_passed, pick('达标', 'Passed'), pick('过长', 'Too long')) }}</li>
               </ul>
             </article>
 
             <article v-if="runtimeWordSummary" class="m3-review-card">
-              <p class="m3-kicker">字数达标</p>
+              <p class="m3-kicker">{{ pick('字数达标', 'Word count target') }}</p>
               <ul>
                 <li>{{ runtimeWordSummary }}</li>
                 <li v-if="runtimeWordReason">{{ runtimeWordReason }}</li>
@@ -94,10 +97,10 @@
             </article>
 
             <article v-if="generationCallMetrics.length" class="m3-review-card">
-              <p class="m3-kicker">生成调用</p>
+              <p class="m3-kicker">{{ pick('生成调用', 'Generation calls') }}</p>
               <ul>
                 <li v-for="item in generationCallMetrics" :key="item.label">
-                  {{ item.label }}：{{ item.summary }}
+                  {{ item.label }}{{ punct.colon }}{{ item.summary }}
                 </li>
               </ul>
             </article>
@@ -117,9 +120,9 @@
             <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
               <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
             </svg>
-            当前选中版本
+            {{ pick('当前选中版本', 'Currently selected version') }}
           </span>
-          <span v-else class="md-on-surface-variant">未选中版本</span>
+          <span v-else class="md-on-surface-variant">{{ pick('未选中版本', 'Not the selected version') }}</span>
         </div>
 
         <div class="flex gap-3">
@@ -128,7 +131,7 @@
             @click="$emit('close')"
             class="md-btn md-btn-outlined md-ripple"
           >
-            关闭
+            {{ t('common.close') }}
           </button>
           <button
             v-if="!isCurrent"
@@ -136,7 +139,7 @@
             @click="$emit('selectVersion')"
             class="md-btn md-btn-filled md-ripple"
           >
-            选择此版本
+            {{ pick('选择此版本', 'Use this version') }}
           </button>
         </div>
       </div>
@@ -148,6 +151,7 @@
 import type { ChapterVersion } from '@/api/novel'
 import { computed } from 'vue'
 import { normalizeChapterContent } from '@/utils/chapterContent'
+import { useLocale } from '@/composables/useLocale'
 
 interface Props {
   show: boolean
@@ -159,6 +163,8 @@ interface Props {
 const props = defineProps<Props>()
 
 defineEmits(['close', 'selectVersion'])
+
+const { pick, t, punct } = useLocale()
 
 const normalizedVersionContent = computed(() => normalizeChapterContent(props.version?.content || ''))
 const reviewSummaries = computed<Record<string, any>>(() => {
@@ -202,6 +208,14 @@ const formatPercent = (value: unknown) => {
   if (!Number.isFinite(numeric)) return '—'
   return `${Math.round(numeric * 100)}%`
 }
+// T-13 / T-14：质量快照里的判定字段是三态（true / false / null）。
+// null 表示「该维度不适用或样本太短未评估」，必须显示成「不适用」而不是「未通过」——
+// 用真假判断（`x ? 通过 : 未通过`）会把「没测」说成「测过且不合格」。
+const formatTriState = (value: unknown, passed: string, failed: string) => {
+  if (value === true) return passed
+  if (value === false) return failed
+  return pick('不适用', 'Not applicable')
+}
 const selfCritiquePriorityFixes = computed(() => {
   const items = selfCritiqueSummary.value?.priority_fixes
   if (!Array.isArray(items)) return []
@@ -224,7 +238,7 @@ const optimizerSteps = computed(() => {
       const record = item as Record<string, any>
       const dimension = String(record.dimension || '').trim()
       const notes = String(record.notes || '').trim()
-      return [dimension ? `【${dimension}】` : '', notes].filter(Boolean).join(' ')
+      return [dimension ? pick(`【${dimension}】`, `[${dimension}]`) : '', notes].filter(Boolean).join(' ')
     })
     .filter(Boolean)
 })
@@ -233,9 +247,9 @@ const targetedDimensionsText = computed(() => {
   const dimensions = optimizerSummary.value?.targeted_dimensions
   if (!Array.isArray(dimensions) || !dimensions.length) return ''
   const labelMap: Record<string, string> = {
-    dialogue: '对话',
-    psychology: '心理',
-    rhythm: '节奏',
+    dialogue: pick('对话', 'Dialogue'),
+    psychology: pick('心理', 'Psychology'),
+    rhythm: pick('节奏', 'Pacing'),
   }
   return dimensions.map((item) => labelMap[String(item)] || String(item)).join(' / ')
 })
@@ -245,21 +259,21 @@ const runtimeWordSummary = computed(() => {
   const target = runtimeMeta.value.target_word_count
   if (!actual && !min && !target) return ''
   const parts = []
-  if (actual) parts.push(`实际 ${actual} 字`)
-  if (min) parts.push(`最低 ${min} 字`)
-  if (target) parts.push(`目标 ${target} 字`)
+  if (actual) parts.push(pick(`实际 ${actual} 字`, `Actual ${actual} words`))
+  if (min) parts.push(pick(`最低 ${min} 字`, `Minimum ${min} words`))
+  if (target) parts.push(pick(`目标 ${target} 字`, `Target ${target} words`))
   return parts.join(' / ')
 })
 const runtimeWordReason = computed(() => {
   const reason = runtimeMeta.value.word_requirement_reason
   if (!reason) return ''
   const map: Record<string, string> = {
-    target_met: '已达到目标字数',
-    close_to_target: '已接近目标字数',
-    minimum_met: '已达到最低字数',
-    minimum_met_but_below_target: '已达到最低字数，但仍低于目标',
-    below_minimum_after_enrichment: '补字后仍低于最低要求',
-    below_minimum: '低于最低要求',
+    target_met: pick('已达到目标字数', 'Target word count reached'),
+    close_to_target: pick('已接近目标字数', 'Close to the target word count'),
+    minimum_met: pick('已达到最低字数', 'Minimum word count reached'),
+    minimum_met_but_below_target: pick('已达到最低字数，但仍低于目标', 'Minimum reached but still below target'),
+    below_minimum_after_enrichment: pick('补字后仍低于最低要求', 'Still below the minimum after enrichment'),
+    below_minimum: pick('低于最低要求', 'Below the minimum'),
   }
   return map[String(reason)] || String(reason)
 })
@@ -270,14 +284,14 @@ const generationCallMetrics = computed(() => {
     .map((item, index) => {
       if (!item || typeof item !== 'object') return null
       const record = item as Record<string, any>
-      const label = String(record.label || `调用 ${index + 1}`)
+      const label = String(record.label || pick(`调用 ${index + 1}`, `Call ${index + 1}`))
       const parts = [
-        record.attempts ? `尝试 ${record.attempts} 次` : '',
-        record.estimated_total_tokens ? `约 ${record.estimated_total_tokens} tokens` : '',
-        record.effective_max_tokens ? `上限 ${record.effective_max_tokens}` : '',
-        record.provider_error_type ? `曾遇到 ${record.provider_error_type}` : '',
+        record.attempts ? pick(`尝试 ${record.attempts} 次`, `${record.attempts} attempt(s)`) : '',
+        record.estimated_total_tokens ? pick(`约 ${record.estimated_total_tokens} tokens`, `about ${record.estimated_total_tokens} tokens`) : '',
+        record.effective_max_tokens ? pick(`上限 ${record.effective_max_tokens}`, `limit ${record.effective_max_tokens}`) : '',
+        record.provider_error_type ? pick(`曾遇到 ${record.provider_error_type}`, `hit ${record.provider_error_type}`) : '',
       ].filter(Boolean)
-      return { label, summary: parts.join(' / ') || '已记录调用指标' }
+      return { label, summary: parts.join(' / ') || pick('已记录调用指标', 'Call metrics recorded') }
     })
     .filter((item): item is { label: string; summary: string } => Boolean(item))
     .slice(0, 4)

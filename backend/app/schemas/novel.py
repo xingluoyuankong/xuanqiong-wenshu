@@ -74,6 +74,9 @@ class ChapterVersionSchema(BaseModel):
     style: Optional[str] = "标准"
     evaluation: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    content_hash: Optional[str] = None
+    parent_version_id: Optional[int] = None
+    status: str = "candidate"
     word_count: int = 0
     created_at: Optional[datetime] = None
 
@@ -81,6 +84,7 @@ class Chapter(ChapterOutline):
     real_summary: Optional[str] = None
     content: Optional[str] = None
     selected_version_id: Optional[int] = None
+    revision: int = 1
     versions: Optional[List[ChapterVersionSchema]] = None
     evaluation: Optional[str] = None
     generation_status: ChapterGenerationStatus = ChapterGenerationStatus.NOT_GENERATED
@@ -330,8 +334,14 @@ class GenerateChapterRequest(BaseModel):
     quality_requirements: Optional[str] = Field(default=None, description="章节质量偏好与方向")
     target_word_count: Optional[int] = Field(default=None, description="章节目标字数")
     min_word_count: Optional[int] = Field(default=None, description="章节最低字数")
+    segment_word_limit: Optional[int] = Field(default=None, ge=500, le=12000, description="长篇分段目标字数")
+    generation_timeout_seconds: Optional[int] = Field(default=None, ge=0, le=14400, description="后台任务总超时秒数，0 表示自动计算")
     preset: Optional[str] = Field(default=None, description="质量档位：basic|enhanced|longform|ultimate。留空则由字数自动推断")
     flow_config: Optional[str] = Field(default=None, description="高级质量开关 JSON 字符串")
+
+
+class ResumeChapterGenerationRequest(BaseModel):
+    run_id: str = Field(..., min_length=1, max_length=64, description="需要从持久化断点恢复的章节任务 ID")
 
 
 class FlowConfig(BaseModel):
@@ -356,6 +366,8 @@ class FlowConfig(BaseModel):
     min_word_count: Optional[int] = Field(default=None, description="章节最低字数，低于该值自动扩写")
     max_enrich_iterations: Optional[int] = Field(default=None, description="自动扩写最大迭代次数")
     allow_truncated_response: Optional[bool] = Field(default=None, description="允许模型触发长度截断时返回部分内容")
+    segment_word_limit: Optional[int] = Field(default=None, ge=500, le=12000, description="长篇分段目标字数")
+    generation_timeout_seconds: Optional[int] = Field(default=None, ge=0, le=14400, description="后台任务总超时秒数")
 
 
 class AdvancedGenerateRequest(BaseModel):
@@ -437,6 +449,9 @@ class GenerateOutlineRequest(BaseModel):
     target_total_chapters: Optional[int] = Field(default=None, description="全书目标总章节数")
     target_total_words: Optional[int] = Field(default=None, description="全书目标总字数")
     chapter_word_target: Optional[int] = Field(default=None, description="单章目标字数")
+    volume_count: Optional[int] = Field(default=None, ge=1, le=50, description="分卷数（可选，自动估算；传入则覆盖自动计算值）")
+    chapters_per_volume: Optional[int] = Field(default=None, ge=3, le=100, description="每卷章节数（可选，自动估算；传入则覆盖自动计算值）")
+    long_form: Optional[bool] = Field(default=None, description="强制使用长篇大纲生成器（目标章节数>50或字数>20万时自动触发）")
 
 
 class BlueprintPatch(BaseModel):
@@ -455,3 +470,4 @@ class BlueprintPatch(BaseModel):
 class EditChapterRequest(BaseModel):
     chapter_number: int
     content: str
+    base_revision: Optional[int] = Field(default=None, ge=1)

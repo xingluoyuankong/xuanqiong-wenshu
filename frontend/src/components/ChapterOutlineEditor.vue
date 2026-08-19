@@ -3,12 +3,12 @@
   <div class="space-y-4 max-h-96 overflow-y-auto p-1">
     <div v-for="(chapter, index) in localOutline" :key="index" class="p-4 border border-gray-200 rounded-lg bg-gray-50">
       <div class="flex items-center mb-2">
-        <span class="font-bold text-indigo-600 mr-2">第 {{ chapter.chapter_number }} 章</span>
-        <input 
-          type="text" 
-          v-model="chapter.title" 
+        <span class="font-bold text-indigo-600 mr-2">{{ pick(`第 ${chapter.chapter_number} 章`, `Ch. ${chapter.chapter_number}`) }}</span>
+        <input
+          type="text"
+          v-model="chapter.title"
           class="flex-grow p-1 border-b-2 border-gray-300 focus:border-indigo-500 outline-none transition"
-          placeholder="章节标题"
+          :placeholder="pick('章节标题', 'Chapter title')"
         />
         <button @click="removeChapter(index)" class="ml-2 text-red-400 hover:text-red-600 transition-colors p-1">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -16,10 +16,10 @@
           </svg>
         </button>
       </div>
-      <textarea 
-        v-model="chapter.summary" 
+      <textarea
+        v-model="chapter.summary"
         class="w-full h-24 p-2 mt-2 border border-gray-300 rounded-md focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition text-sm"
-        placeholder="章节摘要"
+        :placeholder="pick('章节摘要', 'Chapter summary')"
       ></textarea>
     </div>
   </div>
@@ -27,7 +27,10 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue';
+import { useLocale } from '@/composables/useLocale';
 import type { ChapterOutline } from '@/api/novel';
+
+const { pick } = useLocale();
 
 const props = defineProps({
   modelValue: {

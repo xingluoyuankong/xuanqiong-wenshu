@@ -1,6 +1,7 @@
 // AIMETA P=管理员API客户端_管理接口调用|R=用户管理_系统配置_统计|NR=不含UI逻辑|E=api:admin|X=internal|A=adminApi对象|D=axios|S=net|RD=./README.ai
 import type { NovelSectionResponse, NovelSectionType } from '@/api/novel'
 import { API_BASE_URL, ADMIN_API_PREFIX } from '@/api/config'
+import { buildAuthHeaders } from '@/stores/auth'
 
 // API 配置
 
@@ -31,7 +32,7 @@ const toReadableError = (status: number, detail?: string): string => {
 }
 
 const request = async (url: string, options: RequestInit = {}) => {
-  const headers = new Headers({
+  const headers = buildAuthHeaders({
     'Content-Type': 'application/json',
     ...options.headers
   })

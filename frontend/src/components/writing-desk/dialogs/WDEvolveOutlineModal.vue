@@ -5,10 +5,10 @@
       <div class="xq-dialog-header">
         <div>
           <p class="xq-dialog-kicker">Plot Evolution</p>
-          <h3 class="xq-dialog-title">剧情推演</h3>
-          <p class="xq-dialog-subtitle">选择你感兴趣的方向，大纲将自动更新，并保留可回滚的演进意图。</p>
+          <h3 class="xq-dialog-title">{{ pick('剧情推演', 'Plot evolution') }}</h3>
+          <p class="xq-dialog-subtitle">{{ pick('选择你感兴趣的方向，大纲将自动更新，并保留可回滚的演进意图。', 'Pick the direction that interests you. The outline updates automatically and keeps a revertible record of the evolution intent.') }}</p>
         </div>
-        <button type="button" class="xq-dialog-close" @click="$emit('close')" aria-label="关闭">×</button>
+        <button type="button" class="xq-dialog-close" @click="$emit('close')" :aria-label="t('common.close')">×</button>
       </div>
 
       <!-- 内容区 -->
@@ -16,7 +16,7 @@
         <!-- 加载状态 -->
         <div v-if="loading" class="flex flex-col items-center justify-center py-12">
           <div class="animate-spin rounded-full h-12 w-12 border-4 border-indigo-500 border-t-transparent"></div>
-          <p class="mt-4 text-slate-500">AI 正在生成剧情分支...</p>
+          <p class="mt-4 text-slate-500">{{ pick('AI 正在生成剧情分支...', 'AI is generating plot branches...') }}</p>
         </div>
 
         <!-- 选项列表 -->
@@ -40,9 +40,9 @@
                       'bg-sky-100 text-sky-700': alt.evolution_type === 'twist'
                     }"
                   >
-                    {{ alt.evolution_type === 'branch' ? '分支剧情' : alt.evolution_type === 'extend' ? '延伸剧情' : '反转剧情' }}
+                    {{ alt.evolution_type === 'branch' ? pick('分支剧情', 'Plot branch') : alt.evolution_type === 'extend' ? pick('延伸剧情', 'Plot extension') : pick('反转剧情', 'Plot twist') }}
                   </span>
-                  <span class="text-xs text-slate-400">评分: {{ alt.score }}/100</span>
+                  <span class="text-xs text-slate-400">{{ pick('评分', 'Score') }}: {{ alt.score }}/100</span>
                 </div>
               </div>
               <div class="ml-4 text-2xl">🎯</div>
@@ -52,7 +52,7 @@
 
         <!-- 空状态 -->
         <div v-else class="text-center py-12 text-slate-500">
-          暂无剧情选项，请先生成
+          {{ pick('暂无剧情选项，请先生成', 'No plot options yet. Generate them first.') }}
         </div>
       </div>
 
@@ -62,14 +62,14 @@
           @click="$emit('close')"
           class="md-btn md-btn-outlined md-ripple"
         >
-          取消
+          {{ t('common.cancel') }}
         </button>
         <button
           v-if="!loading && alternatives.length"
           @click="regenerate"
           class="md-btn md-btn-filled md-ripple"
         >
-          重新生成
+          {{ t('common.regenerate') }}
         </button>
       </div>
     </div>
@@ -79,6 +79,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { OptimizerAPI } from '@/api/novel'
+import { useLocale } from '@/composables/useLocale'
 
 interface Alternative {
   id: number
@@ -103,6 +104,7 @@ const emit = defineEmits<{
 
 const loading = ref(false)
 const alternatives = ref<Alternative[]>([])
+const { pick, t } = useLocale()
 
 // 当弹窗显示时自动加载选项
 watch(() => props.show, async (newVal) => {
@@ -117,7 +119,7 @@ async function loadAlternatives() {
     const res = await OptimizerAPI.getOutlineAlternatives(props.projectId, props.chapterNumber)
     alternatives.value = res.alternatives
   } catch (e) {
-    console.error('加载剧情选项失败:', e)
+    console.error(pick('加载剧情选项失败:', 'Failed to load plot options:'), e)
     alternatives.value = []
   } finally {
     loading.value = false
@@ -135,7 +137,7 @@ async function regenerate() {
     const res = await OptimizerAPI.evolveOutline(props.projectId, props.chapterNumber, 3)
     alternatives.value = res.alternatives
   } catch (e) {
-    console.error('重新生成失败:', e)
+    console.error(pick('重新生成失败:', 'Regeneration failed:'), e)
   } finally {
     loading.value = false
   }

@@ -11,6 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..models import Chapter, ChapterOutline, NovelProject
+from .novel_text_format import (
+    EXPORT_HEADER_END_MARKER,
+    EXPORT_HEADER_MARKER,
+    build_chapter_title,
+    encode_export_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,21 +39,118 @@ class ExportService:
         outlines = await self._get_outlines_map(project_id)
 
         output = []
-        output.append(project.title or "无标题小说")
+        # 机读导出头标记，让导入侧可以确定性剥离书名/时间戳，不影响旧稿导入兼容性。
+        output.append(EXPORT_HEADER_MARKER)
+        output.append(encode_export_metadata(self._build_roundtrip_metadata(project, outlines, chapters=chapters)))
+        output.append(f"书名: {project.title or '无标题小说'}")
         output.append(f"导出时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-        output.append("=" * 50)
+        output.append(EXPORT_HEADER_END_MARKER)
         output.append("")
 
         for chapter in chapters:
             outline = outlines.get(chapter.chapter_number)
-            chapter_title = outline.title if outline and outline.title else f"第{chapter.chapter_number}章"
+            chapter_title = build_chapter_title(
+                chapter.chapter_number,
+                outline.title if outline else None,
+            )
             content = self._get_chapter_content(chapter)
-            output.append(f"\n{chapter_title}\n")
-            output.append("-" * 30)
+            output.append(f"\n{chapter_title}")
             output.append(content)
             output.append("")
 
         return "\n".join(output)
+
+    def _build_roundtrip_metadata(
+        self,
+        project: NovelProject,
+        outlines: dict[int, ChapterOutline],
+        *,
+        chapters: list[Chapter] | None = None,
+    ) -> dict:
+        blueprint = getattr(project, "blueprint", None)
+        blueprint_payload = None
+        if blueprint is not None:
+            world = dict(getattr(blueprint, "world_setting", None) or {})
+            blueprint_payload = {
+                "title": getattr(blueprint, "title", None) or project.title,
+                "target_audience": getattr(blueprint, "target_audience", None) or "",
+                "genre": getattr(blueprint, "genre", None) or "",
+                "style": getattr(blueprint, "style", None) or "",
+                "tone": getattr(blueprint, "tone", None) or "",
+                "one_sentence_summary": getattr(blueprint, "one_sentence_summary", None) or "",
+                "full_synopsis": getattr(blueprint, "full_synopsis", None) or "",
+                "world_setting": world,
+                "story_arcs": world.pop("story_arcs", []),
+                "volume_plan": world.pop("volume_plan", []),
+                "novel_outline": world.pop("novel_outline", []),
+                "foreshadowing_system": world.pop("foreshadowing_system", []),
+                "characters": [self._plain_character(item) for item in getattr(project, "characters", [])],
+                "relationships": [self._plain_relationship(item) for item in getattr(project, "relationships_", [])],
+            }
+            blueprint_payload["world_setting"] = world
+        formal_payload = {
+            "foreshadowings": [self._plain_foreshadowing(item) for item in getattr(project, "foreshadowings", [])],
+            "timeline_events": [self._plain_timeline_event(item) for item in getattr(project, "timeline_events", [])],
+            "chapter_versions": [self._plain_chapter_versions(item) for item in (chapters or [])],
+        }
+        return {
+            "format_version": 1,
+            "project": {"title": getattr(project, "title", ""), "initial_prompt": getattr(project, "initial_prompt", ""), "status": getattr(project, "status", "")},
+            "blueprint": blueprint_payload,
+            "chapter_outlines": [self._plain_outline(outlines[n]) for n in sorted(outlines)],
+            "formal_ledgers": formal_payload,
+        }
+
+    @staticmethod
+    def _plain_character(item: object) -> dict:
+        return {key: getattr(item, key, None) for key in ("name", "identity", "goals", "personality", "background", "arc", "description") if getattr(item, key, None) is not None}
+
+    @staticmethod
+    def _plain_relationship(item: object) -> dict:
+        return {key: getattr(item, key, None) for key in ("character_from", "character_to", "description", "core_conflict", "relationship_type", "status", "tension", "direction", "trigger_event", "importance", "extra") if getattr(item, key, None) is not None}
+
+    @staticmethod
+    def _plain_outline(item: object) -> dict:
+        keys = ("chapter_number", "title", "summary", "narrative_phase", "chapter_role", "suspense_hook", "emotional_progression", "character_focus", "cast_delta", "conflict_escalation", "continuity_notes", "foreshadowing", "foreshadowing_tasks", "payoff_window", "metadata")
+        return {key: getattr(item, key, None) for key in keys if getattr(item, key, None) is not None}
+
+    @staticmethod
+    def _plain_foreshadowing(item: object) -> dict:
+        keys = ("name", "content", "type", "keywords", "status", "chapter_number", "resolved_chapter_number",
+                "target_reveal_chapter", "reveal_method", "reveal_impact", "related_characters", "related_plots",
+                "importance", "urgency")
+        return {key: getattr(item, key, None) for key in keys if getattr(item, key, None) is not None}
+
+    @staticmethod
+    def _plain_timeline_event(item: object) -> dict:
+        keys = ("chapter_number", "story_time", "story_date", "time_elapsed", "event_type", "event_title",
+                "event_description", "involved_characters", "location", "importance", "is_turning_point",
+                "extra")
+        return {key: getattr(item, key, None) for key in keys if getattr(item, key, None) is not None}
+
+    @staticmethod
+    def _plain_chapter_versions(item: object) -> dict:
+        selected = getattr(item, "selected_version", None)
+        versions = []
+        for version in getattr(item, "versions", []) or []:
+            versions.append({
+                "version_label": getattr(version, "version_label", None),
+                "provider": getattr(version, "provider", None),
+                "content": getattr(version, "content", "") or "",
+                "metadata": getattr(version, "metadata", None),
+            })
+        selected_index = None
+        if selected is not None:
+            for index, version in enumerate(getattr(item, "versions", []) or []):
+                if getattr(version, "id", None) == getattr(selected, "id", None):
+                    selected_index = index
+                    break
+        return {
+            "chapter_number": getattr(item, "chapter_number", None),
+            "versions": versions,
+            "selected_index": selected_index,
+        }
+
 
     async def preflight_export(self, project_id: str) -> dict:
         """导出前检查，给前端展示可执行的缺章/空章/未定稿原因。"""
@@ -110,7 +213,10 @@ class ExportService:
 
         for chapter in chapters:
             outline = outlines.get(chapter.chapter_number)
-            chapter_title = outline.title if outline and outline.title else f"第{chapter.chapter_number}章"
+            chapter_title = build_chapter_title(
+                chapter.chapter_number,
+                outline.title if outline else None,
+            )
             doc.add_page_break()
             doc.add_heading(chapter_title, level=1)
 
@@ -131,7 +237,15 @@ class ExportService:
     async def _get_project(self, project_id: str) -> NovelProject:
         """获取项目信息"""
         result = await self.session.execute(
-            select(NovelProject).where(NovelProject.id == project_id)
+            select(NovelProject)
+            .where(NovelProject.id == project_id)
+            .options(
+                selectinload(NovelProject.blueprint),
+                selectinload(NovelProject.characters),
+                selectinload(NovelProject.relationships_),
+                selectinload(NovelProject.foreshadowings),
+                selectinload(NovelProject.timeline_events),
+            )
         )
         project = result.scalar_one_or_none()
         if not project:

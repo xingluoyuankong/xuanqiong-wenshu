@@ -5,45 +5,45 @@
         <div class="xq-dialog-header">
           <div>
             <p class="xq-dialog-kicker">Chapter Outline</p>
-            <h2 class="xq-dialog-title">编辑章节大纲</h2>
-            <p class="xq-dialog-subtitle">微调标题、摘要与 AI 重写方向，确保后续章节生成承接准确。</p>
+            <h2 class="xq-dialog-title">{{ pick('编辑章节大纲', 'Edit chapter outline') }}</h2>
+            <p class="xq-dialog-subtitle">{{ pick('微调标题、摘要与 AI 重写方向，确保后续章节生成承接准确。', 'Fine-tune the title, summary, and AI rewrite direction so later chapters follow on accurately.') }}</p>
           </div>
-          <button type="button" @click="$emit('close')" class="xq-dialog-close" aria-label="关闭">
+          <button type="button" @click="$emit('close')" class="xq-dialog-close" :aria-label="t('common.close')">
             ×
           </button>
         </div>
 
         <div v-if="editableChapter" class="xq-dialog-body xq-soft-grid">
           <div class="xq-field-panel">
-            <label for="chapter-title" class="md-text-field-label mb-2">章节标题</label>
+            <label for="chapter-title" class="md-text-field-label mb-2">{{ pick('章节标题', 'Chapter title') }}</label>
             <input
               id="chapter-title"
               v-model="editableChapter.title"
               type="text"
               class="md-text-field-input w-full"
-              placeholder="请输入章节标题"
+              :placeholder="pick('请输入章节标题', 'Enter the chapter title')"
             >
           </div>
 
           <div class="xq-field-panel">
-            <label for="chapter-summary" class="md-text-field-label mb-2">章节摘要</label>
+            <label for="chapter-summary" class="md-text-field-label mb-2">{{ pick('章节摘要', 'Chapter summary') }}</label>
             <textarea
               id="chapter-summary"
               v-model="editableChapter.summary"
               rows="5"
               class="md-textarea w-full"
-              placeholder="请输入章节摘要"
+              :placeholder="pick('请输入章节摘要', 'Enter the chapter summary')"
             ></textarea>
           </div>
 
           <div class="xq-field-panel">
-            <label for="rewrite-direction" class="md-text-field-label mb-2">AI 重写方向（可选）</label>
+            <label for="rewrite-direction" class="md-text-field-label mb-2">{{ pick('AI 重写方向（可选）', 'AI rewrite direction (optional)') }}</label>
             <textarea
               id="rewrite-direction"
               v-model="rewriteDirection"
               rows="3"
               class="md-textarea w-full"
-              placeholder="例如：冲突更强、结尾更狠、情绪更细腻"
+              :placeholder="pick('例如：冲突更强、结尾更狠、情绪更细腻', 'For example: sharper conflict, harsher ending, subtler emotion')"
             ></textarea>
             <div class="mt-2 flex flex-wrap gap-2">
               <button
@@ -60,7 +60,7 @@
                 class="md-btn md-btn-text md-ripple text-xs"
                 @click="rewriteDirection = ''"
               >
-                清空方向
+                {{ pick('清空方向', 'Clear direction') }}
               </button>
             </div>
             <div class="mt-3 flex justify-end">
@@ -70,7 +70,7 @@
                 :disabled="!editableChapter || isRewriting || isSaving"
                 @click="rewriteWithAI"
               >
-                {{ isRewriting ? 'AI 重写中...' : 'AI 重写摘要' }}
+                {{ isRewriting ? pick('AI 重写中...', 'AI is rewriting...') : pick('AI 重写摘要', 'Rewrite summary with AI') }}
               </button>
             </div>
           </div>
@@ -78,7 +78,7 @@
 
         <div class="xq-dialog-footer">
           <button type="button" @click="$emit('close')" class="md-btn md-btn-outlined md-ripple" :disabled="isSaving">
-            取消
+            {{ t('common.cancel') }}
           </button>
           <button
             type="button"
@@ -86,7 +86,7 @@
             class="md-btn md-btn-filled md-ripple disabled:opacity-50"
             :disabled="!isChanged || isSaving"
           >
-            {{ isSaving ? '保存中...' : '保存更改' }}
+            {{ isSaving ? pick('保存中...', 'Saving...') : pick('保存更改', 'Save changes') }}
           </button>
         </div>
       </div>
@@ -97,6 +97,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { ChapterOutline } from '@/api/novel'
+import { useLocale } from '@/composables/useLocale'
 
 interface Props {
   show: boolean
@@ -114,16 +115,18 @@ const emit = defineEmits<{
 
 const editableChapter = ref<ChapterOutline | null>(null)
 const rewriteDirection = ref('')
-const rewriteDirectionPresets = [
-  '强化本章主冲突',
-  '提升情绪浓度',
-  '增加伏笔与回收',
-  '让人物动机更清晰',
-  '结尾悬念更强',
-  '对话更有潜台词',
-  '反转更自然',
-  '节奏更紧凑',
-]
+const { pick, t } = useLocale()
+// 预设文案随语言切换刷新，因此用 computed 而非顶层常量
+const rewriteDirectionPresets = computed(() => [
+  pick('强化本章主冲突', 'Strengthen the main conflict'),
+  pick('提升情绪浓度', 'Raise emotional intensity'),
+  pick('增加伏笔与回收', 'Add foreshadowing and payoff'),
+  pick('让人物动机更清晰', 'Clarify character motivation'),
+  pick('结尾悬念更强', 'Sharpen the closing hook'),
+  pick('对话更有潜台词', 'Add subtext to the dialogue'),
+  pick('反转更自然', 'Make the reversal feel natural'),
+  pick('节奏更紧凑', 'Tighten the pacing'),
+])
 
 watch(
   () => props.chapter,
@@ -176,7 +179,7 @@ const appendRewriteDirection = (preset: string) => {
     return
   }
   if (!current.includes(preset)) {
-    rewriteDirection.value = `${current}；${preset}`
+    rewriteDirection.value = `${current}${pick('；', '; ')}${preset}`
   }
 }
 </script>

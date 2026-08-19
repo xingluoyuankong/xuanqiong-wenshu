@@ -1,4 +1,4 @@
-/.vscode
+﻿/.vscode
 /.venv
 /frontend/.vscode
 /frontend/node_modules
@@ -72,3 +72,10 @@ backend/__pycache__/
 # Optimization cleanup
 *.backup*
 docs/reports/archive/
+
+FINAL_*_AUDIT.md
+FINAL_DELIVERY_REPORT.md
+OPTIMIZATION_ROUND5_REPORT.md
+test_llm_service.py
+test_research_service.py
+backend/logs/run-*

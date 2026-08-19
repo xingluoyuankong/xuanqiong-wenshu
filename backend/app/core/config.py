@@ -83,12 +83,22 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("OPENAI_API_BASE_URL", "OPENAI_BASE_URL"),
         description="LLM API Base URL",
     )
-    openai_model_name: str = Field(default="gpt-4o-mini", description="默认 LLM 模型名称")
+    openai_model_name: str = Field(default="deepseek-v4-flash-free", description="默认 LLM 模型名称")
     writer_chapter_versions: int = Field(
         default=2,
         ge=1,
         validation_alias=AliasChoices("WRITER_CHAPTER_VERSION_COUNT", "WRITER_CHAPTER_VERSIONS"),
         description="每次生成章节的候选版本数量",
+    )
+    task_reconcile_stale_seconds: int = Field(
+        default=180,
+        ge=30,
+        description="任务心跳超时秒数，超过则标记为 stale 并允许其他 worker 重新领取",
+    )
+    task_reconcile_interval_seconds: int = Field(
+        default=120,
+        ge=15,
+        description="僵尸任务巡检间隔秒数",
     )
     embedding_provider: str = Field(default="openai", description="嵌入模型提供方，支持 openai / ollama")
     embedding_base_url: Optional[AnyUrl] = Field(default=None, description="嵌入模型 Base URL")

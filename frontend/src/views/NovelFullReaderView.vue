@@ -4,37 +4,43 @@
       <header class="reader-topbar xq-page-topbar xq-page-topbar--reader">
         <div class="reader-topbar__lead">
           <div class="reader-topbar__chips">
-            <span class="reader-chip reader-chip--primary">全文阅读</span>
+            <span class="reader-chip reader-chip--primary">{{ pick('全文阅读', 'Full text') }}</span>
             <span v-for="chip in chips" :key="chip" class="reader-chip">{{ chip }}</span>
           </div>
           <div>
-            <h1>{{ title || '正文阅读' }}</h1>
-            <p>{{ subtitle || '当前章节完整正文' }}</p>
+            <h1>{{ title || pick('正文阅读', 'Chapter reader') }}</h1>
+            <p>{{ subtitle || pick('当前章节完整正文', 'The full text of the current chapter') }}</p>
           </div>
         </div>
 
         <div class="reader-topbar__actions">
-          <button type="button" class="reader-btn reader-btn--ghost" @click="goBack">返回写作台</button>
-          <button type="button" class="reader-btn" @click="router.push('/')">返回主页</button>
+          <button type="button" class="reader-btn reader-btn--ghost" @click="goBack">{{ pick('返回写作台', 'Back to the writing desk') }}</button>
+          <button type="button" class="reader-btn" @click="router.push('/')">{{ pick('返回主页', 'Back to home') }}</button>
         </div>
       </header>
 
       <section v-if="content" class="reader-body">
         <div class="reader-body__head">
           <div>
-            <p class="reader-body__kicker">正文查看区</p>
-            <h2>完整正文</h2>
-            <p class="reader-body__desc">这里只做完整阅读，不改成文档/A4 风格，也不分栏。</p>
+            <p class="reader-body__kicker">{{ pick('正文查看区', 'Reading area') }}</p>
+            <h2>{{ pick('完整正文', 'Full text') }}</h2>
+            <p class="reader-body__desc">{{ pick(
+              '这里只做完整阅读，不改成文档/A4 风格，也不分栏。',
+              'This view is for reading only — no document/A4 styling and no columns.'
+            ) }}</p>
           </div>
           <div class="reader-body__meta">
-            <span>全文字数 {{ content.length }}</span>
+            <span>{{ pick(`全文字数 ${content.length}`, `${content.length} characters`) }}</span>
           </div>
         </div>
 
         <article class="reader-content">{{ content }}</article>
       </section>
 
-      <div v-else class="reader-empty">没有读取到正文内容，请返回写作台重新打开。</div>
+      <div v-else class="reader-empty">{{ pick(
+        '没有读取到正文内容，请返回写作台重新打开。',
+        'No text was loaded — go back to the writing desk and open it again.'
+      ) }}</div>
     </section>
   </main>
 </template>
@@ -42,7 +48,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useLocale } from '@/composables/useLocale'
 import { navigateBackOrFallback } from '@/utils/safeNavigation'
+
+const { pick } = useLocale()
 
 interface ReaderPayload {
   title?: string

@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import random
+import re
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -17,6 +18,41 @@ from .llm_service import LLMService
 logger = logging.getLogger(__name__)
 
 
+_JSON_SCHEMA_FORCE_JSON_OBJECT = "json_object"
+_JSON_SCHEMA_UNSUPPORTED_CACHE: set[str] = set()
+_JSON_SCHEMA_KNOWN_UNSUPPORTED = {"deepseek-v4-flash"}
+
+
+def _normalize_model_name(model: Any) -> str:
+    return re.sub(r"\s+", "-", str(model or "").strip().lower())
+
+
+def clear_json_schema_capability_cache() -> None:
+    _JSON_SCHEMA_UNSUPPORTED_CACHE.clear()
+
+
+def _model_from_error_detail(detail: Any) -> str:
+    text = json.dumps(detail, ensure_ascii=False) if isinstance(detail, (dict, list)) else str(detail or "")
+    match = re.search(r"model\s+([a-z0-9][a-z0-9_.:-]*)", text.lower())
+    return _normalize_model_name(match.group(1)) if match else ""
+
+
+def mark_json_schema_unsupported(*, model: Optional[str] = None, detail: Any = None) -> None:
+    normalized = _normalize_model_name(model) or _model_from_error_detail(detail)
+    if normalized:
+        _JSON_SCHEMA_UNSUPPORTED_CACHE.add(normalized)
+
+
+def is_json_schema_unsupported(*, model: Optional[str] = None) -> bool:
+    normalized = _normalize_model_name(model)
+    if not normalized:
+        return False
+    return (
+        normalized in _JSON_SCHEMA_UNSUPPORTED_CACHE
+        or any(normalized == known or normalized.startswith(known + "-") for known in _JSON_SCHEMA_KNOWN_UNSUPPORTED)
+    )
+
+
 ProgressCallback = Callable[[str, str], Awaitable[None]]
 
 
@@ -27,7 +63,12 @@ class GenerationCallPolicy:
     Defaults: retry_attempts=3, backoff_base=2.0s, soft_timeout=600s.
     """
     retry_attempts: int = 3
+    # Provider 超时通常意味着当前请求规模/线路不可用；默认不重复发送同一大请求。
+    # 业务层如确实需要重试，应显式设置 retry_on_timeout=True，并自行控制预算。
+    retry_on_timeout: bool = False
     retry_same_model_once: bool = False
+    # 长正文不允许在空流后再隐式发送一次同规模非流式请求；短结构化请求可显式开启。
+    allow_non_stream_fallback: bool = True
     response_format: Optional[str] = "json_object"
     json_schema: Optional[Any] = None
     max_tokens: Optional[int] = None
@@ -39,7 +80,7 @@ class GenerationCallPolicy:
     heartbeat_interval_seconds: Optional[float] = 3.0
     soft_timeout_seconds: Optional[float] = 600.0
     stage_label: Optional[str] = None
-    progress_stage: Optional[str] = None
+    progress_stage: Optional[str] = "generating"
     json_schema_name: Optional[str] = None
     json_repair_attempts: int = 2
     json_schema_strict: bool = True
@@ -213,9 +254,11 @@ def _looks_like_structured_output_unsupported(exc: HTTPException) -> bool:
     text = json.dumps(detail, ensure_ascii=False).lower() if isinstance(detail, (dict, list)) else str(detail).lower()
     markers = (
         "json_schema",
+        "json schema",
         "structured output",
         "structured_outputs",
         "schema is not supported",
+        "schema output mode",
         "response_format",
         "unsupported response format",
         "not support response_format",
@@ -392,6 +435,7 @@ async def _await_provider_text_with_heartbeat(
             prompt_cache_key=policy.prompt_cache_key,
             allow_truncated_response=policy.allow_truncated_response,
             retry_same_model_once=policy.retry_same_model_once,
+            allow_non_stream_fallback=policy.allow_non_stream_fallback,
         )
     )
     loop = asyncio.get_running_loop()
@@ -554,6 +598,7 @@ async def call_generation_text(
                 continue
             if (
                 provider_error_type == "timeout"
+                and active_policy.retry_on_timeout
                 and active_policy.max_tokens
                 and active_policy.max_tokens > 12000
                 and attempt < attempts
@@ -575,7 +620,11 @@ async def call_generation_text(
                     )
                 await asyncio.sleep(resolve_retry_delay_seconds(exc, attempt, active_policy))
                 continue
-            if attempt >= attempts or not is_retryable_http_exception(exc):
+            if (
+                attempt >= attempts
+                or not is_retryable_http_exception(exc)
+                or (provider_error_type == "timeout" and not active_policy.retry_on_timeout)
+            ):
                 raise
             if progress_callback is not None:
                 await progress_callback(

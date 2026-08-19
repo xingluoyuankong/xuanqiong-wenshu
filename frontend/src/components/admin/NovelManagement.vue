@@ -3,8 +3,8 @@
   <n-card class="novel-management-card" size="large" :bordered="false">
     <template #header>
       <div class="card-header">
-        <span class="card-title">小说管理</span>
-        <n-tag size="small" type="primary" round>共 {{ novels.length }} 项</n-tag>
+        <span class="card-title">{{ pick('小说管理', 'Novel management') }}</span>
+        <n-tag size="small" type="primary" round>{{ pick(`共 ${novels.length} 项`, `${novels.length} in total`) }}</n-tag>
       </div>
     </template>
 
@@ -17,7 +17,7 @@
         <template #default>
           <n-empty
             v-if="!novels.length && !loading"
-            description="暂无小说项目"
+            :description="pick('暂无小说项目', 'No novel projects yet')"
             class="empty-state"
           />
           <div v-else>
@@ -45,6 +45,9 @@ import { NAlert, NCard, NDataTable, NEmpty, NSpin, NTag, NSpace } from 'naive-ui
 import NovelMobileList from './novels/NovelMobileList.vue'
 import { createNovelColumns } from './novels/createNovelColumns'
 import { useNovelManagement } from '@/composables/admin/useNovelManagement'
+import { useLocale } from '@/composables/useLocale'
+
+const { pick } = useLocale()
 
 const { novels, loading, error, isMobile, pagination, fetchNovels, viewDetails } = useNovelManagement()
 

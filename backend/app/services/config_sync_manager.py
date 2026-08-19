@@ -29,14 +29,18 @@ class ConfigSyncManager:
         self._lock = asyncio.Lock()
         self._last_change: Dict[int, float] = {}
 
-    async def bump_version(self, user_id: int) -> int:
+    async def bump_version(self, user_id: int, *, persisted_version: int | None = None) -> int:
         """
         递增用户的配置版本号，通知所有订阅者
         在配置写入成功后调用
         """
         async with self._lock:
             current = self._user_versions.get(user_id, 0)
-            new_version = current + 1
+            # The database-derived version is the cross-process source of truth.
+            # Notification-only calls must not invent a conflicting local token.
+            new_version = max(current, int(persisted_version)) if persisted_version is not None else current + 1
+            if new_version == current and user_id in self._user_versions:
+                return new_version
             self._user_versions[user_id] = new_version
             self._last_change[user_id] = time.monotonic()
 

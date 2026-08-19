@@ -2,17 +2,19 @@
 import logging
 
 from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import settings
-from ..core.security import hash_password
+from ..core.security import decode_access_token, hash_password
 from ..db.session import get_session
 from ..models import User
 from ..schemas.user import UserInDB
 
 logger = logging.getLogger(__name__)
+_bearer = HTTPBearer(auto_error=False)
 
 
 async def _create_default_admin(session: AsyncSession) -> User:
@@ -87,7 +89,37 @@ def _to_user_schema(user: User) -> UserInDB:
     return schema
 
 
-async def get_current_user(session: AsyncSession = Depends(get_session)) -> UserInDB:
+async def get_current_user(
+    session: AsyncSession = Depends(get_session),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> UserInDB:
+    """解析 Bearer JWT；开发模式仅在未携带令牌时保留单用户兼容回退。"""
+    if credentials is not None:
+        try:
+            payload = decode_access_token(credentials.credentials)
+            user_id = int(str(payload.get("sub")))
+        except (TypeError, ValueError, HTTPException) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": "INVALID_ACCESS_TOKEN", "message": "访问令牌无效或已过期"},
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
+        result = await session.execute(select(User).where(User.id == user_id))
+        user = result.scalars().first()
+        if user is None or not bool(user.is_active):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": "USER_NOT_ACTIVE", "message": "用户不存在或已停用"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return _to_user_schema(user)
+
+    if str(settings.environment).strip().lower() in {"production", "prod", "staging"}:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "AUTH_REQUIRED", "message": "生产环境必须提供 Bearer 访问令牌"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     user = await _ensure_system_user(session)
     return _to_user_schema(user)
 

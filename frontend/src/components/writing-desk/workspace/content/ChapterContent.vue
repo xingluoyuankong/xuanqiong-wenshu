@@ -3,11 +3,11 @@
     <section class="wc-topbar">
       <div class="wc-topbar__lead">
         <div class="wc-topbar__chips">
-          <span class="wc-chip wc-chip--success">已确认正文</span>
-          <span class="wc-chip">正文 {{ normalizedChapterContent.length }} 字</span>
-          <span class="wc-chip">候选 {{ selectedChapter.versions?.length || 1 }} 版</span>
+          <span class="wc-chip wc-chip--success">{{ pick('已确认正文', 'Confirmed draft') }}</span>
+          <span class="wc-chip">{{ pick('正文', 'Draft') }} {{ normalizedChapterContent.length }} {{ pick('字', 'words') }}</span>
+          <span class="wc-chip">{{ pick('候选', 'Candidates') }} {{ selectedChapter.versions?.length || 1 }} {{ pick('版', 'version(s)') }}</span>
         </div>
-        <h4>{{ selectedChapter.title || `第${selectedChapter.chapter_number}章正文` }}</h4>
+        <h4>{{ selectedChapter.title || pick(`第${selectedChapter.chapter_number}章正文`, `Chapter ${selectedChapter.chapter_number} draft`) }}</h4>
       </div>
 
       <div class="wc-topbar__actions">
@@ -17,19 +17,19 @@
           :disabled="!selectedChapter.content"
           @click="exportChapterAsTxt(selectedChapter)"
         >
-          导出 TXT
+          {{ pick('导出 TXT', 'Export TXT') }}
         </button>
         <button type="button" class="md-btn md-btn-filled md-ripple md-btn--sm" @click="showOptimizer = true">
-          精修
+          {{ pick('精修', 'Polish') }}
         </button>
       </div>
     </section>
 
     <section class="wc-reader">
       <div class="wc-reader__head">
-        <p class="wc-reader__kicker">正文预览</p>
+        <p class="wc-reader__kicker">{{ pick('正文预览', 'Draft preview') }}</p>
         <div class="wc-reader__meta">
-          <span>{{ Math.round(normalizedChapterContent.length / 100) * 100 }} 字</span>
+          <span>{{ Math.round(normalizedChapterContent.length / 100) * 100 }} {{ pick('字', 'words') }}</span>
         </div>
       </div>
       <article class="wc-reader__body">{{ chapterPreviewContent }}</article>
@@ -39,7 +39,7 @@
       <div v-if="showOptimizer" class="md-dialog-overlay" @click.self="showOptimizer = false">
         <div class="md-dialog wc-dialog">
           <div class="wc-dialog__head">
-            <h3 class="md-title-medium font-semibold">精修这一章</h3>
+            <h3 class="md-title-medium font-semibold">{{ pick('精修这一章', 'Polish this chapter') }}</h3>
             <button type="button" class="md-icon-btn md-ripple" @click="showOptimizer = false">×</button>
           </div>
           <div class="wc-dialog__body">
@@ -59,13 +59,13 @@
               v-model="additionalNotes"
               rows="3"
               class="md-textarea w-full resize-none mt-4"
-              placeholder="补充你想强化的方向..."
+              :placeholder="pick('补充你想强化的方向...', 'Add the direction you want to strengthen...')"
             ></textarea>
           </div>
           <div class="wc-dialog__foot">
-            <button type="button" class="md-btn md-btn-outlined md-ripple" @click="showOptimizer = false">取消</button>
+            <button type="button" class="md-btn md-btn-outlined md-ripple" @click="showOptimizer = false">{{ t('common.cancel') }}</button>
             <button type="button" class="md-btn md-btn-filled md-ripple" :disabled="!selectedDimension || isOptimizing" @click="startOptimize">
-              {{ isOptimizing ? '精修中...' : '开始精修' }}
+              {{ isOptimizing ? pick('精修中...', 'Polishing...') : pick('开始精修', 'Start polishing') }}
             </button>
           </div>
         </div>
@@ -74,13 +74,13 @@
       <div v-if="optimizeResult" class="md-dialog-overlay" @click.self="optimizeResult = null">
         <div class="md-dialog wc-result">
           <div class="wc-result__head">
-            <h3 class="md-title-medium font-semibold">精修结果：{{ selectedDimensionLabel }}</h3>
+            <h3 class="md-title-medium font-semibold">{{ pick('精修结果', 'Polish result') }}{{ punct.colon }}{{ selectedDimensionLabel }}</h3>
             <button type="button" class="md-icon-btn md-ripple" @click="optimizeResult = null">×</button>
           </div>
           <div class="wc-result__body">{{ optimizeResult }}</div>
           <div class="wc-result__foot">
-            <button type="button" class="md-btn md-btn-outlined md-ripple" @click="optimizeResult = null">关闭</button>
-            <button type="button" class="md-btn md-btn-filled md-ripple" @click="applyOptimizeResult">应用此版本</button>
+            <button type="button" class="md-btn md-btn-outlined md-ripple" @click="optimizeResult = null">{{ t('common.close') }}</button>
+            <button type="button" class="md-btn md-btn-filled md-ripple" @click="applyOptimizeResult">{{ pick('应用此版本', 'Use this version') }}</button>
           </div>
         </div>
       </div>
@@ -91,6 +91,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { Chapter } from '@/api/novel'
+import { useLocale } from '@/composables/useLocale'
 
 interface Props {
   selectedChapter: Chapter
@@ -109,21 +110,24 @@ const emit = defineEmits<{
   (e: 'chapterUpdated', payload: { chapterNumber: number; content: string }): void
 }>()
 
+const { pick, t, punct } = useLocale()
+
 const showOptimizer = ref(false)
 const selectedDimension = ref<string | null>(null)
 const additionalNotes = ref('')
 const isOptimizing = ref(false)
 const optimizeResult = ref<string | null>(null)
 
-const optimizeDimensions = [
-  { key: 'dialogue', label: '对话优化', description: '让对话更自然、有个性' },
-  { key: 'pacing', label: '节奏优化', description: '调整叙事节奏和张力' },
-  { key: 'description', label: '描写优化', description: '丰富场景和感官描写' },
-  { key: 'emotion', label: '情感深化', description: '增强情感冲击力' },
-]
+// 维度文案必须放在 computed 里按需求值，否则切换语言后按钮标签不会刷新
+const optimizeDimensions = computed(() => [
+  { key: 'dialogue', label: pick('对话优化', 'Dialogue'), description: pick('让对话更自然、有个性', 'Make dialogue natural and distinctive') },
+  { key: 'pacing', label: pick('节奏优化', 'Pacing'), description: pick('调整叙事节奏和张力', 'Adjust narrative pacing and tension') },
+  { key: 'description', label: pick('描写优化', 'Description'), description: pick('丰富场景和感官描写', 'Enrich scene and sensory detail') },
+  { key: 'emotion', label: pick('情感深化', 'Emotion'), description: pick('增强情感冲击力', 'Strengthen emotional impact') },
+])
 
 const selectedDimensionLabel = computed(() => {
-  return optimizeDimensions.find(d => d.key === selectedDimension.value)?.label || ''
+  return optimizeDimensions.value.find(d => d.key === selectedDimension.value)?.label || ''
 })
 
 const normalizedChapterContent = computed(() => {
@@ -139,16 +143,16 @@ const normalizedChapterContent = computed(() => {
 const chapterPreviewContent = computed(() => {
   const content = normalizedChapterContent.value
   if (content.length > 1500) {
-    return content.slice(0, 1500) + '\n\n... （更多内容请用上方"全文阅读"查看）'
+    return content.slice(0, 1500) + pick('\n\n... （更多内容请用上方"全文阅读"查看）', '\n\n... (Use “Read full text” above to see the rest)')
   }
   return content
 })
 
 const contentHealthStatus = computed(() => {
   const wordCount = normalizedChapterContent.value.length
-  if (wordCount >= 2000) return '健康'
-  if (wordCount >= 500) return '较短'
-  return '待补充'
+  if (wordCount >= 2000) return pick('健康', 'Healthy')
+  if (wordCount >= 500) return pick('较短', 'Short')
+  return pick('待补充', 'Needs more')
 })
 
 const paragraphCount = computed(() => {
@@ -169,7 +173,8 @@ function exportChapterAsTxt(chapter: Chapter) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `第${chapter.chapter_number}章_${chapter.title || '未命名'}.txt`
+  const fallbackTitle = chapter.title || pick('未命名', 'Untitled')
+  a.download = pick(`第${chapter.chapter_number}章_${fallbackTitle}.txt`, `Chapter ${chapter.chapter_number}_${fallbackTitle}.txt`)
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -179,7 +184,10 @@ async function startOptimize() {
   isOptimizing.value = true
   try {
     await new Promise(resolve => setTimeout(resolve, 1500))
-    optimizeResult.value = `这是针对"${selectedDimensionLabel.value}"的精修结果预览。\n\n优化建议：\n1. 增强场景描写的感官细节\n2. 让人物对话更贴合性格\n3. 调整段落节奏，提高可读性\n\n（实际功能需对接后端 API）`
+    optimizeResult.value = pick(
+      `这是针对"${selectedDimensionLabel.value}"的精修结果预览。\n\n优化建议：\n1. 增强场景描写的感官细节\n2. 让人物对话更贴合性格\n3. 调整段落节奏，提高可读性\n\n（实际功能需对接后端 API）`,
+      `Preview of the polish result for “${selectedDimensionLabel.value}”.\n\nSuggestions:\n1. Add sensory detail to the scene description\n2. Fit the dialogue to each character\n3. Adjust paragraph pacing for readability\n\n(The real feature requires the backend API.)`,
+    )
   } finally {
     isOptimizing.value = false
   }

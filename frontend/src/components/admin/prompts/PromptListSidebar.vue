@@ -1,11 +1,11 @@
 ﻿<template>
   <div class="prompt-sidebar">
     <div class="prompt-sidebar__header">
-      <strong>提示词索引</strong>
-      <span>{{ prompts.length }} 项</span>
+      <strong>{{ pick('提示词索引', 'Prompt index') }}</strong>
+      <span>{{ pick(`${prompts.length} 项`, `${prompts.length} items`) }}</span>
     </div>
     <n-scrollbar class="prompt-scroll">
-      <n-empty v-if="!prompts.length && !loading" description="暂无提示词" />
+      <n-empty v-if="!prompts.length && !loading" :description="pick('暂无提示词', 'No prompts yet')" />
       <n-space v-else vertical size="small">
         <n-button
           v-for="prompt in prompts"
@@ -28,7 +28,10 @@
 
 <script setup lang="ts">
 import type { PromptItem } from '@/api/admin'
+import { useLocale } from '@/composables/useLocale'
 import { translatePromptName } from '../adminI18n'
+
+const { pick } = useLocale()
 
 defineProps<{
   prompts: PromptItem[]

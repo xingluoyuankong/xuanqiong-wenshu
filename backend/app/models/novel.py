@@ -28,6 +28,25 @@ class _MetadataAccessor:
         instance.metadata_ = value
 
 
+class ProjectLedgerSyncLease(Base):
+    """Durable per-project lease preventing concurrent ledger rebuilds."""
+
+    __tablename__ = "project_ledger_sync_leases"
+    __table_args__ = (UniqueConstraint("project_id", name="uq_project_ledger_sync_lease_project"),)
+
+    project_id: Mapped[str] = mapped_column(
+        PROJECT_ID_TYPE,
+        ForeignKey("novel_projects.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    chapter_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    selected_version_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    lease_token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    owner_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    acquired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class NovelProject(Base):
     """小说项目主表，仅存放轻量级元数据。"""
 
@@ -191,6 +210,7 @@ class Chapter(Base):
     real_summary: Mapped[Optional[str]] = mapped_column(LONG_TEXT_TYPE)
     status: Mapped[str] = mapped_column(String(32), default="not_generated")
     word_count: Mapped[int] = mapped_column(Integer, default=0)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     selected_version_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("chapter_versions.id", ondelete="SET NULL"), nullable=True
     )
@@ -227,6 +247,11 @@ class ChapterVersion(Base):
     version_label: Mapped[Optional[str]] = mapped_column(String(64))
     provider: Mapped[Optional[str]] = mapped_column(String(64))
     content: Mapped[str] = mapped_column(LONG_TEXT_TYPE, nullable=False)
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    parent_version_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("chapter_versions.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="candidate")
     metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSON)
     metadata = _MetadataAccessor()
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -243,6 +268,11 @@ class ChapterVersion(Base):
         "Chapter",
         back_populates="versions",
         foreign_keys=[chapter_id],
+    )
+    parent_version: Mapped[Optional["ChapterVersion"]] = relationship(
+        "ChapterVersion",
+        remote_side=[id],
+        foreign_keys=[parent_version_id],
     )
     evaluations: Mapped[list["ChapterEvaluation"]] = relationship(
         back_populates="version", cascade="all, delete-orphan"

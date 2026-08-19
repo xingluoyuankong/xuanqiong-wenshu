@@ -8,6 +8,7 @@ import {
   normalizeRuntimeStage,
   resolveChapterActionDecision,
   resolveChapterRuntime,
+  taskRuntimeEventToChapterEvent,
 } from './chapterGeneration'
 
 describe('chapterGeneration utils', () => {
@@ -250,4 +251,90 @@ describe('chapterGeneration utils', () => {
     })
   })
 
+})
+describe('taskRuntimeEventToChapterEvent 正文与日志分流', () => {
+  it('把 content_delta 事件的正文提升为独立字段并可渲染', () => {
+    const event = taskRuntimeEventToChapterEvent({
+      event_id: 5,
+      event_type: 'content_delta',
+      status: 'running',
+      stage: 'segment_generation',
+      progress: 40,
+      payload: { delta: '第一段正文。', preview: false, segment_index: 0 },
+      created_at: '2026-04-21T08:00:00Z',
+    })
+
+    expect(event.content_delta).toBe('第一段正文。')
+    expect(event.content_preview).toBe('第一段正文。')
+    expect(event.content_is_preview).toBe(false)
+    expect(event.segment_index).toBe(0)
+    expect(event.kind).toBe('content')
+  })
+
+  it('优先使用后端已提升的 content_delta 字段', () => {
+    const event = taskRuntimeEventToChapterEvent({
+      event_id: 6,
+      event_type: 'content_delta',
+      content_delta: '已提升正文。',
+      payload: { delta: '兜底正文。' },
+    })
+
+    expect(event.content_delta).toBe('已提升正文。')
+  })
+
+  it('日志事件即使 payload 夹带 delta 也不得冒充正文', () => {
+    const event = taskRuntimeEventToChapterEvent({
+      event_id: 7,
+      event_type: 'log',
+      message: '后端运行日志',
+      payload: { delta: '这是日志不是正文', content_delta: '这也是日志', log: '后端运行日志' },
+    })
+
+    expect(event.content_delta).toBeUndefined()
+    expect(event.content_preview).toBeUndefined()
+    expect(event.message).toBe('后端运行日志')
+  })
+
+  it('progress 事件不产生正文字段', () => {
+    const event = taskRuntimeEventToChapterEvent({
+      event_id: 8,
+      event_type: 'progress',
+      stage: 'generate_variants',
+      progress: 55,
+      payload: { content: '不应被当作正文' },
+    })
+
+    expect(event.content_delta).toBeUndefined()
+    expect(event.progress_percent).toBe(55)
+  })
+
+  it('标记预览分片，避免整章预览被当成分段正文累积', () => {
+    const event = taskRuntimeEventToChapterEvent({
+      event_id: 9,
+      event_type: 'content_delta',
+      payload: { delta: '整章预览。', preview: true },
+    })
+
+    expect(event.content_is_preview).toBe(true)
+    expect(event.segment_index).toBeUndefined()
+  })
+
+  it('失败与僵尸事件标记为 error 级别', () => {
+    expect(
+      taskRuntimeEventToChapterEvent({ event_id: 10, event_type: 'task_failed', status: 'failed' }).level
+    ).toBe('error')
+    expect(
+      taskRuntimeEventToChapterEvent({ event_id: 11, event_type: 'task_stale', status: 'stale' }).level
+    ).toBe('error')
+  })
+})
+
+
+describe('TaskRuntime SSE 任务绑定', () => {
+  it('拒绝旧任务迟到事件写入新任务', async () => {
+    const { isTaskEventForCurrentTask } = await import('./chapterGeneration')
+    expect(isTaskEventForCurrentTask('old-task', 'new-task')).toBe(false)
+    expect(isTaskEventForCurrentTask('new-task', 'new-task')).toBe(true)
+    expect(isTaskEventForCurrentTask('', 'new-task')).toBe(false)
+  })
 })
