@@ -1,9 +1,11 @@
 # 任务接续文档：小说生成质量优化（xuanqiong-wenshu）
 
-> 生成时间：2026-08-17
-> 分支：`codex/final-continuity-20260520`（领先 main 2 提交，落后 134 提交）
-> 工作区：**317 处未提交改动，必须全部保留**
-> 后端全量门禁基线：**742 passed in 62.50s**（2026-08-19 批 7 完成后实测，`python -m pytest app -q`）。历史值 659→661→668→679→688→691→718→742；CLAUDE.md 曾记录的 401、提交信息里的 401/401、前序会话记录的 648 均已过期，见 D-18）
+> 生成时间：2026-08-17（末次更新 2026-08-19，批 8 + 收尾审查）
+> 分支：`codex/final-continuity-20260520`（批 2-8 已提交并推送，见 `3e64060`）
+> 后端全量门禁基线：**`727 passed, 36 failed in 86.14s`**（2026-08-19 实测，**唯一可信值**）。
+> 命令**必须带四个 `-p no:` 开关**，见 §2.3——裸 `pytest app -q` 会假绿（D-26）。
+> **历史值 659→661→668→679→688→691→718→742 以及 401/401、648 全部作废**：不是过期，
+> 是由一个会静默吞测试的 runner 产出的（D-26）。36 个失败是先存欠账，非本轮引入（D-27）。
 > 本文档所有数值、行号、判定结果均为本轮实机执行所得，非推测。推测部分会显式标注「未验证」。
 
 ---
@@ -32,6 +34,12 @@
 1. **`backend/app/services/story_quality_scoring.py`（1525 行）是零引用的孤儿死代码**，与生产实现已漂移 7 处方法；生产路径用的是 `pipeline_orchestrator.py` 内联的另一份。**在孤儿文件上做的任何优化都不会影响生成的正文。**
 2. **孤儿文件里恰好躺着几处已写好、但从未接线生效的质量判定改进**（章末压力的非标点强钩子、倒计时正则、叙事压力词表）。接线即生效，是当前性价比最高的一步。
 3. **现有质量门存在可复现的漏判**：纯寒暄对话灌水的坏样本拿到 1039 分（好样本 1302 分）且 `event_density_passed=true`；章末压力门只要末尾有两个标点（`？` 和 `！`）即通过。
+
+> **🔴 2026-08-19 最重要的一条（后于下面所有内容，优先读）**：本文档此前记录的**全部**
+> 「全量 N passed / 全绿」结论都是假的——测试 runner 有插件冲突，会静默吞掉测试并返回
+> 退出码 0（**D-26**，P0）。**唯一可信基线是 `727 passed, 36 failed`**，其中 36 个失败是
+> 先于本轮存在的欠账（**D-27**）。接手第一件事是 **T-23 修 runner**，在那之前任何优化的
+> 验收都不成立。详见文档末尾「2026-08-19 本轮的三项结论」。
 
 > **第 1、3 条的状态已变**（2026-08-18，批 2-4 完成后）：第 3 条列的两个漏判**都已修复并被 `class TestBadSampleRegression` 锁住**（批 2 修章末压力、批 3 修事件密度、批 4 固化坏样本）。第 1 条的孤儿文件**还在**（T-19 排在批 10 最后）。**批 4 又暴露出一个同类问题：章末压力的 260 字尾窗会被正文钩子遮蔽（D-24），排进批 6。**
 
@@ -65,11 +73,31 @@
 
 ### 2.3 门禁命令与基线
 
-后端全量（**当前基线 742 passed**；历史 659 → 批 1 后 661 → 批 2 后 668 → 批 3 后 679 → 批 4 后 688 → 批 5 后 691 → 批 6 后 718 → 批 7 后 742）：
+> **2026-08-19 重大改正：本节此前记录的全部全量数字（659 / 661 / 668 / 679 / 688 / 691 / 718 / 742）
+> 都是不可信的。** 不是数字抄错，是**跑测试的命令本身会静默吞掉测试**：`pytest.ini` 的
+> `asyncio_mode = auto` 与 `anyio` 插件抢同一批异步测试，进程不走栈展开直接死，输出缓冲区
+> 整个丢失，而 `-q` 模式下 shell 拿到的退出码还是 0（假绿）。详见 D-26。
+>
+> **首个可信基线：`727 passed, 36 failed in 86.14s`（2026-08-19 实测）。**
+> 36 个失败不是本轮改坏的，是一直存在、之前从没跑到过（被崩溃掩盖）。构成见 D-26 / D-27。
+
+后端全量（**必须带这四个 `-p no:` 开关，缺一个就回到假绿**）：
 
 ```bash
-cd "/d/小说写作/xuanqiong-wenshu/backend" && .venv/Scripts/python.exe -m pytest -q
+cd "/d/小说写作/xuanqiong-wenshu/backend" && python -m pytest app -p no:randomly -p no:anyio -p no:seleniumbase -p no:sb_manager -q --timeout=120 --timeout-method=thread -rf
 ```
+
+四个开关各自的理由，**不要因为「看起来冗余」就删**：
+
+| 开关 | 不加会怎样 |
+|---|---|
+| `-p no:anyio` | 与 `asyncio_mode = auto` 冲突 → 进程猝死、输出丢失、假绿（D-26） |
+| `-p no:seleniumbase` | seleniumbase 硬拦 `--timeout`，抛 `Don't use --timeout=s from pytest-timeout!` 直接退出 |
+| `-p no:sb_manager` | 同上，seleniumbase 的第二个入口插件 |
+| `-p no:randomly` | 随机顺序会让状态污染类失败漂移，无法复现定位 |
+
+`--timeout=120 --timeout-method=thread` 是必需的：有测试会真的挂住（不是慢），没有单测超时
+就只能靠外层 `timeout` 砍掉整个进程，拿不到「是哪一个挂的」。
 
 后端定向（质量守卫，最常用）：
 
@@ -83,7 +111,14 @@ cd "/d/小说写作/xuanqiong-wenshu/backend" && .venv/Scripts/python.exe -m pyt
 cd "/d/小说写作/xuanqiong-wenshu/frontend" && npm run type-check && npm run test:run && npm run build-only
 ```
 
-**任何修改后，后端全量必须 ≥ 742 passed 且 0 failed**（批 7 完成后的现行基线）。若新增测试，基线随之上调（每批的目标值见 6.3 表）。提交信息里的测试数**必须是本次实测 `python -m pytest app -q` 的输出**，不要沿用上一次的数字——历史提交写的 `— 401/401` 现在已经差了 290 个（D-18 / T-21）。
+**任何修改后，后端全量必须 ≥ 727 passed，且失败数不得超过 36**（2026-08-19 实测基线）。
+注意这条门禁的形态和以前不一样：**现阶段允许有失败**，因为那 36 个是先于本轮存在的欠账
+（28 个 spec-first 未实现 + 8 个行为分歧，见 D-26 / D-27），不是本轮引入的。判断标准是
+**失败集合不能变大、也不能换人**——跑完拿 `-rf` 的列表和 D-26 的清单逐条对，多一条就是回归。
+
+提交信息里的测试数**必须是本次实测输出**，且必须写成 `N passed, M failed` 的完整形态，
+不许只写 passed 数。历史提交写的 `— 401/401`、以及本文档此前的 `742 passed`，都是假绿产物
+（D-18 / D-26）。
 
 **批 4 之后多了一道更快的护栏**：改任何质量门之前先跑 `-k "BadSampleRegression"`（9 条，约 3-13s），它比全量快一个数量级，且专门守着「坏样本必须被拦、正向对照不能被误杀」两个方向。全绿再跑全量。
 
@@ -256,23 +291,31 @@ cmd1 2>&1; echo "===EXIT $?==="; cmd2 2>&1
 
 ### 4.1 全量门禁基线
 
-```bash
-cd "/d/小说写作/xuanqiong-wenshu/backend" && PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -m pytest app -q -p no:cacheprovider
-```
+命令见 2.3（**必须带四个 `-p no:` 开关**）。
 
-**本轮末尾复验输出尾部：`659 passed in 83.58s`，exit code 0。以此为后续所有改动的对照基线。**
+**首个可信基线：`727 passed, 36 failed in 86.14s`（2026-08-19 实测，exit code 1）。**
 
-历史数字全部过期，不要引用：
+历史数字**全部作废，且作废的理由不是「过期」而是「测量工具坏了」**——它们由一个会静默
+吞测试的 runner 产出，既不是当时的真实值，也无法通过重跑复原：
 
 | 来源 | 数字 | 状态 |
 |---|---|---|
-| 提交信息 `32eafd3` / `57e7e1c` / `f869ec3` 等 | `401/401` | 过期 290 个 |
-| 前序会话记录 | `648 passed in 51.41s` | 过期 43 个 |
-| 本轮（改动前）实测 | `659 passed in 83.58s` | 已被批 1-5 上调 |
-| 批 1 / 批 2 / 批 3 / 批 4 实测 | `661` / `668` / `679` / `688` | 各批当时有效，现已过期 |
-| 批 5 实测 | `691 passed in 61.34s` | 已被批 6 上调 |
-| **批 6 实测** | **`718 passed in 55.80s`** | 已被批 7 覆盖 |
-| **批 7 实测（现行基线）** | **`742 passed in 62.50s`** | **有效** |
+| 提交信息 `32eafd3` / `57e7e1c` / `f869ec3` 等 | `401/401` | **假绿**（D-26） |
+| 前序会话记录 | `648 passed in 51.41s` | **假绿** |
+| 本轮（改动前）实测 | `659 passed in 83.58s` | **假绿** |
+| 批 1 / 批 2 / 批 3 / 批 4 实测 | `661` / `668` / `679` / `688` | **假绿** |
+| 批 5 实测 | `691 passed in 61.34s` | **假绿** |
+| 批 6 实测 | `718 passed in 55.80s` | **假绿** |
+| 批 7 实测 | `742 passed in 62.50s` | **假绿** |
+| **2026-08-19 修正 runner 后实测** | **`727 passed, 36 failed in 86.14s`** | **唯一有效** |
+
+为什么 727 比作废的 742 还少：那 742 里包含了被 anyio 冲突「跳过而计为通过」的测试，
+以及崩溃前已计数的部分；727 是在**全部测试真的被执行**的前提下数出来的。两个数字不可比。
+
+**这件事对本文档全部「已修复 ✅」标记的影响**：批 2-8 的定向测试（`test_generation_quality_guards.py`
+单文件、`-k BadSampleRegression`）**不受影响**——它们是同步测试，不碰 anyio，实测
+`167 passed, 21 failed` 可信。受影响的只有「全量全绿」这一类整体性结论。也就是说：
+**各批改对了没有，仍然有定向证据支撑；但「没有破坏别处」这个结论，此前从未被真正验证过。**
 
 `CLAUDE.md` 的 `Latest Progress` **现在也写了基线数字**（原先没写，是批 3 加进去的），所以每批完成后**要同时更新三处**：本文档 6.3 执行状态、本文档第 12 节当前进度、`CLAUDE.md`。详见 D-18。
 
@@ -1255,6 +1298,81 @@ and (critique_score is None or critique_score < 70)     # self_critique 给 ≥7
 
 ---
 
+### D-26（**P0，2026-08-19 新发现，优先级高于本文档所有其它条目**）测试 runner 假绿：`asyncio_mode = auto` 与 `anyio` 插件冲突，进程猝死且退出码为 0
+
+- **位置**：`backend/pytest.ini`（`asyncio_mode = auto`）＋ `backend/conftest.py:23-25`（`anyio_backend` fixture）＋ 各处 `@pytest.mark.anyio`。
+- **现象**：跑全量或跑较大目录时，pytest **静默死掉**——不抛异常、不打 traceback、输出缓冲区整个丢失。`-q` 模式下 shell 拿到的退出码是 **0**，看起来像"跑完了、全绿"；只有 `-v` 才能看到真实 `RC=1` 和"走到某个测试就没有下文"。崩溃点**随测试组合漂移**，所以单跑必过、合跑必崩，极易被误判成"环境抖动"。
+- **控制变量实证**（同一文件、同一顺序，只差一个开关）：
+
+| 命令 | 结果 |
+|---|---|
+| `pytest app/api/routers/test_style_profile_job.py` | `RC=1`，输出 0 字节，11 个 PASSED 后无下文 |
+| 同上 **`-p no:anyio`** | **`19 passed in 15.28s`，`RC=0`** |
+
+- **根因**：`plugins:` 行显示 `anyio-4.12.1` 与 `asyncio-1.3.0` 同时加载。`asyncio_mode = auto` 让 pytest-asyncio 接管**所有**协程测试，**包括**那些标了 `@pytest.mark.anyio`、本该由 `conftest.py` 的 `anyio_backend` fixture 驱动的。两个插件在不同事件循环上驱动同一个协程，进程不走栈展开就终止，缓冲区来不及 flush。
+- **影响（这是本条排 P0 的理由）**：**本文档与所有历史提交里的每一个"全量 N passed / 全绿"结论都是假的**（见 4.1 作废表）。更严重的是它的长期后果——在被修正之前，**任何人改任何代码，都无法知道有没有破坏别处**。批 2-8 的定向测试不受影响（同步测试，不碰 anyio），所以"各批改对了没有"仍有证据；但"没有破坏别处"从未被验证过。
+- **修复方案**（三条路，**倾向第 2 条**）：
+  1. 门禁命令永久加 `-p no:anyio`：最小改动，已验证有效，但把配置问题藏进了命令行，新人照 `pytest -q` 跑还是假绿。
+  2. **统一异步栈**：把 `@pytest.mark.anyio` 全部换成 pytest-asyncio 的标记（或反之），删掉多余的那个插件依赖。改动面大但根治，且让裸 `pytest` 也是可信的。
+  3. `pytest.ini` 里 `asyncio_mode = strict` + 显式标记：介于两者之间，需要给现有异步测试逐个补标记。
+- **验收**：裸跑 `python -m pytest app -q`（**不带任何 `-p no:`**）必须给出与门禁命令一致的 `passed/failed` 数，且退出码与结果一致（有失败时非 0）。
+- **顺带记两个次级环境陷阱**（同一次排查踩到，写在这里省得别人再踩）：
+  - **seleniumbase 硬拦 `--timeout`**：抛 `Don't use --timeout=s from pytest-timeout! Use --time-limit=s instead!` 并直接退出。必须 `-p no:seleniumbase -p no:sb_manager`。
+  - **后台命令的 `cd` 不跨调用保持**：必须在同一条命令里 `cd backend && python -m pytest ...`，否则报 `file or directory not found: app`。
+- **建议归属**：**批 8-F 之前的第 0 步**。在 runner 可信之前做任何优化，都是在没有仪表的情况下开车。
+
+---
+
+### D-27（**P0，2026-08-19 新发现**）36 个先存失败：28 个方法从未被实现（spec-first 欠账）＋ 8 个真实行为分歧
+
+- **来源**：D-26 修正 runner 后首次拿到完整结果 `727 passed, 36 failed`。**这 36 个不是本轮改坏的**——它们一直存在，只是被 anyio 崩溃掩盖着从没跑到过。
+- **A 组：9 个方法从未被实现，牵连 28 个失败。**
+
+| 缺失方法 | 失败数 | 涉及文件 |
+|---|---|---|
+| `_detect_generation_meta_leakage` | 5 | `test_generation_quality_guards.py` |
+| `_extract_segment_text` | 5 | `test_longform_segment_streaming.py` |
+| `_rebind_generation_run_if_needed` | 4 | `test_generation_run_rebind.py` |
+| `_summarize_generation_error` | 2 | `test_generation_quality_guards.py` |
+| `_normalize_generated_prose` | 2 | `test_generation_quality_guards.py` |
+| `_strip_leading_generation_meta` | 1 | 同上 |
+| `_resolve_writer_prompt_budget` | 1 | 同上 |
+| `_build_lean_chapter_mission` | 1 | 同上 |
+| `_resolve_scene_split_generation_soft_timeout` | 1 | `test_cloud_provider_resilience.py` |
+
+  余下 6 个失败是同批测试里 `orchestrator.guardrails`（测试自身对 `object.__new__` 实例的 setup，**不是**缺失方法）等连带项。
+
+- **"从未被实现"是怎么坐实的**（不是"可能被 checkout 擦了"，这点很重要，别再往恢复方向浪费时间）：
+  1. `git show HEAD^:...pipeline_orchestrator.py | grep -c "def <name>"` → 0
+  2. 当前工作区 `grep -c` → 0
+  3. `git log --all --oneline -S"def <name>"` → 0（全历史、全分支都没出现过）
+  4. **决定性一条**：扫描 `~/.claude/projects/D-------xuanqiong-wenshu/` 下**全部 154 个 transcript**（含 `subagents/` 与 `subagents/workflows/` 子目录），统计针对 `pipeline_orchestrator.py` 的 `Edit`/`Write`/`MultiEdit` 记录 → **恰好 97 次，全部来自主会话，且已全部重放**。而同期对**测试文件**的 48 次编辑完好无损。
+  → 结论：**测试先写、实现没写**。这是 spec-first 留下的欠账，不是代码丢失。
+- **A 组的好消息**：测试把契约钉得很死，照着写不用猜。举证（`test_generation_quality_guards.py:142-215`）：
+  - `_summarize_generation_error`：`LongformGenerationContractError` → 以 `"LongformGenerationContractError:"` 开头且 `len <= 360`；`HTTPException(503, detail={"code": "UPSTREAM_TIMEOUT", "message": "Provider 超时"})` → **精确等于** `"UPSTREAM_TIMEOUT: Provider 超时"`（结构化 detail 优先于状态码）。
+  - `_detect_generation_meta_leakage`：返回**命中标记列表**（`"the user wants"` / `"let's design"` / `"need at least"` / `"我来设计"` / `"让我写"`）；对 `"The lantern shook. 林七没有回头。"` 必须返回 `[]`；**对 `"林七沿着潮湿的石阶往下走。" * 180 + 泄漏句` 也必须返回 `[]`** —— 即存在**头部窗口上限**，与 D-24 的末段窗口是同一设计思路（只扫开头，不深入正文）。
+  - `_strip_leading_generation_meta`：`"They want:\n- Target: 1200 characters\n\nLet me design it.\n---\nDraft:\n顾沉推开门…"` → 精确剩下 `"顾沉推开门，看见火光贴着墙根逼近。"`（以 `---` / `Draft:` 为草稿边界）。
+  - `_resolve_writer_prompt_budget`：`(1200) == 1800`（1.5×）、`(5000) == 6000`（1.2×）→ 两段不同倍率。**它是既有三件套的缺失成员**：`_resolve_chapter_generation_max_tokens`（`pipeline_orchestrator.py:1561`）与 `_resolve_chapter_generation_soft_timeout`（同文件 `:1331`）都已存在且被 8 处调用。这说明这批方法是当前架构的既定组成部分，不是凭空发明。
+  - `_build_lean_chapter_mission`：`mission["generation_source"] == "local_short_chapter_contract"`；`continuity_anchor["inherit_from_previous"] == [previous_tail]`；`scene_list[0]["word_budget"] == target_word_count` 且 `conflict` / `end_hook` 非空。
+- **B 组：8 个真实行为分歧**（实现与测试的约定不一致，**必须先判"哪边对"再动手**）：
+
+| 断言 | 实现实际值 | 测试预期 | 性质 |
+|---|---|---|---|
+| `_resolve_chapter_mission_timeout(700)` | `30.0` | `20.0` | 阈值约定不一致 |
+| `_resolve_chapter_generation_max_tokens(700)` | `3200` | `2200` | 阈值约定不一致 |
+| `_build_stable_retry_config(short)` | 返回 `PipelineConfig` | `None` | 短章不该走整章重试 |
+| `_build_stable_retry_config(longform)` | 返回 `PipelineConfig` | `None` | 长章同上 |
+| `guard["dialogue_state_change_markers"]` | `0` | `>= 2` | **落在批 8 T-13 上，见下** |
+| `'mission_progression_weak' not in reasons` | 在里面 | 不该在 | 原因码进出不符 |
+| `'word_count_far_below_target' not in reasons` | 在里面 | 不该在 | 原因码进出不符 |
+| `'chapter_progression_weak' in blockers` | 不在（实际是 `insufficient_dialogue_pressure` / `static_description_risk`） | 该在 | 原因码进出不符 |
+
+- **B 组第 5 行要单独记一笔（对批 8 的结论有修正作用）**：`test_dialogue_state_guard_recognizes_concrete_revelation_choice_and_external_pressure` 期望该样本的 `dialogue_state_change_markers >= 2`，实测 **0**。这**不是**三态逻辑（T-13）写错了——三态的 21 项定向测试与 24 项文本变异反向验证都通过——而是 **`_count_dialogue_state_change_markers` 的标记识别覆盖不足**：该样本里的"具体揭示 / 做出选择 / 外部压力"三类语义，词表一个都没认出来。
+  → **所以 T-13 不能算完全闭环**：判定的三分支结构对了，但喂给它的标记计数偏低，会让本该 `True` 的样本落到"未声明预期 + 计数不足门槛"那条路。修法属于词表扩充（与 D-06 章末压力词表过拟合同类问题），**必须走真实语料校准**（§11.2.1），不能凭直觉加词。
+- **建议归属**：A 组 = **批 8-F**（新实现，9 个方法）；B 组 = **批 8-G**（先定性再改，其中 `dialogue_state_change_markers` 词表扩充需真实语料校准）。两批都必须在 D-26 修好之后做。
+
+---
+
 ## 6. 优化方案总表
 
 ### 6.1 任务编号与执行顺序（**这一节是接手后的行动清单**）
@@ -1285,6 +1403,13 @@ and (critique_score is None or critique_score < 70)     # self_critique 给 ≥7
 | **T-19** | 删除孤儿文件 `story_quality_scoring.py` | D-01 | P2 | 低 | −1525 行 | T-10…T-17 |
 | **T-20** | EXTRACTABLE 注释去掉行号 | D-17 | P3 | 零 | ~3 行 | 无 |
 | **T-21** | 提交信息约定改为「全量通过/增量」 | D-18 | P3 | 零 | 0 行 | 无 |
+| **T-23** | **修 runner 假绿：统一异步栈（`asyncio_mode` 与 `anyio` 二选一）** | **D-26** | **P0** | 中 | ~30 行配置＋标记 | **无（必须最先做）** |
+| **T-24** | 实现 9 个从未落地的方法（契约已由测试钉死） | **D-27 A 组** | P0 | 高 | ~350 行 | T-23 |
+| **T-25** | 定性并修 8 个行为分歧（阈值 4 项 / 原因码 3 项 / 词表 1 项） | **D-27 B 组** | P1 | 中 | ~40 行 | T-23 |
+| **T-26** | `_count_dialogue_state_change_markers` 词表扩充（**须真实语料校准**） | D-27 B 组第 5 行 | P1 | 中 | ~20 行 | T-25 |
+
+> **T-23 是新的关键路径起点。** 它排在 T-01 之前——在 runner 会静默吞测试的前提下，
+> 其余任何任务的"全量全绿"验收都无法成立（D-26）。
 
 ### 6.2 依赖图（关键路径）
 
@@ -1326,8 +1451,15 @@ T-20 / T-21（独立，随时可做；注意 T-21 是"提交信息约定"，别�
 | **批 3（事件密度，核心）** | T-04, T-05, T-06 | 事件密度门方向修正，灌水对话不再拿满推进 | +6（+3 / +1 / +2）→ 实际 **+11** | **674 passed** ✅ 实测 **679** |
 | **批 4（回归测试）** | T-07 | 5 种已实现的失败形态固化 + 1 个防误杀锚点 | +8 → 实际 **+9** | **687 passed** ✅ 实测 **688** |
 | **批 5（修复闭环，加 blocker 前必做）** | **T-22** | 部分改善不再被丢弃，拒稿率不随 blocker 增加而爆炸 | +2 → 实际 **+3** | **690 passed** ✅ 实测 **691** |
-| **批 6（静态与重复）** ✅ | T-08, T-09, T-10 | 纯描写与复制段落被拦下（**外加 D-24 尾窗遮蔽、D-25 静态连段覆盖缺口**） | 计划 +5，**实际 +27** | **718 passed**（实测） |
-| **批 7（字数与人物）** ✅ | T-11, T-12 | 候选选择考虑字数与焦点人物；质量门用真实配置 | 计划 +7，**实际 +24** | **742 passed**（实测） |
+| **批 6（静态与重复）** ✅ | T-08, T-09, T-10 | 纯描写与复制段落被拦下（**外加 D-24 尾窗遮蔽、D-25 静态连段覆盖缺口**） | 计划 +5，**实际 +27** | ~~718 passed~~ **假绿（D-26）** |
+| **批 7（字数与人物）** ✅ | T-11, T-12 | 候选选择考虑字数与焦点人物；质量门用真实配置 | 计划 +7，**实际 +24** | ~~742 passed~~ **假绿（D-26）** |
+| **批 8（三态与短路）** ✅ | T-13, T-14 (+D-22) | 「没测过」不再冒充「通过」；前端 `null` 不显示成风险 | 计划 +7，**实际 +21** | 定向 **167 passed, 21 failed**（可信） |
+| **T-23（修 runner）** ⏳ | **D-26** | **裸 `pytest` 也能给出可信数字** | 0（改配置） | **首个真正可信的全量值** |
+| **T-24 / T-25 / T-26** ⏳ | D-27 | 9 个方法落地 + 8 项分歧定性 + 词表校准 | 0（让现存 36 条转绿） | 目标 **763 passed, 0 failed** |
+
+> **这张表从批 6 起的「全量」列已不可用**（D-26）。批 8 起改为记录**定向测试的完整形态**
+> （`N passed, M failed`），因为定向测试是同步的、不受插件冲突影响，是当前唯一可信的证据。
+> T-23 完成后，本列恢复记录全量值。
 | **批 8（三态与短路）** | T-13, T-14 | 消除「零对话却说对话改变局势」等假阳性 | +5（+3 / +2） | **730 passed**（前端 `chapterQuality.spec.ts` 另 +2，见 D-22） |
 | **批 9（权重重配）** | T-16 | 好坏分差从 20% 提到 ≥45% | +2 | **732 passed**，**影响面最大** |
 | **批 10（清理与收尾）** | T-17, T-18, T-19 | 确定性清理生效，孤儿文件删除 | +6（+3 / +2 / +1） | **738 passed** |
@@ -2335,6 +2467,24 @@ cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m 
 
 ---
 
+### 批 8 实际落地记录（2026-08-18 ~ 2026-08-19）
+
+**结果**：`test_generation_quality_guards.py` 实测 **`167 passed, 21 failed`**（21 个失败全是 D-27 A 组的先存欠账，与本批无关）。三态改造本身全绿。
+
+**T-13 落地**：三态 + `dialogue_expectation_declared` + `dialogue_state_applicable` 按方案做完，**四层消费点全部改成 `is False` 显式判定**（gate blocker / 定向修复清单 / 重试原因码 / AI 复核覆盖）。定标实测分差：`True-None = 140`、`None-False = 140`——即 `None` 落在正中间，既不加分也不倒扣，这正是三态想要的语义。
+
+**T-14 落地**：短路分支三个 `passed` 全改 `None`，比率类改 `None` 而非 `0`（避免前端画出一根 0 的进度条），加 `event_density_evaluated` / `event_density_skip_reason` 双标记。计分从两分支改三分支，实测旧写法把 `None` 当失败合计倒扣 **490** 分。
+
+**反向验证（`_probe_b8e_tests.py`，24 个文本变异全部被捕获）**：与批 6 / 批 7-C 同法——**改源码字符串而非 `setattr`**，因为这两个缺陷的判据全写在函数体里（`is False` / `is not False` / 三分支 if），换类属性碰不到。脚本在 `finally` 里还原并比对 sha256，且**按当前文件行尾编码锚点**（CRLF 文件里用 LF 锚点一个都匹配不到；`read_text`/`write_text` 会把行尾整体归一，导致"内容还原了但整个文件被重写"）。
+
+**D-22 前端落地**：`chapterQuality.ts` 补 3 条 event_density 兜底文案，并加一条测试钉住**三态 `null` 不得显示成风险**（`treats null tri-state metrics as not-applicable rather than failures` → `issues == []`、`tone == 'success'`）。这条是本轮核心谎报的前端侧闭环。
+
+**⚠️ T-13 的遗留缺口（不能算完全闭环）**：见 D-27 B 组第 5 行——`_count_dialogue_state_change_markers` 对"具体揭示 / 做出选择 / 外部压力"三类语义**一个都认不出来**（该样本实测 0 个标记，测试要求 ≥2）。三分支结构是对的，但喂进去的计数偏低，会让本该 `True` 的样本落到"未声明预期 + 计数不足门槛"那条路。**修法归 T-26，须走真实语料校准。**
+
+**本批的一次事故（教训比成果重要）**：期间执行 `git checkout` 覆盖了 `pipeline_orchestrator.py`，抹掉了当时未提交的生产改动。**恢复办法已验证可行**：扫 `~/.claude/projects/<项目>/` 下全部 transcript（`rglob("*.jsonl")`，**必须含 `subagents/` 与 `subagents/workflows/` 子目录**），提取针对目标文件的 `Edit`/`Write` 记录按时间戳排序重放（脚本见 `_recover_scan.py` / `_recover_replay.py`）。本次重放 97 次编辑全部成功。**但这不是安全网**——它只能救回"曾经通过工具写入过"的内容，且 D-27 证明了**扫不到的东西就是从来没写过**，别指望恢复。**动 `git checkout` / `git restore` 前先 `git stash` 或 `git diff > backup.patch`。**
+
+---
+
 ### 批 9：权重重配（T-16）—— **对生产行为影响最大的一批**
 
 #### T-16 两段式评分：有上限的资格分 + 无上限的质量分（对应 D-09）
@@ -2621,7 +2771,29 @@ cd /d/小说写作/xuanqiong-wenshu/backend && rm -f _probe_bypass.py _probe_hoo
 rm -f _probe_b7_cfg.py _probe_b7_keys.py _probe_b7_corpus.py _probe_b7_corpus2.py _probe_b7_score.py _probe_b7_t11.py _probe_b7c_tests.py _probe_b7_verify.py _probe_b7c_reverse.py
 ```
 
-> **进度**（2026-08-19，批 7 完成后）：**backend 目录下没有遗留的 `_probe*` / `_reverse_verify*` / `*.bak` 文件**（批 7 的 8 个探针也已删除）。批 2/3/4/6/7 的样本与断言值都已固化进 `test_generation_quality_guards.py`（167 条）；阈值校准结论、反向验证结果、D-24/D-25 的关闭记录已分别写进第 7 节各批落地记录、§11.2.1 批 6/批 7 分位表与第 5 节缺陷清单。
+**批 8 的探针（2026-08-19 实测仍在盘上，⏳ 待删）**：
+
+| 文件 | 用途 | 处置 |
+|---|---|---|
+| `_probe_b8_corpus.py` / `_probe_b8_keys.py` / `_probe_b8_order.py` / `_probe_b8_x.py`（批 8-A） | 真实语料量化 T-13/T-14 影响面、摸 metadata 键路径与判定顺序 | 数据已进批 8 落地记录，⏳ 待删 |
+| `_probe_b8e_calib.py`（批 8-E） | 定标：三态在真实评分器上的分差（`True-None=140` / `None-False=140`；密度旧写法倒扣 490） | 数值已进批 8 落地记录，⏳ 待删 |
+| `_probe_b8e_tests.py`（批 8-E） | **24 个文本变异反向验证**，含 sha256 还原校验与行尾编码对齐 | 24/24 必红已进落地记录，⏳ 待删 |
+
+**批 8 事故遗留的恢复工具（⏳ 待删，但方法必须留在文档里）**：`_recover_scan.py`（扫 transcript 提取编辑记录，**`rglob` 必须含 `subagents/`**）、`_recover_replay.py`（按时间戳重放）、`_recover_show.py`、`_recover_edits.json`（97 条编辑记录）、`_rec_*_old.txt` / `_rec_*_new.txt`（14 个逐条比对样本）。
+
+**其它遗留物（⏳ 待删）**：`_head_po.py.tmp` / `_head_test.py.tmp` / `_po_head_backup.py.tmp`、`app/services/task_runtime.py.orig`、`app/api/routers/.research.patch`、`storage/.real-asgi-*.db.migration.lock`（**51 个**，测试跑出来的迁移锁残留）。
+
+**批 8 清理命令**：
+
+```bash
+cd /d/小说写作/xuanqiong-wenshu/backend && rm -f _probe_b8_corpus.py _probe_b8_keys.py _probe_b8_order.py _probe_b8_x.py _probe_b8e_calib.py _probe_b8e_tests.py _recover_scan.py _recover_replay.py _recover_show.py _recover_edits.json _rec_*_old.txt _rec_*_new.txt _head_po.py.tmp _head_test.py.tmp _po_head_backup.py.tmp app/services/task_runtime.py.orig app/api/routers/.research.patch
+```
+
+```bash
+cd /d/小说写作/xuanqiong-wenshu/backend && rm -f storage/.real-asgi-*.db.migration.lock
+```
+
+> **进度**（2026-08-19，批 8 完成后）：批 1-7 的探针**已全部清完**；**批 8 的 6 个探针 + 4 个恢复脚本 + 14 个比对样本 + 3 个 `.tmp` + 51 个迁移锁尚在盘上**（命令见上）。批 2/3/4/6/7/8 的样本与断言值都已固化进 `test_generation_quality_guards.py`（188 条收集，167 passed）；阈值校准结论、反向验证结果、D-24/D-25 的关闭记录已分别写进第 7 节各批落地记录、§11.2.1 批 6/批 7 分位表与第 5 节缺陷清单。
 >
 > **批 6 探针的一个做法差异（值得抄）**：前几批的反向验证用运行时 `setattr` 改坏类属性，批 6 改成**直接改源码文本再跑 pytest**，跑完写回原文并 `diff` 校验。原因是本批有 5 处改坏点在函数体内部（`or` 分支、判罚表达式、blocker 分支、调用点传参），`setattr` 碰不到；而"改文本"顺带能验证锚点是否还在——第一轮就有 3 条因锚点缩进不对而报「锚点失配」，那本身就是有效信号（说明我记的代码形态和实际不符）。**代价是必须保证异常路径也写回原文**（用 `try/finally` + 末尾 diff 校验）。
 
@@ -2775,7 +2947,17 @@ cd /d/小说写作/xuanqiong-wenshu && git status --short | head -20 ; git branc
 cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m pytest app -q 2>&1 | tail -5
 ```
 
-期望看到 **`742 passed`**（批 7 完成后的基线；±几个取决于是否已有人动过）。若遇 `exit 143` 而没有 `N passed` 行，见第 7 节批 7 落地记录里的环境坑说明，先清残留 python 进程再重跑。**如果数字差很多，先弄清为什么，不要直接开始改。**
+> **⚠️ 上面这条命令是坏的，不要用。** 裸 `pytest app -q` 会触发 D-26 的假绿：进程猝死、
+> 输出丢失、退出码 0。**用 2.3 的四开关版本**：
+>
+> ```bash
+> cd /d/小说写作/xuanqiong-wenshu/backend && python -m pytest app -p no:randomly -p no:anyio -p no:seleniumbase -p no:sb_manager -q --timeout=120 --timeout-method=thread -rf
+> ```
+
+期望看到 **`727 passed, 36 failed`**（2026-08-19 实测，唯一可信基线）。**看到失败不要慌**——
+那 36 个是先存欠账（D-27），不是有人改坏了。拿 `-rf` 的清单和 D-27 的表逐条对：**条目一致
+就是正常起点；多出任何一条才是回归。** 如果你看到的是"742 passed 全绿"，说明你用的是裸命令
+（假绿），回上面重跑。
 
 ```bash
 cd /d/小说写作/xuanqiong-wenshu/backend && grep -rn "plain_run_limit\|_score_fallback_candidate" app | grep -v "def _score_fallback_candidate"
@@ -2807,7 +2989,12 @@ cd /d/小说写作/xuanqiong-wenshu/backend && PYTHONIOENCODING=utf-8 python -m 
 6. **批 6（T-08 / T-09 / T-10 + D-24 / D-25）** —— ✅ 已完成（实测 **718 passed in 55.80s**）。T-09 重建动作词表（**根因是高频单字**而不只是自然现象动词）、T-08 补第 4 条判定（第 2 条门槛按真实语料保持 `>= 3`）、T-10 照搬重复检测并做第 12 类硬 blocker、D-24 改成「保留 260 尾窗 + 末段否决」（缩窗的 6 个变体全部更差）、D-25 改成四条 or 各配互斥样本。新增 27 条测试分 4 个类，反向验证 16/16 必红。**D-24 与 D-25 两条缺陷至此关闭。**
 
 7. **批 7（T-11 / T-12）** —— ✅ 已完成（实测 **742 passed**）。焦点人物缺席进候选评分（判罚 −240，不加 blocker）；字数四层断链全修（三判罚 620/520/180、`upper` 系数 2.0/1.6、第 3 层必填 / 第 4 层默认 0 故意不对称）。真实语料 n=99 校准表见 §11.2.1「批 7 表」。反向验证 14/14 必红，**其中 6 项首轮假绿全是探针 bug**（选择器 deselect、改坏点不在判定路径、只替换了 2 处中的 1 处），方法论已写进批 7 落地记录。
-8. **批 8（T-13 / T-14）—— 下一步就做这个**。`dialogue_changes_state` 改三态 + 事件密度短路返回值改 `None`。基线从 **742** 起算。两条都是「白给通过」类缺陷，**T-13 步骤 1 会让既有测试变红**（第 7 节已标），变红后先判断是修复误杀还是原测试固化了错误行为。之后按 6.3 的批 9-10 顺序执行。
+8. **批 8（T-13 / T-14 + D-22）** —— ✅ 已完成（`test_generation_quality_guards.py` 实测 **167 passed, 21 failed**，21 个失败全是 D-27 先存欠账）。三态改造 + 短路返回 `None` + 前端兜底文案，反向验证 24/24 必红。定标分差：`True-None = 140`、`None-False = 140`（三态语义正确）；旧两分支写法把密度 `None` 当失败合计倒扣 **490**。**T-13 留一个缺口未闭环**（标记词表认不出三类语义，见 D-27 B 组第 5 行 → T-26）。本批还发生了一次 `git checkout` 覆盖未提交代码的事故，恢复方法与教训见第 7 节「批 8 实际落地记录」。
+
+9. **T-23（D-26）—— 下一步必须先做这个，优先级高于批 9**。修 runner 假绿：`asyncio_mode = auto` 与 `anyio` 插件冲突，导致本文档此前**所有**"全量全绿"结论作废。**在这一条修好之前，任何优化任务的验收都不成立**——你无法知道改动有没有破坏别处。三条修法见 D-26，倾向"统一异步栈"（根治，让裸 `pytest` 也可信）。
+10. **T-24（D-27 A 组）**。实现 9 个从未落地的方法。契约已由 28 条现存测试钉死（精确返回值、长度上限、头部窗口边界都有），照着写不用猜；`_resolve_writer_prompt_budget` 是既有三件套的缺失成员（另两个在 `pipeline_orchestrator.py:1331` / `:1561`，已被 8 处调用）。
+11. **T-25 / T-26（D-27 B 组）**。8 个真实行为分歧，**先定性"哪边对"再改**：4 项阈值约定不一致、3 项原因码进出不符、1 项词表覆盖不足。其中 T-26（`_count_dialogue_state_change_markers` 扩词）**必须走 §11.2.1 的真实语料校准**——它与 D-06 章末压力词表过拟合是同类问题，凭直觉加词会重演批 3「合成样本定阈值、真实语料误杀 96%」的错误。
+12. 之后才按 6.3 的批 9-10 顺序执行（T-16 权重重配 / T-17-T-19 清理收尾）。
 9. **E-08（离线评测脚本）建议尽早插入**（原计划排在批 3 与批 4 之间，已错过窗口，**批 6 已完成，现在就是补它的窗口**），这样批 9（权重重配）才有数据依据。批 3 的 11.2.1 真实语料探针已经把「怎么读 DB、怎么剔退化文本、怎么脱敏」跑通了，E-08 可以直接照搬那套取样逻辑。
 
 **如果只有很少时间，做这三件事**（按性价比排序，**三项均已完成**）：
@@ -3078,10 +3265,24 @@ cd /d/小说写作/xuanqiong-wenshu && git diff --stat backend/app/services/pipe
 ## 文档完成状态
 
 - **第 0-12 节 + 附录 A/B/C 全部完成。**
-- 缺陷清单：**D-01 ～ D-25**（25 条。本轮新增实证 5 条：D-19 死代码、D-20 字数配置断链、D-21 修复闭环、D-22 前端兜底缺口，以及 D-02 的第二根因「纯连词污染词表」；批 2 新增 D-23；**批 4 新增 D-24 尾窗遮蔽、D-25 静态连段无覆盖**）。**已修：D-02 / D-03 / D-04 / D-06 / D-08 / D-10 / D-16-a / D-16-c / D-17 / D-19 / D-21 / D-24 / D-25。**
-- 修复任务：**T-01 ～ T-22**（22 条，分 10 批）。**已完成 T-01～T-10 与 T-15、T-20、T-21、T-22（批 1-6）**；D-24/D-25 已随批 6 关闭，不单独占编号。
+- 缺陷清单：**D-01 ～ D-27**（27 条。本轮新增实证 5 条：D-19 死代码、D-20 字数配置断链、D-21 修复闭环、D-22 前端兜底缺口，以及 D-02 的第二根因「纯连词污染词表」；批 2 新增 D-23；批 4 新增 D-24 尾窗遮蔽、D-25 静态连段无覆盖；**2026-08-19 新增 D-26 runner 假绿（P0）、D-27 36 个先存失败（P0）**）。**已修：D-02 / D-03 / D-04 / D-06 / D-07 / D-08 / D-10 / D-15 / D-16-a / D-16-c / D-17 / D-19 / D-21 / D-22 / D-24 / D-25。**
+- 修复任务：**T-01 ～ T-26**（26 条）。**已完成 T-01～T-15 与 T-20、T-21、T-22（批 1-8）**；D-24/D-25 已随批 6 关闭，D-22 随批 8 关闭，均不单独占编号。**新增 T-23（修 runner，P0）/ T-24（实现 9 个方法）/ T-25 / T-26。**
 - 增强任务：**E-01 ～ E-11**（12 项，含 E-01.1 / E-01.2 拆分）。**全部待办。**
-- **代码改动进度：批 1-7 已完成，全量基线 659 → 742。** 下一步是批 8（T-13 / T-14），见第 12 节。
+- **代码改动进度：批 1-8 已完成。** 但**全量基线的历史序列（659 → 742）全部作废**——它们由一个会静默吞测试的 runner 产出（D-26）。**唯一可信基线：`727 passed, 36 failed`（2026-08-19）。** 下一步是 **T-23 修 runner**，不是批 9，见第 12 节。
+
+---
+
+## 2026-08-19 本轮（批 8 + 收尾审查）的三项结论
+
+这三条改变了文档的可信度基础，单独列出来，接手人**先看这里再看别处**：
+
+**① 测量工具是坏的（D-26，P0）。** `pytest.ini` 的 `asyncio_mode = auto` 与 `anyio` 插件抢同一批异步测试，进程猝死、输出缓冲区丢失、`-q` 下退出码还是 0。控制变量实证：同一文件裸跑 `RC=1` 且输出 0 字节，加 `-p no:anyio` 则 `19 passed in 15.28s`。**后果是本文档与所有历史提交里的每一个"全量全绿"都是假的**，包括 §2.3 的 742、§4.1 的整张历史表、以及提交 `32eafd3` / `57e7e1c` 的 `401/401`。定向测试（同步、不碰 anyio）不受影响，所以"各批改对了没有"仍有证据；**但"没有破坏别处"这个结论从未被真正验证过。**
+
+**② 修好 runner 后首次拿到完整结果：`727 passed, 36 failed`（D-27，P0）。** 36 个失败**不是本轮改坏的**，是一直存在、被崩溃掩盖着从没跑到过。构成是 28 个 spec-first 欠账（9 个方法从未被实现）＋ 8 个真实行为分歧。"从未被实现"经四重排除坐实：HEAD^ / 工作区 / `git log --all -S` 全为 0，且**扫描全部 154 个 transcript（含 `subagents/` 与 workflows 子目录）确认针对该文件的写入恰好 97 次、已全部重放**，而同期对测试文件的 48 次编辑完好无损。**别再往"恢复"方向浪费时间——扫不到的东西就是从来没写过。**
+
+**③ 批 8 本体完成，但 T-13 留一个缺口。** 三态改造 + 短路返回 `None` + 前端兜底文案落地，反向验证 24/24 必红，定标分差 `True-None=140` / `None-False=140`。**缺口**：`_count_dialogue_state_change_markers` 对"具体揭示 / 做出选择 / 外部压力"三类语义一个都认不出来（实测 0 个标记，测试要求 ≥2）。三分支结构是对的，喂进去的计数偏低——归 T-26，**须走真实语料校准**。
+
+**一条方法论教训（比上面三条更通用）**：本轮花了大量时间在"全量跑不出数字"上反复试超时、试分片、试插件组合，中途一度把原因归结为"网络/DB 依赖测试"和"Windows 长时间静默输出被判超时"——**两个归因都是错的**。真正定位靠的是**控制变量**：同一文件、同一顺序，只改一个开关。**下次遇到"时快时慢、时红时绿、单跑必过合跑必崩"，先怀疑工具链冲突，别怀疑被测代码；并且第一件事是让失败可复现，而不是让它消失。**
 
 **本轮收尾时做的一致性修正**（记在这里是为了让接手人知道哪些数字被动过、别再拿旧版数字对照）：
 
