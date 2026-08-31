@@ -68384,3 +68384,32 @@ production_readiness：false
 GitHub 推送：已执行
 Bohrium-2 fast-forward：待当前提交推送后执行
 ```
+
+---
+
+# 最终同步校验｜2026-09-01
+
+```text
+GitHub 分支：origin/codex/bohrium-integration-20260831
+GitHub HEAD：fc2209a8702b5e44d217f44189b560d9b170d485
+Bohrium-2 HEAD：fc2209a8702b5e44d217f44189b560d9b170d485
+远端工作树：clean
+远端 API：RUNNING
+远端 Nginx：RUNNING
+远端 Tunnel：RUNNING
+远端内部 /api/health：200
+数据库 SHA-256：de6627bbaf02c64835b0cf3529832412bd3103692fe6197ea7e4cec3b6749a85
+```
+
+最终全量验证：
+
+```text
+后端：1399 passed
+前端：74 files / 424 tests passed
+前端 type-check：passed
+前端 build-only：passed
+```
+
+当前公开入口仍为 Quick Tunnel 临时地址；固定域名、稳定 Tunnel 和 Bohrium 平台固定端口属于后续 CARD-007 运维项。之后每次优化必须遵循：Bohrium-2 修改 → 测试 → 任务文档记录 → 独立 commit → GitHub push → Bohrium-2 fast-forward → 健康检查 → 回退点记录。
+
+本项目仍未修改小说正文，也未生成十万字小说。
