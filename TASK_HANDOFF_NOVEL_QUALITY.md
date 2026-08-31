@@ -68142,3 +68142,219 @@ npm run type-check：退出码 0
 ``
 
 本批次未修改小说正文，未生成十万字小说。
+
+---
+
+# 2026-08-31｜Bohrium-2 无损部署与前端公网入口记录｜DEPLOY-BOHRIUM2-20260831
+
+## 1. 发布目标与结果
+
+本批次将已推送的整合分支部署到 Bohrium-2，采用原生 Python + Nginx + 独立 Supervisor + Cloudflare Quick Tunnel，而不是依赖远端不存在的 Docker。发布版本为：
+
+```text
+GitHub 分支：origin/codex/bohrium-integration-20260831
+代码提交：89b0049e0fff6dc28db4f3e9c3fa4abf5edd0479
+本地整合提交：d080022
+前端布局提交：3214e1d
+布局记录提交：89b0049
+```
+
+发布完成状态：
+
+```text
+Bohrium-2 SSH：connected
+远端代码目录：/opt/xuanqiong-wenshu
+远端 API：RUNNING，绑定 127.0.0.1:18081
+远端 Nginx：RUNNING，绑定 0.0.0.0:18080
+远端 Cloudflare Quick Tunnel：RUNNING，由项目独立 Supervisor 管理
+远端内部 /api/health：200
+本地经公开 Tunnel /：200
+本地经公开 Tunnel /api/health：200
+OpenClaw 50001/50003：仍在监听，未被本项目覆盖
+```
+
+## 2. 部署架构
+
+```text
+浏览器
+  -> Cloudflare Quick Tunnel（临时公网入口）
+  -> Bohrium-2 Nginx :18080
+  -> 静态前端 /opt/xuanqiong-wenshu/frontend/dist
+  -> /api/ 反向代理
+  -> Uvicorn / FastAPI 127.0.0.1:18081
+  -> SQLite /opt/xuanqiong-wenshu/backend/storage/xuanqiong_wenshu.db
+```
+
+Bohrium-2 原有 OpenClaw 服务使用端口 50001/50003；本项目只使用 18080、18081 和 Cloudflare Tunnel 的本地 metrics 端口，不覆盖已有服务、原 Supervisor 配置或平台守护进程。
+
+## 3. 数据无损迁移证据
+
+本地正式 SQLite 数据库先采用 SQLite backup API 创建一致性快照，然后上传到 Bohrium-2；上传后的远端数据库 SHA-256 与本地备份一致：
+
+```text
+DE6627BBAF02C64835B0CF3529832412BD3103692FE6197EA7E4CEC3B6749A85
+```
+
+同步对象：
+
+```text
+backend/storage/xuanqiong_wenshu.db
+backend/storage/novel_imports/
+backend/storage/style_uploads/
+```
+
+本地回退资产：
+
+```text
+D:\小说写作\xuanqiong-wenshu\audit\rollback-snapshots\20260901\pre-bohrium-data\xuanqiong_wenshu.db
+D:\小说写作\xuanqiong-wenshu\audit\rollback-snapshots\20260901\pre-bohrium-data\novel_imports.tgz
+D:\小说写作\xuanqiong-wenshu\audit\rollback-snapshots\20260901\pre-bohrium-data\style_uploads.tgz
+```
+
+远端发布清单：
+
+```text
+/opt/xuanqiong-wenshu/run/release.json
+```
+
+该清单记录发布提交、端口、数据 hash、当前临时公网地址和回退目录；运行配置 `runtime.env` 不进入 Git。
+
+## 4. 远端运行配置与服务管理
+
+远端已安装并使用：
+
+```text
+Python 3.12 virtualenv
+Node 22 / npm
+Nginx
+rsync
+独立 Supervisor 实例
+cloudflared
+```
+
+项目独立 Supervisor 配置：
+
+```text
+/opt/xuanqiong-wenshu/run/supervisord.conf
+```
+
+受管进程：
+
+```text
+xuanqiong-wenshu-api
+xuanqiong-wenshu-nginx
+xuanqiong-wenshu-tunnel
+```
+
+运行配置：
+
+```text
+/opt/xuanqiong-wenshu/runtime.env
+权限：0600
+ENVIRONMENT=production
+DEBUG=false
+DB_PROVIDER=sqlite
+```
+
+生产启动时发现导入环境中的管理员默认口令属于项目拒绝启动名单，因此只修改了**运行配置中的默认建库口令**为随机非默认值；导入 SQLite 内已有用户记录和密码哈希未被改写。
+
+## 5. 前端公网入口
+
+当前已验证的临时公网入口：
+
+```text
+https://translate-properties-sussex-subscription.trycloudflare.com
+```
+
+验证结果：
+
+```text
+GET /                 -> 200 text/html
+GET /api/health       -> 200 application/json
+响应内容              -> {"status":"healthy","app":"玄穹文枢 API","version":"1.0.0"}
+```
+
+Bohrium-2 公网 IP 直连 `18080` 当前未开放，因此采用 Quick Tunnel。该地址属于临时地址：Tunnel 进程重新创建后 URL 可能改变，且没有账户级 SLA。稳定公网域名属于后续运维工作，需要 Cloudflare Named Tunnel 或 Bohrium 平台开放固定端口/域名后替换；在该项完成前，不将临时 URL 写成永久生产域名。
+
+## 6. 回退方案
+
+代码回退：
+
+```text
+GitHub 当前部署分支：codex/bohrium-integration-20260831
+整合基线：d080022
+布局回退点：d080022
+当前部署记录：89b0049
+```
+
+远端回退资产：
+
+```text
+/opt/xuanqiong-wenshu.predeploy-20260901
+```
+
+数据回退资产：
+
+```text
+本地 SQLite backup 快照及上传目录压缩包，路径见第 3 节
+```
+
+回退原则：
+
+```text
+1. 先停止 xuanqiong-wenshu 独立 Supervisor 进程组。
+2. 保留当前 /opt/xuanqiong-wenshu 和 SQLite 数据副本，不直接删除。
+3. 以 Git 提交或保留发布目录恢复代码。
+4. 仅在确认需要数据回滚时，用 SQLite backup 快照恢复数据库和上传目录。
+5. 重启项目独立 Supervisor，执行 /api/health 和公开 Tunnel 验证。
+6. 不使用 git reset --hard 覆盖远端工作树，不操作 OpenClaw 进程或端口。
+```
+
+## 7. 后续优化强制工作流
+
+从本记录起，后续项目优化按以下顺序进行：
+
+```text
+1. SSH 到 bohrium-cloud-second。
+2. 在 /opt/xuanqiong-wenshu 的 Git worktree 执行优化；不在运行数据目录直接写源码。
+3. 每次修改补测试并执行相应后端/前端验证。
+4. 在 TASK_HANDOFF_NOVEL_QUALITY.md 新增实际修改、命令、结果、风险和回退点。
+5. 每个独立优化批次单独 git commit，提交信息说明优化范围。
+6. git push origin codex/bohrium-integration-20260831。
+7. 更新 /opt/xuanqiong-wenshu/run/release.json 的 commit、数据库 hash 和验证结果。
+8. 仅用 fast-forward/发布目录切换更新运行版本；保留上一发布目录和数据快照。
+9. 检查独立 Supervisor 三个进程、/api/health、首页和公开 Tunnel。
+10. 将真实 commit、推送状态、部署状态继续追加到本文件。
+```
+
+## 8. 下一后端优化目标
+
+当前下一后端主线保持：
+
+```text
+CARD-007：Agent Durable Event Delivery 与跨实例恢复验收
+```
+
+Bohrium-2 上继续执行时优先完成：
+
+```text
+HTTP 层 Last-Event-ID 测试
+500/501/1000 终态分页边界
+跨进程/跨 Worker 持久化 replay
+WorkTrace 脱敏字段组合测试
+真实 ASGI SSE smoke
+replay / gap / duplicate / terminal-close 指标
+```
+
+当前整体状态：
+
+```text
+本地与 GitHub 整合：completed
+Bohrium-2 无损代码与数据部署：completed
+临时公网 Tunnel：completed
+固定公网端口或固定域名：pending
+后续优化执行位置：Bohrium-2
+production_readiness：false
+```
+
+---
