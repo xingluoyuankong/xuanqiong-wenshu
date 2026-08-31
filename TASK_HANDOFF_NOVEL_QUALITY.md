@@ -68358,3 +68358,29 @@ production_readiness：false
 ```
 
 ---
+
+## 9. 部署后最终全量回归（2026-09-01）
+
+在本地完成部署后，对当前已推送版本执行完整回归，真实结果如下：
+
+```text
+后端：python -m pytest -q
+结果：1399 passed in 320.16s（5分20秒）
+
+前端：npm run test:run
+结果：74 test files passed，424 tests passed，89.15s
+
+前端：npm run type-check
+结果：通过，退出码 0
+
+前端：npm run build-only
+结果：4905 modules transformed，built in 37.31s
+```
+
+该组结果覆盖后端 SSE 建流预检、Agent 事件链路、前端工作区三栏重构和既有项目回归。测试运行出现的 Pinia injection warning、Browserslist 数据更新提醒均未造成失败。
+
+```text
+最终验证提交：待提交后回填
+GitHub 推送：待执行
+Bohrium-2 fast-forward：待执行
+```
