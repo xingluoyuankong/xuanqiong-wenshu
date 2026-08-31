@@ -21,7 +21,7 @@ class _HangingProvider:
             self.cancelled.set()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_cancelling_generation_wait_cancels_provider_without_hanging():
     provider = _HangingProvider()
     wait_task = asyncio.create_task(

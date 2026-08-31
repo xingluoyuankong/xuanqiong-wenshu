@@ -30,6 +30,14 @@ services:
       OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-https://api.openai.com/v1}
       OPENAI_MODEL_NAME: ${OPENAI_MODEL_NAME:-gpt-4o-mini}
       WRITER_CHAPTER_VERSION_COUNT: ${WRITER_CHAPTER_VERSION_COUNT:-2}
+      AGENT_INLINE_EXECUTION: ${AGENT_INLINE_EXECUTION:-false}
+      AGENT_INLINE_VISIBLE_RESPONSE: ${AGENT_INLINE_VISIBLE_RESPONSE:-false}
+      AGENT_VISIBLE_RESPONSE_MAX_TOKENS: ${AGENT_VISIBLE_RESPONSE_MAX_TOKENS:-1200}
+      AGENT_RUN_LEASE_SECONDS: ${AGENT_RUN_LEASE_SECONDS:-120}
+      AGENT_TOOL_PROVIDERS_ENABLED: ${AGENT_TOOL_PROVIDERS_ENABLED:-false}
+      AGENT_TOOL_PROVIDERS: ${AGENT_TOOL_PROVIDERS:-[]}
+      AGENT_TOOL_PROVIDER_MAX_COUNT: ${AGENT_TOOL_PROVIDER_MAX_COUNT:-16}
+      AGENT_TOOL_PROVIDER_STARTUP_POLICY: ${AGENT_TOOL_PROVIDER_STARTUP_POLICY:-fail_closed}
 
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
@@ -72,6 +80,118 @@ services:
       timeout: 10s
       retries: 3
       start_period: 90s
+
+  # 独立的持久化 Agent Job 执行器。不能与 app 内再启动第二个 worker。
+  agent-worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: xuanqiong-wenshu-app:local
+    command: ["python", "scripts/agent_worker.py"]
+    environment:
+      SECRET_KEY: ${SECRET_KEY:?请设置SECRET_KEY}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      LOGGING_LEVEL: ${LOGGING_LEVEL:-INFO}
+      DB_PROVIDER: ${DB_PROVIDER:-sqlite}
+      SQLITE_DB_PATH: ${SQLITE_DB_PATH:-/app/storage/xuanqiong_wenshu.db}
+      MYSQL_HOST: ${MYSQL_HOST:-db}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-xuanqiong_wenshu}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-xuanqiong_wenshu}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL_NAME: ${OPENAI_MODEL_NAME:-gpt-4o-mini}
+      AGENT_INLINE_EXECUTION: ${AGENT_INLINE_EXECUTION:-false}
+      AGENT_INLINE_VISIBLE_RESPONSE: ${AGENT_INLINE_VISIBLE_RESPONSE:-false}
+      AGENT_VISIBLE_RESPONSE_MAX_TOKENS: ${AGENT_VISIBLE_RESPONSE_MAX_TOKENS:-1200}
+      AGENT_RUN_LEASE_SECONDS: ${AGENT_RUN_LEASE_SECONDS:-120}
+      AGENT_TOOL_PROVIDERS_ENABLED: ${AGENT_TOOL_PROVIDERS_ENABLED:-false}
+      AGENT_TOOL_PROVIDERS: ${AGENT_TOOL_PROVIDERS:-[]}
+      AGENT_TOOL_PROVIDER_MAX_COUNT: ${AGENT_TOOL_PROVIDER_MAX_COUNT:-16}
+      AGENT_TOOL_PROVIDER_STARTUP_POLICY: ${AGENT_TOOL_PROVIDER_STARTUP_POLICY:-fail_closed}
+      AGENT_WORKER_ID: ${AGENT_WORKER_ID:-agent-worker-1}
+      AGENT_WORKER_LEASE_SECONDS: ${AGENT_WORKER_LEASE_SECONDS:-120}
+      AGENT_WORKER_POLL_INTERVAL: ${AGENT_WORKER_POLL_INTERVAL:-0.25}
+    restart: unless-stopped
+    volumes:
+      - ${SQLITE_STORAGE_SOURCE:-sqlite-data}:/app/storage
+    networks:
+      - app-network
+    depends_on:
+      db:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"from pathlib import Path; import sys; sys.exit(0 if any(b'scripts/agent_worker.py' in p.read_bytes() for p in Path('/proc').glob('[0-9]*/cmdline')) else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # 独立的 Agent Run Command 执行器。只处理 pause/resume/cancel 命令，不消费 Agent Job。
+  agent-command-worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: xuanqiong-wenshu-app:local
+    command: ["python", "scripts/agent_command_worker.py"]
+    environment:
+      SECRET_KEY: ${SECRET_KEY:?请设置SECRET_KEY}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      LOGGING_LEVEL: ${LOGGING_LEVEL:-INFO}
+      DB_PROVIDER: ${DB_PROVIDER:-sqlite}
+      SQLITE_DB_PATH: ${SQLITE_DB_PATH:-/app/storage/xuanqiong_wenshu.db}
+      MYSQL_HOST: ${MYSQL_HOST:-db}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-xuanqiong_wenshu}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-xuanqiong_wenshu}
+      # agent_command_worker.py 复用通用设置字段；Compose 用独立插值名避免两个 worker 抢同一身份。
+      AGENT_WORKER_ID: ${AGENT_COMMAND_WORKER_ID:-agent-command-worker-1}
+      AGENT_WORKER_LEASE_SECONDS: ${AGENT_COMMAND_WORKER_LEASE_SECONDS:-120}
+      AGENT_WORKER_POLL_INTERVAL: ${AGENT_COMMAND_WORKER_POLL_INTERVAL:-0.25}
+    restart: unless-stopped
+    volumes:
+      - ${SQLITE_STORAGE_SOURCE:-sqlite-data}:/app/storage
+    networks:
+      - app-network
+    depends_on:
+      db:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD-SHELL", "tr \"\0\" \" \" </proc/1/cmdline | grep -F -- \"scripts/agent_command_worker.py\" >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # 维护任务：发布时先执行 docker compose run --rm migrate，再启动 app/agent-worker。
+  migrate:
+    profiles: ["maintenance"]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: xuanqiong-wenshu-app:local
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    environment:
+      SECRET_KEY: ${SECRET_KEY:?请设置SECRET_KEY}
+      DB_PROVIDER: ${DB_PROVIDER:-sqlite}
+      SQLITE_DB_PATH: ${SQLITE_DB_PATH:-/app/storage/xuanqiong_wenshu.db}
+      MYSQL_HOST: ${MYSQL_HOST:-db}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-xuanqiong_wenshu}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-xuanqiong_wenshu}
+    volumes:
+      - ${SQLITE_STORAGE_SOURCE:-sqlite-data}:/app/storage
+    networks:
+      - app-network
+    depends_on:
+      db:
+        condition: service_healthy
+        required: false
 
   # MySQL 数据库服务（通过 profile mysql 启用）
   db:

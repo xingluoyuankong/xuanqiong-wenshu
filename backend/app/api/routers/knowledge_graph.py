@@ -468,7 +468,7 @@ async def get_knowledge_graph_overview(
     await NovelService(session).ensure_project_owner(project_id, current_user.id)
     service = KnowledgeGraphService(session)
     async with project_ledger_lease(project_id):
-        sync = await service.sync_from_story_memory(project_id, commit=True)
+        sync = await service.sync_from_story_memory(project_id)
         graph = await service.get_project_graph(project_id)
         threads = await service._analyze_project_threads(project_id)
     return {

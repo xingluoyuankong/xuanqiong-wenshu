@@ -24,7 +24,7 @@ async def _add_user(session, user_id: int, username: str) -> User:
     return user
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_create_task_accepts_project_owned_by_current_user(task_session):
     user = await _add_user(task_session, 101, "task-owner")
     task_session.add(NovelProject(id="owned-project", user_id=user.id, title="Owned"))
@@ -40,7 +40,7 @@ async def test_create_task_accepts_project_owned_by_current_user(task_session):
     assert task.owner_user_id == user.id
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_create_task_rejects_project_owned_by_another_user(task_session):
     owner = await _add_user(task_session, 102, "other-owner")
     current_user = await _add_user(task_session, 103, "current-owner")
@@ -58,7 +58,7 @@ async def test_create_task_rejects_project_owned_by_another_user(task_session):
     assert error.value.detail["code"] == "PROJECT_NOT_FOUND"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_create_task_without_project_remains_available(task_session):
     user = await _add_user(task_session, 104, "generic-owner")
 
@@ -72,7 +72,7 @@ async def test_create_task_without_project_remains_available(task_session):
     assert task.owner_user_id == user.id
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_event_response_projects_stable_channel_and_sequence(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter", owner_user_id=105)

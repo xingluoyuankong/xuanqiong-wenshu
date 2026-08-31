@@ -1,0 +1,16 @@
+{
+  "id": "benchmark-closure-3000",
+  "target_word_count": 3000,
+  "min_word_count": 2700,
+  "chapter_mission": {
+    "chapter_purpose": "解开局部谜团，同时揭开更大的代价",
+    "scene_list": [
+      {
+        "goal": "找出破坏者",
+        "conflict": "凶手提出交易",
+        "turn": "接受交易能救一个人却会毁掉整个案件",
+        "end_hook": "新的指控点名主角"
+      }
+    ]
+  }
+}

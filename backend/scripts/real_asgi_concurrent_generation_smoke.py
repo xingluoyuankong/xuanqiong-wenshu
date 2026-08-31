@@ -26,6 +26,7 @@ os.environ["SQLITE_DB_PATH"] = str(db_path)
 sys.path.insert(0, str(ROOT))
 
 from app.api.routers.writer import stream_chapter_progress  # noqa: E402
+from app.utils.smoke_timeout import resolve_smoke_poll_timeout_seconds  # noqa: E402
 from app.db.session import AsyncSessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.novel import Chapter, ChapterVersion, NovelProject  # noqa: E402
@@ -92,7 +93,7 @@ async def _submit_generation(
     *,
     case: ProjectCase,
     project_id: str,
-) -> None:
+) -> dict[str, Any]:
     response = await client.post(
         f"/api/writer/novels/{project_id}/chapters/generate",
         headers=headers,
@@ -112,6 +113,7 @@ async def _submit_generation(
     print(f"GENERATE label={case.label} status={response.status_code}")
     if response.status_code not in (200, 202):
         raise RuntimeError(f"GENERATE_ERROR {case.label} {_safe_error(response)}")
+    return response.json() if response.content else {}
 
 
 async def _wait_for_terminal(
@@ -120,8 +122,12 @@ async def _wait_for_terminal(
     *,
     case: ProjectCase,
     project_id: str,
+    submitted_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    deadline = time.monotonic() + 420
+    poll_timeout_seconds = resolve_smoke_poll_timeout_seconds(
+        submitted_payload, requested_timeout_seconds=900, fallback_timeout_seconds=900
+    )
+    deadline = time.monotonic() + poll_timeout_seconds
     last_stage: str | None = None
     while time.monotonic() < deadline:
         response = await client.get(
@@ -297,7 +303,7 @@ async def main() -> int:
                 project_ids = await asyncio.gather(*(_create_project(client, headers, case) for case in cases))
 
                 # 同一个应用进程、同一个真实 Provider 下同时入队，覆盖信号量和 SQLite 写入竞争。
-                await asyncio.gather(
+                submitted_payloads = await asyncio.gather(
                     *(
                         _submit_generation(client, headers, case=case, project_id=project_id)
                         for case, project_id in zip(cases, project_ids)
@@ -305,8 +311,11 @@ async def main() -> int:
                 )
                 statuses = await asyncio.gather(
                     *(
-                        _wait_for_terminal(client, headers, case=case, project_id=project_id)
-                        for case, project_id in zip(cases, project_ids)
+                        _wait_for_terminal(
+                            client, headers, case=case, project_id=project_id,
+                            submitted_payload=submitted_payload,
+                        )
+                        for case, project_id, submitted_payload in zip(cases, project_ids, submitted_payloads)
                     )
                 )
                 task_ids = await asyncio.gather(

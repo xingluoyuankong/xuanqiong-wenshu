@@ -18,6 +18,7 @@ from app.services.generation_call_service import (
     validate_json_schema_subset,
 )
 from app.services.llm_service import LLMService
+from app.utils.llm_tool import LLMClient
 
 
 class _FakeLLMService:
@@ -33,7 +34,7 @@ class _FakeLLMService:
         return response
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_call_generation_json_repairs_malformed_json_once():
     llm = _FakeLLMService(
         [
@@ -57,7 +58,7 @@ async def test_call_generation_json_repairs_malformed_json_once():
     assert "上一条回复不是可解析的 JSON 对象" in llm.calls[1]["conversation_history"][-1]["content"]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_call_generation_text_retries_retryable_http_exception():
     stages = []
 
@@ -85,7 +86,7 @@ async def test_call_generation_text_retries_retryable_http_exception():
     assert stages == [("generating", "蓝图生成遇到上游抖动，正在进行第 1/1 次重试")]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_call_generation_text_reduces_max_tokens_after_provider_token_limit_rejection():
     stages = []
 
@@ -124,7 +125,7 @@ async def test_call_generation_text_reduces_max_tokens_after_provider_token_limi
     assert stages and stages[0][0] == "generating"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_call_generation_text_does_not_retry_timeout_by_default():
     stages = []
 
@@ -166,7 +167,7 @@ async def test_call_generation_text_does_not_retry_timeout_by_default():
     assert not any("重试" in message for _, message in stages)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_call_generation_text_retries_timeout_only_when_explicitly_enabled():
     class SlowThenFastLLMService(_FakeLLMService):
         async def get_llm_response(self, **kwargs):
@@ -208,8 +209,24 @@ def test_estimate_generation_token_count_handles_cjk_and_ascii():
 
 def test_deepseek_free_model_capability_is_narrowly_scoped():
     assert LLMService.is_deepseek_free_model("deepseek-v4-flash-free") is True
+    assert LLMService.is_deepseek_free_model("deepseek/deepseek-v4-flash-free") is True
     assert LLMService.is_deepseek_free_model("deepseek-v4-flash-0731") is False
     assert LLMService.is_deepseek_free_model("glm-5.2") is False
+
+
+def test_llm_client_normalizes_only_known_gateway_bare_model_alias():
+    assert LLMClient._resolve_model(
+        "deepseek-v4-flash-free",
+        "https://api.xzxyuan.ccwu.cc/v1",
+    ) == "deepseek/deepseek-v4-flash-free"
+    assert LLMClient._resolve_model(
+        "deepseek-v4-flash-free",
+        "https://provider.example/v1",
+    ) == "deepseek-v4-flash-free"
+    assert LLMClient._resolve_model(
+        "deepseek/deepseek-v4-flash-free",
+        "https://api.xzxyuan.ccwu.cc/v1",
+    ) == "deepseek/deepseek-v4-flash-free"
 
 
 def test_retry_delay_respects_retry_after_and_cap():
@@ -255,7 +272,7 @@ def test_build_response_format_payload_prefers_json_schema():
     assert payload["json_schema"]["strict"] is True
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_call_generation_text_passes_prompt_cache_key_when_configured():
     llm = _FakeLLMService(["ok"])
 
@@ -277,7 +294,7 @@ async def test_call_generation_text_passes_prompt_cache_key_when_configured():
     assert llm.calls[0]["prompt_cache_key"] == "project:p1:writer"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_call_generation_json_uses_schema_and_repairs_local_schema_failure():
     llm = _FakeLLMService(
         [
@@ -315,7 +332,7 @@ async def test_call_generation_json_uses_schema_and_repairs_local_schema_failure
     assert "必须满足本地 schema" in llm.calls[1]["conversation_history"][-1]["content"]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_call_generation_text_downgrades_schema_when_provider_rejects_structured_outputs():
     stages = []
 

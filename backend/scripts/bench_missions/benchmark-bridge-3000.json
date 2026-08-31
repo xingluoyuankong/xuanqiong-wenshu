@@ -1,0 +1,24 @@
+{
+  "id": "benchmark-bridge-3000",
+  "target_word_count": 3000,
+  "min_word_count": 2700,
+  "chapter_mission": {
+    "chapter_purpose": "把新发现的线索带入陌生地点",
+    "continuity_anchor": {
+      "inherit_from_previous": [
+        "被撕开的地图仍是湿的"
+      ],
+      "deliver_to_next": [
+        "留下必须立刻抉择的路线"
+      ]
+    },
+    "scene_list": [
+      {
+        "goal": "核验地图",
+        "conflict": "渡船临时停航",
+        "turn": "一名乘客认出了标记的路线",
+        "end_hook": "最后一班船抛下他们离开"
+      }
+    ]
+  }
+}

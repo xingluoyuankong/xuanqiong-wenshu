@@ -99,6 +99,8 @@ COMPAT_GENERATE_MIN_WORD_COUNT = 4500
 CHAPTER_STALE_TIMEOUT = timedelta(minutes=30)
 BACKGROUND_GENERATION_TIMEOUT_MIN_SECONDS = 15 * 60  # 最小15分钟
 BACKGROUND_GENERATION_TIMEOUT_MAX_SECONDS = 4 * 60 * 60  # 最大4小时
+RUNTIME_STALE_GRACE_SECONDS = 180
+MAX_RUNTIME_STALE_SECONDS = 24 * 60 * 60
 GENERATION_HEARTBEAT_GRACE_SECONDS = 8 * 60
 BACKGROUND_GENERATION_TIMEOUT_DISABLED = os.getenv("XUANQIONG_WENSHU_DISABLE_GENERATION_TIMEOUT", "0").strip().lower() in {"1", "true", "yes", "on"}
 _GENERATION_TASK_SEMAPHORE = asyncio.Semaphore(4)  # lowered to avoid LLM rate-limiting
@@ -503,6 +505,26 @@ def _extract_runtime_heartbeat_at(chapter: Optional[Chapter]) -> Optional[dateti
         return None
     return _normalize_datetime_to_utc(parsed)
 
+def _busy_chapter_stale_after_seconds(chapter: Chapter) -> int:
+    """Use the persisted generation budget without weakening legacy stale checks."""
+    runtime = _load_generation_runtime_state(chapter).get("generation_runtime")
+    timeout_seconds = None
+    if isinstance(runtime, dict):
+        try:
+            parsed_timeout = int(float(runtime.get("timeout_seconds") or 0))
+        except (TypeError, ValueError):
+            parsed_timeout = 0
+        if parsed_timeout > 0:
+            timeout_seconds = min(MAX_RUNTIME_STALE_SECONDS, parsed_timeout)
+    stale_after_seconds = int(CHAPTER_STALE_TIMEOUT.total_seconds())
+    if timeout_seconds is not None:
+        stale_after_seconds = min(
+            MAX_RUNTIME_STALE_SECONDS,
+            max(stale_after_seconds, timeout_seconds + RUNTIME_STALE_GRACE_SECONDS),
+        )
+    return stale_after_seconds
+
+
 def _is_busy_chapter_stale(chapter: Chapter) -> bool:
     if chapter.status not in _BUSY_CHAPTER_STATUSES:
         return False
@@ -510,7 +532,13 @@ def _is_busy_chapter_stale(chapter: Chapter) -> bool:
     last_updated_at = heartbeat_at or _normalize_datetime_to_utc(chapter.updated_at or chapter.created_at)
     if not last_updated_at:
         return False
-    return datetime.now(timezone.utc) - last_updated_at >= CHAPTER_STALE_TIMEOUT
+    stale_after_seconds = _busy_chapter_stale_after_seconds(chapter)
+    return datetime.now(timezone.utc) - last_updated_at >= timedelta(seconds=stale_after_seconds)
+
+
+def _busy_chapter_stale_after_minutes(chapter: Chapter) -> int:
+    """Return the same budget-aware threshold used by the busy guard message."""
+    return max(1, int(_busy_chapter_stale_after_seconds(chapter) // 60))
 
 def _load_generation_runtime_state(chapter: Optional[Chapter]) -> Dict[str, Any]:
     raw_summary = (chapter.real_summary or "").strip() if chapter else ""
@@ -856,6 +884,9 @@ async def _persist_generation_execution_spec(
     spec = {
         "writing_notes": str(writing_notes or ""),
         "flow_config": dict(flow_config),
+        # The reconciler uses the same normalized budget to avoid marking a
+        # live long-form worker stale before its own generation watchdog.
+        "normalized_generation_timeout_seconds": _calculate_generation_timeout_seconds(flow_config),
     }
     try:
         await TaskRuntimeService(session).merge_payload(
@@ -929,6 +960,7 @@ async def _try_claim_chapter_generation(
     *,
     chapter_id: int,
     chapter_number: int,
+    generation_timeout_seconds: Optional[int] = None,
 ) -> Optional[str]:
     run_id = str(uuid.uuid4())
     owner_result = await session.execute(
@@ -937,6 +969,21 @@ async def _try_claim_chapter_generation(
         .where(Chapter.id == chapter_id)
     )
     owner_user_id = owner_result.scalar_one_or_none()
+    runtime_extra: Dict[str, Any] = {
+        "progress_stage": "queued",
+        "progress_message": "章节已进入后台队列，等待任务启动",
+        "chapter_number": chapter_number,
+        "allowed_actions": ["refresh_status", "cancel_generation"],
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        normalized_timeout = int(float(generation_timeout_seconds or 0))
+    except (TypeError, ValueError):
+        normalized_timeout = 0
+    if normalized_timeout > 0:
+        runtime_extra["timeout_seconds"] = min(MAX_RUNTIME_STALE_SECONDS, normalized_timeout)
+
     result = await session.execute(
         update(Chapter)
         .where(
@@ -946,14 +993,7 @@ async def _try_claim_chapter_generation(
         .values(
             real_summary=_build_generation_runtime_state(
                 run_id=run_id,
-                extra={
-                    "progress_stage": "queued",
-                    "progress_message": "章节已进入后台队列，等待任务启动",
-                    "chapter_number": chapter_number,
-                    "allowed_actions": ["refresh_status", "cancel_generation"],
-                    "started_at": datetime.now(timezone.utc).isoformat(),
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                },
+                extra=runtime_extra,
             ),
             selected_version_id=None,
             status=ChapterGenerationStatus.GENERATING.value,
@@ -1242,6 +1282,8 @@ def _build_advanced_background_flow_config(request: AdvancedGenerateRequest) -> 
     config: Dict[str, Any] = {
         "preset": preset,
         "versions": versions,
+        # 只有调用方显式传入多候选时才拒绝静默降级；自动策略仍容忍 provider 抖动。
+        "require_requested_candidate_count": bool(raw_config.get("versions") is not None and versions > 1),
         "target_word_count": target_word_count,
         "min_word_count": min_word_count,
         "chapter_draft_contract": draft_contract,
@@ -1331,7 +1373,9 @@ def _build_compat_generate_flow_config(request: GenerateChapterRequest) -> Dict[
     config: Dict[str, Any] = {
         "preset": preset,
         "versions": version_count,
-        "allow_truncated_response": False,
+        # 短章 provider 偶尔会在完整冲突链后命中 token 上限；保留正文交给
+        # 字数/质量门判定，不能在传输层直接丢弃。长章仍保持严格拒绝截断。
+        "allow_truncated_response": requested_target <= 2500,
         "target_word_count": target_word_count,
         "min_word_count": min_word_count,
         "chapter_draft_contract": draft_contract,
@@ -3456,7 +3500,7 @@ async def advanced_generate_chapter(
     if chapter.status in _BUSY_CHAPTER_STATUSES:
         if _is_busy_chapter_stale(chapter):
             stale_reason = (
-                f"上一轮高级生成任务超过 {int(CHAPTER_STALE_TIMEOUT.total_seconds() // 60)} 分钟未更新，"
+                f"上一轮高级生成任务超过 {_busy_chapter_stale_after_minutes(chapter)} 分钟未更新，"
                 "已自动终止，请重新生成。"
             )
             await _mark_busy_chapter_failed(session, chapter=chapter, reason=stale_reason)
@@ -3486,6 +3530,7 @@ async def advanced_generate_chapter(
         session,
         chapter_id=chapter.id,
         chapter_number=request.chapter_number,
+        generation_timeout_seconds=_calculate_generation_timeout_seconds(flow_config),
     )
     if not run_id:
         await session.refresh(chapter)
@@ -3755,7 +3800,7 @@ async def generate_chapter(
     if chapter.status in _BUSY_CHAPTER_STATUSES:
         if _is_busy_chapter_stale(chapter):
             stale_reason = (
-                f"上一轮后台任务超过 {int(CHAPTER_STALE_TIMEOUT.total_seconds() // 60)} 分钟未更新，"
+                f"上一轮后台任务超过 {_busy_chapter_stale_after_minutes(chapter)} 分钟未更新，"
                 "已自动终止，请重新生成。"
             )
             logger.warning(
@@ -3800,6 +3845,7 @@ async def generate_chapter(
         session,
         chapter_id=chapter.id,
         chapter_number=request.chapter_number,
+        generation_timeout_seconds=_calculate_generation_timeout_seconds(flow_config),
     )
     if not run_id:
         await session.refresh(chapter)

@@ -60,7 +60,7 @@ def test_terminal_task_with_historical_non_terminal_events_must_stop_replay():
     assert writer._runtime_stream_should_stop(SimpleNamespace(status="running"), False) is False
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_find_chapter_runtime_task_matches_run_id_and_scope(task_session):
     task = await TaskRuntimeService(task_session).create_task(
         task_id="chapter-run-1",
@@ -100,7 +100,7 @@ def test_log_event_does_not_promote_content_delta():
     assert payload["log"] == "backend log"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_longform_plan_registration_persists_blueprint_context(task_session, monkeypatch):
     task = await TaskRuntimeService(task_session).create_task(
         task_id="chapter-longform-context-1",
@@ -142,7 +142,7 @@ async def test_longform_plan_registration_persists_blueprint_context(task_sessio
     assert runtime["plan"]["chapter_context"]["title"] == "潮汐之门"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_formal_chapter_entry_persists_longform_plan(task_session):
     task = await TaskRuntimeService(task_session).create_task(
         task_id="chapter-longform-1",
@@ -167,7 +167,7 @@ async def test_formal_chapter_entry_persists_longform_plan(task_session):
     assert stored.payload["longform_generation"]["checkpoint"]["next_segment_index"] == 0
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_cancelled_background_generation_releases_busy_chapter(monkeypatch):
     """Provider 等待被取消时，章节必须从 generating 释放为可重试状态。"""
     events: list[dict] = []

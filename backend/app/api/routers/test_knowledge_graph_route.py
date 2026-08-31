@@ -45,7 +45,7 @@ class _KnowledgeGraphService:
     def __init__(self, _session):
         pass
 
-    async def sync_from_story_memory(self, project_id, *, commit=True):
+    async def sync_from_story_memory(self, project_id):
         _KnowledgeGraphService.last_sync_calls += 1
         return {"created_nodes": 1, "created_edges": 1, "removed_nodes": 0, "removed_edges": 0}
 
@@ -123,7 +123,7 @@ async def _fake_project_ledger_lease(project_id, **_kwargs):
     yield "lease-token"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_knowledge_graph_overview_syncs_once_and_returns_graph_plus_threads(monkeypatch):
     _KnowledgeGraphService.last_sync_calls = 0
     _KnowledgeGraphService.last_graph_calls = 0

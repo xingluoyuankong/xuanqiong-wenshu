@@ -1,3 +1,4 @@
+import json
 # Test ai_review_service dataclass validation
 from app.services.ai_review_service import ReviewResult, AIReviewService
 
@@ -42,3 +43,19 @@ class TestReviewResult:
         )
         assert r.raw_response == 'Some raw LLM output'
         assert r.final_recommendation == 'REVISE'
+
+def test_parse_review_response_preserves_and_normalizes_candidate_scores():
+    service = AIReviewService(llm_service=None, prompt_service=None)
+    result = service._parse_review_response(json.dumps({
+        "best_version_index": 1,
+        "scores": {"immersion": 8},
+        "candidate_scores": {
+            "0": {"immersion": 12, "pacing": "7"},
+            "1": {"immersion": 9, "hook": 6},
+            "bad": "ignore",
+        },
+    }, ensure_ascii=False))
+    assert result.candidate_scores == {
+        "0": {"immersion": 10, "pacing": 7},
+        "1": {"immersion": 9, "hook": 6},
+    }

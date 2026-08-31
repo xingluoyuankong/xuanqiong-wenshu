@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -6,12 +7,41 @@ import {
   getBlockingChapterNumber,
   isBusyChapterStatus,
   normalizeRuntimeStage,
+  resolveActualWordCount,
   resolveChapterActionDecision,
   resolveChapterRuntime,
   taskRuntimeEventToChapterEvent,
 } from './chapterGeneration'
 
 describe('chapterGeneration utils', () => {
+  it('GenerationRuntime 类型显式保留质量运行字段，而非仅依赖索引签名', () => {
+    const source = readFileSync('src/api/types/novel.ts', 'utf8')
+    expect(source).toContain('quality_metrics?: Record<string, unknown> | null')
+    expect(source).toContain('story_progression_guard?: Record<string, unknown> | null')
+    expect(source).toContain('generation_call_metrics?: Array<Record<string, unknown>> | null')
+    expect(source).toContain('enrichment_triggered?: boolean | null')
+  })
+
+  it('GenerationRuntime 显式声明字数三态字段', () => {
+    const runtime: import('@/api/types/novel').GenerationRuntime = {
+      actual_word_count: 0,
+      word_requirement_met: null,
+      word_requirement_reason: 'below_minimum',
+      quality_metrics: { event_density_passed: null },
+      story_progression_guard: { quality_metric_snapshot: {} },
+      generation_call_metrics: [{ label: 'draft_candidate_1' }],
+      enrichment_triggered: false,
+    }
+    expect(runtime.actual_word_count).toBe(0)
+    expect(runtime.word_requirement_met).toBeNull()
+  })
+
+  it('保留实际字数 0，不把合法数值误判为缺失', () => {
+    expect(resolveActualWordCount({ actual_word_count: 0 }, 1200)).toBe(0)
+    expect(resolveActualWordCount({}, 0)).toBe(0)
+    expect(resolveActualWordCount({ actual_word_count: null }, undefined)).toBeNull()
+  })
+
   it('将 selecting 识别为忙状态', () => {
     expect(isBusyChapterStatus('selecting')).toBe(true)
   })

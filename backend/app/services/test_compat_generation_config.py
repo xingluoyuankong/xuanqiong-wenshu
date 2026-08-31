@@ -22,10 +22,19 @@ def test_compat_generate_respects_explicit_short_word_counts():
     assert config["preset"] == "basic"
     assert config["enable_enrichment"] is False
     assert config["enable_self_critique"] is False
-    assert config["allow_truncated_response"] is False
+    assert config["allow_truncated_response"] is True
     assert config["compat_short_chapter_mode"] is True
     assert config["chapter_draft_contract"]["tier"] == "short"
     assert config["generation_strategy"] == "single_pass_compact"
+
+
+def test_compat_generate_allows_shorter_provider_length_response_to_reach_quality_gate():
+    config = _build_compat_generate_flow_config(
+        GenerateChapterRequest(chapter_number=1, target_word_count=1200, min_word_count=900)
+    )
+
+    assert config["allow_truncated_response"] is True
+    assert config["preset"] == "longform"
 
 
 def test_compat_generate_uses_heavier_quality_defaults_for_default_long_chapters():
@@ -90,7 +99,7 @@ def test_chapter_mission_timeout_scales_with_target_length():
     assert PipelineOrchestrator._resolve_chapter_mission_timeout(10000) == 300.0
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_short_quality_config_disables_expensive_writing_ledgers_by_default():
     orchestrator = PipelineOrchestrator.__new__(PipelineOrchestrator)
     orchestrator._resolve_version_count = lambda _value: _async_one()
@@ -112,7 +121,7 @@ async def test_short_quality_config_disables_expensive_writing_ledgers_by_defaul
     assert config.enable_reader_sim is False
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_short_quality_config_keeps_explicit_writing_ledgers_enabled():
     orchestrator = PipelineOrchestrator.__new__(PipelineOrchestrator)
     orchestrator._resolve_version_count = lambda _value: _async_one()
@@ -161,6 +170,7 @@ def test_advanced_generate_config_is_background_safe_and_bounded():
 
     assert config["preset"] == "ultimate"
     assert config["versions"] == 4
+    assert config["require_requested_candidate_count"] is True
     assert config["target_word_count"] == 800
     assert config["min_word_count"] == 800
     assert config["enable_self_critique"] is True
@@ -185,6 +195,7 @@ def test_advanced_generate_config_does_not_override_preset_quality_defaults_when
     )
 
     assert config["preset"] == "ultimate"
+    assert config["require_requested_candidate_count"] is False
     assert "enable_consistency" not in config
     assert "enable_enrichment" not in config
     assert "enable_self_critique" not in config
@@ -255,3 +266,16 @@ def test_generation_config_defaults_are_safe_for_longform_and_auto_timeout():
     assert config["generation_timeout_seconds"] == 0
     timeout = _calculate_generation_timeout_seconds(config)
     assert 15 * 60 <= timeout <= 4 * 60 * 60
+
+
+def test_pipeline_has_no_duplicate_staticmethod_decorators():
+    from pathlib import Path
+    import inspect
+    from app.services import pipeline_orchestrator as module
+
+    source = Path(module.__file__).read_text(encoding="utf-8")
+    assert "@staticmethod\n    @staticmethod" not in source
+
+    # Reverse guard: if the redundant decorator pair is restored, this contract must fail.
+    sabotaged = source.replace("@staticmethod\n", "@staticmethod\n    @staticmethod\n", 1)
+    assert "@staticmethod\n    @staticmethod" in sabotaged

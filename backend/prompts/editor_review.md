@@ -39,6 +39,8 @@
 
 ---
 
+当提供多个版本时，`candidate_scores` 必须按版本索引分别评分；`scores` 仅表示本轮总体标准，不能代替逐候选评分。若只有一个版本，可以省略 `candidate_scores`。
+
 # 输出格式 (JSON)
 
 ```json
@@ -49,6 +51,10 @@
     "pacing": 9,
     "hook": 7,
     "character": 8
+  },
+  "candidate_scores": {
+    "0": {"immersion": 8, "pacing": 9, "hook": 7, "character": 8},
+    "1": {"immersion": 7, "pacing": 7, "hook": 8, "character": 7}
   },
   "overall_evaluation": "本章节奏紧凑，1234逻辑中的'挑衅'部分写得非常压抑，代入感极强。",
   "critical_flaws": ["结尾出现了AI标志性的总结语，建议删除最后两段"],

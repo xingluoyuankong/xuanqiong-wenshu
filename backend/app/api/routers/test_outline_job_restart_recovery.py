@@ -43,7 +43,7 @@ async def _seed_project(session) -> None:
     await session.commit()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_start_does_not_duplicate_when_persisted_task_is_active(task_session, monkeypatch):
     """内存索引被清空（模拟重启）时，start 必须复用持久化任务而不是新建。"""
     monkeypatch.setattr(writer, "NovelService", _FakeNovelService)
@@ -78,7 +78,7 @@ async def test_start_does_not_duplicate_when_persisted_task_is_active(task_sessi
     assert len(outline_tasks) == 1
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_status_reports_persisted_task_after_restart(task_session, monkeypatch):
     monkeypatch.setattr(writer, "NovelService", _FakeNovelService)
     await _seed_project(task_session)
@@ -102,7 +102,7 @@ async def test_status_reports_persisted_task_after_restart(task_session, monkeyp
     assert response.progress_stage == "outline_context"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_status_prefers_terminal_runtime_over_stale_memory_cache(task_session, monkeypatch):
     """进程内旧快照不能把已取消的持久化任务误报为生成中。"""
     monkeypatch.setattr(writer, "NovelService", _FakeNovelService)
@@ -143,7 +143,7 @@ async def test_status_prefers_terminal_runtime_over_stale_memory_cache(task_sess
     assert response.progress_stage == "cancelled"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_terminal_persisted_task_allows_new_run(task_session, monkeypatch):
     """已完成的任务不得阻塞新任务：否则用户永远无法再生成大纲。"""
     monkeypatch.setattr(writer, "NovelService", _FakeNovelService)
@@ -172,7 +172,7 @@ async def test_terminal_persisted_task_allows_new_run(task_session, monkeypatch)
     assert len(background_tasks.tasks) == 1
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_cancel_recovers_queued_runtime_when_memory_cache_is_empty(task_session, monkeypatch):
     """重启后清空大纲缓存，取消入口仍必须收敛持久化 queued 任务。"""
     monkeypatch.setattr(writer, "NovelService", _FakeNovelService)
@@ -199,7 +199,7 @@ async def test_cancel_recovers_queued_runtime_when_memory_cache_is_empty(task_se
     assert persisted.status == TaskRuntimeStatus.CANCELLED.value
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_cancel_finalizes_queued_runtime_even_when_worker_is_scheduled(task_session, monkeypatch):
     """已登记但尚未领取的后台协程不能把取消任务永远留在 cancelling。"""
     monkeypatch.setattr(writer, "NovelService", _FakeNovelService)
@@ -234,7 +234,7 @@ async def test_cancel_finalizes_queued_runtime_even_when_worker_is_scheduled(tas
     assert (await runtime.get_task(task.task_id, USER_ID)).status == TaskRuntimeStatus.CANCELLED.value
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_other_users_active_task_does_not_block(task_session, monkeypatch):
     """归属隔离：别人的任务不能占用当前用户的项目大纲入口。"""
     monkeypatch.setattr(writer, "NovelService", _FakeNovelService)
@@ -263,7 +263,7 @@ async def test_other_users_active_task_does_not_block(task_session, monkeypatch)
     assert response.run_id != "outline-run-other"
     assert len(background_tasks.tasks) == 1
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_rewrite_job_consults_runtime_stop_check_before_rewrite(monkeypatch):
     """重写 worker 必须把持久化 Runtime 停止判断放在业务调用之前。
 
@@ -305,7 +305,7 @@ async def test_rewrite_job_consults_runtime_stop_check_before_rewrite(monkeypatc
     assert not called
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_outline_runtime_should_stop_uses_persisted_terminal_status(monkeypatch):
     """Runtime 停止判断：记录消失或终态必须停止，运行中不停止。"""
 

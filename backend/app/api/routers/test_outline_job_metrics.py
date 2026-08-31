@@ -24,7 +24,7 @@ def test_normalize_outline_job_payload_defaults_metrics():
     assert payload["metrics"]["retry_events"] == []
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_set_outline_job_state_merges_retry_metrics(monkeypatch):
     run_id = "run-outline-metrics-1"
     writer_router._OUTLINE_JOBS[run_id] = {
@@ -107,7 +107,7 @@ def test_serialize_outline_job_includes_metrics():
     assert response.metrics["llm_call_count"] == 2
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_outline_start_job_includes_default_metrics(monkeypatch):
     from fastapi import BackgroundTasks
 

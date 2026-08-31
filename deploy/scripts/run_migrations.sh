@@ -1,89 +1,96 @@
-#!/bin/bash
-# 数据库迁移执行脚本
+#!/usr/bin/env bash
+# Safe deployment migration runner. Legacy SQL remains compatible; Alembic is authoritative for Agent 005-014.
+set -Eeuo pipefail
 
-set -e
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
+BACKEND_DIR="$REPO_ROOT/backend"
+ENV_FILE="${ENV_FILE:-$BACKEND_DIR/.env}"
+DRY_RUN=false
+APPLY_LEGACY_SQL="${APPLY_LEGACY_SQL:-true}"
 
-echo "========================================="
-echo "数据库迁移执行脚本"
-echo "========================================="
+usage() { echo "Usage: bash deploy/scripts/run_migrations.sh [--dry-run]"; }
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) DRY_RUN=true ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
 
-# 加载环境变量
-if [ -f .env ]; then
-    source .env
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
 fi
 
-# 数据库连接信息
 DB_HOST="${MYSQL_HOST:-localhost}"
 DB_PORT="${MYSQL_PORT:-3306}"
 DB_USER="${MYSQL_USER:-xuanqiong_wenshu}"
-DB_PASSWORD="${MYSQL_PASSWORD}"
+DB_PASSWORD="${MYSQL_PASSWORD:-}"
 DB_NAME="${MYSQL_DATABASE:-xuanqiong_wenshu}"
+MYSQL_BIN="${MYSQL_BIN:-mysql}"
+MYSQLDUMP_BIN="${MYSQLDUMP_BIN:-mysqldump}"
+PYTHON_BIN="${PYTHON_BIN:-}"
 
-if [ -z "$DB_PASSWORD" ]; then
-    echo "错误：未设置 MYSQL_PASSWORD 环境变量"
-    exit 1
+if [[ -z "$DB_PASSWORD" ]]; then
+  echo "ERROR: MYSQL_PASSWORD is required; no migration was executed." >&2
+  exit 1
 fi
 
-echo "数据库连接信息："
-echo "  主机: $DB_HOST"
-echo "  端口: $DB_PORT"
-echo "  用户: $DB_USER"
-echo "  数据库: $DB_NAME"
-echo ""
-
-# 检查 MySQL 连接
-echo "检查 MySQL 连接..."
-if ! mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" -e "SELECT 1;" > /dev/null 2>&1; then
-    echo "错误：无法连接到 MySQL 数据库"
-    exit 1
+if [[ -z "$PYTHON_BIN" ]]; then
+  if [[ -x "$BACKEND_DIR/.venv/bin/python" ]]; then
+    PYTHON_BIN="$BACKEND_DIR/.venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python3)"
+  else
+    PYTHON_BIN="$(command -v python)"
+  fi
 fi
-echo "✓ MySQL 连接成功"
-echo ""
 
-# 创建备份
-BACKUP_DIR="./backups"
+mysql_exec() { MYSQL_PWD="$DB_PASSWORD" "$MYSQL_BIN" --protocol=tcp -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" "$@"; }
+require_command() { command -v "$1" >/dev/null 2>&1 || { echo "ERROR: required command not found: $1" >&2; exit 1; }; }
+
+require_command "$MYSQL_BIN"
+require_command "$MYSQLDUMP_BIN"
+[[ -f "$BACKEND_DIR/alembic.ini" ]] || { echo "ERROR: missing $BACKEND_DIR/alembic.ini" >&2; exit 1; }
+
+echo "== Xuanqiong Wenshu database migration =="
+echo "Host: $DB_HOST:$DB_PORT  Database: $DB_NAME  User: $DB_USER"
+echo "Alembic backend: $BACKEND_DIR"
+mysql_exec -e "SELECT 1" >/dev/null
+mysql_exec "$DB_NAME" -e "SELECT 1" >/dev/null
+echo "MySQL health check: OK"
+
+if [[ "$DRY_RUN" == true ]]; then
+  echo "Dry run: no backup, legacy SQL, or Alembic upgrade will run."
+  ( cd "$BACKEND_DIR"; "$PYTHON_BIN" -m alembic -c alembic.ini current; "$PYTHON_BIN" -m alembic -c alembic.ini heads )
+  exit 0
+fi
+
+BACKUP_DIR="${BACKUP_DIR:-$REPO_ROOT/backups}"
 mkdir -p "$BACKUP_DIR"
-BACKUP_FILE="$BACKUP_DIR/backup_$(date +%Y%m%d_%H%M%S).sql"
+BACKUP_FILE="$BACKUP_DIR/${DB_NAME}_before_alembic_$(date +%Y%m%d_%H%M%S).sql"
+echo "Creating backup: $BACKUP_FILE"
+MYSQL_PWD="$DB_PASSWORD" "$MYSQLDUMP_BIN" --single-transaction --routines --events -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" "$DB_NAME" > "$BACKUP_FILE"
+[[ -s "$BACKUP_FILE" ]] || { echo "ERROR: backup is empty; refusing migration." >&2; exit 1; }
+echo "Backup complete."
 
-echo "创建数据库备份..."
-mysqldump -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" > "$BACKUP_FILE"
-echo "✓ 备份已保存到: $BACKUP_FILE"
-echo ""
-
-# 执行迁移脚本
-MIGRATION_DIR="./backend/db/migrations"
-
-echo "执行迁移脚本..."
-
-# 1. Novel-Kit 功能迁移
-if [ -f "$MIGRATION_DIR/add_novel_kit_features.sql" ]; then
-    echo "  执行: add_novel_kit_features.sql"
-    mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" < "$MIGRATION_DIR/add_novel_kit_features.sql"
-    echo "  ✓ 完成"
+if [[ "$APPLY_LEGACY_SQL" == true ]]; then
+  LEGACY_DIR="$BACKEND_DIR/db/migrations"
+  for legacy in add_novel_kit_features.sql add_deep_optimization_features.sql; do
+    if [[ -f "$LEGACY_DIR/$legacy" ]]; then
+      echo "Applying compatible legacy SQL: $legacy"
+      mysql_exec "$DB_NAME" < "$LEGACY_DIR/$legacy"
+    fi
+  done
 else
-    echo "  ⚠ 未找到: add_novel_kit_features.sql"
+  echo "Legacy SQL skipped (APPLY_LEGACY_SQL=false)."
 fi
 
-# 2. 深度优化功能迁移
-if [ -f "$MIGRATION_DIR/add_deep_optimization_features.sql" ]; then
-    echo "  执行: add_deep_optimization_features.sql"
-    mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" < "$MIGRATION_DIR/add_deep_optimization_features.sql"
-    echo "  ✓ 完成"
-else
-    echo "  ⚠ 未找到: add_deep_optimization_features.sql"
-fi
-
-# 3. chapter_outlines 表添加 metadata 字段
-echo "  添加 chapter_outlines.metadata 字段..."
-mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" -e "
-    ALTER TABLE chapter_outlines 
-    ADD COLUMN IF NOT EXISTS metadata JSON NULL;
-" 2>/dev/null || echo "  ⚠ 字段可能已存在"
-
-echo ""
-echo "========================================="
-echo "迁移完成"
-echo "========================================="
-echo ""
-echo "请运行验证脚本检查迁移结果："
-echo "  bash deploy/scripts/verify_migration.sh"
+echo "Running Alembic upgrade head (authoritative application schema)."
+( cd "$BACKEND_DIR"; "$PYTHON_BIN" -m alembic -c alembic.ini upgrade head; "$PYTHON_BIN" -m alembic -c alembic.ini current )
+echo "Migration complete. Backup retained at: $BACKUP_FILE"
+echo "Next: run bash deploy/scripts/verify_migration.sh and application health checks."

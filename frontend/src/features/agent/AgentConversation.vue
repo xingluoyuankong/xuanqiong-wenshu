@@ -1,0 +1,144 @@
+<template>
+  <XqPanel tone="ink" title="创作对话" subtitle="展示目标、计划、工具调用和结果摘要，不展示隐藏思维链。">
+    <div class="session-bar">
+      <span data-testid="agent-session-status">{{ sessionLabel }}</span>
+      <small v-if="sessionLoading">正在恢复历史…</small>
+      <small v-else-if="streamConnectionState === 'live'">实时运行流已连接</small>
+      <small v-else-if="streamConnectionState === 'connecting'">正在连接实时运行流…</small>
+      <small v-else-if="streamConnectionState === 'reconnecting'">实时运行流正在重连…</small>
+      <small v-else-if="streamConnectionState === 'disconnected'" class="error">实时运行流已断开，可手动重连</small>
+      <small v-else-if="sessionError" class="error">{{ sessionError }}</small>
+    </div>
+    <div v-if="messages.length" class="messages" data-testid="agent-message-list">
+      <article v-for="message in messages" :key="message.id" class="message" :class="`message-${message.role}`">
+        <b>{{ message.role === 'user' ? '你' : 'Agent' }}</b><p>{{ message.content }}</p>
+      </article>
+    </div>
+    <p v-else class="empty-chat" data-testid="agent-empty-chat">请选择项目并发送目标，Agent 的历史消息会显示在这里。</p>
+    <article v-if="streamingAssistant" class="message message-assistant message-streaming" data-testid="agent-streaming-message">
+      <b>Agent</b><p>{{ streamingAssistant }}</p>
+    </article>
+    <XqPanel v-if="artifactPreview" title="候选正文预览" data-testid="agent-artifact-preview">
+      <pre class="artifact-preview">{{ artifactPreview }}</pre>
+      <XqButton variant="secondary" size="sm" @click="emit('close-artifact-preview')">关闭预览</XqButton>
+    </XqPanel>
+    <AgentPublicWorkSummary
+      v-if="publicWorkSummary"
+      :summary="publicWorkSummary"
+      :work-trace-deltas="workTraceDeltas"
+      :latest-work-trace="latestWorkTrace"
+      :has-sequence-gap="hasSequenceGap"
+      :replay-required="replayRequired"
+      :pending-sequences="pendingSequences"
+    />
+    <div class="events" data-testid="agent-process-stream">
+      <article v-for="event in events" :key="event.id"><strong>{{ event.label }}</strong><p>{{ event.detail }}</p></article>
+    </div>
+    <form class="composer" @submit.prevent="emit('submit')">
+      <AgentContextChips :refs="contextRefs" :project-title="projectTitle || undefined" :chapter-title="chapterTitle || undefined" @remove="emit('remove-context-ref', $event)" />
+      <label class="sr-only" for="agent-goal">给小说 Agent 的指令</label>
+      <textarea id="agent-goal" :value="goal" data-testid="agent-message-input" rows="4" placeholder="例如：检查当前项目第三章的质量风险，并给出不改正文的计划" @input="updateGoal" />
+      <div>
+        <small>{{ runtimeSupported ? '消息会写入当前会话，并接收真实运行事件。' : '当前测试/兼容模式只生成计划，不执行写入。' }}</small>
+        <XqButton type="submit" data-testid="agent-plan-submit" :loading="sending || planning" :disabled="!goal.trim() || sessionLoading">{{ runtimeSupported ? '发送给 Agent' : '生成执行计划' }}</XqButton>
+      </div>
+    </form>
+  </XqPanel>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import type { AgentContextRef, AgentMessage, AgentPublicWorkSummary as AgentPublicWorkSummaryType } from '@/api/agent'
+import type { SSEConnectionState } from '@/utils/sseStream'
+import type { AgentDisplayEvent, AgentWorkTraceDelta } from './reducers/agentEventReducer'
+import AgentContextChips from './AgentContextChips.vue'
+import AgentPublicWorkSummary from './AgentPublicWorkSummary.vue'
+import { XqButton, XqPanel } from '@/shared/ui'
+
+const props = withDefaults(
+  defineProps<{
+    messages: AgentMessage[]
+    sessionTitle?: string | null
+    sessionLoading?: boolean
+    streamConnectionState?: SSEConnectionState
+    sessionError?: string
+    runtimeSupported?: boolean
+    sending?: boolean
+    planning?: boolean
+    streamingAssistant?: string
+    artifactPreview?: string
+    publicWorkSummary?: AgentPublicWorkSummaryType | null
+    workTraceDeltas?: AgentWorkTraceDelta[]
+    latestWorkTrace?: AgentWorkTraceDelta | null
+    hasSequenceGap?: boolean
+    replayRequired?: boolean
+    pendingSequences?: number[]
+    events?: AgentDisplayEvent[]
+    contextRefs?: AgentContextRef[]
+    projectTitle?: string | null
+    chapterTitle?: string | null
+    goal?: string
+  }>(),
+  {
+    sessionTitle: null,
+    sessionLoading: false,
+    streamConnectionState: 'closed',
+    sessionError: '',
+    runtimeSupported: false,
+    sending: false,
+    planning: false,
+    streamingAssistant: '',
+    artifactPreview: '',
+    publicWorkSummary: null,
+    workTraceDeltas: () => [],
+    latestWorkTrace: null,
+    hasSequenceGap: false,
+    replayRequired: false,
+    pendingSequences: () => [],
+    events: () => [],
+    contextRefs: () => [],
+    projectTitle: null,
+    chapterTitle: null,
+    goal: '',
+  },
+)
+
+const emit = defineEmits<{
+  (event: 'update:goal', value: string): void
+  (event: 'submit'): void
+  (event: 'remove-context-ref', ref: AgentContextRef): void
+  (event: 'close-artifact-preview'): void
+}>()
+
+const sessionLabel = computed(() => {
+  if (props.sessionTitle) return `会话：${props.sessionTitle}`
+  return props.runtimeSupported ? '准备会话…' : '兼容计划预览模式'
+})
+
+const updateGoal = (event: Event) => {
+  emit('update:goal', (event.target as HTMLTextAreaElement).value)
+}
+</script>
+
+<style scoped>
+.session-bar { display: flex; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; color: rgba(255, 255, 255, 0.86); font-size: 0.82rem; }
+.session-bar small { color: rgba(255, 255, 255, 0.68); }
+.messages { display: grid; gap: 0.7rem; max-height: 26rem; overflow: auto; margin-bottom: 1rem; }
+.message { max-width: 88%; padding: 0.7rem 0.85rem; border-radius: 0.8rem; background: rgba(255, 255, 255, 0.1); }
+.message-streaming { border-left: 3px solid var(--xq-jade); opacity: 0.92; }
+.artifact-preview { max-height: 28rem; overflow: auto; white-space: pre-wrap; line-height: 1.65; margin: 0 0 0.65rem; font: inherit; }
+.message p { margin: 0.25rem 0 0; white-space: pre-wrap; line-height: 1.6; }
+.message-user { justify-self: end; background: rgba(8, 145, 178, 0.35); }
+.message-assistant { justify-self: start; background: rgba(255, 255, 255, 0.12); }
+.empty-chat { color: rgba(255, 255, 255, 0.7); line-height: 1.6; }
+.events { display: grid; gap: 0.65rem; max-height: 28rem; overflow: auto; }
+.events article { border-left: 3px solid #0891b2; padding: 0.15rem 0.75rem; }
+.events p { margin: 0.25rem 0; line-height: 1.55; }
+.composer { display: grid; gap: 0.65rem; margin-top: 1rem; }
+.composer textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--xq-border); border-radius: 0.7rem; padding: 0.7rem; background: rgba(255, 255, 255, 0.85); font: inherit; resize: vertical; line-height: 1.6; }
+.composer > div { display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; }
+.composer small { color: rgba(255, 255, 255, 0.7); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+@media (max-width: 650px) { .composer > div { align-items: flex-start; flex-direction: column; } }
+</style>
+

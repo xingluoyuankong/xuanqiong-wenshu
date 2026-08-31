@@ -3,7 +3,7 @@
     class="xq-button xq-focus-ring"
     :class="[`xq-button--${variant}`, `xq-button--${size}`, { 'is-loading': loading }]"
     :disabled="disabled || loading"
-    type="button"
+    :type="type"
   >
     <span v-if="$slots.icon || loading" class="xq-button__icon" aria-hidden="true">
       <span v-if="loading" class="xq-button__spinner" />
@@ -20,12 +20,14 @@ withDefaults(
     size?: 'sm' | 'md' | 'lg'
     loading?: boolean
     disabled?: boolean
+    type?: 'button' | 'submit' | 'reset'
   }>(),
   {
     variant: 'primary',
     size: 'md',
     loading: false,
     disabled: false,
+    type: 'button',
   },
 )
 </script>

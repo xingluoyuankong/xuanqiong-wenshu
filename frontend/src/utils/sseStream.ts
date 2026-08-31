@@ -1,7 +1,12 @@
 import { getAccessToken } from '@/stores/auth'
 // SSE 流式连接工具：支持鉴权、断线重连与 Last-Event-ID 游标续接。
 
+export type SSEConnectionState = 'connecting' | 'live' | 'reconnecting' | 'disconnected' | 'terminal' | 'closed'
+
 export interface SSECallback {
+  /** Return true for a terminal event; terminal events stop automatic reconnect. */
+  isTerminalEvent?: (event: string, data: unknown) => boolean
+  onConnectionState?: (state: SSEConnectionState, retryCount: number) => void
   onStatusUpdate?: (data: StreamStatusData) => void
   onComplete?: (data: StreamCompleteData) => void
   onError?: (error: string) => void
@@ -27,14 +32,23 @@ export interface SSEController {
   close: () => void
 }
 
-const withCursor = (url: string, cursor: number): string => {
+/**
+ * A stream endpoint owns its replay cursor name. Most legacy task streams use
+ * after_event_id; the Agent event ledger uses its monotonic event sequence.
+ */
+export interface SSEOptions {
+  cursorParam?: 'after_event_id' | 'after_sequence'
+}
+
+const withCursor = (url: string, cursor: number, cursorParam: SSEOptions['cursorParam'] = 'after_event_id'): string => {
   if (!cursor) return url
   const resolved = new URL(url, window.location.origin)
-  resolved.searchParams.set('after_event_id', String(cursor))
+  resolved.searchParams.set(cursorParam, String(cursor))
   return resolved.toString()
 }
 
-export function connectSSE(url: string, callbacks: SSECallback, maxRetries = 3): SSEController {
+export function connectSSE(url: string, callbacks: SSECallback, maxRetries = 3, options: SSEOptions = {}): SSEController {
+  const cursorParam = options.cursorParam || 'after_event_id'
   let retryCount = 0
   let aborted = false
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
@@ -45,8 +59,12 @@ export function connectSSE(url: string, callbacks: SSECallback, maxRetries = 3):
   const scheduleReconnect = (message: string) => {
     if (aborted) return
     callbacks.onError?.(message)
-    if (retryCount >= maxRetries) return
+    if (retryCount >= maxRetries) {
+      callbacks.onConnectionState?.('disconnected', retryCount)
+      return
+    }
     retryCount += 1
+    callbacks.onConnectionState?.('reconnecting', retryCount)
     retryTimer = window.setTimeout(() => {
       retryTimer = null
       void connect()
@@ -55,10 +73,11 @@ export function connectSSE(url: string, callbacks: SSECallback, maxRetries = 3):
 
   const connect = async (): Promise<void> => {
     if (aborted) return
+    callbacks.onConnectionState?.(retryCount ? 'reconnecting' : 'connecting', retryCount)
     const controller = new AbortController()
     activeController = controller
     try {
-      const response = await fetch(withCursor(url, lastEventId), {
+      const response = await fetch(withCursor(url, lastEventId, cursorParam), {
         signal: controller.signal,
         credentials: 'include',
         headers: {
@@ -78,12 +97,14 @@ export function connectSSE(url: string, callbacks: SSECallback, maxRetries = 3):
         scheduleReconnect('SSE: 无法获取响应流')
         return
       }
+      callbacks.onConnectionState?.('live', retryCount)
 
       const decoder = new TextDecoder()
       let buffer = ''
       let eventType = ''
       let dataBuffer = ''
       let pendingEventId: number | null = null
+      let terminalSeen = false
 
       const dispatch = () => {
         if (!dataBuffer) {
@@ -99,6 +120,11 @@ export function connectSSE(url: string, callbacks: SSECallback, maxRetries = 3):
           callbacks.onRawEvent?.(eventType, parsed)
           if (eventType === 'status_update') callbacks.onStatusUpdate?.(parsed as StreamStatusData)
           else if (eventType === 'complete') callbacks.onComplete?.(parsed as StreamCompleteData)
+          if (callbacks.isTerminalEvent?.(eventType, parsed)) {
+            terminalSeen = true
+            aborted = true
+            callbacks.onConnectionState?.('terminal', retryCount)
+          }
         } catch {
           // 忽略单个不可解析事件，继续保持连接与游标。
         }
@@ -146,7 +172,7 @@ export function connectSSE(url: string, callbacks: SSECallback, maxRetries = 3):
       }
       if (!aborted) {
         dispatch()
-        scheduleReconnect('SSE连接已断开，正在尝试续接')
+        if (!terminalSeen) scheduleReconnect('SSE连接已断开，正在尝试续接')
       }
     } catch (err: unknown) {
       if (!aborted) scheduleReconnect(err instanceof Error ? err.message : '未知SSE错误')
@@ -160,6 +186,7 @@ export function connectSSE(url: string, callbacks: SSECallback, maxRetries = 3):
   return {
     close: () => {
       aborted = true
+      callbacks.onConnectionState?.('closed', retryCount)
       if (retryTimer !== null) window.clearTimeout(retryTimer)
       retryTimer = null
       activeController?.abort()

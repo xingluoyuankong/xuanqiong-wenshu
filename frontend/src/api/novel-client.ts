@@ -41,6 +41,7 @@ import type {
   ResearchRunRequest,
   ResearchArchive,
   ResearchArchiveCreate,
+  QualityTrendResponse,
 } from '@/api/types/novel'
 
 // ============================================================================
@@ -69,9 +70,18 @@ const readText = (value: unknown): string | undefined => {
 }
 
 const getFallbackMessage = (status: number): string => {
-  if (status === 429) return pick('请求过于频繁，请稍后重试', 'Too many requests — please retry shortly')
-  if (status === 503) return pick('AI 服务暂时不可用，请稍后重试', 'The AI service is temporarily unavailable — please retry shortly')
-  if (status >= 500) return pick('服务暂时不可用，请稍后重试', 'The service is temporarily unavailable — please retry shortly')
+  if (status === 429)
+    return pick('请求过于频繁，请稍后重试', 'Too many requests — please retry shortly')
+  if (status === 503)
+    return pick(
+      'AI 服务暂时不可用，请稍后重试',
+      'The AI service is temporarily unavailable — please retry shortly',
+    )
+  if (status >= 500)
+    return pick(
+      '服务暂时不可用，请稍后重试',
+      'The service is temporarily unavailable — please retry shortly',
+    )
   return pick(`请求失败，状态码: ${status}`, `Request failed with status ${status}`)
 }
 
@@ -79,7 +89,7 @@ const buildApiErrorDetail = (
   status: number,
   payload: unknown,
   requestIdFromHeader?: string,
-  responseSnippet?: string
+  responseSnippet?: string,
 ): ApiErrorDetail => {
   const fallbackMessage = getFallbackMessage(status)
   if (!payload || typeof payload !== 'object') {
@@ -87,12 +97,15 @@ const buildApiErrorDetail = (
       status,
       message: fallbackMessage,
       requestId: readText(requestIdFromHeader),
-      responseSnippet: readText(responseSnippet)
+      responseSnippet: readText(responseSnippet),
     }
   }
 
   const record = payload as Record<string, unknown>
-  const rawDetail = (record.detail && typeof record.detail === 'object') ? record.detail as Record<string, unknown> : null
+  const rawDetail =
+    record.detail && typeof record.detail === 'object'
+      ? (record.detail as Record<string, unknown>)
+      : null
   const message =
     readText(rawDetail?.message) ??
     readText(record.detail) ??
@@ -106,35 +119,44 @@ const buildApiErrorDetail = (
     code: readText(rawDetail?.code),
     hint: readText(rawDetail?.hint),
     rootCause: readText(rawDetail?.root_cause) ?? readText(rawDetail?.rootCause),
-    requestId: readText(rawDetail?.request_id) ?? readText(rawDetail?.requestId) ?? readText(requestIdFromHeader),
+    requestId:
+      readText(rawDetail?.request_id) ??
+      readText(rawDetail?.requestId) ??
+      readText(requestIdFromHeader),
     retryable: typeof rawDetail?.retryable === 'boolean' ? rawDetail.retryable : undefined,
     responseSnippet: readText(responseSnippet),
-    rejectionSummary: rawDetail?.rejection_summary && typeof rawDetail.rejection_summary === 'object'
-      ? rawDetail.rejection_summary as Record<string, any>
-      : undefined,
+    rejectionSummary:
+      rawDetail?.rejection_summary && typeof rawDetail.rejection_summary === 'object'
+        ? (rawDetail.rejection_summary as Record<string, any>)
+        : undefined,
     missingChapters: Array.isArray(rawDetail?.missing_chapters)
       ? rawDetail.missing_chapters.filter((item): item is number => typeof item === 'number')
-      : undefined
+      : undefined,
   }
 }
 
 const formatApiErrorMessage = (detail: ApiErrorDetail): string => {
   const lines = [detail.message || getFallbackMessage(detail.status)]
-  if (detail.rootCause) lines.push(pick(`根因: ${detail.rootCause}`, `Root cause: ${detail.rootCause}`))
+  if (detail.rootCause)
+    lines.push(pick(`根因: ${detail.rootCause}`, `Root cause: ${detail.rootCause}`))
   if (detail.code) lines.push(pick(`错误码: ${detail.code}`, `Error code: ${detail.code}`))
-  if (detail.requestId) lines.push(pick(`请求ID: ${detail.requestId}`, `Request ID: ${detail.requestId}`))
+  if (detail.requestId)
+    lines.push(pick(`请求ID: ${detail.requestId}`, `Request ID: ${detail.requestId}`))
   if (detail.hint) lines.push(pick(`建议: ${detail.hint}`, `Hint: ${detail.hint}`))
-  if (detail.responseSnippet) lines.push(pick(`响应片段: ${detail.responseSnippet}`, `Response snippet: ${detail.responseSnippet}`))
+  if (detail.responseSnippet)
+    lines.push(
+      pick(`响应片段: ${detail.responseSnippet}`, `Response snippet: ${detail.responseSnippet}`),
+    )
   return lines.join('\n')
 }
 
 const request = async (url: string, options: RequestInit = {}, retryCount = 0): Promise<any> => {
   const MAX_RETRIES = 2
   const RETRY_DELAYS = [800, 2000, 4000]
-  
+
   const headers = buildAuthHeaders({
     'Content-Type': 'application/json',
-    ...options.headers
+    ...options.headers,
   })
 
   if (options.body instanceof FormData) {
@@ -147,20 +169,25 @@ const request = async (url: string, options: RequestInit = {}, retryCount = 0): 
   } catch {
     if (retryCount < MAX_RETRIES) {
       const delay = RETRY_DELAYS[retryCount] || 2000
-      await new Promise(resolve => setTimeout(resolve, delay))
+      await new Promise((resolve) => setTimeout(resolve, delay))
       return request(url, options, retryCount + 1)
     }
-    throw new Error(pick(
-      '网络连接失败，请检查后端是否已启动后重试',
-      'Network request failed — check that the backend is running and retry'
-    ))
+    throw new Error(
+      pick(
+        '网络连接失败，请检查后端是否已启动后重试',
+        'Network request failed — check that the backend is running and retry',
+      ),
+    )
   }
 
   // Retry on 502/503/504 (backend temporarily unavailable)
-  if (!response.ok && (response.status === 502 || response.status === 503 || response.status === 504)) {
+  if (
+    !response.ok &&
+    (response.status === 502 || response.status === 503 || response.status === 504)
+  ) {
     if (retryCount < MAX_RETRIES) {
       const delay = RETRY_DELAYS[retryCount] || 2000
-      await new Promise(resolve => setTimeout(resolve, delay))
+      await new Promise((resolve) => setTimeout(resolve, delay))
       return request(url, options, retryCount + 1)
     }
   }
@@ -176,7 +203,9 @@ const request = async (url: string, options: RequestInit = {}, retryCount = 0): 
       const trimmed = rawText.trim()
       responseSnippet = trimmed ? trimmed.slice(0, 220) : undefined
     }
-    throw new ApiError(buildApiErrorDetail(response.status, errorData, requestIdFromHeader, responseSnippet))
+    throw new ApiError(
+      buildApiErrorDetail(response.status, errorData, requestIdFromHeader, responseSnippet),
+    )
   }
 
   return response.json()
@@ -192,30 +221,30 @@ const normalizeChapterVersion = (value: unknown): ChapterVersion => {
     return {
       id: undefined,
       content: normalizeChapterContent(value),
-      style: '标准'
+      style: '标准',
     }
   }
 
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>
-    const rawContent = typeof record.content === 'string'
-      ? record.content
-      : normalizeChapterContent(record)
+    const rawContent =
+      typeof record.content === 'string' ? record.content : normalizeChapterContent(record)
     return {
       id: typeof record.id === 'number' ? record.id : undefined,
       content: normalizeChapterContent(rawContent),
       style: typeof record.style === 'string' ? record.style : '标准',
       evaluation: typeof record.evaluation === 'string' ? record.evaluation : undefined,
-      metadata: record.metadata && typeof record.metadata === 'object'
-        ? record.metadata as Record<string, any>
-        : undefined
+      metadata:
+        record.metadata && typeof record.metadata === 'object'
+          ? (record.metadata as Record<string, any>)
+          : undefined,
     }
   }
 
   return {
     id: undefined,
     content: '',
-    style: '标准'
+    style: '标准',
   }
 }
 
@@ -224,14 +253,14 @@ const normalizeChapter = (chapter: Chapter): Chapter => ({
   content: chapter.content === null ? null : normalizeChapterContent(chapter.content),
   versions: Array.isArray(chapter.versions)
     ? chapter.versions.map((version) => normalizeChapterVersion(version))
-    : null
+    : null,
 })
 
 const normalizeProject = (project: NovelProject): NovelProject => ({
   ...project,
   chapters: Array.isArray(project.chapters)
     ? project.chapters.map((chapter) => normalizeChapter(chapter))
-    : []
+    : [],
 })
 
 const requestProject = async (url: string, options?: RequestInit): Promise<NovelProject> => {
@@ -265,7 +294,10 @@ const NOVEL_IMPORT_MAX_POLL_ATTEMPTS = 900
 const delay = (ms: number) => new Promise((resolve) => globalThis.setTimeout(resolve, ms))
 
 const readBlueprintJobError = (status: BlueprintGenerationJobResponse): string => {
-  const fallback = pick('蓝图生成失败，请稍后重试', 'Blueprint generation failed — please retry shortly')
+  const fallback = pick(
+    '蓝图生成失败，请稍后重试',
+    'Blueprint generation failed — please retry shortly',
+  )
   const rawError = status.error
   if (!rawError) return status.progress_message || fallback
   if (typeof rawError === 'string') return rawError
@@ -273,7 +305,10 @@ const readBlueprintJobError = (status: BlueprintGenerationJobResponse): string =
 }
 
 const readStyleProfileJobError = (status: StyleProfileJobResponse): string => {
-  const fallback = pick('文风画像生成失败，请稍后重试', 'Style profile generation failed — please retry shortly')
+  const fallback = pick(
+    '文风画像生成失败，请稍后重试',
+    'Style profile generation failed — please retry shortly',
+  )
   const rawError = status.error
   if (!rawError) return status.progress_message || fallback
   if (typeof rawError === 'string') return rawError
@@ -281,7 +316,10 @@ const readStyleProfileJobError = (status: StyleProfileJobResponse): string => {
 }
 
 const readStyleSourceUploadJobError = (status: StyleSourceUploadJobResponse): string => {
-  const fallback = pick('文风素材导入失败，请稍后重试', 'Style source import failed — please retry shortly')
+  const fallback = pick(
+    '文风素材导入失败，请稍后重试',
+    'Style source import failed — please retry shortly',
+  )
   const rawError = status.error
   if (!rawError) return status.progress_message || fallback
   if (typeof rawError === 'string') return rawError
@@ -289,7 +327,10 @@ const readStyleSourceUploadJobError = (status: StyleSourceUploadJobResponse): st
 }
 
 const readNovelImportJobError = (status: NovelImportJobResponse): string => {
-  const fallback = pick('旧稿导入失败，请稍后重试', 'Manuscript import failed — please retry shortly')
+  const fallback = pick(
+    '旧稿导入失败，请稍后重试',
+    'Manuscript import failed — please retry shortly',
+  )
   const rawError = status.error
   if (!rawError) return status.progress_message || fallback
   if (typeof rawError === 'string') return rawError
@@ -304,7 +345,7 @@ export class NovelAPI {
   static async createNovel(title: string, initialPrompt: string): Promise<NovelProject> {
     return requestProject(NOVELS_BASE, {
       method: 'POST',
-      body: JSON.stringify({ title, initial_prompt: initialPrompt })
+      body: JSON.stringify({ title, initial_prompt: initialPrompt }),
     })
   }
 
@@ -319,17 +360,21 @@ export class NovelAPI {
         throw new Error(readNovelImportJobError(status))
       }
       if (status.status === 'cancelled') {
-        throw new Error(status.progress_message || pick('旧稿导入已取消', 'Manuscript import cancelled'))
+        throw new Error(
+          status.progress_message || pick('旧稿导入已取消', 'Manuscript import cancelled'),
+        )
       }
 
       await delay(NOVEL_IMPORT_POLL_INTERVAL_MS)
       status = await NovelAPI.getNovelImportStatus(status.run_id)
     }
 
-    throw new Error(pick(
-      '旧稿导入后台任务等待超时，请稍后刷新项目列表查看结果。',
-      'Timed out waiting for the manuscript import job — refresh the project list later to see the result.'
-    ))
+    throw new Error(
+      pick(
+        '旧稿导入后台任务等待超时，请稍后刷新项目列表查看结果。',
+        'Timed out waiting for the manuscript import job — refresh the project list later to see the result.',
+      ),
+    )
   }
 
   static async startNovelImport(file: File): Promise<NovelImportJobResponse> {
@@ -340,7 +385,7 @@ export class NovelAPI {
       body: formData,
       headers: {
         // 让 browser 自动设置 Content-Type 为 multipart/form-data，不手动设置
-      }
+      },
     })
   }
 
@@ -370,22 +415,30 @@ export class NovelAPI {
     return requestChapter(`${NOVELS_BASE}/${projectId}/chapters/${chapterNumber}`)
   }
 
-  static async getSection(projectId: string, section: NovelSectionType): Promise<NovelSectionResponse> {
+  /** 获取项目跨章节质量趋势（只读聚合）。 */
+  static async getQualityTrend(projectId: string): Promise<QualityTrendResponse> {
+    return request(`${NOVELS_BASE}/${projectId}/quality-trend`)
+  }
+
+  static async getSection(
+    projectId: string,
+    section: NovelSectionType,
+  ): Promise<NovelSectionResponse> {
     return request(`${NOVELS_BASE}/${projectId}/sections/${section}`)
   }
 
   static async converseConcept(
     projectId: string,
     userInput: any,
-    conversationState: any = {}
+    conversationState: any = {},
   ): Promise<ConverseResponse> {
     const formattedUserInput = userInput || { id: null, value: null }
     return request(`${NOVELS_BASE}/${projectId}/concept/converse`, {
       method: 'POST',
       body: JSON.stringify({
         user_input: formattedUserInput,
-        conversation_state: conversationState
-      })
+        conversation_state: conversationState,
+      }),
     })
   }
 
@@ -397,58 +450,67 @@ export class NovelAPI {
       if (status.status === 'successful' && status.blueprint) {
         return {
           blueprint: status.blueprint,
-          ai_message: status.ai_message || pick(
-            '蓝图已生成，请确认后进入写作阶段。',
-            'The blueprint is ready — confirm it to move on to writing.'
-          )
+          ai_message:
+            status.ai_message ||
+            pick(
+              '蓝图已生成，请确认后进入写作阶段。',
+              'The blueprint is ready — confirm it to move on to writing.',
+            ),
         }
       }
       if (status.status === 'failed') {
         throw new Error(readBlueprintJobError(status))
       }
       if (status.status === 'cancelled') {
-        throw new Error(status.progress_message || pick('蓝图生成已取消', 'Blueprint generation cancelled'))
+        throw new Error(
+          status.progress_message || pick('蓝图生成已取消', 'Blueprint generation cancelled'),
+        )
       }
 
       await delay(BLUEPRINT_LEGACY_POLL_INTERVAL_MS)
       status = await NovelAPI.getBlueprintGenerationStatus(projectId)
     }
 
-    throw new Error(pick(
-      '蓝图后台任务等待超时，请稍后到生成状态中刷新结果。',
-      'Timed out waiting for the blueprint job — refresh the generation status later to see the result.'
-    ))
+    throw new Error(
+      pick(
+        '蓝图后台任务等待超时，请稍后到生成状态中刷新结果。',
+        'Timed out waiting for the blueprint job — refresh the generation status later to see the result.',
+      ),
+    )
   }
 
   static async startBlueprintGeneration(
     projectId: string,
-    options: { forceStage?: 'novel_outline' | 'chapter_outline' } = {}
+    options: { forceStage?: 'novel_outline' | 'chapter_outline' } = {},
   ): Promise<BlueprintGenerationJobResponse> {
     return request(`${NOVELS_BASE}/${projectId}/blueprint/generate/start`, {
       method: 'POST',
       body: JSON.stringify({
         force_stage: options.forceStage,
-      })
+      }),
     })
   }
 
-  static async getBlueprintGenerationStatus(projectId: string): Promise<BlueprintGenerationJobResponse> {
+  static async getBlueprintGenerationStatus(
+    projectId: string,
+  ): Promise<BlueprintGenerationJobResponse> {
     return request(`${NOVELS_BASE}/${projectId}/blueprint/generate/status`)
   }
 
-  static async cancelBlueprintGeneration(projectId: string): Promise<BlueprintGenerationJobResponse> {
+  static async cancelBlueprintGeneration(
+    projectId: string,
+  ): Promise<BlueprintGenerationJobResponse> {
     return request(`${NOVELS_BASE}/${projectId}/blueprint/generate/cancel`, {
-      method: 'POST'
+      method: 'POST',
     })
   }
 
   static async saveBlueprint(projectId: string, blueprint: Blueprint): Promise<NovelProject> {
     return requestProject(`${NOVELS_BASE}/${projectId}/blueprint/save`, {
       method: 'POST',
-      body: JSON.stringify(blueprint)
+      body: JSON.stringify(blueprint),
     })
   }
-
 
   static async getAllNovels(): Promise<NovelProjectSummary[]> {
     return request(NOVELS_BASE)
@@ -457,15 +519,17 @@ export class NovelAPI {
   static async deleteNovels(projectIds: string[]): Promise<DeleteNovelsResponse> {
     return request(NOVELS_BASE, {
       method: 'DELETE',
-      body: JSON.stringify(projectIds)
+      body: JSON.stringify(projectIds),
     })
   }
 
-
-  static async updateBlueprint(projectId: string, data: Record<string, any>): Promise<NovelProject> {
+  static async updateBlueprint(
+    projectId: string,
+    data: Record<string, any>,
+  ): Promise<NovelProject> {
     return requestProject(`${NOVELS_BASE}/${projectId}/blueprint`, {
       method: 'PATCH',
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
     })
   }
 
@@ -478,14 +542,14 @@ export class NovelAPI {
 
   static async updateFactions(
     projectId: string,
-    factions: Array<Record<string, any>>
+    factions: Array<Record<string, any>>,
   ): Promise<{
     project_id: string
     factions: Array<Record<string, any>>
   }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/factions`, {
       method: 'PUT',
-      body: JSON.stringify(factions)
+      body: JSON.stringify(factions),
     })
   }
 
@@ -493,27 +557,30 @@ export class NovelAPI {
     projectId: string,
     chapterNumber: number,
     original: string,
-    patched: string
+    patched: string,
   ): Promise<{
     status: string
     message: string
     patch_id: number
     chapter_number: number
   }> {
-    return request(`${PATCH_DIFF_BASE}/projects/${projectId}/chapters/${chapterNumber}/patch/apply`, {
-      method: 'POST',
-      body: JSON.stringify({
-        original_text: original,
-        patched_text: patched,
-      })
-    })
+    return request(
+      `${PATCH_DIFF_BASE}/projects/${projectId}/chapters/${chapterNumber}/patch/apply`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          original_text: original,
+          patched_text: patched,
+        }),
+      },
+    )
   }
 
   static async getDiff(
     projectId: string,
     chapterNumber: number,
     original: string,
-    patched: string
+    patched: string,
   ): Promise<{
     chapter_number: number
     diff_lines: Array<{
@@ -535,7 +602,7 @@ export class NovelAPI {
       body: JSON.stringify({
         original_text: original,
         patched_text: patched,
-      })
+      }),
     })
   }
 
@@ -543,7 +610,7 @@ export class NovelAPI {
     projectId: string,
     chapterNumber: number,
     v1: number,
-    v2: number
+    v2: number,
   ): Promise<{
     chapter_number: number
     version1_id: number
@@ -562,21 +629,29 @@ export class NovelAPI {
       unchanged: number
     }
   }> {
-    return request(`${PATCH_DIFF_BASE}/projects/${projectId}/chapters/${chapterNumber}/versions/${v1}/vs/${v2}`)
+    return request(
+      `${PATCH_DIFF_BASE}/projects/${projectId}/chapters/${chapterNumber}/versions/${v1}/vs/${v2}`,
+    )
   }
   // ===== Research APIs =====
   static async getResearchConfig(projectId: string): Promise<ResearchConfig> {
     return request(`${PROJECTS_BASE}/${projectId}/research/config`)
   }
 
-  static async updateResearchConfig(projectId: string, config: ResearchConfigUpdate): Promise<ResearchConfig> {
+  static async updateResearchConfig(
+    projectId: string,
+    config: ResearchConfigUpdate,
+  ): Promise<ResearchConfig> {
     return request(`${PROJECTS_BASE}/${projectId}/research/config`, {
       method: 'PUT',
       body: JSON.stringify(config),
     })
   }
 
-  static async startResearchJob(projectId: string, payload: ResearchRunRequest): Promise<ResearchJobRead> {
+  static async startResearchJob(
+    projectId: string,
+    payload: ResearchRunRequest,
+  ): Promise<ResearchJobRead> {
     return request(`${PROJECTS_BASE}/${projectId}/research/run/start`, {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -594,7 +669,10 @@ export class NovelAPI {
   }
 
   /** @deprecated Use startResearchJob. */
-  static async startResearchRun(projectId: string, payload: ResearchRunRequest): Promise<ResearchJobRead> {
+  static async startResearchRun(
+    projectId: string,
+    payload: ResearchRunRequest,
+  ): Promise<ResearchJobRead> {
     return this.startResearchJob(projectId, payload)
   }
 
@@ -611,7 +689,10 @@ export class NovelAPI {
     return request(`${PROJECTS_BASE}/${projectId}/research/archives`)
   }
 
-  static async createResearchArchive(projectId: string, payload: ResearchArchiveCreate): Promise<ResearchArchive> {
+  static async createResearchArchive(
+    projectId: string,
+    payload: ResearchArchiveCreate,
+  ): Promise<ResearchArchive> {
     return request(`${PROJECTS_BASE}/${projectId}/research/archives`, {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -632,7 +713,7 @@ export class OptimizerAPI {
   static async optimizeChapter(optimizeReq: OptimizeRequest): Promise<OptimizeResponse> {
     return request(`${OPTIMIZER_BASE}/optimize`, {
       method: 'POST',
-      body: JSON.stringify(optimizeReq)
+      body: JSON.stringify(optimizeReq),
     })
   }
 
@@ -642,15 +723,15 @@ export class OptimizerAPI {
   static async applyOptimization(
     projectId: string,
     chapterNumber: number,
-    optimizedContent: string
+    optimizedContent: string,
   ): Promise<ApplyOptimizationResponse> {
     return request(`${OPTIMIZER_BASE}/apply-optimization`, {
       method: 'POST',
       body: JSON.stringify({
         project_id: projectId,
         chapter_number: chapterNumber,
-        optimized_content: optimizedContent
-      })
+        optimized_content: optimizedContent,
+      }),
     })
   }
 
@@ -667,11 +748,11 @@ export class OptimizerAPI {
       new_plot_arcs?: Record<string, any>
       new_timeline_events?: Array<Record<string, any>>
       character_states?: Record<string, any>
-    }
+    },
   ): Promise<{ project_id: string; result: any }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/memory/incremental`, {
       method: 'POST',
-      body: JSON.stringify(update)
+      body: JSON.stringify(update),
     })
   }
 
@@ -681,7 +762,7 @@ export class OptimizerAPI {
   static async getMemorySnapshots(
     projectId: string,
     chapterNumber?: number,
-    limit: number = 10
+    limit: number = 10,
   ): Promise<{
     project_id: string
     snapshots: Array<{ id: number; chapter_number: number; summary: string; created_at: string }>
@@ -700,11 +781,11 @@ export class OptimizerAPI {
    */
   static async compressMemory(
     projectId: string,
-    preserveChapters: number = 5
+    preserveChapters: number = 5,
   ): Promise<{ project_id: string; result: any }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/memory/compress`, {
       method: 'POST',
-      body: JSON.stringify({ preserve_chapters: preserveChapters })
+      body: JSON.stringify({ preserve_chapters: preserveChapters }),
     })
   }
 
@@ -713,11 +794,11 @@ export class OptimizerAPI {
    */
   static async rollbackMemory(
     projectId: string,
-    targetVersion: number
+    targetVersion: number,
   ): Promise<{ project_id: string; result: any }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/memory/rollback`, {
       method: 'POST',
-      body: JSON.stringify({ target_version: targetVersion })
+      body: JSON.stringify({ target_version: targetVersion }),
     })
   }
 
@@ -728,11 +809,11 @@ export class OptimizerAPI {
    */
   static async extractStyle(
     projectId: string,
-    chapterNumbers: number[]
+    chapterNumbers: number[],
   ): Promise<{ success: boolean; message: string; style_summary: any }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/extract`, {
       method: 'POST',
-      body: JSON.stringify({ chapter_numbers: chapterNumbers })
+      body: JSON.stringify({ chapter_numbers: chapterNumbers }),
     })
   }
 
@@ -740,7 +821,7 @@ export class OptimizerAPI {
    * 获取项目当前风格配置
    */
   static async getProjectStyle(
-    projectId: string
+    projectId: string,
   ): Promise<{ has_style: boolean; summary: any; source?: any }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style`)
   }
@@ -748,15 +829,18 @@ export class OptimizerAPI {
   /**
    * 获取外部文风来源列表
    */
-  static async listStyleSources(
-    projectId: string
-  ): Promise<{ sources: any[] }> {
+  static async listStyleSources(projectId: string): Promise<{ sources: any[] }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/sources`)
   }
 
   static async getStyleLibrary(
-    projectId: string
-  ): Promise<{ sources: any[]; profiles: any[]; project_active_profile: any | null; global_active_profile: any | null }> {
+    projectId: string,
+  ): Promise<{
+    sources: any[]
+    profiles: any[]
+    project_active_profile: any | null
+    global_active_profile: any | null
+  }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/library`)
   }
 
@@ -770,11 +854,11 @@ export class OptimizerAPI {
       content_text: string
       source_type?: string
       extra?: Record<string, any>
-    }
+    },
   ): Promise<{ success: boolean; source: any }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/sources`, {
       method: 'POST',
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
     })
   }
 
@@ -783,19 +867,17 @@ export class OptimizerAPI {
    */
   static async deleteStyleSource(
     projectId: string,
-    sourceId: string
+    sourceId: string,
   ): Promise<{ success: boolean }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/sources/${sourceId}`, {
-      method: 'DELETE'
+      method: 'DELETE',
     })
   }
 
   /**
    * 获取文风画像列表
    */
-  static async listStyleProfiles(
-    projectId: string
-  ): Promise<{ profiles: any[] }> {
+  static async listStyleProfiles(projectId: string): Promise<{ profiles: any[] }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/profiles`)
   }
 
@@ -804,7 +886,7 @@ export class OptimizerAPI {
    */
   static async createStyleProfile(
     projectId: string,
-    payload: { source_ids: string[]; name?: string; append_to_profile_id?: string }
+    payload: { source_ids: string[]; name?: string; append_to_profile_id?: string },
   ): Promise<{ success: boolean; profile: any }> {
     let status = await OptimizerAPI.startStyleProfileGeneration(projectId, payload)
 
@@ -816,36 +898,43 @@ export class OptimizerAPI {
         throw new Error(readStyleProfileJobError(status))
       }
       if (status.status === 'cancelled') {
-        throw new Error(status.progress_message || pick('文风画像生成已取消', 'Style profile generation cancelled'))
+        throw new Error(
+          status.progress_message ||
+            pick('文风画像生成已取消', 'Style profile generation cancelled'),
+        )
       }
 
       await delay(STYLE_PROFILE_POLL_INTERVAL_MS)
       status = await OptimizerAPI.getStyleProfileGenerationStatus(projectId)
     }
 
-    throw new Error(pick(
-      '文风画像后台任务等待超时，请稍后刷新文风中心查看结果。',
-      'Timed out waiting for the style profile job — refresh the style center later to see the result.'
-    ))
+    throw new Error(
+      pick(
+        '文风画像后台任务等待超时，请稍后刷新文风中心查看结果。',
+        'Timed out waiting for the style profile job — refresh the style center later to see the result.',
+      ),
+    )
   }
 
   static async startStyleProfileGeneration(
     projectId: string,
-    payload: { source_ids: string[]; name?: string; append_to_profile_id?: string }
+    payload: { source_ids: string[]; name?: string; append_to_profile_id?: string },
   ): Promise<StyleProfileJobResponse> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/profiles/start`, {
       method: 'POST',
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
     })
   }
 
-  static async getStyleProfileGenerationStatus(projectId: string): Promise<StyleProfileJobResponse> {
+  static async getStyleProfileGenerationStatus(
+    projectId: string,
+  ): Promise<StyleProfileJobResponse> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/profiles/status`)
   }
 
   static async cancelStyleProfileGeneration(projectId: string): Promise<StyleProfileJobResponse> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/profiles/cancel`, {
-      method: 'POST'
+      method: 'POST',
     })
   }
 
@@ -856,7 +945,7 @@ export class OptimizerAPI {
       title?: string
       source_type?: string
       extra?: Record<string, any>
-    }
+    },
   ): Promise<{ success: boolean; source: any }> {
     let status = await OptimizerAPI.startStyleSourceUpload(projectId, payload)
 
@@ -868,17 +957,21 @@ export class OptimizerAPI {
         throw new Error(readStyleSourceUploadJobError(status))
       }
       if (status.status === 'cancelled') {
-        throw new Error(status.progress_message || pick('文风素材导入已取消', 'Style source import cancelled'))
+        throw new Error(
+          status.progress_message || pick('文风素材导入已取消', 'Style source import cancelled'),
+        )
       }
 
       await delay(STYLE_SOURCE_UPLOAD_POLL_INTERVAL_MS)
       status = await OptimizerAPI.getStyleSourceUploadStatus(projectId, status.run_id)
     }
 
-    throw new Error(pick(
-      '文风素材导入后台任务等待超时，请稍后刷新文风中心查看结果。',
-      'Timed out waiting for the style source import job — refresh the style center later to see the result.'
-    ))
+    throw new Error(
+      pick(
+        '文风素材导入后台任务等待超时，请稍后刷新文风中心查看结果。',
+        'Timed out waiting for the style source import job — refresh the style center later to see the result.',
+      ),
+    )
   }
 
   static async startStyleSourceUpload(
@@ -888,33 +981,41 @@ export class OptimizerAPI {
       title?: string
       source_type?: string
       extra?: Record<string, any>
-    }
+    },
   ): Promise<StyleSourceUploadJobResponse> {
     const formData = new FormData()
     formData.append('file', payload.file)
     if (payload.title) formData.append('title', payload.title)
     if (payload.source_type) formData.append('source_type', payload.source_type)
     if (payload.extra) formData.append('extra', JSON.stringify(payload.extra))
-    return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/sources/upload/start`, {
-      method: 'POST',
-      body: formData
-    })
+    return request(
+      `${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/sources/upload/start`,
+      {
+        method: 'POST',
+        body: formData,
+      },
+    )
   }
 
   static async getStyleSourceUploadStatus(
     projectId: string,
-    runId: string
+    runId: string,
   ): Promise<StyleSourceUploadJobResponse> {
-    return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/sources/upload/status?run_id=${encodeURIComponent(runId)}`)
+    return request(
+      `${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/sources/upload/status?run_id=${encodeURIComponent(runId)}`,
+    )
   }
 
   static async cancelStyleSourceUpload(
     projectId: string,
-    runId: string
+    runId: string,
   ): Promise<StyleSourceUploadJobResponse> {
-    return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/sources/upload/${encodeURIComponent(runId)}/cancel`, {
-      method: 'POST'
-    })
+    return request(
+      `${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/sources/upload/${encodeURIComponent(runId)}/cancel`,
+      {
+        method: 'POST',
+      },
+    )
   }
 
   static async updateStyleProfile(
@@ -924,20 +1025,27 @@ export class OptimizerAPI {
       name?: string
       summary?: Record<string, string>
       extra?: Record<string, any>
-    }
+    },
   ): Promise<{ success: boolean; profile: any }> {
-    return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/profiles/${profileId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(payload)
-    })
+    return request(
+      `${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/profiles/${profileId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      },
+    )
   }
 
   /**
    * 获取当前激活的文风画像
    */
   static async getActiveStyleProfile(
-    projectId: string
-  ): Promise<{ has_active_style: boolean; profile: any | null; scope: 'global' | 'project' | null }> {
+    projectId: string,
+  ): Promise<{
+    has_active_style: boolean
+    profile: any | null
+    scope: 'global' | 'project' | null
+  }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/active`)
   }
 
@@ -947,11 +1055,11 @@ export class OptimizerAPI {
   static async activateStyleProfile(
     projectId: string,
     profileId: string,
-    scope: 'global' | 'project' = 'project'
+    scope: 'global' | 'project' = 'project',
   ): Promise<{ success: boolean; profile: any; scope: 'global' | 'project' }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/apply`, {
       method: 'POST',
-      body: JSON.stringify({ profile_id: profileId, scope })
+      body: JSON.stringify({ profile_id: profileId, scope }),
     })
   }
 
@@ -960,21 +1068,24 @@ export class OptimizerAPI {
    */
   static async clearActiveStyleProfile(
     projectId: string,
-    scope: 'global' | 'project' = 'project'
+    scope: 'global' | 'project' = 'project',
   ): Promise<{ success: boolean }> {
-    return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/active?scope=${scope}`, {
-      method: 'DELETE'
-    })
+    return request(
+      `${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/active?scope=${scope}`,
+      {
+        method: 'DELETE',
+      },
+    )
   }
 
   /**
    * 清除项目的风格配置
    */
   static async clearProjectStyle(
-    projectId: string
+    projectId: string,
   ): Promise<{ success: boolean; message: string }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style`, {
-      method: 'DELETE'
+      method: 'DELETE',
     })
   }
 
@@ -985,15 +1096,15 @@ export class OptimizerAPI {
     projectId: string,
     existingContent: string,
     direction: string,
-    maxTokens: number = 2000
+    maxTokens: number = 2000,
   ): Promise<{ content: string; style_applied: boolean }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/generate`, {
       method: 'POST',
       body: JSON.stringify({
         existing_content: existingContent,
         direction: direction,
-        max_tokens: maxTokens
-      })
+        max_tokens: maxTokens,
+      }),
     })
   }
 
@@ -1005,14 +1116,14 @@ export class OptimizerAPI {
   static async evolveOutline(
     projectId: string,
     chapterNumber: number,
-    numOptions: number = 3
+    numOptions: number = 3,
   ): Promise<{ alternatives: any[]; batch_id: string; chapter_number: number }> {
     return request(`${NOVELS_BASE}/${projectId}/outline/evolve`, {
       method: 'POST',
       body: JSON.stringify({
         chapter_number: chapterNumber,
-        num_options: numOptions
-      })
+        num_options: numOptions,
+      }),
     })
   }
 
@@ -1022,14 +1133,14 @@ export class OptimizerAPI {
   static async selectAlternative(
     projectId: string,
     optionId: number,
-    chapterNumber: number
+    chapterNumber: number,
   ): Promise<{ success: boolean; message: string; updated_outline: any }> {
     return request(`${NOVELS_BASE}/${projectId}/outline/next`, {
       method: 'POST',
       body: JSON.stringify({
         option_id: optionId,
-        chapter_number: chapterNumber
-      })
+        chapter_number: chapterNumber,
+      }),
     })
   }
 
@@ -1039,7 +1150,7 @@ export class OptimizerAPI {
   static async getOutlineAlternatives(
     projectId: string,
     chapterNumber: number,
-    statusFilter?: string
+    statusFilter?: string,
   ): Promise<{ alternatives: any[]; chapter_number: number; total: number }> {
     const params = new URLSearchParams({ chapter_number: String(chapterNumber) })
     if (statusFilter) params.append('status_filter', statusFilter)
@@ -1052,7 +1163,7 @@ export class OptimizerAPI {
   static async getOutlineHistory(
     projectId: string,
     chapterNumber?: number,
-    limit: number = 20
+    limit: number = 20,
   ): Promise<{ history: any[]; total: number }> {
     const params = new URLSearchParams({ limit: String(limit) })
     if (chapterNumber !== undefined) params.append('chapter_number', String(chapterNumber))
@@ -1067,13 +1178,12 @@ export class OptimizerAPI {
    * 应用 Patch 到章节内容
    */
 
-
   /**
    * 获取章节的 Patch 历史
    */
   static async getPatchHistory(
     projectId: string,
-    chapterNumber: number
+    chapterNumber: number,
   ): Promise<{
     chapter_number: number
     patches: Array<{
@@ -1089,7 +1199,9 @@ export class OptimizerAPI {
     }>
     total: number
   }> {
-    return request(`${PATCH_DIFF_BASE}/projects/${projectId}/chapters/${chapterNumber}/patch/history`)
+    return request(
+      `${PATCH_DIFF_BASE}/projects/${projectId}/chapters/${chapterNumber}/patch/history`,
+    )
   }
 
   /**
@@ -1098,16 +1210,19 @@ export class OptimizerAPI {
   static async revertPatch(
     projectId: string,
     chapterNumber: number,
-    patchId: number
+    patchId: number,
   ): Promise<{
     status: string
     message: string
     original_text: string
   }> {
-    return request(`${PATCH_DIFF_BASE}/projects/${projectId}/chapters/${chapterNumber}/patch/revert`, {
-      method: 'POST',
-      body: JSON.stringify({ patch_id: patchId })
-    })
+    return request(
+      `${PATCH_DIFF_BASE}/projects/${projectId}/chapters/${chapterNumber}/patch/revert`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ patch_id: patchId }),
+      },
+    )
   }
 }
 
@@ -1122,7 +1237,7 @@ export class AnalyticsAPI {
 
   static async analyzeEmotionWithAI(projectId: string): Promise<any> {
     return request(`${API_BASE_URL}${API_PREFIX}/analytics/${projectId}/analyze-emotion-ai`, {
-      method: 'POST'
+      method: 'POST',
     })
   }
 
@@ -1131,7 +1246,9 @@ export class AnalyticsAPI {
   }
 
   static async getEnhancedEmotionCurve(projectId: string): Promise<EnhancedEmotionPoint[]> {
-    return request(`${API_BASE_URL}${API_PREFIX}/analytics/projects/${projectId}/emotion-curve-enhanced`)
+    return request(
+      `${API_BASE_URL}${API_PREFIX}/analytics/projects/${projectId}/emotion-curve-enhanced`,
+    )
   }
 
   static async getStoryTrajectory(projectId: string): Promise<StoryTrajectoryAnalysis> {
@@ -1143,13 +1260,20 @@ export class AnalyticsAPI {
   }
 
   static async getComprehensiveAnalysis(projectId: string): Promise<ComprehensiveAnalysis> {
-    return request(`${API_BASE_URL}${API_PREFIX}/analytics/projects/${projectId}/comprehensive-analysis`)
+    return request(
+      `${API_BASE_URL}${API_PREFIX}/analytics/projects/${projectId}/comprehensive-analysis`,
+    )
   }
 
-  static async invalidateAnalysisCache(projectId: string): Promise<{ message: string; project_id: string }> {
-    return request(`${API_BASE_URL}${API_PREFIX}/analytics/projects/${projectId}/invalidate-cache`, {
-      method: 'POST'
-    })
+  static async invalidateAnalysisCache(
+    projectId: string,
+  ): Promise<{ message: string; project_id: string }> {
+    return request(
+      `${API_BASE_URL}${API_PREFIX}/analytics/projects/${projectId}/invalidate-cache`,
+      {
+        method: 'POST',
+      },
+    )
   }
 }
 
@@ -1163,9 +1287,7 @@ export class TokenBudgetAPI {
   /**
    * 获取项目的 Token 预算配置
    */
-  static async getBudgetConfig(
-    projectId: string
-  ): Promise<{
+  static async getBudgetConfig(projectId: string): Promise<{
     project_id: string
     total_budget: number
     chapter_budget: number
@@ -1185,7 +1307,7 @@ export class TokenBudgetAPI {
       chapter_budget?: number
       module_allocation?: Record<string, number>
       warning_threshold?: number
-    }
+    },
   ): Promise<{
     project_id: string
     total_budget: number
@@ -1195,7 +1317,7 @@ export class TokenBudgetAPI {
   }> {
     return request(`${TOKEN_BUDGET_BASE}/${projectId}/token-budget`, {
       method: 'PUT',
-      body: JSON.stringify(config)
+      body: JSON.stringify(config),
     })
   }
 
@@ -1212,7 +1334,7 @@ export class TokenBudgetAPI {
       chapter_id?: number
       operation_type?: string
       description?: string
-    }
+    },
   ): Promise<{
     id: number
     project_id: string
@@ -1223,7 +1345,7 @@ export class TokenBudgetAPI {
   }> {
     return request(`${TOKEN_BUDGET_BASE}/${projectId}/token-budget/usage`, {
       method: 'POST',
-      body: JSON.stringify(usage)
+      body: JSON.stringify(usage),
     })
   }
 
@@ -1236,7 +1358,7 @@ export class TokenBudgetAPI {
       start_date?: string
       end_date?: string
       chapter_id?: number
-    }
+    },
   ): Promise<{
     project_id: string
     total_budget: number
@@ -1259,16 +1381,17 @@ export class TokenBudgetAPI {
   /**
    * 获取各模块的使用量
    */
-  static async getModuleUsage(
-    projectId: string
-  ): Promise<{
+  static async getModuleUsage(projectId: string): Promise<{
     project_id: string
-    module_usage: Record<string, {
-      used: number
-      allocated: number
-      remaining: number
-      percent: number
-    }>
+    module_usage: Record<
+      string,
+      {
+        used: number
+        allocated: number
+        remaining: number
+        percent: number
+      }
+    >
     total_budget: number
     warning_threshold: number
   }> {
@@ -1280,19 +1403,21 @@ export class TokenBudgetAPI {
    */
   static async getAlerts(
     projectId: string,
-    includeResolved: boolean = false
-  ): Promise<Array<{
-    id: number
-    alert_type: string
-    threshold_percent: number
-    current_usage: number
-    budget_limit: number
-    message: string
-    is_resolved: boolean
-    created_at: string
-  }>> {
+    includeResolved: boolean = false,
+  ): Promise<
+    Array<{
+      id: number
+      alert_type: string
+      threshold_percent: number
+      current_usage: number
+      budget_limit: number
+      message: string
+      is_resolved: boolean
+      created_at: string
+    }>
+  > {
     return request(
-      `${TOKEN_BUDGET_BASE}/${projectId}/token-budget/alerts?include_resolved=${includeResolved}`
+      `${TOKEN_BUDGET_BASE}/${projectId}/token-budget/alerts?include_resolved=${includeResolved}`,
     )
   }
 
@@ -1301,12 +1426,11 @@ export class TokenBudgetAPI {
    */
   static async resolveAlert(
     projectId: string,
-    alertId: number
+    alertId: number,
   ): Promise<{ status: string; message: string }> {
-    return request(
-      `${TOKEN_BUDGET_BASE}/${projectId}/token-budget/alerts/${alertId}/resolve`,
-      { method: 'POST' }
-    )
+    return request(`${TOKEN_BUDGET_BASE}/${projectId}/token-budget/alerts/${alertId}/resolve`, {
+      method: 'POST',
+    })
   }
 
   /**
@@ -1314,7 +1438,7 @@ export class TokenBudgetAPI {
    */
   static async allocateModuleBudget(
     projectId: string,
-    allocations: Array<{ module: string; allocation_percent: number }>
+    allocations: Array<{ module: string; allocation_percent: number }>,
   ): Promise<{
     status: string
     message: string
@@ -1322,7 +1446,7 @@ export class TokenBudgetAPI {
   }> {
     return request(`${TOKEN_BUDGET_BASE}/${projectId}/token-budget/allocate`, {
       method: 'POST',
-      body: JSON.stringify(allocations)
+      body: JSON.stringify(allocations),
     })
   }
 }

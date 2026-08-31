@@ -31,7 +31,7 @@ def _chapter(run_id: str | None = "old-run", status: str = "generating"):
     )
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_rebind_generation_run_overwrites_stale_run_id():
     orch = PipelineOrchestrator(session=AsyncMock())
     orch.session.refresh = AsyncMock()
@@ -54,7 +54,7 @@ async def test_rebind_generation_run_overwrites_stale_run_id():
     orch.session.commit.assert_awaited()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_rebind_is_noop_when_run_already_active():
     orch = PipelineOrchestrator(session=AsyncMock())
     orch.session.refresh = AsyncMock()
@@ -73,7 +73,7 @@ async def test_rebind_is_noop_when_run_already_active():
     orch.session.commit.assert_not_awaited()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_assert_generation_active_passes_after_rebind():
     orch = PipelineOrchestrator(session=AsyncMock())
     orch.session.refresh = AsyncMock()
@@ -89,7 +89,7 @@ async def test_assert_generation_active_passes_after_rebind():
     )
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_formal_generate_chapter_entry_rebinds_before_runtime_updates():
     orch = PipelineOrchestrator(session=AsyncMock())
     chapter = _chapter("stale-run", status="failed")

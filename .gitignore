@@ -79,3 +79,11 @@ OPTIMIZATION_ROUND5_REPORT.md
 test_llm_service.py
 test_research_service.py
 backend/logs/run-*
+# Local/cloud runtime artifacts (keep outside version control)
+/audit/rollback-snapshots/
+/audit/production-readiness/evidence/
+/storage/
+/backend/backend/
+/backend/storage/*.migration.lock
+/backend/*.db-*
+/frontend/test-results/

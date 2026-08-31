@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from app.api.routers import writer as writer_router
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_longform_plan_registration_rejects_persistence_failure(monkeypatch):
     """计划落库失败不得静默降级为不可恢复的正文任务。"""
     session = SimpleNamespace(execute=AsyncMock())
@@ -49,7 +49,7 @@ async def test_longform_plan_registration_rejects_persistence_failure(monkeypatc
     assert caught.value.detail["retryable"] is True
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_longform_plan_registration_failure_closes_claimed_task(monkeypatch):
     """计划登记失败时，正式入口必须释放章节占用并写任务失败事件。"""
     session = SimpleNamespace(execute=AsyncMock(), rollback=AsyncMock())

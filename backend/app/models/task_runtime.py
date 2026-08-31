@@ -19,6 +19,8 @@ class TaskRuntime(Base):
     task_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     owner_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     project_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    # Legacy jobs have no reliable Agent parent. Agent-originated jobs explicitly inherit it.
+    correlation_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
     chapter_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     task_type: Mapped[str] = mapped_column(String(96), nullable=False, index=True)
     idempotency_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -63,6 +65,7 @@ class TaskRuntimeEvent(Base):
 
     event_id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
     task_id: Mapped[str] = mapped_column(String(64), ForeignKey("task_runtime_tasks.task_id", ondelete="CASCADE"), nullable=False, index=True)
+    correlation_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
     event_type: Mapped[str] = mapped_column(String(48), nullable=False, index=True)
     status: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
     stage: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)

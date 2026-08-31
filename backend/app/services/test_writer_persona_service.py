@@ -6,7 +6,7 @@ from app.models.writer_persona import WriterPersona
 from app.services.writer_persona_service import WriterPersonaService
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_generation_persona_uses_in_memory_default_without_writes():
     session = MagicMock()
     session.execute = AsyncMock()
@@ -27,7 +27,7 @@ async def test_generation_persona_uses_in_memory_default_without_writes():
     session.refresh.assert_not_awaited()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_generation_persona_returns_active_persona_without_writes():
     session = MagicMock()
     session.add = MagicMock()
@@ -46,7 +46,7 @@ async def test_generation_persona_returns_active_persona_without_writes():
     session.refresh.assert_not_awaited()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_ensure_default_persona_keeps_explicit_persistence_path():
     session = MagicMock()
     service = WriterPersonaService(session, MagicMock(), MagicMock())

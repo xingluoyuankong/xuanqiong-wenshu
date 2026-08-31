@@ -99,7 +99,10 @@ class LongformCheckpoint:
     def from_dict(cls, payload: Mapping[str, Any], plan: LongformGenerationPlan) -> "LongformCheckpoint":
         if str(payload.get("plan_key") or "") != plan.plan_key:
             raise LongformGenerationContractError("断点快照与当前长篇生成计划不匹配")
-        next_index = int(payload.get("next_segment_index") or 0)
+        try:
+            next_index = int(payload.get("next_segment_index") or 0)
+        except (TypeError, ValueError) as exc:
+            raise LongformGenerationContractError("断点快照的下一段编号非法") from exc
         if next_index < 0 or next_index > len(plan.segments):
             raise LongformGenerationContractError("断点快照的下一段编号非法")
         completed = payload.get("completed_segments") or []
@@ -108,12 +111,15 @@ class LongformCheckpoint:
         completed_records = [dict(item) for item in completed]
         if len(completed_records) != next_index:
             raise LongformGenerationContractError("断点快照的完成段数量与下一段编号不一致")
-        if any(int(item.get("index", -1)) != index for index, item in enumerate(completed_records)):
-            raise LongformGenerationContractError("断点快照的完成段编号不连续")
-        used_words = max(0, int(payload.get("used_words") or 0))
-        total_tokens = max(0, int(payload.get("total_tokens") or 0))
-        recorded_words = sum(max(0, int(item.get("word_count") or 0)) for item in completed_records)
-        recorded_tokens = sum(max(0, int(item.get("token_usage") or 0)) for item in completed_records)
+        try:
+            if any(int(item.get("index", -1)) != index for index, item in enumerate(completed_records)):
+                raise LongformGenerationContractError("断点快照的完成段编号不连续")
+            used_words = max(0, int(payload.get("used_words") or 0))
+            total_tokens = max(0, int(payload.get("total_tokens") or 0))
+            recorded_words = sum(max(0, int(item.get("word_count") or 0)) for item in completed_records)
+            recorded_tokens = sum(max(0, int(item.get("token_usage") or 0)) for item in completed_records)
+        except (TypeError, ValueError) as exc:
+            raise LongformGenerationContractError("断点快照的数值字段非法") from exc
         if used_words != recorded_words or total_tokens != recorded_tokens:
             raise LongformGenerationContractError("断点快照的累计用量与完成段记录不一致")
         return cls(

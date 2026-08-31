@@ -35,6 +35,8 @@ from ..services.prompt_service import PromptService
 from ..services.usage_service import UsageService
 from ..utils.llm_tool import ChatMessage, LLMClient
 from .config_sync_manager import get_config_sync_manager
+from ..agent.provider_attempt import ProviderAttemptLedger
+from ..agent.provider_gateway import call_with_attempt, collect_stream_with_attempt, current_provider_call_context
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +64,8 @@ class LLMService:
     def is_deepseek_free_model(model: Optional[str]) -> bool:
         """Return whether the selected model needs the bounded free-tier writer path."""
         normalized = re.sub(r"\s+", "-", str(model or "").strip().lower())
-        return normalized.startswith("deepseek-v4-flash-free")
+        model_id = normalized.rsplit("/", 1)[-1]
+        return model_id.startswith("deepseek-v4-flash-free")
 
     async def get_generation_capabilities(self, user_id: Optional[int]) -> Dict[str, Any]:
         """Expose the resolved model capability without leaking credentials."""
@@ -311,8 +314,13 @@ class LLMService:
         allow_truncated_response: bool = False,
         retry_same_model_once: bool = True,
         allow_non_stream_fallback: bool = True,
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
+        attempt_role: str = "response",
     ) -> str:
         messages = [{"role": "system", "content": system_prompt}, *conversation_history]
+        if attempt_ledger is None:
+            provider_context = current_provider_call_context()
+            attempt_ledger = provider_context.ledger if provider_context is not None else None
         hard_timeout = max(10.0, float(timeout) + 8.0)
         try:
             return await asyncio.wait_for(
@@ -328,6 +336,8 @@ class LLMService:
                     allow_truncated_response=allow_truncated_response,
                     retry_same_model_once=retry_same_model_once,
                     allow_non_stream_fallback=allow_non_stream_fallback,
+                    attempt_ledger=attempt_ledger,
+                    attempt_role=attempt_role,
                 ),
                 timeout=hard_timeout,
             )
@@ -348,6 +358,69 @@ class LLMService:
                     extra={"configured_timeout": timeout, "hard_timeout": hard_timeout},
                 ),
             ) from exc
+
+    async def stream_visible_response(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        user_id: Optional[int],
+        temperature: float = 0.4,
+        timeout: float = 120.0,
+        max_tokens: Optional[int] = None,
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
+        attempt_role: str = "response",
+    ):
+        """Yield only user-visible content deltas; reasoning is deliberately discarded.
+
+        This is the Agent-facing streaming API.  It shares normal configuration
+        and daily-limit resolution with the main LLM service but never exposes
+        provider reasoning fields to callers, events, logs, or persistence.
+        """
+        config = await self._resolve_llm_config(user_id, enforce_daily_limit=True)
+        if attempt_ledger is None:
+            provider_context = current_provider_call_context()
+            attempt_ledger = provider_context.ledger if provider_context is not None else None
+        model_name = str(config.get("model") or "").strip() or None
+        base_url = config.get("base_url")
+        provider_key = self._build_provider_key(base_url, model_name)
+        semaphore = self._get_provider_semaphore(base_url)
+        messages = [
+            ChatMessage(role="system", content=system_prompt),
+            ChatMessage(role="user", content=user_prompt),
+        ]
+        async with semaphore:
+            await self._wait_for_provider_cooldown(provider_key)
+            client = LLMClient(api_key=config.get("api_key"), base_url=base_url)
+            try:
+                stream_source = client.stream_chat(
+                    messages=messages,
+                    model=model_name,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout=max(10, int(timeout)),
+                )
+                if attempt_ledger is not None:
+                    stream_source = collect_stream_with_attempt(
+                        stream_source,
+                        role=attempt_role,
+                        provider_ref=provider_key,
+                        model_ref=model_name,
+                        ledger=attempt_ledger,
+                    )
+                async for part in stream_source:
+                    content = part.get("content")
+                    if isinstance(content, str) and content:
+                        yield content
+                    # reasoning_content intentionally has no code path here.
+            except Exception as exc:
+                logger.warning(
+                    "Agent visible stream failed: model=%s user_id=%s error=%s",
+                    model_name,
+                    user_id,
+                    self._extract_provider_error_detail(exc, "provider stream failure"),
+                )
+                raise
 
     async def generate(
         self,
@@ -485,8 +558,13 @@ class LLMService:
         allow_truncated_response: bool = False,
         retry_same_model_once: bool = True,
         allow_non_stream_fallback: bool = True,
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
+        attempt_role: str = "response",
     ) -> str:
         config = await self._resolve_llm_config(user_id)
+        if attempt_ledger is None:
+            provider_context = current_provider_call_context()
+            attempt_ledger = provider_context.ledger if provider_context is not None else None
         chat_messages = [ChatMessage(role=msg["role"], content=msg["content"]) for msg in messages]
 
         primary_api_key = (config.get("api_key") or "").strip()
@@ -529,6 +607,8 @@ class LLMService:
                     prompt_cache_key=prompt_cache_key,
                     retry_same_model_once=retry_same_model_once,
                     allow_non_stream_fallback=allow_non_stream_fallback,
+                    attempt_ledger=attempt_ledger,
+                    attempt_role=attempt_role,
                 )
         except HTTPException as exc:
             last_exception = exc
@@ -600,6 +680,8 @@ class LLMService:
         prompt_cache_key: Optional[str] = None,
         retry_same_model_once: bool = True,
         allow_non_stream_fallback: bool = True,
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
+        attempt_role: str = "response",
     ) -> tuple[str, Optional[str]]:
         stream_response_format = response_format
         stream_prompt_cache_key = prompt_cache_key
@@ -615,7 +697,7 @@ class LLMService:
             finish_reason = None
             await self._wait_for_provider_cooldown(provider_key)
             try:
-                async for part in client.stream_chat(
+                stream_source = client.stream_chat(
                     messages=chat_messages,
                     model=model_name,
                     temperature=temperature,
@@ -624,7 +706,17 @@ class LLMService:
                     max_tokens=max_tokens,
                     top_p=top_p,
                     prompt_cache_key=stream_prompt_cache_key,
-                ):
+                )
+                if attempt_ledger is not None:
+                    stream_source = collect_stream_with_attempt(
+                        stream_source,
+                        role=attempt_role,
+                        provider_ref=provider_key,
+                        model_ref=model_name,
+                        ledger=attempt_ledger,
+                        retry_index=attempt_index,
+                    )
+                async for part in stream_source:
                     if part.get("content"):
                         full_response += part["content"]
                     elif part.get("reasoning_content"):
@@ -639,30 +731,24 @@ class LLMService:
                         "LLM stream returned empty response (model=%s), attempting non-stream fallback",
                         model_name,
                     )
-                    try:
-                        non_stream_resp = await client.chat(
-                            messages=chat_messages,
-                            model=model_name,
-                            temperature=temperature,
-                            timeout=int(timeout),
-                            response_format=stream_response_format,
-                            max_tokens=max_tokens,
-                            top_p=top_p,
-                            prompt_cache_key=stream_prompt_cache_key,
-                        )
-                        if non_stream_resp.get("content"):
-                            logger.debug(
-                                "Non-stream fallback succeeded: model=%s len=%d",
-                                model_name,
-                                len(non_stream_resp["content"]),
-                            )
-                            return non_stream_resp["content"], non_stream_resp.get("finish_reason")
-                    except Exception as fallback_exc:
-                        logger.warning(
-                            "Non-stream fallback exception: model=%s error=%s",
-                            model_name,
-                            fallback_exc,
-                        )
+                    fallback_result = await self._try_non_stream_fallback_once(
+                        client=client,
+                        chat_messages=chat_messages,
+                        model_name=model_name,
+                        temperature=temperature,
+                        timeout=timeout,
+                        response_format=stream_response_format,
+                        max_tokens=max_tokens,
+                        top_p=top_p,
+                        prompt_cache_key=stream_prompt_cache_key,
+                        user_id=user_id,
+                        trigger="EMPTY_STREAM",
+                        provider_key=provider_key,
+                        attempt_ledger=attempt_ledger,
+                        attempt_role=attempt_role,
+                    )
+                    if fallback_result is not None:
+                        return fallback_result
                 return full_response, finish_reason
             except RateLimitError as exc:
                 detail = self._extract_provider_error_detail(exc, "AI 服务当前限流，请稍后重试或切换模型")
@@ -784,6 +870,9 @@ class LLMService:
                     prompt_cache_key=stream_prompt_cache_key,
                     user_id=user_id,
                     trigger=detail,
+                    provider_key=provider_key,
+                    attempt_ledger=attempt_ledger,
+                    attempt_role=attempt_role,
                 )
                 if fallback_result is not None:
                     return fallback_result
@@ -831,6 +920,9 @@ class LLMService:
                         prompt_cache_key=stream_prompt_cache_key,
                         user_id=user_id,
                         trigger=detail,
+                        provider_key=provider_key,
+                        attempt_ledger=attempt_ledger,
+                        attempt_role=attempt_role,
                     )
                     if fallback_result is not None:
                         return fallback_result
@@ -917,6 +1009,9 @@ class LLMService:
                     prompt_cache_key=stream_prompt_cache_key,
                     user_id=user_id,
                     trigger=detail,
+                    provider_key=provider_key,
+                    attempt_ledger=attempt_ledger,
+                    attempt_role=attempt_role,
                 )
                 if fallback_result is not None:
                     return fallback_result
@@ -960,6 +1055,9 @@ class LLMService:
                     prompt_cache_key=stream_prompt_cache_key,
                     user_id=user_id,
                     trigger=detail,
+                    provider_key=provider_key,
+                    attempt_ledger=attempt_ledger,
+                    attempt_role=attempt_role,
                 )
                 if fallback_result is not None:
                     return fallback_result
@@ -989,6 +1087,9 @@ class LLMService:
         prompt_cache_key: Optional[str],
         user_id: Optional[int],
         trigger: str,
+        provider_key: str | None = None,
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
+        attempt_role: str = "response",
     ) -> Optional[tuple[str, Optional[str]]]:
         logger.warning(
             "Attempting non-stream fallback after stream failure: model=%s user_id=%s trigger=%s",
@@ -997,7 +1098,7 @@ class LLMService:
             trigger,
         )
         try:
-            result = await client.chat(
+            call = lambda: client.chat(
                 messages=chat_messages,
                 model=model_name,
                 temperature=temperature,
@@ -1006,6 +1107,14 @@ class LLMService:
                 max_tokens=max_tokens,
                 top_p=top_p,
                 prompt_cache_key=prompt_cache_key,
+            )
+            result = await call_with_attempt(
+                call,
+                role=f"{attempt_role}.fallback",
+                provider_ref=provider_key or model_name,
+                model_ref=model_name,
+                ledger=attempt_ledger,
+                fallback_from_attempt=attempt_ledger.latest_attempt_number() if attempt_ledger is not None else None,
             )
             content = (result.get("content") or "").strip()
             if not content:

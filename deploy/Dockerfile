@@ -41,6 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nginx \
     supervisor \
     curl \
+    default-mysql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # 配置 pip 使用中国镜像源

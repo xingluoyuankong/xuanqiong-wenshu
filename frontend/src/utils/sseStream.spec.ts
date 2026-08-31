@@ -45,6 +45,40 @@ describe('connectSSE', () => {
     controller.close()
   })
 
+  it('resumes an Agent event ledger with after_sequence instead of the legacy event-id cursor', async () => {
+    vi.useFakeTimers()
+    const encoder = new TextEncoder()
+    const readers = [
+      {
+        read: vi.fn()
+          .mockResolvedValueOnce({ done: false, value: encoder.encode('id: 11\nevent: assistant_delta\ndata: {\"content\":\"第一段\"}\n\n') })
+          .mockResolvedValueOnce({ done: true, value: undefined }),
+      },
+      { read: vi.fn().mockResolvedValueOnce({ done: true, value: undefined }), cancel: vi.fn() },
+    ]
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      body: { getReader: () => readers[Math.min(fetchMock.mock.calls.length - 1, 1)] },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const controller = connectSSE(
+      '/api/agent/sessions/session-1/runs/run-1/stream?after_sequence=0',
+      { onRawEvent: vi.fn() },
+      3,
+      { cursorParam: 'after_sequence' },
+    )
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    await vi.advanceTimersByTimeAsync(2000)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    const [url, init] = fetchMock.mock.calls[1] as unknown as [string, RequestInit]
+    expect(url).toContain('after_sequence=11')
+    expect(url).not.toContain('after_event_id=')
+    expect((init.headers as Record<string, string>)['Last-Event-ID']).toBe('11')
+    controller.close()
+  })
+
   it('honors maxRetries when the server repeatedly closes an empty stream', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.fn(async () => ({
@@ -64,6 +98,27 @@ describe('connectSSE', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(error).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not reconnect after an Agent terminal event', async () => {
+    vi.useFakeTimers()
+    const encoder = new TextEncoder()
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      body: { getReader: () => ({
+        read: vi.fn()
+          .mockResolvedValueOnce({ done: false, value: encoder.encode('id: 9\nevent: run_completed\ndata: {\"status\":\"completed\"}\n\n') })
+          .mockResolvedValueOnce({ done: true, value: undefined }),
+      }) },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = connectSSE('/api/agent/stream', {
+      isTerminalEvent: (event) => event === 'run_completed',
+    })
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    controller.close()
   })
 
   it('uses a fresh abort signal after reconnecting', async () => {
@@ -95,6 +150,25 @@ describe('connectSSE', () => {
     expect(signals[0].aborted).toBe(false)
     expect(complete).toHaveBeenCalledTimes(1)
     controller.close()
+  })
+
+
+  it('reports connecting, live, and disconnected when automatic reconnect is exhausted', async () => {
+    vi.useFakeTimers()
+    const states: string[] = []
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      body: { getReader: () => ({ read: vi.fn().mockResolvedValue({ done: true, value: undefined }) }) },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    connectSSE('/api/stream/state', {
+      onConnectionState: (state) => states.push(state),
+    }, 0)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(states).toEqual(['connecting', 'live', 'disconnected'])
   })
 
 })

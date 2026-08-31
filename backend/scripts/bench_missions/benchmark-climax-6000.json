@@ -1,0 +1,16 @@
+{
+  "id": "benchmark-climax-6000",
+  "target_word_count": 6000,
+  "min_word_count": 5400,
+  "chapter_mission": {
+    "chapter_purpose": "在证据毁掉前迫使对手公开对峙",
+    "scene_list": [
+      {
+        "goal": "当众出示证据",
+        "conflict": "对手控制了整间会场",
+        "turn": "盟友揭露证据早已被复制",
+        "end_hook": "整栋大楼进入封锁"
+      }
+    ]
+  }
+}

@@ -933,12 +933,16 @@ const buildSummaryEntries = (chapter: ChapterRuntimeLogItem) => {
     { label: pick('最近更新', 'Last updated'), value: formatDateTime(chapter.updated_at) },
     { label: pick('当前阶段', 'Current stage'), value: chapter.progress_stage || notRecorded },
     { label: pick('评审状态', 'Review status'), value: chapter.summary_snapshot.review_status || notRecorded },
-    { label: pick('目标字数', 'Target words'), value: chapter.summary_snapshot.target_word_count || notRecorded },
-    { label: pick('实际字数', 'Actual words'), value: chapter.summary_snapshot.actual_word_count || chapter.word_count || notRecorded },
-    { label: pick('总耗时', 'Total duration'), value: chapter.summary_snapshot.pipeline_total_duration_ms ? formatDuration(chapter.summary_snapshot.pipeline_total_duration_ms) : notRecorded },
+    { label: pick('目标字数', 'Target words'), value: chapter.summary_snapshot.target_word_count ?? notRecorded },
+    { label: pick('实际字数', 'Actual words'), value: chapter.summary_snapshot.actual_word_count ?? chapter.word_count ?? notRecorded },
+    { label: pick('总耗时', 'Total duration'), value: formatDuration(
+      chapter.summary_snapshot.pipeline_total_duration_ms ?? runtime.pipeline_total_duration_ms,
+    ) || notRecorded },
     { label: 'Provider', value: preflight.active_profile_name || preflight.current_profile_name || preflight.reason || notRecorded },
-    { label: pick('Token预算', 'Token budget'), value: budget.total_tokens ? `${formatNumber(budget.total_tokens)} token / ${formatCost(budget.estimated_cost)}` : notRecorded },
-    { label: pick('角色上下文', 'Character context'), value: castPlan.planned_character_count
+    { label: pick('Token预算', 'Token budget'), value: budget.total_tokens != null
+      ? `${formatNumber(budget.total_tokens)} token / ${formatCost(budget.estimated_cost)}`
+      : notRecorded },
+    { label: pick('角色上下文', 'Character context'), value: castPlan.planned_character_count != null
       ? pick(
           `${castPlan.planned_character_count} 人计划 / ${asArray(castPlan.chapter_focus_names).length} 人聚焦`,
           `${castPlan.planned_character_count} planned / ${asArray(castPlan.chapter_focus_names).length} in focus`,

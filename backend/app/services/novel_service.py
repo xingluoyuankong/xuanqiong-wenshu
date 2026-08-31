@@ -117,6 +117,8 @@ _BUSY_CHAPTER_STATUSES = {
     "selecting",
 }
 _BUSY_CHAPTER_STALE_TIMEOUT = timedelta(minutes=15)
+_RUNTIME_STALE_GRACE_SECONDS = 180
+_MAX_RUNTIME_STALE_SECONDS = 24 * 60 * 60
 _SUPPLEMENTAL_CHARACTER_NAMES: tuple[str, ...] = (
     "线索持有者",
     "旧日盟友",
@@ -1570,6 +1572,21 @@ def _coerce_runtime_datetime(value: Any) -> Optional[datetime]:
     return parsed.astimezone(timezone.utc) if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+def _runtime_stale_after_seconds(runtime: Dict[str, Any]) -> int:
+    """Keep legacy stale behavior, but honor a persisted generation budget."""
+    stale_after_seconds = int(_BUSY_CHAPTER_STALE_TIMEOUT.total_seconds())
+    try:
+        timeout_seconds = int(float(runtime.get("timeout_seconds") or 0))
+    except (TypeError, ValueError):
+        timeout_seconds = 0
+    if timeout_seconds > 0:
+        stale_after_seconds = min(
+            _MAX_RUNTIME_STALE_SECONDS,
+            max(stale_after_seconds, timeout_seconds + _RUNTIME_STALE_GRACE_SECONDS),
+        )
+    return stale_after_seconds
+
+
 def _extract_generation_runtime_payload(chapter: Optional[Chapter]) -> Dict[str, Any]:
     raw_summary = _get_loaded_scalar_value(chapter, "real_summary") if chapter else None
     if not isinstance(raw_summary, str):
@@ -1587,7 +1604,7 @@ def _extract_generation_runtime_payload(chapter: Optional[Chapter]) -> Dict[str,
     if not isinstance(runtime, dict):
         return {}
     normalized_runtime = dict(runtime)
-    for field in ("started_at", "updated_at"):
+    for field in ("started_at", "updated_at", "heartbeat_at"):
         parsed = _coerce_runtime_datetime(normalized_runtime.get(field))
         if parsed is not None:
             normalized_runtime[field] = parsed
@@ -1596,7 +1613,8 @@ def _extract_generation_runtime_payload(chapter: Optional[Chapter]) -> Dict[str,
         normalized_runtime.get("progress_stage") or normalized_runtime.get("status") or chapter_status
     ).lower()
     runtime_updated_at = (
-        _coerce_runtime_datetime(normalized_runtime.get("updated_at"))
+        _coerce_runtime_datetime(normalized_runtime.get("heartbeat_at"))
+        or _coerce_runtime_datetime(normalized_runtime.get("updated_at"))
         or _coerce_runtime_datetime(_get_loaded_scalar_value(chapter, "updated_at") if chapter else None)
         or _coerce_runtime_datetime(normalized_runtime.get("started_at"))
         or _coerce_runtime_datetime(_get_loaded_scalar_value(chapter, "created_at") if chapter else None)
@@ -1621,7 +1639,7 @@ def _extract_generation_runtime_payload(chapter: Optional[Chapter]) -> Dict[str,
         stale_seconds = int((datetime.now(timezone.utc) - runtime_updated_at).total_seconds())
         normalized_runtime["stale"] = False
         normalized_runtime["stale_seconds"] = max(0, stale_seconds)
-        if stale_seconds >= int(_BUSY_CHAPTER_STALE_TIMEOUT.total_seconds()):
+        if stale_seconds >= _runtime_stale_after_seconds(normalized_runtime):
             normalized_runtime["stale"] = True
             normalized_runtime["stale_reason"] = "generation_runtime_has_not_updated"
     elif runtime_stage in busy_runtime_stages:
@@ -2423,21 +2441,27 @@ class NovelService:
 
     async def _recover_stale_busy_chapters(self, project: NovelProject) -> None:
         now_utc = datetime.now(timezone.utc)
-        timeout_minutes = int(_BUSY_CHAPTER_STALE_TIMEOUT.total_seconds() // 60)
         dirty = False
 
         for chapter in project.chapters:
             status_value = _normalize_chapter_status(_get_loaded_scalar_value(chapter, "status"))
             if status_value not in _BUSY_CHAPTER_STATUSES:
                 continue
+            runtime = _extract_generation_runtime_payload(chapter)
             chapter_updated_at = _get_loaded_scalar_value(chapter, "updated_at")
             chapter_created_at = _get_loaded_scalar_value(chapter, "created_at")
-            last_updated_at = _normalize_datetime_to_utc(chapter_updated_at or chapter_created_at)
+            last_updated_at = (
+                _coerce_runtime_datetime(runtime.get("heartbeat_at"))
+                or _coerce_runtime_datetime(runtime.get("updated_at"))
+                or _normalize_datetime_to_utc(chapter_updated_at or chapter_created_at)
+            )
             if not last_updated_at:
                 continue
-            if now_utc - last_updated_at < _BUSY_CHAPTER_STALE_TIMEOUT:
+            stale_after_seconds = _runtime_stale_after_seconds(runtime)
+            if now_utc - last_updated_at < timedelta(seconds=stale_after_seconds):
                 continue
 
+            timeout_minutes = max(1, int(stale_after_seconds // 60))
             reason = f"后台任务超过 {timeout_minutes} 分钟未更新，系统已自动终止，请重新生成。"
             chapter.status = ChapterGenerationStatus.FAILED.value
             chapter.real_summary = reason

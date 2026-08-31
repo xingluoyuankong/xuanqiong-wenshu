@@ -430,6 +430,14 @@ export const isBusyChapterStatus = (status?: Chapter['generation_status'] | null
 export const isRecoverableVersionStatus = (status?: Chapter['generation_status'] | null) =>
   RECOVERABLE_VERSION_STATUSES.has((status || 'not_generated') as Chapter['generation_status'])
 
+export const resolveActualWordCount = (
+  runtime?: Pick<GenerationRuntime, 'actual_word_count'> | null,
+  fallbackWordCount?: unknown,
+): number | null => {
+  const actual = runtime?.actual_word_count ?? fallbackWordCount
+  return typeof actual === 'number' && Number.isFinite(actual) && actual >= 0 ? actual : null
+}
+
 export const resolveChapterRuntime = (
   chapter?: Partial<Chapter> | null,
   fallbackRuntime?: GenerationRuntime | null

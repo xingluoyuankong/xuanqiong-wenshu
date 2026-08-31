@@ -14,6 +14,7 @@ from fastapi import HTTPException
 
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
 from .llm_service import LLMService
+from ..agent.provider_attempt import ProviderAttemptLedger
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,8 @@ class GenerationCallPolicy:
     json_schema_name: Optional[str] = None
     json_repair_attempts: int = 2
     json_schema_strict: bool = True
+    attempt_ledger: Optional[ProviderAttemptLedger] = None
+    attempt_role: str = "generation"
 
 @dataclass(frozen=True)
 class GenerationTextResult:
@@ -97,6 +100,7 @@ class GenerationTextResult:
     estimated_input_tokens: int = 0
     estimated_output_tokens: int = 0
     estimated_total_tokens: int = 0
+    provider_attempts: Optional[Dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -114,6 +118,7 @@ class GenerationJsonResult:
     estimated_input_tokens: int = 0
     estimated_output_tokens: int = 0
     estimated_total_tokens: int = 0
+    provider_attempts: Optional[Dict[str, Any]] = None
 
 
 class GenerationJSONDecodeError(ValueError):
@@ -436,6 +441,8 @@ async def _await_provider_text_with_heartbeat(
             allow_truncated_response=policy.allow_truncated_response,
             retry_same_model_once=policy.retry_same_model_once,
             allow_non_stream_fallback=policy.allow_non_stream_fallback,
+            attempt_ledger=policy.attempt_ledger,
+            attempt_role=policy.attempt_role,
         )
     )
     loop = asyncio.get_running_loop()
@@ -523,6 +530,10 @@ async def call_generation_text(
 ) -> GenerationTextResult:
     attempts = max(1, policy.retry_attempts)
     active_policy = policy
+    active_ledger = policy.attempt_ledger or ProviderAttemptLedger(
+        run_id=f"generation:{policy.stage_label or 'unknown'}:{user_id}"
+    )
+    active_policy = replace(active_policy, attempt_ledger=active_ledger)
     last_http_exc: HTTPException | None = None
     last_provider_error_type: Optional[str] = None
     for attempt in range(1, attempts + 1):
@@ -550,6 +561,7 @@ async def call_generation_text(
                 response_format_used=response_format_payload,
                 provider_error_type=last_provider_error_type,
                 effective_max_tokens=active_policy.max_tokens,
+                provider_attempts=active_ledger.snapshot(),
                 **usage,
             )
         except HTTPException as exc:
@@ -697,6 +709,7 @@ async def call_generation_json(
                 estimated_input_tokens=text_result.estimated_input_tokens,
                 estimated_output_tokens=text_result.estimated_output_tokens,
                 estimated_total_tokens=text_result.estimated_total_tokens,
+                provider_attempts=text_result.provider_attempts,
             )
         except GenerationJSONDecodeError as exc:
             last_decode_error = exc

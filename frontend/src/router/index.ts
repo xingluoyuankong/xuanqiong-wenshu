@@ -27,6 +27,11 @@ const router = createRouter({
       component: () => import('../views/InspirationMode.vue'),
     },
     {
+      path: '/agent',
+      name: 'agent-workspace',
+      component: () => import('../views/AgentWorkspace.vue'),
+    },
+    {
       path: '/detail/:id',
       name: 'novel-detail',
       component: () => import('../views/NovelDetail.vue'),

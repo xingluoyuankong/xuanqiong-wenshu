@@ -163,6 +163,7 @@ class ChapterReviewService:
                 timeout=120.0,
                 policy=GenerationCallPolicy(
                     stage_label="周期回顾-节奏分析",
+                    attempt_role="quality",
                     progress_stage="periodic_review_pacing",
                     retry_attempts=2,
                     json_repair_attempts=1,
@@ -232,6 +233,7 @@ class ChapterReviewService:
                 timeout=120.0,
                 policy=GenerationCallPolicy(
                     stage_label="周期回顾-角色发展分析",
+                    attempt_role="quality",
                     progress_stage="periodic_review_character",
                     retry_attempts=2,
                     json_repair_attempts=1,
@@ -355,6 +357,7 @@ class ChapterReviewService:
                 timeout=120.0,
                 policy=GenerationCallPolicy(
                     stage_label="周期回顾-连续性检查",
+                    attempt_role="quality",
                     progress_stage="periodic_review_continuity",
                     retry_attempts=2,
                     json_repair_attempts=1,
@@ -508,12 +511,13 @@ class ChapterReviewService:
                     timeout=120.0,
                     policy=GenerationCallPolicy(
                         stage_label="周期回顾-调整计划",
+                        attempt_role="quality",
                         progress_stage="periodic_review_adjustment_plan",
                         retry_attempts=2,
                         json_repair_attempts=1,
                     ),
                 )
-                return result.data
+                return {**result.data, "provider_attempts": result.provider_attempts}
             except Exception as e:
                 logger.warning(f"生成调整计划失败: {e}")
 

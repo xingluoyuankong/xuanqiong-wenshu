@@ -46,7 +46,7 @@ async def _seed_chapter(task_session):
     return user, project, chapter, original
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_manual_edit_creates_child_version_without_mutating_parent(task_session, monkeypatch):
     user, project, chapter, original = await _seed_chapter(task_session)
 
@@ -81,7 +81,7 @@ async def test_manual_edit_creates_child_version_without_mutating_parent(task_se
     assert chapter.revision == 2
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_manual_edit_rejects_stale_base_revision_without_creating_version(task_session, monkeypatch):
     user, project, chapter, _original = await _seed_chapter(task_session)
 
@@ -110,7 +110,7 @@ async def test_manual_edit_rejects_stale_base_revision_without_creating_version(
     assert count == 1
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_finalize_selection_guard_rejects_superseded_version(task_session):
     _user, project, chapter, original = await _seed_chapter(task_session)
     replacement = ChapterVersion(

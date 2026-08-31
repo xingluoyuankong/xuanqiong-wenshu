@@ -17,6 +17,9 @@ from .db.init_db import init_db
 from .db.session import AsyncSessionLocal
 from .services.prompt_service import PromptService
 from .services.task_reconciliation import TaskReconciliationService
+from .services.agent_runtime import AgentRuntimeService
+from .agent.registry import initialize_configured_tool_providers
+from .agent.provider_runtime import ProviderConfigurationError
 
 
 _logging_boot_error: str | None = None
@@ -301,6 +304,17 @@ elif settings.file_logging_enabled:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _enforce_startup_security()
+    try:
+        provider_health = initialize_configured_tool_providers(
+            enabled=settings.agent_tool_providers_enabled,
+            provider_ids=settings.agent_tool_providers,
+            max_count=settings.agent_tool_provider_max_count,
+            startup_policy=settings.agent_tool_provider_startup_policy,
+        )
+    except ProviderConfigurationError as exc:
+        raise RuntimeError(f"Agent Tool Provider 启动被拒绝：{exc}") from exc
+    if provider_health:
+        app_logger.info("Agent Tool Provider 初始化完成：%s", provider_health)
     await init_db()
     async with AsyncSessionLocal() as session:
         prompt_service = PromptService(session)
@@ -329,12 +343,18 @@ async def _startup_reconcile() -> None:
             report = await TaskReconciliationService(session).reconcile(
                 stale_after_seconds=settings.task_reconcile_stale_seconds
             )
+            stale_steps = await AgentRuntimeService(session).reconcile_stale_steps()
+            stale_runs = await AgentRuntimeService(session).reconcile_stale_runs()
         _recon_log.info(
             "启动巡检完成：stale任务=%d 释放章节=%d 保留章节=%d",
             len(report.stale_task_ids),
             len(report.released_chapter_ids),
             len(report.preserved_chapter_ids),
         )
+        if stale_steps:
+            _recon_log.info("启动 Agent step 巡检：释放过期步骤=%d", len(stale_steps))
+        if stale_runs:
+            _recon_log.info("启动 Agent run 巡检：进入可恢复状态=%d", len(stale_runs))
     except Exception:
         _recon_log.warning("启动任务巡检失败，跳过（不影响服务启动）", exc_info=True)
 
@@ -350,12 +370,18 @@ async def _periodic_sweeper() -> None:
                 report = await TaskReconciliationService(session).reconcile(
                     stale_after_seconds=settings.task_reconcile_stale_seconds
                 )
+                stale_steps = await AgentRuntimeService(session).reconcile_stale_steps()
+                stale_runs = await AgentRuntimeService(session).reconcile_stale_runs()
             if report.stale_task_ids or report.released_chapter_ids:
                 _sweep_log.info(
                     "定期巡检：stale任务=%d 释放章节=%d",
                     len(report.stale_task_ids),
                     len(report.released_chapter_ids),
                 )
+            if stale_steps:
+                _sweep_log.info("定期 Agent step 巡检：释放过期步骤=%d", len(stale_steps))
+            if stale_runs:
+                _sweep_log.info("定期 Agent run 巡检：进入可恢复状态=%d", len(stale_runs))
         except asyncio.CancelledError:
             break
         except Exception:
@@ -381,13 +407,22 @@ def _get_request_id(request: Request) -> str:
 
 
 def _find_root_cause(exc: BaseException) -> BaseException:
+    """Unwrap middleware TaskGroup wrappers before following cause/context links."""
     current: BaseException = exc
     visited: set[int] = set()
     while True:
-        next_exc = current.__cause__ or current.__context__
-        if next_exc is None or id(next_exc) in visited:
+        if id(current) in visited:
             return current
-        visited.add(id(next_exc))
+        visited.add(id(current))
+        if isinstance(current, BaseExceptionGroup) and current.exceptions:
+            # Starlette's function-style middleware may wrap one request error in
+            # ``ExceptionGroup('unhandled errors in a TaskGroup', [...])``.
+            # The contained exception is the actionable root for the client log.
+            current = current.exceptions[-1]
+            continue
+        next_exc = current.__cause__ or current.__context__
+        if next_exc is None:
+            return current
         current = next_exc
 
 

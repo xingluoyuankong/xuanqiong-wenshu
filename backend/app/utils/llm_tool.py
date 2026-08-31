@@ -33,6 +33,13 @@ class LLMClient:
     """异步流式调用封装，兼容 OpenAI SDK。"""
 
     _PROMPT_CACHE_KEY_UNSUPPORTED_HOSTS = {"api.xzxyuan.ccwu.cc"}
+    # 该兼容网关公开的 DeepSeek free 模型 ID 带 provider 命名空间；
+    # 保留配置层的历史裸别名，但在真正发请求时转换为可路由的 ID。
+    _BARE_MODEL_ALIASES_BY_HOST = {
+        "api.xzxyuan.ccwu.cc": {
+            "deepseek-v4-flash-free": "deepseek/deepseek-v4-flash-free",
+        },
+    }
 
     @classmethod
     def _supports_prompt_cache_key(cls, base_url: Optional[str]) -> bool:
@@ -48,14 +55,16 @@ class LLMClient:
             cleaned.pop("prompt_cache_key", None)
         return cleaned
 
-    @staticmethod
-    def _resolve_model(model: Optional[str]) -> str:
+    @classmethod
+    def _resolve_model(cls, model: Optional[str], base_url: Optional[str] = None) -> str:
         """Use the same configured default for every low-level call path."""
-        return (
+        resolved = (
             (model or "").strip()
             or _read_env_value("OPENAI_MODEL_NAME", "MODEL")
             or get_settings().openai_model_name
         )
+        host = (urlparse(str(base_url or "")).hostname or "").lower()
+        return cls._BARE_MODEL_ALIASES_BY_HOST.get(host, {}).get(resolved, resolved)
 
     @staticmethod
     def _build_response_format_payload(response_format: Optional[Any]) -> Optional[Dict[str, Any]]:
@@ -86,7 +95,7 @@ class LLMClient:
         **kwargs,
     ) -> AsyncGenerator[Dict[str, str], None]:
         payload = {
-            "model": self._resolve_model(model),
+            "model": self._resolve_model(model, self._base_url),
             "messages": [msg.to_dict() for msg in messages],
             "stream": True,
             "timeout": timeout,
@@ -170,7 +179,7 @@ class LLMClient:
         **kwargs,
     ) -> Dict[str, Optional[str]]:
         payload = {
-            "model": self._resolve_model(model),
+            "model": self._resolve_model(model, self._base_url),
             "messages": [msg.to_dict() for msg in messages],
             "stream": False,
             "timeout": timeout,

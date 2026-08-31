@@ -153,7 +153,7 @@ def test_resumed_checkpoint_reconstructs_segment_text():
     restored = LongformCheckpoint.from_dict(checkpoint.as_dict(), restored_plan)
 
     assert PipelineOrchestrator._extract_segment_text(restored, 0).startswith("甲")
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_executor_streams_content_delta_in_order_and_resume_does_not_repeat():
     """服务层 content_delta 契约：按段串行流出、断点续跑只流新段、整段内容不重复。"""
     plan = _plan(target=1500, limit=600)  # 3 段

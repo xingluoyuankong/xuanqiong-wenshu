@@ -26,7 +26,7 @@ async def ledger_factory(monkeypatch):
     await engine.dispose()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_project_ledger_lease_is_exclusive_and_releasable(ledger_factory):
     token, active = await leases.acquire_project_ledger_lease(
         project_id="project-1", chapter_number=3, selected_version_id=8
@@ -51,7 +51,7 @@ async def test_project_ledger_lease_is_exclusive_and_releasable(ledger_factory):
     assert active is None
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_project_ledger_context_releases_after_exit(ledger_factory):
     async with leases.project_ledger_lease("project-2", wait_seconds=0.2) as token:
         assert token
@@ -64,7 +64,7 @@ async def test_project_ledger_context_releases_after_exit(ledger_factory):
     assert active is None
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_project_ledger_lease_file_database_allows_only_one_concurrent_owner(tmp_path, monkeypatch):
     db_path = tmp_path / "lease-race.sqlite"
     from sqlalchemy.ext.asyncio import create_async_engine
@@ -89,7 +89,7 @@ async def test_project_ledger_lease_file_database_allows_only_one_concurrent_own
     await engine.dispose()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_expired_project_ledger_lease_is_taken_over_once(ledger_factory):
     old_token, _ = await leases.acquire_project_ledger_lease(project_id="expired-project")
     async with ledger_factory() as session:

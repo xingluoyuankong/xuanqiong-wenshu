@@ -22,7 +22,7 @@ def test_extract_keeps_summary_when_runtime_present():
     assert "血契" in extract_chapter_narrative_summary(chapter)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_generate_chapter_preserves_summary_on_regen(monkeypatch):
     from app.services.pipeline_orchestrator import PipelineOrchestrator
 

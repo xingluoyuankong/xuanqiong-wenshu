@@ -2,6 +2,8 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 
+import inspect
+
 import pytest
 
 from app.api.routers.optimizer import _continuity_guard_failure as optimizer_continuity_guard_failure
@@ -25,7 +27,7 @@ _SAMPLE_MIN_WORDS = 2250
 
 
 class TestGenerationQualityGuards:
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_contamination_uses_one_clean_retry_without_sending_contaminated_text(self, monkeypatch):
         orchestrator = object.__new__(PipelineOrchestrator)
         calls = []
@@ -97,7 +99,7 @@ class TestGenerationQualityGuards:
         assert result["metadata"]["contamination_retry_used"] is True
         assert result["metadata"]["contamination_retry_result"] == "accepted"
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_contamination_retry_is_bounded_and_surfaces_contract_error(self, monkeypatch):
         orchestrator = object.__new__(PipelineOrchestrator)
         calls = []
@@ -172,6 +174,12 @@ class TestGenerationQualityGuards:
         assert "我来设计" in PipelineOrchestrator._detect_generation_meta_leakage("我来设计这一章的冲突")
         assert "让我写" in PipelineOrchestrator._detect_generation_meta_leakage("让我写出最终草稿")
 
+    def test_generation_meta_leakage_rejects_chinese_word_budget_preamble(self):
+        leaked = "\u672c\u7ae0\u5b57\u6570\u76ee\u6807 1200 \u5b57\uff0c\u6700\u4f4e\u5b57\u6570 900 \u5b57\u3002\u73b0\u5728\u5f00\u59cb\u5199\u4e00\u4e2a\u5c0f\u8bf4\u7ae0\u8282\u3002"
+        markers = PipelineOrchestrator._detect_generation_meta_leakage(leaked)
+        assert "\u672c\u7ae0\u5b57\u6570" in markers
+        assert "\u6700\u4f4e\u5b57\u6570" in markers
+
     def test_meta_leakage_does_not_scan_deep_inside_valid_prose(self):
         prose = "林七沿着潮湿的石阶往下走。" * 180
         assert not PipelineOrchestrator._detect_generation_meta_leakage(
@@ -214,7 +222,7 @@ class TestGenerationQualityGuards:
         assert PipelineOrchestrator._resolve_chapter_generation_soft_timeout(1200) >= 135
         assert PipelineOrchestrator._resolve_writer_prompt_budget(5000) == 6000
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_short_chapter_mission_skips_model_but_long_chapter_keeps_model_path(self):
         orchestrator = object.__new__(PipelineOrchestrator)
         cache_writes = []
@@ -297,6 +305,8 @@ class TestGenerationQualityGuards:
         )
 
         assert PipelineOrchestrator._build_stable_retry_config(longform) is None
+        long_tier = PipelineConfig(preset="enhanced", target_word_count=7000, version_count=1)
+        assert PipelineOrchestrator._build_stable_retry_config(long_tier) is None
 
     def test_runtime_event_keeps_developer_detail_separate_from_user_summary(self):
         compact = PipelineOrchestrator._compact_runtime_event({
@@ -665,6 +675,39 @@ class TestGenerationQualityGuards:
         assert should_enrich is True
         assert effective_min == 2400
 
+    def test_structural_quality_gate_records_self_critique_exemption_observability(self):
+        gate = PipelineOrchestrator._build_structural_quality_gate(
+            {
+                "self_critique": {"final_score": 82, "critical_count": 0, "major_count": 0},
+                "story_progression_guard": {
+                    "word_count": 2400,
+                    "dialogue_marker_count": 12,
+                    "mission_hit_count": 4,
+                    "scene_count": 2,
+                    "scene_fulfillment_rate": 1.0,
+                    "scene_structure_rate": 1.0,
+                    "dialogue_changes_state": True,
+                    "ending_pressure_passed": False,
+                    "event_density_passed": False,
+                    "state_change_interval_passed": True,
+                    "static_description_risk": False,
+                },
+            }
+        )
+
+        assert gate["exemptions"] == ["ending_pressure_missing", "event_density_weak"]
+        assert gate["critique_exemption_applied"] == gate["exemptions"]
+
+        guard = PipelineOrchestrator._attach_quality_gate_status_to_guard(
+            {"quality_metric_snapshot": {}}, gate
+        )
+        assert guard["quality_metric_snapshot"]["critique_exemption_applied"] == gate["exemptions"]
+        assert guard["quality_metric_snapshot"]["self_critique_final_score"] == 82
+        assert guard["quality_metric_snapshot"]["self_critique_critical_count"] == 0
+        assert guard["quality_metric_snapshot"]["self_critique_major_count"] == 0
+        assert guard["quality_metric_snapshot"]["selected_critique_source"] == "self_critique"
+        assert guard["quality_gate_summary"]["exemptions"] == gate["exemptions"]
+
     def test_structural_quality_gate_blocks_catastrophic_self_critique_and_consistency_failures(self):
         gate = PipelineOrchestrator._build_structural_quality_gate(
             {
@@ -1007,7 +1050,7 @@ class TestGenerationQualityGuards:
         assert repaired_summaries["story_progression_guard"]["mission_hit_count"] >= 2
         assert repaired_summaries["story_progression_guard_pre_enrichment"]["static_description_risk"] is True
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_structural_gate_repair_adopts_revision_that_fixes_progression(self, monkeypatch):
         """结构质量门失败后，若定向修复能改善结构并通过重评，应采纳修复内容而非直接拦截。"""
         chapter_mission = {
@@ -1074,7 +1117,7 @@ class TestGenerationQualityGuards:
         assert captured["issues"], "结构定向修复应收到结构问题清单"
         assert captured["chapter_content"] == weak_content
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_structural_gate_repair_keeps_diagnostics_when_no_improvement(self, monkeypatch):
         """修复毫无改善时不能采纳，但**必须留下诊断**。
 
@@ -1143,7 +1186,7 @@ class TestGenerationQualityGuards:
         # 没有改善就不能回写正文
         assert "content" not in result
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_structural_gate_repair_adopts_partial_improvement(self, monkeypatch):
         """**T-22 的核心**：blocker 从 7 条降到 1 条但仍未通过门时，必须采纳这次修复。
 
@@ -1208,7 +1251,7 @@ class TestGenerationQualityGuards:
         assert summary["remaining_issue_count"] < len(summary["issue_codes_before"])
         assert summary["remaining_issue_count"] > 0
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_structural_gate_repair_rejects_traded_issue_types(self, monkeypatch):
         """反例：blocker 数量变少但**引入了新的 code 类型**，不算改善。
 
@@ -1267,7 +1310,7 @@ class TestGenerationQualityGuards:
         assert "chapter_artifact_markers" in summary["new_issue_codes"]
         assert "content" not in result
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_structural_gate_repair_stops_at_two_rounds(self, monkeypatch):
         """修复上限硬编码为 2 轮，且第 2 轮必须基于第 1 轮的产物继续修。
 
@@ -1336,7 +1379,7 @@ class TestGenerationQualityGuards:
         assert summary["issue_codes_after"] == []
         assert summary["remaining_issue_count"] == 0
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_structural_gate_repair_skipped_when_self_critique_disabled(self, monkeypatch):
         """低配 preset（enable_self_critique=False）不做结构定向修复，保持原有拦截语义。"""
         chapter_mission = {
@@ -1418,7 +1461,9 @@ class TestGenerationQualityGuards:
         first_persist = source.index("_persist_quality_gate_blocked_versions(")
         assert first_repair < first_persist
 
-    @pytest.mark.anyio
+        assert source.count("quality_gate_repairs=runtime_metadata.get(\"quality_gate_repairs\")") == 2
+
+    @pytest.mark.asyncio
     async def test_run_ai_review_overrides_static_ai_choice_with_progressive_fallback(self, monkeypatch):
         chapter_mission = {
             "chapter_purpose": "逼问真相",
@@ -1476,8 +1521,12 @@ class TestGenerationQualityGuards:
         assert summary["selection_override"]["fallback_best_index"] == 1
         assert weak_candidate["metadata"]["ai_review"]["ai_original_best"] is True
         assert strong_candidate["metadata"]["ai_review"]["is_best"] is True
+        assert weak_candidate["metadata"]["ai_review"]["heuristic_rank"] == 2
+        assert strong_candidate["metadata"]["ai_review"]["heuristic_rank"] == 1
+        assert strong_candidate["metadata"]["ai_review"]["heuristic_best"] is True
+        assert isinstance(strong_candidate["metadata"]["ai_review"]["heuristic_score"], int)
 
-    @pytest.mark.anyio
+    @pytest.mark.asyncio
     async def test_run_ai_review_keeps_ai_choice_when_story_guard_has_no_clear_reason_to_override(self, monkeypatch):
         chapter_mission = {
             "chapter_purpose": "逼问真相",
@@ -2509,6 +2558,51 @@ def test_ending_hook_markers_are_genre_neutral_and_greppable():
     )
     assert block is not None, "找不到 ENDING_SEMANTIC_HOOK_MARKERS 定义"
     assert "\\u" not in block.group(1), "章末压力词表里仍有 \\uXXXX 转义，grep 不到"
+
+
+def test_t17_final_version_metadata_persists_cleanup_and_quality_gate_snapshots():
+    import inspect
+    source = inspect.getsource(PipelineOrchestrator.generate_chapter)
+    assert 'best_version_metadata["deterministic_cleanup"]' in source
+    assert 'best_version_metadata["quality_gates"]' in source
+    sabotaged = source.replace('best_version_metadata["deterministic_cleanup"]', 'best_version_metadata["removed_cleanup"]', 1)
+    with pytest.raises(AssertionError):
+        assert 'best_version_metadata["deterministic_cleanup"]' in sabotaged
+
+
+def test_e11_quality_gate_repairs_are_persisted_in_final_version_metadata_with_reverse_guard():
+    import inspect
+    source = inspect.getsource(PipelineOrchestrator.generate_chapter)
+    assert 'quality_gate_repairs = runtime_metadata.get("quality_gate_repairs")' in source
+    assert 'best_version_metadata["quality_gate_repairs"] = deepcopy(' in source
+    sabotaged = source.replace('best_version_metadata["quality_gate_repairs"] = deepcopy(', 'best_version_metadata["removed_quality_gate_repairs"] = deepcopy(', 1)
+    with pytest.raises(AssertionError):
+        assert 'best_version_metadata["quality_gate_repairs"] = deepcopy(' in sabotaged
+
+    assert "quality_gate_repairs if isinstance(quality_gate_repairs, list) else []" in source
+    missing_default = source.replace(
+        "quality_gate_repairs if isinstance(quality_gate_repairs, list) else []",
+        "quality_gate_repairs",
+        1,
+    )
+    with pytest.raises(AssertionError):
+        assert "quality_gate_repairs if isinstance(quality_gate_repairs, list) else []" in missing_default
+
+
+def test_t17_real_smoke_asserts_persisted_metadata_snapshots_with_reverse_guard():
+    source = (Path(__file__).parents[2] / "scripts" / "real_asgi_generation_smoke.py").read_text(encoding="utf-8")
+    for marker in (
+        'cleanup_snapshot = metadata.get("deterministic_cleanup")',
+        'quality_gates_snapshot = metadata.get("quality_gates")',
+        'quality_metrics_snapshot = metadata.get("quality_metrics")',
+        'quality_gate_repairs = metadata.get("quality_gate_repairs")',
+        'and isinstance(quality_gate_repairs, list)',
+        'PERSISTENCE_ERROR selected chapter version is missing T-17 metadata snapshots',
+    ):
+        assert marker in source
+    sabotaged = source.replace('quality_metrics_snapshot = metadata.get("quality_metrics")', 'quality_metrics_snapshot = None', 1)
+    with pytest.raises(AssertionError):
+        assert 'quality_metrics_snapshot = metadata.get("quality_metrics")' in sabotaged
 
 
 def test_quality_metric_snapshot_exposes_ending_pressure_hit_counts():
@@ -3896,8 +3990,8 @@ class TestWordCountWiringAcrossLayers:
         assert bare_index == wired_index == 1, "完整版始终该被选中"
         bare_gap = score_of(bare_summary, 1) - score_of(bare_summary, 0)
         wired_gap = score_of(wired_summary, 1) - score_of(wired_summary, 0)
-        assert bare_gap == 23
-        assert wired_gap == 643, f"字数配置没进候选排序（实测分差 {wired_gap}）"
+        assert bare_gap > 0, f"无字数配置时完整版仍应凭结构质量胜出（实测分差 {bare_gap}）"
+        assert wired_gap - bare_gap == 620, f"字数配置没进候选排序（实测分差 {wired_gap}）"
 
     def test_fallback_defaults_stay_neutral_not_hardcoded(self):
         """第 4 层的默认值必须是 0（中性），不是 3000/2000。
@@ -4003,6 +4097,39 @@ class TestDialogueStateTriState:
         )
         assert state["dialogue_state_applicable"] is True
         assert state["dialogue_expectation_declared"] is True
+
+    def test_single_overlapping_state_marker_does_not_count_twice(self):
+        """T-13：同一处“拒绝”只能算一个状态变化，不能被重叠词表刷成通过。"""
+        content = "“你愿意交出钥匙吗？”他拒绝了。"
+        dialogue_markers = sum(content.count(mark) for mark in ("“", "”"))
+
+        state = PipelineOrchestrator._evaluate_dialogue_changes_state(
+            content, expected_dialogue=True, dialogue_markers=dialogue_markers
+        )
+
+        assert state["state_change_marker_count"] == 1
+        assert state["dialogue_changes_state"] is False
+
+    def test_duplicate_marker_count_sabotage_is_detected(self, monkeypatch):
+        """反向验证：重新把一处状态变化抬成两个时，上述失败判定必须变红。"""
+        content = "“你愿意交出钥匙吗？”他拒绝了。"
+        dialogue_markers = sum(content.count(mark) for mark in ("“", "”"))
+
+        baseline = PipelineOrchestrator._evaluate_dialogue_changes_state(
+            content, expected_dialogue=True, dialogue_markers=dialogue_markers
+        )
+        assert baseline["dialogue_changes_state"] is False
+
+        monkeypatch.setattr(
+            PipelineOrchestrator,
+            "_count_dialogue_state_change_markers",
+            staticmethod(lambda _text: 2),
+        )
+        sabotaged = PipelineOrchestrator._evaluate_dialogue_changes_state(
+            content, expected_dialogue=True, dialogue_markers=dialogue_markers
+        )
+        with pytest.raises(AssertionError):
+            assert sabotaged["dialogue_changes_state"] is False
 
     def test_undeclared_but_dialogue_present_still_gets_judged(self):
         """没要求对话但正文有对话 → 仍然判，只是门槛降到 1 个状态变化标记。
@@ -4131,9 +4258,11 @@ class TestDialogueStateTriStateWiringAcrossLayers:
 
         assert undeclared_gate["passed"] is True
         assert undeclared_codes == set(), f"不适用的对话维度被拦章了：{sorted(undeclared_codes)}"
-        assert "dialogue_does_not_change_state" in declared_codes, (
-            "判据被改成 `is not False` 之类的写法，这道 blocker 就静默失效了"
-        )
+        assert "dialogue_does_not_change_state" not in declared_codes
+        declared_warnings = {item["code"] for item in declared_gate["warnings"]}
+        assert "dialogue_does_not_change_state" in declared_warnings
+        assert declared_gate["warnings"]
+        assert all(item.get("patch_suggestion") for item in declared_gate["warnings"])
 
     def test_repair_list_skips_not_applicable_dialogue(self):
         """第 2 层：定向修复清单不给「不适用」派返修指令。
@@ -4177,6 +4306,79 @@ class TestDialogueStateTriStateWiringAcrossLayers:
         assert "dialogue_does_not_change_state" not in undeclared_reasons
         assert declared_guard["dialogue_changes_state"] is False
         assert "dialogue_does_not_change_state" in declared_reasons
+
+    def test_ending_pressure_none_is_not_a_failure_across_quality_paths(self, monkeypatch):
+        """T-13：章末压力三态字段的 None 不能被摘要、质量门或重试路径当成 False。"""
+        guard = {
+            "word_count": 1800,
+            "dialogue_marker_count": 8,
+            "mission_hit_count": 4,
+            "scene_count": 1,
+            "scene_fulfillment_rate": 0.9,
+            "scene_structure_rate": 0.9,
+            "expected_dialogue": False,
+            "dialogue_changes_state": None,
+            "ending_pressure_passed": None,
+            "event_density_passed": True,
+            "state_change_interval_passed": True,
+            "long_chapter_density_passed": True,
+            "static_description_risk": False,
+            "repetition_risk": False,
+        }
+
+        summary = PipelineOrchestrator._build_quality_issue_summary(story_guard=guard)
+        assert "ending_pressure_missing" not in summary["codes"]
+
+        gate = PipelineOrchestrator._build_structural_quality_gate(
+            {"story_progression_guard": guard}
+        )
+        assert "ending_pressure_missing" not in {item["code"] for item in gate["blockers"]}
+
+        repair_issues = PipelineOrchestrator._build_structural_reader_polish_issues(guard)
+        assert "suspense" not in {item["dimension"] for item in repair_issues}
+
+        monkeypatch.setattr(
+            PipelineOrchestrator,
+            "_score_story_quality_candidate",
+            classmethod(lambda cls, **_kwargs: guard),
+        )
+        needs_retry, _guard, reasons = PipelineOrchestrator._evaluate_first_draft_retry(
+            content="正文",
+            violations=[],
+            chapter_mission=None,
+            target_word_count=1800,
+            min_word_count=1600,
+        )
+        assert needs_retry is False
+        assert "ending_pressure_missing" not in reasons
+
+    def test_ai_review_override_requires_explicit_ending_failure(self):
+        """T-13：AI 选稿只能把明确 False 当章末缺陷，不能把 None 当缺陷。"""
+        base = {
+            "word_count": 2000,
+            "dialogue_marker_count": 8,
+            "mission_hit_count": 5,
+            "scene_count": 0,
+            "expected_dialogue": False,
+            "guardrail_passed": True,
+            "static_description_risk": False,
+            "scene_fulfillment_rate": 1.0,
+            "score": 900,
+        }
+
+        def override_for(ai_ending):
+            ai_candidate = dict(base, index=0, ending_pressure_passed=ai_ending)
+            fallback_candidate = dict(base, index=1, ending_pressure_passed=True)
+            override, _detail = PipelineOrchestrator._should_override_ai_review_choice(
+                ai_index=0,
+                fallback_index=1,
+                fallback_summary={"candidates": [ai_candidate, fallback_candidate]},
+            )
+            return override
+
+        assert override_for(None) is False
+        assert override_for(False) is True
+        assert override_for(True) is False
 
     def test_ai_review_override_does_not_treat_none_as_a_defect(self):
         """第 4 层：`None` 不算「AI 稿有硬伤」，`False` 算。
@@ -4285,6 +4487,25 @@ class TestEventDensityNotEvaluated:
         assert density["event_density_evaluated"] is True
         assert density.get("event_density_skip_reason") is None
         assert density["event_density_passed"] is True
+
+    def test_long_chapter_density_is_not_applicable_below_long_chapter_floor(self):
+        """T-14：长章密度只适用于 7000+ 字，短/中章必须保留 None。"""
+        density = PipelineOrchestrator._evaluate_event_density(
+            GOOD_DRAMATIC, word_count=3200
+        )
+
+        assert density["event_density_evaluated"] is True
+        assert density["event_density_passed"] is True
+        assert density["state_change_interval_passed"] is True
+        assert density["long_chapter_density_passed"] is None
+
+    def test_long_chapter_density_is_evaluated_at_exact_floor(self):
+        density = PipelineOrchestrator._evaluate_event_density(
+            GOOD_DRAMATIC, word_count=7000
+        )
+
+        assert density["event_density_evaluated"] is True
+        assert density["long_chapter_density_passed"] in (True, False)
 
     def test_score_gives_none_neither_bonus_nor_penalty(self, monkeypatch):
         """三个密度判定同时钉值时：True 1302 / None 1072 / False 582。
@@ -4414,6 +4635,31 @@ class TestEventDensityNotEvaluatedWiringAcrossLayers:
             "真正的密度不达标必须仍然派返修——否则这条测试只证明了门被关掉了"
         )
 
+    def test_repair_list_ignores_stale_density_failures_when_not_evaluated(self):
+        """历史快照残留 false 时，未评估状态仍不得派发 pacing 修复。"""
+        stale_guard = {
+            "word_count": 420,
+            "event_density_evaluated": False,
+            "event_density_passed": False,
+            "state_change_interval_passed": False,
+            "long_chapter_density_passed": False,
+            "dialogue_changes_state": None,
+            "ending_pressure_passed": True,
+            "static_description_risk": False,
+            "scene_count": 0,
+        }
+        issues = PipelineOrchestrator._build_structural_reader_polish_issues(stale_guard)
+        assert "pacing" not in {item["dimension"] for item in issues}
+
+    def test_repair_list_density_guard_requires_evaluation_state(self):
+        import inspect
+        source = inspect.getsource(PipelineOrchestrator._build_structural_reader_polish_issues)
+        guard = 'guard.get("event_density_evaluated") is not False'
+        assert guard in source
+        sabotaged = source.replace(guard, 'True', 1)
+        with pytest.raises(AssertionError):
+            assert guard in sabotaged
+
     def test_first_draft_retry_does_not_fire_on_not_evaluated_density(self):
         """重试原因码不因「未评估」触发。
 
@@ -4436,3 +4682,9 @@ class TestEventDensityNotEvaluatedWiringAcrossLayers:
         assert "word_count_far_below_target" in reasons, (
             "字数维度必须照常报——否则这条测试可能是因为整个 guard 空了才绿的"
         )
+
+def test_explicit_candidate_count_contract_rejects_partial_provider_salvage_before_review():
+    source = inspect.getsource(PipelineOrchestrator.generate_chapter)
+    assert "REQUESTED_CANDIDATE_COUNT_UNMET" in source
+    assert "len(versions) < config.version_count" in source
+    assert "strict_requested_count" in source

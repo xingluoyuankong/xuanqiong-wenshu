@@ -1,0 +1,17 @@
+{
+  "id": "smoke-opening",
+  "target_word_count": 1200,
+  "min_word_count": 900,
+  "chapter_mission": {
+    "chapter_purpose": "找回遗失的账簿",
+    "scene_list": [
+      {
+        "goal": "取回账簿",
+        "conflict": "门卫拦住档案室",
+        "turn": "一张湿照片揭露背叛",
+        "end_hook": "门外脚步停住"
+      }
+    ]
+  },
+  "fixture_content": "雨停时，林七推开档案室的门，发现账簿被人换成了空白纸。门卫伸手阻拦，他反手扣住钥匙，照片从夹层滑出，门外的脚步已停在第三阶。"
+}

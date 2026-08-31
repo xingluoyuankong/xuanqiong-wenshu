@@ -30,7 +30,7 @@ async def _async_noop(*_a, **_k):
     return None
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_stream_single_model_falls_back_to_reasoning_content():
     service = object.__new__(LLMService)
     service._wait_for_provider_cooldown = _async_noop
@@ -58,7 +58,7 @@ async def test_stream_single_model_falls_back_to_reasoning_content():
     assert finish == "stop"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_stream_single_model_prefers_content_when_present():
     service = object.__new__(LLMService)
     service._wait_for_provider_cooldown = _async_noop
@@ -85,7 +85,7 @@ async def test_stream_single_model_prefers_content_when_present():
     assert finish == "stop"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_empty_stream_fallback_keeps_prompt_cache_key_on_formal_non_stream_path():
     service = object.__new__(LLMService)
     service._wait_for_provider_cooldown = _async_noop
@@ -114,7 +114,7 @@ async def test_empty_stream_fallback_keeps_prompt_cache_key_on_formal_non_stream
     assert client.chat_kwargs["prompt_cache_key"] == "project:p1:writer"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_empty_stream_can_disable_non_stream_fallback_for_long_form_budget():
     service = object.__new__(LLMService)
     service._wait_for_provider_cooldown = _async_noop

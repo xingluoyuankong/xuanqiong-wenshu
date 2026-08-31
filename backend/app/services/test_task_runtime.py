@@ -7,7 +7,7 @@ from app.schemas.task_runtime import TaskRuntimeEventType, TaskRuntimeStatus
 from app.services.task_runtime import TaskRuntimeConflict, TaskRuntimeService
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_create_is_idempotent_and_emits_creation_event(task_session):
     service = TaskRuntimeService(task_session)
     first = await service.create_task(task_type="outline", idempotency_key="outline-1", owner_user_id=7)
@@ -18,7 +18,7 @@ async def test_create_is_idempotent_and_emits_creation_event(task_session):
     assert [event.event_type for event in events] == [TaskRuntimeEventType.TASK_CREATED.value]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_progress_and_heartbeat_update_state_and_cursor(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter", owner_user_id=3)
@@ -32,7 +32,7 @@ async def test_progress_and_heartbeat_update_state_and_cursor(task_session):
     assert task.event_cursor == 3
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_active_progress_event_refreshes_heartbeat_for_provider_wait(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter")
@@ -54,7 +54,63 @@ async def test_active_progress_event_refreshes_heartbeat_for_provider_wait(task_
     assert service._normalize_datetime(updated.heartbeat_at) >= service._now() - timedelta(seconds=2)
     assert await service.mark_stale(stale_after_seconds=120) == []
 
-@pytest.mark.anyio
+
+@pytest.mark.asyncio
+async def test_longform_budget_protects_live_task_from_generic_stale_sweep(task_session):
+    service = TaskRuntimeService(task_session)
+    task = await service.create_task(
+        task_type="chapter_generation",
+        payload={
+            "generation_spec": {
+                "normalized_generation_timeout_seconds": 1800,
+            }
+        },
+    )
+    await service.claim(task.task_id, lease_owner="worker-longform")
+    task.heartbeat_at = service._now() - timedelta(seconds=301)
+    await task_session.commit()
+
+    assert await service.mark_stale(stale_after_seconds=120) == []
+
+
+@pytest.mark.asyncio
+async def test_longform_budget_prevents_foreign_claim_before_budget_plus_grace(task_session):
+    service = TaskRuntimeService(task_session)
+    task = await service.create_task(
+        task_type="chapter_generation",
+        payload={
+            "generation_spec": {
+                "normalized_generation_timeout_seconds": 1800,
+            }
+        },
+    )
+    await service.claim(task.task_id, lease_owner="worker-longform")
+    task.heartbeat_at = service._now() - timedelta(seconds=301)
+    await task_session.commit()
+
+    with pytest.raises(TaskRuntimeConflict, match="lease is held"):
+        await service.claim(task.task_id, lease_owner="worker-other", stale_after_seconds=120)
+
+
+async def test_longform_budget_still_becomes_stale_after_budget_plus_grace(task_session):
+    service = TaskRuntimeService(task_session)
+    task = await service.create_task(
+        task_type="chapter_generation",
+        payload={
+            "generation_spec": {
+                "normalized_generation_timeout_seconds": 1800,
+            }
+        },
+    )
+    await service.claim(task.task_id, lease_owner="worker-longform")
+    task.heartbeat_at = service._now() - timedelta(seconds=2000)
+    await task_session.commit()
+
+    stale = await service.mark_stale(stale_after_seconds=120)
+    assert [item.task_id for item in stale] == [task.task_id]
+    assert stale[0].error_code == "STALE_TASK"
+
+@pytest.mark.asyncio
 async def test_cancel_then_retry_is_persisted_and_retry_is_idempotent(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="research", max_retries=2)
@@ -67,7 +123,7 @@ async def test_cancel_then_retry_is_persisted_and_retry_is_idempotent(task_sessi
     assert task.retry_count == 1
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_retry_releases_previous_worker_lease_and_assigns_event_channel(task_session):
     """重试必须切换 attempt，旧 worker 的租约不能阻塞重新派发。"""
     service = TaskRuntimeService(task_session)
@@ -85,7 +141,7 @@ async def test_retry_releases_previous_worker_lease_and_assigns_event_channel(ta
     assert events[-1].payload["event_sequence"] == events[-1].event_id
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_event_channels_keep_content_and_logs_separate(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter")
@@ -96,7 +152,7 @@ async def test_event_channels_keep_content_and_logs_separate(task_session):
     assert events[-1].payload["channel"] == "log"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_retry_rejects_non_retryable_task(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter")
@@ -104,7 +160,7 @@ async def test_retry_rejects_non_retryable_task(task_session):
         await service.retry(task.task_id)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_event_cursor_supports_incremental_replay(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="export")
@@ -115,7 +171,7 @@ async def test_event_cursor_supports_incremental_replay(task_session):
     assert len(events) == 1
     assert events[0].message == "two"
     assert events[0].event_id == task.event_cursor
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_cancel_requests_cancellation_and_emits_event(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter")
@@ -125,7 +181,7 @@ async def test_cancel_requests_cancellation_and_emits_event(task_session):
     events = await service.list_events(task.task_id, after_event_id=1)
     assert events[-1].event_type == "cancel_requested"
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_claim_prevents_live_duplicate_and_metrics_are_persisted(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter", owner_user_id=11)
@@ -137,7 +193,7 @@ async def test_claim_prevents_live_duplicate_and_metrics_are_persisted(task_sess
     assert task.total_tokens == 42
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_stale_reconciliation_marks_timed_out_task(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="research")
@@ -150,7 +206,7 @@ async def test_stale_reconciliation_marks_timed_out_task(task_session):
     assert stale[0].error_code == "STALE_TASK"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_repeated_stale_reconciliation_is_idempotent(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter")
@@ -167,7 +223,7 @@ async def test_repeated_stale_reconciliation_is_idempotent(task_session):
     assert [event.event_type for event in events].count(TaskRuntimeEventType.TASK_STALE.value) == 1
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_heartbeat_rejects_live_foreign_lease(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter")
@@ -176,7 +232,7 @@ async def test_heartbeat_rejects_live_foreign_lease(task_session):
         await service.heartbeat(task.task_id, lease_owner="worker-b")
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_stale_task_can_be_reclaimed_by_a_new_worker(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter")
@@ -189,7 +245,7 @@ async def test_stale_task_can_be_reclaimed_by_a_new_worker(task_session):
     assert task.lease_owner == "worker-b"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_recover_is_the_persistent_reclaim_entrypoint(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter")
@@ -205,7 +261,7 @@ async def test_recover_is_the_persistent_reclaim_entrypoint(task_session):
     assert recovered.heartbeat_at is not None
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_recover_rejects_queued_task_without_claiming_it(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter")
@@ -217,7 +273,7 @@ async def test_recover_rejects_queued_task_without_claiming_it(task_session):
     assert current.status == "queued"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_terminal_event_normalizes_naive_db_started_at(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter")
@@ -236,7 +292,7 @@ async def test_terminal_event_normalizes_naive_db_started_at(task_session):
     assert finished.elapsed_ms >= 0
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_list_tasks_is_scoped_by_owner_project_and_status(task_session):
     service = TaskRuntimeService(task_session)
     await service.create_task(task_id="list-a", task_type="chapter", owner_user_id=7, project_id="p1")
@@ -247,7 +303,7 @@ async def test_list_tasks_is_scoped_by_owner_project_and_status(task_session):
     assert [task.task_id for task in tasks] == ["list-a"]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_append_event_rejects_unknown_status(task_session):
     service = TaskRuntimeService(task_session)
     await service.create_task(task_id="status-guard", task_type="chapter")
@@ -255,7 +311,7 @@ async def test_append_event_rejects_unknown_status(task_session):
         await service.append_event("status-guard", event_type="progress", status="done")
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_late_progress_cannot_overwrite_cancellation_request(task_session):
     """取消与迟到 Provider 进度竞态时，任务必须继续保持 cancelling。"""
     service = TaskRuntimeService(task_session)
@@ -277,7 +333,7 @@ async def test_late_progress_cannot_overwrite_cancellation_request(task_session)
     assert events[-1].status == "cancelling"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_cancelling_task_rejects_late_terminal_success(task_session):
     """取消竞态下，迟到的成功回调不得伪造任务完成。"""
     service = TaskRuntimeService(task_session)
@@ -297,7 +353,7 @@ async def test_cancelling_task_rejects_late_terminal_success(task_session):
     assert current.status == TaskRuntimeStatus.CANCELLING.value
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_late_event_cannot_reopen_terminal_task(task_session):
     """终态任务拒绝迟到的非终态事件，防止伪造恢复或继续运行。"""
     service = TaskRuntimeService(task_session)
@@ -322,7 +378,7 @@ async def test_late_event_cannot_reopen_terminal_task(task_session):
     assert current.status == "failed"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_idempotency_race_fallback_does_not_return_other_owner_task(task_session, monkeypatch):
     """唯一键竞争后的二次查询也必须执行归属校验，不能泄露他人任务。"""
     service = TaskRuntimeService(task_session)
@@ -350,7 +406,7 @@ async def test_idempotency_race_fallback_does_not_return_other_owner_task(task_s
     assert (await service.get_task(existing.task_id, owner_user_id=7)).task_id == existing.task_id
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_api_style_cancel_finalizes_unclaimed_queued_task(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter")
@@ -364,7 +420,7 @@ async def test_api_style_cancel_finalizes_unclaimed_queued_task(task_session):
     ]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_retry_starts_new_attempt_and_resets_attempt_clock(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter", max_retries=2)
@@ -389,7 +445,7 @@ async def test_retry_starts_new_attempt_and_resets_attempt_clock(task_session):
     assert retried.lease_owner is None
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_old_worker_cannot_write_after_retry_and_reclaim(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter", max_retries=2)
@@ -428,7 +484,7 @@ async def test_old_worker_cannot_write_after_retry_and_reclaim(task_session):
     assert all(event.attempt == persisted.attempt for event in events[-1:])
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_current_worker_event_records_attempt_and_lease_generation(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter")
@@ -450,7 +506,7 @@ async def test_current_worker_event_records_attempt_and_lease_generation(task_se
     assert event.channel == "progress"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_expired_worker_cannot_write_after_same_attempt_is_reclaimed(task_session):
     service = TaskRuntimeService(task_session)
     task = await service.create_task(task_type="chapter")

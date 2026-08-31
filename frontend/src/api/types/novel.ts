@@ -216,9 +216,24 @@ export interface Chapter {
   selected_version_id?: number | null
   versions: ChapterVersion[] | null
   evaluation: string | null
-  generation_status: 'not_generated' | 'generating' | 'evaluating' | 'selecting' | 'failed' | 'evaluation_failed' | 'waiting_for_confirm' | 'successful'
+  generation_status:
+    | 'not_generated'
+    | 'generating'
+    | 'evaluating'
+    | 'selecting'
+    | 'failed'
+    | 'evaluation_failed'
+    | 'waiting_for_confirm'
+    | 'successful'
   word_count?: number
-  progress_stage?: 'queued' | 'generating' | 'evaluating' | 'selecting' | 'ready' | 'failed' | string
+  progress_stage?:
+    | 'queued'
+    | 'generating'
+    | 'evaluating'
+    | 'selecting'
+    | 'ready'
+    | 'failed'
+    | string
   progress_message?: string | null
   started_at?: string | null
   updated_at?: string | null
@@ -256,6 +271,16 @@ export interface GenerationRuntime {
   version_count?: number
   target_word_count?: number
   min_word_count?: number
+  actual_word_count?: number | null
+  word_requirement_met?: boolean | null
+  word_requirement_reason?: string | null
+  quality_metrics?: Record<string, unknown> | null
+  story_progression_guard?: Record<string, unknown> | null
+  generation_call_metrics?: Array<Record<string, unknown>> | null
+  enrichment_triggered?: boolean | null
+  pipeline_total_duration_ms?: number | null
+  stage_timings_ms?: Record<string, number> | null
+  degraded_stages?: Array<Record<string, unknown>> | null
   progress_stage?: string
   progress_message?: string
   progress_percent?: number
@@ -282,6 +307,69 @@ export interface GenerationRuntime {
   recovered_from_reload?: boolean
   events?: GenerationRuntimeEvent[]
   [key: string]: any
+}
+
+export interface QualityTrendChapter {
+  chapter_number: number
+  status: string | null
+  score?: number | null
+  word_count?: number | null
+  self_critique_final_score?: number | null
+  self_critique_critical_count?: number | null
+  self_critique_major_count?: number | null
+  selected_critique_source?: string | null
+  repetition_risk?: boolean | null
+  repeated_paragraph_count?: number | null
+  max_repeated_paragraph_count?: number | null
+  repeated_paragraph_ratio?: number | null
+  longest_repeated_paragraph_chars?: number | null
+  focus_character_names?: string[]
+  focus_character_hit_count?: number | null
+  missing_focus_characters?: string[]
+  target_word_count?: number | null
+  min_word_count?: number | null
+  preferred_word_floor?: number | null
+  upper_word_ceiling?: number | null
+  word_count_below_min?: boolean | null
+  word_count_far_above_target?: boolean | null
+  word_count_far_below_target?: boolean | null
+  word_requirement_met?: boolean | null
+  event_density_evaluated?: boolean | null
+  event_density_skip_reason?: string | null
+  event_density_passed?: boolean | null
+  long_chapter_density_passed?: boolean | null
+  state_change_interval_passed?: boolean | null
+  ending_pressure_passed?: boolean | null
+  dialogue_changes_state?: boolean | null
+  static_description_risk?: boolean | null
+  reversal_signal_count?: number | null
+  reversal_in_late_section?: boolean | null
+  dialogue_ratio?: number | null
+  action_ratio?: number | null
+  description_ratio?: number | null
+  speaker_count?: number | null
+  dominant_speaker_ratio?: number | null
+  hard_scene_cut_count?: number | null
+  summary_scene_cut_count?: number | null
+  scene_transition_warning?: boolean | null
+  continuity_inherit_missing?: boolean | null
+  continuity_inherit_late?: boolean | null
+  mission_quality_codes?: string[]
+  blocker_codes?: string[]
+  warning_codes?: string[]
+  patch_suggestions?: Array<{ code?: string; suggestion?: string }>
+  exemptions?: string[]
+  critique_exemption_applied?: string[]
+  quality_gate_passed?: boolean | null
+}
+
+export interface QualityTrendResponse {
+  project_id: string
+  chapter_count?: number
+  chapters?: QualityTrendChapter[]
+  blocker_counts?: Record<string, number>
+  warning_counts?: Record<string, number>
+  exemption_counts?: Record<string, number>
 }
 
 export interface WorkspaceSummary {
@@ -361,7 +449,15 @@ export interface OutlineGenerationJobResponse {
 export interface StyleProfileJobResponse {
   run_id: string
   project_id: string
-  status: 'idle' | 'queued' | 'extracting' | 'profiling' | 'saving' | 'successful' | 'failed' | 'cancelled'
+  status:
+    | 'idle'
+    | 'queued'
+    | 'extracting'
+    | 'profiling'
+    | 'saving'
+    | 'successful'
+    | 'failed'
+    | 'cancelled'
   progress_stage: string
   progress_message: string
   started_at?: string | null
@@ -478,7 +574,14 @@ export interface DeleteNovelsResponse {
 // Section 类型
 // ============================================================================
 
-export type NovelSectionType = 'overview' | 'world_setting' | 'novel_outline' | 'characters' | 'relationships' | 'chapter_outline' | 'chapters'
+export type NovelSectionType =
+  | 'overview'
+  | 'world_setting'
+  | 'novel_outline'
+  | 'characters'
+  | 'relationships'
+  | 'chapter_outline'
+  | 'chapters'
 
 export type AnalysisSectionType =
   | 'emotion_curve'
@@ -489,7 +592,14 @@ export type AnalysisSectionType =
   | 'comprehensive_analysis'
   | 'clue_tracker'
 
-export type FeatureEntryType = 'style_learning' | 'memory_management' | 'token_budget' | 'research' | 'clue_tracker' | 'knowledge_graph' | 'foreshadowing'
+export type FeatureEntryType =
+  | 'style_learning'
+  | 'memory_management'
+  | 'token_budget'
+  | 'research'
+  | 'clue_tracker'
+  | 'knowledge_graph'
+  | 'foreshadowing'
 
 export type AllSectionType = NovelSectionType | AnalysisSectionType | FeatureEntryType
 
@@ -516,11 +626,7 @@ export interface EmotionBeat {
 export interface OptimizeRequest {
   project_id: string
   chapter_number: number
-  dimension:
-    | 'dialogue'
-    | 'environment'
-    | 'psychology'
-    | 'rhythm'
+  dimension: 'dialogue' | 'environment' | 'psychology' | 'rhythm'
   additional_notes?: string
   version_index?: number
   version_id?: number
@@ -671,7 +777,6 @@ export interface ForeshadowingReminderItem {
   suggested_chapter_range?: { start?: number; end?: number } | null
   created_at: string
 }
-
 
 // ===== Research Types =====
 export type ResearchMode = 'auto' | 'ask' | 'off'

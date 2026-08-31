@@ -523,7 +523,7 @@ const detailItems = computed(() => {
   const source = runtime.value
   const items: Array<{ key: string; label: string; value: string }> = []
   const push = (key: string, label: string, value: unknown) => {
-    if (value === null || typeof value === 'undefined' || value === '' || value === false) return
+    if (value === null || typeof value === 'undefined' || value === '') return
     items.push({ key, label, value: String(value) })
   }
   push('requested_preset', pick('请求预设', 'Requested preset'), source.requested_preset)
@@ -533,6 +533,9 @@ const detailItems = computed(() => {
   push('target_word_count', pick('目标字数', 'Target words'), source.target_word_count)
   push('min_word_count', pick('最低字数', 'Minimum words'), source.min_word_count)
   push('actual_word_count', pick('当前字数', 'Current words'), source.actual_word_count)
+  push('stable_retry_used', pick('是否切换稳定模式', 'Switched to stable mode'), source.stable_retry_used)
+  push('word_requirement_met', pick('是否达到字数要求', 'Word requirement met'), source.word_requirement_met)
+  push('stagewide_allowed', pick('允许整章候选', 'Full-chapter candidate allowed'), source.stagewide_allowed)
   push('diagnosis_stage_label', pick('诊断阶段', 'Diagnosis stage'), source.diagnosis_stage_label)
   if (Array.isArray(source.diagnosis_dimensions) && source.diagnosis_dimensions.length) {
     push('diagnosis_dimensions', pick('诊断维度', 'Diagnosis dimensions'), source.diagnosis_dimensions.join(listSeparator.value))

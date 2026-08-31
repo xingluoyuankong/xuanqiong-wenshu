@@ -95,6 +95,7 @@
         />
 
         <div class="m3-workspace__pane min-w-0 min-h-0 flex-1">
+          <QualityTrendPanel v-if="project?.id" :project-id="project.id" />
           <WDWorkspace
             ref="workspaceRef"
             :project="project"
@@ -423,6 +424,7 @@ import {
   WDWorkspace,
   WDGenerateOutlineModal
 } from '@/components/writing-desk'
+import QualityTrendPanel from '@/components/writing-desk/widgets/QualityTrendPanel.vue'
 
 const WDEvaluationDetailModal = defineAsyncComponent(() => import('@/components/writing-desk/dialogs/WDEvaluationDetailModal.vue'))
 const WDEditChapterModal = defineAsyncComponent(() => import('@/components/writing-desk/dialogs/WDEditChapterModal.vue'))
@@ -479,6 +481,7 @@ const { pick } = useLocale()
 const selectedChapterNumber = ref<number | null>(null)
 const chapterGenerationResult = ref<ChapterGenerationResponse | null>(null)
 const selectedVersionIndex = ref(0)
+const deepLinkVersionFocus = ref(false)
 const compareVersionIndex = ref<number | null>(null)
 const generatingChapter = ref<number | null>(null)
 const sidebarOpen = ref(true)
@@ -649,7 +652,7 @@ const generationRuntime = computed(() =>
   resolveChapterRuntime(selectedChapter.value, project.value?.generation_runtime || null)
 )
 const showVersionSelector = computed(() =>
-  isRecoverableVersionStatus(selectedChapter.value?.generation_status)
+  deepLinkVersionFocus.value || isRecoverableVersionStatus(selectedChapter.value?.generation_status)
 )
 const evaluatingChapter = computed(() =>
   selectedChapter.value?.generation_status === 'evaluating'
@@ -818,12 +821,55 @@ const closeSidebar = () => {
   sidebarOpen.value = false
 }
 
+const deepLinkChapterNumber = computed(() => {
+  const raw = route.query.chapter
+  const parsed = typeof raw === 'string' ? Number(raw) : Array.isArray(raw) ? Number(raw[0]) : NaN
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : null
+})
+const deepLinkVersionId = computed(() => {
+  const raw = route.query.version_id
+  const parsed = typeof raw === 'string' ? Number(raw) : Array.isArray(raw) ? Number(raw[0]) : NaN
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : null
+})
+const deepLinkFocus = computed(() => typeof route.query.focus === 'string' ? route.query.focus : '')
+const deepLinkApplied = ref(false)
+
+const applyWritingDeskDeepLink = () => {
+  if (deepLinkApplied.value || !outlineOrChapterNumbers.value.length) return
+  const requestedChapter = deepLinkChapterNumber.value
+  const requestedVersion = deepLinkVersionId.value
+  if (requestedChapter === null || !outlineOrChapterNumbers.value.includes(requestedChapter)) return
+  const chapter = project.value?.chapters?.find(item => item.chapter_number === requestedChapter)
+  if (!chapter) return
+  selectedChapterNumber.value = requestedChapter
+  const versionIndex = requestedVersion === null
+    ? 0
+    : (chapter.versions || []).findIndex(version => Number(version.id) === requestedVersion)
+  if (requestedVersion !== null && versionIndex < 0) {
+    globalAlert.showError(
+      pick(`未找到第 ${requestedChapter} 章的版本 ${requestedVersion}，已打开该章节。`, `Version ${requestedVersion} was not found in chapter ${requestedChapter}; the chapter was opened instead.`),
+      pick('版本定位失败', 'Version focus unavailable')
+    )
+    resetVersionSelectionState()
+  } else {
+    resetVersionSelectionState(Math.max(0, versionIndex))
+  }
+  if (deepLinkFocus.value === 'version' || deepLinkFocus.value === 'quality-blocker') {
+    deepLinkVersionFocus.value = true
+  }
+  deepLinkApplied.value = true
+}
+
 const pickInitialChapter = () => {
   if (!outlineOrChapterNumbers.value.length) {
     selectedChapterNumber.value = null
     return
   }
   const validNumbers = new Set(outlineOrChapterNumbers.value)
+  if (deepLinkChapterNumber.value !== null && validNumbers.has(deepLinkChapterNumber.value)) {
+    applyWritingDeskDeepLink()
+    return
+  }
   if (selectedChapterNumber.value !== null && validNumbers.has(selectedChapterNumber.value)) return
   selectedChapterNumber.value =
     workspaceSummary.value?.active_chapter ??
@@ -834,6 +880,8 @@ const pickInitialChapter = () => {
 }
 
 const resetWorkspaceState = () => {
+  deepLinkApplied.value = false
+  deepLinkVersionFocus.value = false
   selectedChapterNumber.value = null
   resetVersionSelectionState()
   generatingChapter.value = null
@@ -1081,6 +1129,7 @@ const loadProject = async () => {
     await hydrateTrackableTaskRuntimes()
     clearLatestDiagnostics()
     pickInitialChapter()
+    applyWritingDeskDeepLink()
     _ensureSSEConnected()
   } catch (error) {
     const diagnostics = normalizeUiDiagnostics(
@@ -1219,6 +1268,7 @@ const resetVersionSelectionState = (selectedIndex: number = 0) => {
 }
 
 const selectChapter = (chapterNumber: number) => {
+  deepLinkVersionFocus.value = false
   selectedChapterNumber.value = chapterNumber
   resetVersionSelectionState()
   if (window.innerWidth < 1024) closeSidebar()

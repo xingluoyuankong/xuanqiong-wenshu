@@ -1,129 +1,73 @@
-#!/bin/bash
-# 数据库迁移验证脚本
+#!/usr/bin/env bash
+# Read-only deployment schema verifier.  It checks Alembic plus critical Agent correlation columns.
+set -Eeuo pipefail
 
-set -e
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
+BACKEND_DIR="$REPO_ROOT/backend"
+ENV_FILE="${ENV_FILE:-$BACKEND_DIR/.env}"
+STRICT=false
 
-echo "========================================="
-echo "数据库迁移验证脚本"
-echo "========================================="
+usage() { echo "Usage: bash deploy/scripts/verify_migration.sh [--strict]"; }
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --strict) STRICT=true ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
 
-# 加载环境变量
-if [ -f .env ]; then
-    source .env
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
 fi
 
-# 数据库连接信息
 DB_HOST="${MYSQL_HOST:-localhost}"
 DB_PORT="${MYSQL_PORT:-3306}"
 DB_USER="${MYSQL_USER:-xuanqiong_wenshu}"
-DB_PASSWORD="${MYSQL_PASSWORD}"
+DB_PASSWORD="${MYSQL_PASSWORD:-}"
 DB_NAME="${MYSQL_DATABASE:-xuanqiong_wenshu}"
+MYSQL_BIN="${MYSQL_BIN:-mysql}"
+PYTHON_BIN="${PYTHON_BIN:-}"
 
-if [ -z "$DB_PASSWORD" ]; then
-    echo "错误：未设置 MYSQL_PASSWORD 环境变量"
-    exit 1
+[[ -n "$DB_PASSWORD" ]] || { echo "ERROR: MYSQL_PASSWORD is required." >&2; exit 1; }
+command -v "$MYSQL_BIN" >/dev/null 2>&1 || { echo "ERROR: mysql command unavailable: $MYSQL_BIN" >&2; exit 1; }
+if [[ -z "$PYTHON_BIN" ]]; then
+  if [[ -x "$BACKEND_DIR/.venv/bin/python" ]]; then PYTHON_BIN="$BACKEND_DIR/.venv/bin/python";
+  elif command -v python3 >/dev/null 2>&1; then PYTHON_BIN="$(command -v python3)";
+  else PYTHON_BIN="$(command -v python)"; fi
 fi
 
-echo "数据库连接信息："
-echo "  主机: $DB_HOST"
-echo "  端口: $DB_PORT"
-echo "  用户: $DB_USER"
-echo "  数据库: $DB_NAME"
-echo ""
+mysql_exec() { MYSQL_PWD="$DB_PASSWORD" "$MYSQL_BIN" --protocol=tcp -N -s -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" "$@"; }
+failures=0
+check() { local label="$1"; shift; if "$@"; then echo "OK: $label"; else echo "FAIL: $label" >&2; failures=$((failures + 1)); fi; }
 
-# 检查 MySQL 连接
-echo "1. 检查 MySQL 连接..."
-if mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" -e "SELECT 1;" > /dev/null 2>&1; then
-    echo "   ✓ MySQL 连接成功"
-else
-    echo "   ✗ MySQL 连接失败"
-    exit 1
+check "MySQL connectivity" mysql_exec -e "SELECT 1"
+check "database exists" mysql_exec "$DB_NAME" -e "SELECT 1"
+
+echo "Alembic current (read-only):"
+if ! ( cd "$BACKEND_DIR" && "$PYTHON_BIN" -m alembic -c alembic.ini current ); then
+  echo "FAIL: Alembic current" >&2
+  failures=$((failures + 1))
 fi
 
-# 检查数据库是否存在
-echo ""
-echo "2. 检查数据库 $DB_NAME 是否存在..."
-if mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" -e "USE $DB_NAME;" > /dev/null 2>&1; then
-    echo "   ✓ 数据库存在"
-else
-    echo "   ✗ 数据库不存在"
-    exit 1
-fi
-
-# 检查 Novel-Kit 功能表
-echo ""
-echo "3. 检查 Novel-Kit 功能表..."
-NOVEL_KIT_TABLES=(
-    "constitutions"
-    "writer_personas"
-    "factions"
-    "faction_members"
-    "faction_relationships"
-    "faction_relationship_history"
-)
-
-for table in "${NOVEL_KIT_TABLES[@]}"; do
-    if mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" -e "DESCRIBE $table;" > /dev/null 2>&1; then
-        echo "   ✓ 表 $table 存在"
-    else
-        echo "   ✗ 表 $table 不存在"
-        echo "     请执行迁移脚本: backend/db/migrations/add_novel_kit_features.sql"
-    fi
+echo "Critical Agent correlation columns:"
+for table in agent_runs agent_run_steps agent_events agent_approvals agent_artifact_refs agent_jobs task_runtime_tasks task_runtime_events; do
+  if [[ "$(mysql_exec "$DB_NAME" -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='${DB_NAME//\'/\'\'}' AND table_name='$table' AND column_name='correlation_id';" 2>/dev/null || true)" == "1" ]]; then
+    echo "OK: $table.correlation_id"
+  else
+    echo "FAIL: $table.correlation_id" >&2
+    failures=$((failures + 1))
+  fi
 done
 
-# 检查深度优化功能表
-echo ""
-echo "4. 检查深度优化功能表..."
-OPTIMIZATION_TABLES=(
-    "character_states"
-    "timeline_events"
-    "causal_chains"
-    "story_time_trackers"
-    "periodic_reviews"
-    "reader_feedbacks"
-    "critique_records"
-    "revision_histories"
-    "emotion_curve_configs"
-)
-
-for table in "${OPTIMIZATION_TABLES[@]}"; do
-    if mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" -e "DESCRIBE $table;" > /dev/null 2>&1; then
-        echo "   ✓ 表 $table 存在"
-    else
-        echo "   ✗ 表 $table 不存在"
-        echo "     请执行迁移脚本: backend/db/migrations/add_deep_optimization_features.sql"
-    fi
-done
-
-# 检查 chapter_outlines 表的 metadata 字段
-echo ""
-echo "5. 检查 chapter_outlines 表的 metadata 字段..."
-if mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" -e "DESCRIBE chapter_outlines metadata;" > /dev/null 2>&1; then
-    echo "   ✓ chapter_outlines.metadata 字段存在"
-else
-    echo "   ✗ chapter_outlines.metadata 字段不存在"
-    echo "     请执行: ALTER TABLE chapter_outlines ADD COLUMN metadata JSON NULL;"
+if [[ "$STRICT" == true && "$failures" -gt 0 ]]; then
+  echo "Verification failed with $failures issue(s)." >&2
+  exit 1
 fi
 
-# 检查 foreshadowings 表的扩展字段
-echo ""
-echo "6. 检查 foreshadowings 表的扩展字段..."
-FORESHADOWING_FIELDS=(
-    "status"
-    "planted_chapter"
-    "revealed_chapter"
-    "planned_reveal_chapter"
-)
-
-for field in "${FORESHADOWING_FIELDS[@]}"; do
-    if mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" -e "DESCRIBE foreshadowings $field;" > /dev/null 2>&1; then
-        echo "   ✓ foreshadowings.$field 字段存在"
-    else
-        echo "   ✗ foreshadowings.$field 字段不存在"
-    fi
-done
-
-echo ""
-echo "========================================="
-echo "验证完成"
-echo "========================================="
+echo "Verification finished: failures=$failures strict=$STRICT"
+[[ "$failures" -eq 0 ]] || echo "WARNING: non-strict mode returned success; do not treat this as deploy verified." >&2

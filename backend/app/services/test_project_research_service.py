@@ -23,7 +23,7 @@ def anyio_backend():
     return "asyncio"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_research_config_encrypts_keys_and_disables_local_model(tmp_path, monkeypatch):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'research.db'}")
     factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -80,7 +80,7 @@ def test_research_archive_uses_project_scope_chapter_and_category_folders(tmp_pa
     assert (run_dir / "query_plan.json").exists()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_parallel_search_failure_is_per_query_not_global():
     client = ResearchSearchClient()
     calls = []
@@ -138,7 +138,7 @@ def test_research_config_rejects_private_and_non_http_base_urls():
     assert ResearchConfigUpdate(search_base_url="https://api.example.com/search").search_base_url == "https://api.example.com/search"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_search_runtime_rejects_dns_resolution_to_private_network(monkeypatch):
     client = ResearchSearchClient()
     loop = asyncio.get_running_loop()
@@ -177,7 +177,7 @@ def test_secret_round_trip_and_plaintext_backward_compatibility():
     assert decrypt_secret(encrypted) == "sk-example"
     assert decrypt_secret("legacy-plain") == "legacy-plain"
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_preferred_domains_sort_without_filtering_and_blocked_domains_filter(monkeypatch):
     client = ResearchSearchClient()
 
@@ -230,7 +230,7 @@ def test_flatten_sources_gives_preferred_domain_only_a_small_bonus():
     assert preferred["credibility_score"] == 58
     assert official["credibility_score"] > preferred["credibility_score"]
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_background_reuse_keeps_current_run_id_and_copies_existing_artifact(tmp_path, monkeypatch):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'reuse.db'}")
     factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -271,7 +271,7 @@ async def test_background_reuse_keeps_current_run_id_and_copies_existing_artifac
         await engine.dispose()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_fresh_heartbeat_survives_status_recovery_and_stale_heartbeat_interrupts(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'heartbeat.db'}")
     factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -305,7 +305,7 @@ async def test_fresh_heartbeat_survives_status_recovery_and_stale_heartbeat_inte
     finally:
 
         await engine.dispose()
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_prompt_context_keeps_latest_artifact_per_scope(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'prompt-context.db'}")
     factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -359,7 +359,7 @@ async def test_prompt_context_keeps_latest_artifact_per_scope(tmp_path):
             assert metadata["artifact_run_ids"] == ["global-latest", "enhanced-latest", "chapter-9"]
     finally:
         await engine.dispose()
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_prompt_context_keeps_archived_context_when_new_research_is_skipped(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'pipeline-archive.db'}")
     factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -385,7 +385,7 @@ async def test_prompt_context_keeps_archived_context_when_new_research_is_skippe
         await engine.dispose()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_prompt_context_degrades_without_interrupting_generation():
     class BrokenSession:
         async def execute(self, *_args, **_kwargs):
@@ -397,7 +397,7 @@ async def test_prompt_context_degrades_without_interrupting_generation():
     assert "archive database unavailable" in metadata["archive_error"]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_prompt_context_filters_requested_research_scope(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'blueprint-archive.db'}")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)

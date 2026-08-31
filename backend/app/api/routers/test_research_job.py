@@ -66,7 +66,7 @@ class _ResearchService:
         )
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_manual_research_job_start_status_and_queued_cancel(monkeypatch):
     monkeypatch.setattr(research, "NovelService", _OwnerService)
     monkeypatch.setattr(research, "ProjectResearchService", _ResearchService)
@@ -91,7 +91,7 @@ async def test_manual_research_job_start_status_and_queued_cancel(monkeypatch):
     assert cancelled.artifact and cancelled.artifact.status == "cancelled"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_manual_research_cancel_sends_signal_to_registered_task(monkeypatch):
     monkeypatch.setattr(research, "NovelService", _OwnerService)
     monkeypatch.setattr(research, "ProjectResearchService", _ResearchService)
@@ -109,7 +109,7 @@ async def test_manual_research_cancel_sends_signal_to_registered_task(monkeypatc
     assert cancelled.in_process_task_cancelled is True
     await asyncio.sleep(0)
     assert sleeper.cancelled()
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_manual_research_cancel_recovers_database_job_after_restart(monkeypatch):
     artifact = ResearchArtifactRead(
         id=2, run_id="persisted-run", project_id="project-1", scope="chapter",
@@ -136,7 +136,7 @@ async def test_manual_research_cancel_recovers_database_job_after_restart(monkey
     assert cancelled.artifact and cancelled.artifact.status == "cancelled"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_manual_research_start_rejects_duplicate_active_scope(monkeypatch):
     active = ResearchArtifactRead(
         id=3, run_id="already-running", project_id="project-1", scope="global",
@@ -174,7 +174,7 @@ def _fake_session_factory(session):
     return factory
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_cancel_running_research_job_enters_cancelling_not_terminal(monkeypatch):
     """取消仍在跑的研究任务只能进入 cancelling，且不得提前把工件写成终态。
 
@@ -220,7 +220,7 @@ async def test_cancel_running_research_job_enters_cancelling_not_terminal(monkey
     assert sleeper.cancelled()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_research_worker_converges_cancelling_into_cancelled(monkeypatch):
     """worker 收到 CancelledError 后才把工件与内存态收敛到终态 cancelled。"""
     marked_cancelled: list[str] = []
@@ -271,7 +271,7 @@ async def test_research_worker_converges_cancelling_into_cancelled(monkeypatch):
     assert research._RESEARCH_JOBS[run_id]["status"] == "cancelled"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_runtime_backed_research_worker_recovers_after_memory_cache_is_cleared(monkeypatch):
     """TaskRuntime 领取成功后，重启清空内存缓存不能让 worker 静默退出。"""
     calls: list[str] = []
@@ -312,7 +312,7 @@ async def test_runtime_backed_research_worker_recovers_after_memory_cache_is_cle
     assert "runtime-only-run" not in research._RESEARCH_TASKS
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_research_status_uses_artifact_when_runtime_is_missing(monkeypatch):
     """旧记录没有 TaskRuntime 时，内存快照不得覆盖持久化工件状态。"""
     artifact = ResearchArtifactRead(
@@ -355,7 +355,7 @@ async def test_research_status_uses_artifact_when_runtime_is_missing(monkeypatch
     assert result.status == "queued"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_research_status_prefers_task_runtime_over_stale_memory(monkeypatch):
     """TaskRuntime 是状态真相源：内存里的 running 不得覆盖持久化的 cancelling。"""
     artifact = ResearchArtifactRead(
@@ -400,7 +400,7 @@ async def test_research_status_prefers_task_runtime_over_stale_memory(monkeypatc
     assert status.status == TaskRuntimeStatus.CANCELLING.value
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_research_cancel_prefers_persisted_running_runtime_after_restart(monkeypatch):
     """重启后没有本地句柄时，取消活跃租约只能请求取消，不能伪造终态。"""
     artifact = ResearchArtifactRead(
@@ -456,7 +456,7 @@ async def test_research_cancel_prefers_persisted_running_runtime_after_restart(m
     assert marked_cancelled == []
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_research_status_rejects_runtime_from_another_project(monkeypatch):
     class _RuntimeStub:
         def __init__(self, _session):
@@ -489,7 +489,7 @@ async def test_research_status_rejects_runtime_from_another_project(monkeypatch)
     assert getattr(exc_info.value, "status_code", None) == 404
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_research_cancel_rejects_other_project_before_mutation(monkeypatch):
     cancel_calls: list[str] = []
 
@@ -527,7 +527,7 @@ async def test_research_cancel_rejects_other_project_before_mutation(monkeypatch
     assert cancel_calls == []
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_runtime_disappearance_stops_worker_before_research(monkeypatch):
     research_calls: list[str] = []
     interrupted: list[str] = []
@@ -562,7 +562,7 @@ async def test_runtime_disappearance_stops_worker_before_research(monkeypatch):
     assert interrupted == ["missing-runtime"]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_completion_event_loss_marks_research_interrupted_not_cancelled(monkeypatch):
     interrupted: list[str] = []
     cancelled: list[str] = []
@@ -608,7 +608,7 @@ async def test_completion_event_loss_marks_research_interrupted_not_cancelled(mo
     assert cancelled == []
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_database_status_does_not_fall_back_to_memory_without_runtime(monkeypatch):
     class _MissingRuntime:
         def __init__(self, _session):
@@ -639,7 +639,7 @@ async def test_database_status_does_not_fall_back_to_memory_without_runtime(monk
     assert getattr(exc_info.value, "status_code", None) == 404
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_research_cancel_rejects_same_project_non_research_runtime(monkeypatch):
     cancel_calls: list[str] = []
 

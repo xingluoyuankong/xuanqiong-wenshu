@@ -24,7 +24,7 @@ def anyio_backend():
     return "asyncio"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_import_ledger_rebuild_persists_foreshadowings_and_clues(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'import-ledgers.db'}")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -131,7 +131,7 @@ async def test_import_ledger_rebuild_persists_foreshadowings_and_clues(tmp_path)
         await engine.dispose()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_formal_export_import_roundtrip_restores_project_and_ledgers(tmp_path, monkeypatch):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'formal-roundtrip.db'}")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)

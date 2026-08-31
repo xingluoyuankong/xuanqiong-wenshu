@@ -58,6 +58,17 @@ jobs:
         shell: pwsh
         run: ./verify.ps1 quick
 
+      - name: Run full backend regression gate
+        shell: pwsh
+        run: backend/.venv/Scripts/python.exe -m pytest -q
+
+      - name: Run frontend type, test and production build gates
+        shell: pwsh
+        run: |
+          npm --prefix frontend run type-check
+          npm --prefix frontend run test:run
+          npm --prefix frontend run build-only
+
       - name: Start formal stack
         shell: pwsh
         run: ./start.ps1

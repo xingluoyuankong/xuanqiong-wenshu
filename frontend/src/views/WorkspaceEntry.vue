@@ -23,6 +23,9 @@
           <XqButton variant="secondary" size="lg" @click="go('/inspiration')">{{
             pick('开启灵感模式', 'Start inspiration mode')
           }}</XqButton>
+          <XqButton data-testid="entry-agent-action" variant="secondary" size="lg" @click="go('/agent')">{{
+            pick('打开创作 Agent', 'Open writing Agent')
+          }}</XqButton>
           <XqButton variant="ghost" size="lg" @click="go('/workspace')">{{
             pick('进入项目工作台', 'Open the project workspace')
           }}</XqButton>

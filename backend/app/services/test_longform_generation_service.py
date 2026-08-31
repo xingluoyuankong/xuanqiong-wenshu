@@ -75,6 +75,15 @@ def test_checkpoint_serialization_resumes_in_order_and_tracks_budget():
     assert restored.completed_segments[0]["fingerprint"]
 
 
+def test_checkpoint_restore_rejects_non_numeric_next_segment_index_as_contract_error():
+    plan = build_longform_generation_plan(
+        project_id="p-checkpoint-type", chapter_number=1, target_word_count=1000, min_word_count=1, segment_word_limit=500
+    )
+    payload = start_longform_checkpoint(plan).as_dict()
+    payload["next_segment_index"] = "not-an-integer"
+    with pytest.raises(LongformGenerationContractError, match="下一段编号非法"):
+        type(start_longform_checkpoint(plan)).from_dict(payload, plan)
+
 def test_checkpoint_restore_rejects_inconsistent_completed_segments():
     plan = build_longform_generation_plan(
         project_id="p-checkpoint", chapter_number=1, target_word_count=1000, min_word_count=1, segment_word_limit=500
@@ -92,6 +101,22 @@ def test_checkpoint_restore_rejects_inconsistent_completed_segments():
     tampered["used_words"] += 1
     with pytest.raises(LongformGenerationContractError, match="累计用量"):
         type(checkpoint).from_dict(tampered, plan)
+
+def test_checkpoint_restore_rejects_invalid_numeric_types_as_contract_error():
+    plan = build_longform_generation_plan(project_id="p-checkpoint-types", chapter_number=1, target_word_count=1000, min_word_count=1, segment_word_limit=500)
+    payload = start_longform_checkpoint(plan).as_dict()
+    payload["next_segment_index"] = "not-an-integer"
+    with pytest.raises(LongformGenerationContractError):
+        type(start_longform_checkpoint(plan)).from_dict(payload, plan)
+    payload = start_longform_checkpoint(plan).as_dict()
+    payload["used_words"] = {"unexpected": "object"}
+    with pytest.raises(LongformGenerationContractError):
+        type(start_longform_checkpoint(plan)).from_dict(payload, plan)
+    payload = start_longform_checkpoint(plan).as_dict()
+    payload["next_segment_index"] = 1
+    payload["completed_segments"] = [{"index": "bad", "word_count": 0, "token_usage": 0}]
+    with pytest.raises(LongformGenerationContractError):
+        type(start_longform_checkpoint(plan)).from_dict(payload, plan)
 
 
 def test_segment_gate_rejects_short_duplicate_and_missing_anchor():
@@ -136,7 +161,7 @@ def test_chapter_gate_rejects_repetition_and_accepts_minimum_content():
     assert not passed.blockers
     assert passed.passed
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_segment_executor_persists_checkpoint_and_resumes_after_cancel():
     plan = build_longform_generation_plan(
         project_id="p-executor", chapter_number=4, target_word_count=1000, min_word_count=700, segment_word_limit=500
@@ -212,7 +237,7 @@ def _measure_chinese_words(text: str) -> int:
     return len([ch for ch in text if "\u4e00" <= ch <= "\u9fff"])
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_twenty_thousand_word_chapter_generates_by_segments_and_resumes_after_restart():
     """单章 2 万字必须靠分段产出，并能在中断后从断点续跑到达标。
 
@@ -285,7 +310,7 @@ async def test_twenty_thousand_word_chapter_generates_by_segments_and_resumes_af
 
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_longform_checkpoint_persistence_failure_stops_pipeline(monkeypatch):
     """checkpoint 落库失败必须返回可识别错误，不能伪造完成或继续下一段。"""
     from unittest.mock import AsyncMock
@@ -365,7 +390,7 @@ async def test_longform_checkpoint_persistence_failure_stops_pipeline(monkeypatc
 
     assert execution_error.value.detail["code"] == "LONGFORM_CHECKPOINT_PERSISTENCE_FAILED"
     assert generated_segments == [0], "checkpoint 失败后不得生成后续分段"
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_cancel_before_first_segment_runs_no_generation_and_resume_completes():
     """每段开启前的持久化取消检查：取消状态从首段就成立时不得发起任何段调用。"""
     plan = build_longform_generation_plan(

@@ -63,7 +63,7 @@ async def _make_busy_chapter(
     return chapter
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_live_lease_chapter_is_preserved_not_reset(task_session):
     """回归：旧启动逻辑会把仍在运行的章节无条件重置，必须不再发生。"""
     await _make_project(task_session)
@@ -88,7 +88,7 @@ async def test_live_lease_chapter_is_preserved_not_reset(task_session):
     assert chapter.status == ChapterGenerationStatus.GENERATING.value
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_heartbeat_timeout_marks_task_stale_and_releases_chapter(task_session):
     await _make_project(task_session)
     runtime = TaskRuntimeService(task_session)
@@ -116,7 +116,7 @@ async def test_heartbeat_timeout_marks_task_stale_and_releases_chapter(task_sess
     assert chapter.status == ChapterGenerationStatus.FAILED.value
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_released_chapter_keeps_run_id_and_retry_action(task_session):
     """恢复信息必须保留：run_id、事件历史与可执行动作不能被抹掉。"""
     await _make_project(task_session)
@@ -144,7 +144,7 @@ async def test_released_chapter_keeps_run_id_and_retry_action(task_session):
     assert runtime_state["events"][-1]["stage"] == "interrupted"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_busy_chapter_without_task_record_is_released(task_session):
     await _make_project(task_session)
     chapter = await _make_busy_chapter(
@@ -158,7 +158,7 @@ async def test_busy_chapter_without_task_record_is_released(task_session):
     assert chapter.status == ChapterGenerationStatus.FAILED.value
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_reconcile_does_not_touch_other_projects_tasks(task_session):
     """多小说并发：巡检不得把另一个项目的活跃任务连带处理。"""
     await _make_project(task_session, project_id="proj-a", user_id=51)
@@ -187,7 +187,7 @@ async def test_reconcile_does_not_touch_other_projects_tasks(task_session):
     assert orphan.id in report.released_chapter_ids
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_reconcile_is_idempotent(task_session):
     await _make_project(task_session)
     await _make_busy_chapter(task_session, project_id="proj-recon", chapter_number=3, run_id=None)
@@ -200,7 +200,7 @@ async def test_reconcile_is_idempotent(task_session):
     assert second.released_chapter_ids == []
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_stale_task_can_be_recovered_after_reconcile(task_session):
     """巡检标记 stale 后，必须能被新 worker 通过租约重新领取。"""
     await _make_project(task_session)

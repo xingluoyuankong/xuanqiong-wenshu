@@ -1,0 +1,222 @@
+import { computed, ref } from 'vue'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+
+const {
+  getRunProviderProvenanceMock,
+  getRunContextSnapshotMock,
+  getRunPlanRevisionMock,
+  listRunConversationSummariesMock,
+  getArtifactQualityMock,
+  getArtifactLineageMock,
+  listEventsMock,
+  listRunActivityMock,
+  sessionStreamUrlMock,
+} = vi.hoisted(() => ({
+  getRunProviderProvenanceMock: vi.fn(),
+  getRunContextSnapshotMock: vi.fn(),
+  getRunPlanRevisionMock: vi.fn(),
+  listRunConversationSummariesMock: vi.fn(),
+  getArtifactQualityMock: vi.fn(),
+  getArtifactLineageMock: vi.fn(),
+  listEventsMock: vi.fn(),
+  listRunActivityMock: vi.fn(),
+  sessionStreamUrlMock: vi.fn(),
+}))
+
+vi.mock('@/api/agent', () => ({
+  AgentAPI: {
+    getRunProviderProvenance: getRunProviderProvenanceMock,
+    getRunContextSnapshot: getRunContextSnapshotMock,
+    getRunPlanRevision: getRunPlanRevisionMock,
+    listRunConversationSummaries: listRunConversationSummariesMock,
+    getArtifactQuality: getArtifactQualityMock,
+    getArtifactLineage: getArtifactLineageMock,
+    listEvents: listEventsMock,
+    listRunActivity: listRunActivityMock,
+    sessionStreamUrl: sessionStreamUrlMock,
+  },
+}))
+
+import { useAgentWorkspaceRuntime } from './useAgentWorkspaceRuntime'
+import { useAgentRunProjection } from '@/features/agent/stores/agentRunProjection'
+
+const run = {
+  id: 'runtime-run', correlation_id: 'corr', session_id: 'session', user_id: 1,
+  project_id: 'project', status: 'running', current_phase: 'planning', current_step: 0,
+  progress: 10, created_at: '2026-08-30T00:00:00Z',
+}
+const artifact = {
+  id: 'artifact-runtime', run_id: run.id, correlation_id: 'corr', user_id: 1,
+  project_id: 'project', kind: 'chapter_candidate', uri: 'agent-artifact://runtime',
+  sha256: 'a'.repeat(64), metadata_json: { status: 'candidate' }, created_at: run.created_at,
+}
+
+describe('useAgentWorkspaceRuntime', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    getRunProviderProvenanceMock.mockResolvedValue({
+      planner_provider_called: true, planner_provider_fallback_reason: null,
+      response_provider_called: false, response_provider_fallback_reason: 'TimeoutError',
+      candidate_writer_provider_called: null, candidate_writer_provider_fallback_reason: null,
+      candidate_writer_model_ref: null,
+    })
+    getRunContextSnapshotMock.mockResolvedValue(null)
+    getRunPlanRevisionMock.mockResolvedValue(null)
+    listRunConversationSummariesMock.mockResolvedValue([])
+    getArtifactQualityMock.mockResolvedValue({ artifact_id: artifact.id, quality_result: null, findings: [], gate: { decision: 'passed', blocker_count: 0 } })
+    getArtifactLineageMock.mockResolvedValue({ artifact_id: artifact.id, upstream_edges: [], downstream_edges: [] })
+    listEventsMock.mockResolvedValue([])
+    listRunActivityMock.mockResolvedValue([])
+    sessionStreamUrlMock.mockImplementation((sessionId: string, runId: string, afterSequence: number) => `/stream/${sessionId}/${runId}/${afterSequence}`)
+  })
+
+  const createRuntime = () => {
+    const projection = useAgentRunProjection()
+    projection.upsertRun(run, { select: true })
+    const selectedProjectId = ref('project')
+    const session = ref<{ id: string } | null>(null)
+    const streaming = ref(false)
+    const stream = { close: vi.fn(), start: vi.fn().mockResolvedValue(undefined) }
+    const onTerminalRefresh = vi.fn()
+    const tools = ref([])
+    const runtime = useAgentWorkspaceRuntime({
+      runProjection: projection,
+      activeRun: projection.activeRun,
+      plan: computed(() => projection.activePlan.value),
+      artifacts: computed(() => projection.activeArtifacts.value),
+      approvals: computed(() => projection.activeApprovals.value),
+      selectedProjectId,
+      session: session as never,
+      selectedRunId: projection.selectedRunId,
+      streaming,
+      stream: stream as never,
+      tools,
+      addActivity: vi.fn(),
+      onTerminalRefresh,
+    })
+    return { runtime, session, streaming, stream, onTerminalRefresh }
+  }
+
+  it('loads stage-separated provenance into the selected Run without event-stream inference', async () => {
+    const { runtime } = createRuntime()
+    await runtime.loadRunFacts(run.id)
+
+    expect(getRunProviderProvenanceMock).toHaveBeenCalledWith(run.id)
+    expect(runtime.providerProvenanceByRunId.value[run.id]).toMatchObject({
+      planner_provider_called: true,
+      response_provider_called: false,
+      response_provider_fallback_reason: 'TimeoutError',
+    })
+  })
+
+  it('keeps an Artifact fail-closed while authority facts are loading or unavailable', async () => {
+    const { runtime } = createRuntime()
+    const promise = runtime.loadArtifactFacts(artifact)
+    expect(runtime.artifactQualityFactsLoading.value[artifact.id]).toBe(true)
+    await promise
+    expect(runtime.artifactQualityFactsLoading.value[artifact.id]).toBe(false)
+    expect(runtime.artifactQualityFacts.value[artifact.id].gate?.decision).toBe('passed')
+
+    getArtifactQualityMock.mockRejectedValueOnce(new Error('quality transport failed'))
+    await expect(runtime.loadArtifactFacts(artifact)).rejects.toThrow('quality transport failed')
+    expect(runtime.artifactQualityFactsErrors.value[artifact.id]).toBe('quality transport failed')
+  })
+
+  it('repairs an observed sequence gap from durable after_sequence activity without changing the selected Run', async () => {
+    const { runtime, session } = createRuntime()
+    session.value = { id: 'session' }
+    listRunActivityMock.mockResolvedValueOnce([
+      { id: 'event-2', run_id: run.id, sequence: 2, event_type: 'progress_update', summary: '补洞', data: { progress: 20 }, created_at: run.created_at },
+    ])
+
+    runtime.applyEvent({ id: 'event-1', run_id: run.id, sequence: 1, event_type: 'progress_update', summary: 'first', data: { progress: 10 }, created_at: run.created_at })
+    runtime.applyEvent({ id: 'event-3', run_id: run.id, sequence: 3, event_type: 'progress_update', summary: 'third', data: { progress: 30 }, created_at: run.created_at })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(listRunActivityMock).toHaveBeenCalledWith(run.id, 1, 500)
+    expect(runtime.gapRepairStateByRunId.value[run.id]).toBe('repaired')
+  })
+
+  it('pages durable activity until a long sequence gap is repaired', async () => {
+    const { runtime, session } = createRuntime()
+    session.value = { id: 'session' }
+    const pageOne = Array.from({ length: 500 }, (_, index) => ({
+      id: `event-${index + 2}`,
+      run_id: run.id,
+      sequence: index + 2,
+      event_type: 'progress_update',
+      summary: 'repair page one',
+      data: { progress: 20 },
+      created_at: run.created_at,
+    }))
+    const pageTwo = Array.from({ length: 501 }, (_, index) => ({
+      id: `event-${index + 502}`,
+      run_id: run.id,
+      sequence: index + 502,
+      event_type: 'progress_update',
+      summary: 'repair page two',
+      data: { progress: 40 },
+      created_at: run.created_at,
+    }))
+    listRunActivityMock
+      .mockResolvedValueOnce(pageOne)
+      .mockResolvedValueOnce(pageTwo)
+
+    runtime.applyEvent({ id: 'event-1', run_id: run.id, sequence: 1, event_type: 'progress_update', summary: 'first', data: { progress: 10 }, created_at: run.created_at })
+    runtime.applyEvent({ id: 'event-1003', run_id: run.id, sequence: 1003, event_type: 'progress_update', summary: 'last', data: { progress: 90 }, created_at: run.created_at })
+
+    await vi.waitFor(() => expect(runtime.gapRepairStateByRunId.value[run.id]).toBe('repaired'))
+    expect(listRunActivityMock).toHaveBeenNthCalledWith(1, run.id, 1, 500)
+    expect(listRunActivityMock).toHaveBeenNthCalledWith(2, run.id, 501, 500)
+  })
+
+  it('fails closed when a gap repair page makes no contiguous cursor progress', async () => {
+    const { runtime, session } = createRuntime()
+    session.value = { id: 'session' }
+    listRunActivityMock.mockResolvedValueOnce([
+      { id: 'event-3-replayed', run_id: run.id, sequence: 3, event_type: 'progress_update', summary: 'duplicate', data: { progress: 30 }, created_at: run.created_at },
+    ])
+
+    runtime.applyEvent({ id: 'event-1', run_id: run.id, sequence: 1, event_type: 'progress_update', summary: 'first', data: { progress: 10 }, created_at: run.created_at })
+    runtime.applyEvent({ id: 'event-3', run_id: run.id, sequence: 3, event_type: 'progress_update', summary: 'third', data: { progress: 30 }, created_at: run.created_at })
+
+    await vi.waitFor(() => expect(runtime.gapRepairStateByRunId.value[run.id]).toBe('failed'))
+    expect(listRunActivityMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('repairs a prefix gap by replaying from after_sequence zero', async () => {
+    const { runtime, session } = createRuntime()
+    session.value = { id: 'session' }
+    listRunActivityMock.mockResolvedValueOnce([
+      { id: 'event-1', run_id: run.id, sequence: 1, event_type: 'progress_update', summary: 'first', data: { progress: 10 }, created_at: run.created_at },
+      { id: 'event-2', run_id: run.id, sequence: 2, event_type: 'progress_update', summary: 'second', data: { progress: 20 }, created_at: run.created_at },
+    ])
+
+    runtime.applyEvent({ id: 'event-3', run_id: run.id, sequence: 3, event_type: 'progress_update', summary: 'third', data: { progress: 30 }, created_at: run.created_at })
+
+    await vi.waitFor(() => expect(runtime.gapRepairStateByRunId.value[run.id]).toBe('repaired'))
+    expect(listRunActivityMock).toHaveBeenCalledWith(run.id, 0, 500)
+  })
+
+  it('fences one Run stream lifecycle and refreshes the session only after the selected Run reaches terminal state', async () => {
+    const { runtime, session, streaming, stream, onTerminalRefresh } = createRuntime()
+    session.value = { id: 'session' }
+
+    await runtime.loadEventsAndStream(session.value as never, run)
+
+    expect(stream.start).toHaveBeenCalledTimes(1)
+    const options = stream.start.mock.calls[0][0]
+    expect(options.streamUrl(7)).toBe('/stream/session/runtime-run/7')
+    options.onConnectionState('live')
+    expect(streaming.value).toBe(true)
+    options.onTerminal('run_completed')
+    expect(streaming.value).toBe(false)
+    expect(onTerminalRefresh).toHaveBeenCalledTimes(1)
+    runtime.closeRunLifecycle()
+    expect(stream.close).toHaveBeenCalledTimes(1)
+  })
+
+})

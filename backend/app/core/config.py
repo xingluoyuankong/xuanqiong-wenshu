@@ -2,9 +2,9 @@ from datetime import datetime
 from functools import cached_property, lru_cache
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import AliasChoices, AnyUrl, Field, HttpUrl, field_validator
+from pydantic import AliasChoices, AnyUrl, Field, HttpUrl, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL, make_url
 
@@ -100,6 +100,61 @@ class Settings(BaseSettings):
         ge=15,
         description="僵尸任务巡检间隔秒数",
     )
+    agent_inline_execution: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("AGENT_INLINE_EXECUTION"),
+        description="是否由 API 进程内启动 agent_execution Job；关闭后由独立 Agent Worker 领取完整执行链",
+    )
+    agent_inline_visible_response: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("AGENT_INLINE_VISIBLE_RESPONSE"),
+        description="是否由当前执行进程内 runner 直接执行 visible response；关闭后由独立 Agent Worker 领取 Job",
+    )
+    agent_visible_response_max_tokens: int = Field(
+        default=1200, ge=64, le=1200,
+        validation_alias=AliasChoices("AGENT_VISIBLE_RESPONSE_MAX_TOKENS"),
+        description="Agent 可见回复的最大 token 数",
+    )
+    agent_run_lease_seconds: int = Field(
+        default=120, ge=1, le=3600,
+        validation_alias=AliasChoices("AGENT_RUN_LEASE_SECONDS"),
+        description="Agent Run 租约秒数",
+    )
+    agent_worker_id: Optional[str] = Field(
+        default=None, max_length=128,
+        validation_alias=AliasChoices("AGENT_WORKER_ID"),
+        description="独立 Agent Worker 标识；为空时使用主机名",
+    )
+    agent_worker_lease_seconds: int = Field(
+        default=120, ge=1, le=3600,
+        validation_alias=AliasChoices("AGENT_WORKER_LEASE_SECONDS"),
+        description="Agent Job Worker 租约秒数",
+    )
+    agent_worker_poll_interval: float = Field(
+        default=0.25, gt=0, le=60,
+        validation_alias=AliasChoices("AGENT_WORKER_POLL_INTERVAL"),
+        description="Agent Worker 轮询间隔秒数",
+    )
+    agent_tool_providers_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("AGENT_TOOL_PROVIDERS_ENABLED"),
+        description="是否启用部署配置选择的受审核 Agent Tool Provider；内置能力不受此开关影响",
+    )
+    agent_tool_providers: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("AGENT_TOOL_PROVIDERS"),
+        description="JSON 数组：要启用的受审核 Agent Tool Provider ID，不接受模块路径",
+    )
+    agent_tool_provider_max_count: int = Field(
+        default=16, ge=0, le=64,
+        validation_alias=AliasChoices("AGENT_TOOL_PROVIDER_MAX_COUNT"),
+        description="部署配置可启用的 Agent Tool Provider 最大数量",
+    )
+    agent_tool_provider_startup_policy: Literal["fail_closed", "skip_invalid"] = Field(
+        default="fail_closed",
+        validation_alias=AliasChoices("AGENT_TOOL_PROVIDER_STARTUP_POLICY"),
+        description="受审核 Provider 加载失败时的启动策略；生产应使用 fail_closed",
+    )
     embedding_provider: str = Field(default="openai", description="嵌入模型提供方，支持 openai / ollama")
     embedding_base_url: Optional[AnyUrl] = Field(default=None, description="嵌入模型 Base URL")
     embedding_api_key: Optional[str] = Field(default=None, description="嵌入模型 API Key")
@@ -137,6 +192,7 @@ class Settings(BaseSettings):
         env_file=ENV_FILES,
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     @field_validator("database_url", mode="before")
@@ -152,6 +208,33 @@ class Settings(BaseSettings):
             raise ValueError("DB_PROVIDER 仅支持 mysql 或 sqlite")
         return candidate
 
+    @field_validator("agent_visible_response_max_tokens", mode="before")
+    @classmethod
+    def _bound_agent_visible_response_max_tokens(cls, value: object) -> int:
+        try:
+            candidate = int(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            candidate = 1200
+        return min(1200, max(64, candidate))
+
+    @field_validator("agent_run_lease_seconds", "agent_worker_lease_seconds", mode="before")
+    @classmethod
+    def _bound_agent_lease_seconds(cls, value: object) -> int:
+        try:
+            candidate = int(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            candidate = 120
+        return min(3600, max(1, candidate))
+
+    @field_validator("agent_worker_poll_interval", mode="before")
+    @classmethod
+    def _bound_agent_worker_poll_interval(cls, value: object) -> float:
+        try:
+            candidate = float(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            candidate = 0.25
+        return min(60.0, max(0.01, candidate))
+
     @field_validator("embedding_provider", mode="before")
     @classmethod
     def _normalize_embedding_provider(cls, value: Optional[str]) -> str:
@@ -159,6 +242,12 @@ class Settings(BaseSettings):
         if candidate not in {"openai", "ollama"}:
             raise ValueError("EMBEDDING_PROVIDER 仅支持 openai 或 ollama")
         return candidate
+
+    @model_validator(mode="after")
+    def _validate_agent_provider_startup_policy(self) -> "Settings":
+        if self.is_production and self.agent_tool_provider_startup_policy != "fail_closed":
+            raise ValueError("production Agent Tool Provider startup policy must be fail_closed")
+        return self
 
     @field_validator("logging_level", "console_logging_level", mode="before")
     @classmethod
@@ -193,7 +282,7 @@ class Settings(BaseSettings):
 
     @property
     def is_production(self) -> bool:
-        return self.environment.strip().lower() == "production"
+        return self.environment.strip().lower() in {"production", "prod", "staging"}
 
     @property
     def project_root(self) -> Path:

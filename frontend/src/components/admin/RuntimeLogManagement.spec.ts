@@ -119,6 +119,32 @@ describe('RuntimeLogManagement', () => {
     listRuntimeLogsMock.mockResolvedValue(runtimeProject())
   })
 
+  it('保留摘要中的 0 字数值，不显示为未记录', async () => {
+    const project = runtimeProject()
+    const chapter = project[0].chapters[0]
+    chapter.word_count = 0
+    chapter.summary_snapshot.target_word_count = 0
+    chapter.summary_snapshot.actual_word_count = 0
+    chapter.runtime_snapshot.longform_context.cast_plan.planned_character_count = 0
+    listRuntimeLogsMock.mockResolvedValueOnce(project)
+
+    const wrapper = mount(RuntimeLogManagement, {
+      global: { stubs: naiveStubs },
+    })
+
+    await flushPromises()
+
+    const summaryRows = wrapper.findAll('.summary-grid dt').map((label, index) => ({
+      label: label.text(),
+      value: wrapper.findAll('.summary-grid dd')[index]?.text(),
+    }))
+    expect(summaryRows.find(row => row.label === '目标字数')?.value).toBe('0')
+    expect(summaryRows.find(row => row.label === '实际字数')?.value).toBe('0')
+    expect(summaryRows.find(row => row.label === '角色上下文')?.value).toContain('0 人计划')
+
+    wrapper.unmount()
+  })
+
   it('将详细日志展示为生成状态而不是程序流水', async () => {
     const wrapper = mount(RuntimeLogManagement, {
       global: {

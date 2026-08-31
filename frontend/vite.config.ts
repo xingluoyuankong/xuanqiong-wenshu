@@ -8,6 +8,8 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 import Components from 'unplugin-vue-components/vite'
 import { NaiveUiResolver } from 'unplugin-vue-components/resolvers'
 
+import { componentDtsTarget } from './src/build/componentDtsTarget'
+
 const getEnv = (...names: string[]) => {
   for (const name of names) {
     const value = process.env[name]
@@ -39,6 +41,9 @@ export default defineConfig(({ command }) => ({
     environment: 'jsdom',
     globals: true,
     css: true,
+    // Playwright 用例由 `npm run e2e` 独立执行，禁止 Vitest 将其按 jsdom
+    // 模块加载，否则会把 test.describe 当成 Vitest suite 并造成假失败。
+    include: ['src/**/*.{test,spec}.{js,ts,jsx,tsx}'],
     // 大型异步视图会同时触发 Vite/Naive UI 转换；Windows 上两个 worker 会争抢
     // 文件句柄与转换缓存，造成与业务无关的 20 秒假超时。保持单 worker 串行，
     // 让每个组件测试使用稳定且独立的转换生命周期，而不是放宽测试超时掩盖问题。
@@ -52,8 +57,9 @@ export default defineConfig(({ command }) => ({
     // 自动导入 Naive UI 组件（按需加载，大幅减少打包体积）
     // @ts-ignore - NaiveUiResolver 在新版本中类型定义可能有变化
     Components({
-      // 将自动组件声明写入 src，避免 Windows 根目录文件句柄在生产构建中失败。
-      dts: 'src/components.d.ts',
+      // 开发服务器更新已跟踪的声明快照；生产构建只读取，不在构建中抢占
+      // Windows 文件句柄，避免偶发 UNKNOWN/open 失败。
+      dts: componentDtsTarget(command),
       resolvers: [
         NaiveUiResolver()
       ],

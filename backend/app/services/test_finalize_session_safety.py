@@ -34,7 +34,7 @@ def test_llm_service_uses_locked_and_unlocked_config_resolution():
     assert isinstance(service._session_lock, asyncio.Lock)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_llm_config_resolution_is_serialized_per_service():
     service = LLMService(session=object())
     events = []

@@ -23,7 +23,7 @@ def test_causal_chain_extraction_schema_is_strict_for_structured_outputs():
     assert item_schema["additionalProperties"] is False
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_knowledge_graph_sync_backfills_causal_chain_edges(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'knowledge-graph-causal.db'}")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)

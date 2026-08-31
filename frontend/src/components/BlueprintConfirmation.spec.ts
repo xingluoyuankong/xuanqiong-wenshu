@@ -140,7 +140,12 @@ describe('BlueprintConfirmation', () => {
     await wrapper.findAll('button').find((button) => button.text().includes('确认蓝图并生成大纲'))!.trigger('click')
     await flushPromises()
 
-    await vi.advanceTimersByTimeAsync(900000)
+    // This scenario deliberately leaves the first polling request pending.  Advancing
+    // timers asynchronously makes Vitest await that pending poll promise before it
+    // reaches the independent fifteen-minute notice timer.  Synchronous advancement
+    // verifies the same user-visible timeout contract without turning the test into a
+    // fake-timer deadlock.
+    vi.advanceTimersByTime(900000)
     await flushPromises()
 
     expect(novelStoreMock.cancelBlueprintGeneration).not.toHaveBeenCalled()

@@ -233,6 +233,30 @@ describe('ChapterGenerating', () => {
     expect(metaBlocks[0].text()).toContain('生成模式：stable')
   })
 
+  it('任务详情保留 false 状态而不是静默丢失', async () => {
+    const wrapper = shallowMount(ChapterGenerating, {
+      props: {
+        chapterNumber: 1,
+        generationRuntime: {
+          progress_stage: 'review',
+          progress_message: '质量检查中',
+          word_requirement_met: false,
+          stable_retry_used: false,
+          stagewide_allowed: false,
+        },
+        progressStage: 'review',
+        progressMessage: '质量检查中',
+        allowedActions: ['refresh_status'],
+      },
+    })
+
+    await wrapper.find('.cg-advanced__toggle').trigger('click')
+
+    expect(wrapper.text()).toContain('是否达到字数要求：false')
+    expect(wrapper.text()).toContain('是否切换稳定模式：false')
+    expect(wrapper.text()).toContain('允许整章候选：false')
+  })
+
   it('在日志消息中展示阶段耗时', () => {
     const wrapper = shallowMount(ChapterGenerating, {
       props: {

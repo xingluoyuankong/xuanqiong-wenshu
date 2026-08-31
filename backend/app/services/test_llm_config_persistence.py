@@ -85,7 +85,7 @@ async def test_masked_profile_key_is_retained_when_other_fields_are_saved(task_s
 import pytest
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_health_probe_does_not_mark_models_only_as_usable(monkeypatch):
     service = LLMConfigService(None)
 
@@ -113,7 +113,7 @@ async def test_health_probe_does_not_mark_models_only_as_usable(monkeypatch):
     assert "secret-key" not in (result.detail or "")
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_health_probe_marks_key_usable_only_after_chat_success(monkeypatch):
     service = LLMConfigService(None)
 

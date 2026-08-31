@@ -1,0 +1,787 @@
+{
+  "catalog_id": "agent-catalog-contract-v1",
+  "schema_version": 1,
+  "tool_count": 19,
+  "tools": [
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [
+        {
+          "argument_name": "chapter_number",
+          "required": true,
+          "source": "selected_chapter_number"
+        }
+      ],
+      "description": "生成章节候选，审批后写入 artifact，不直接覆盖正文。",
+      "handler_identity": "app.agent.tool_adapters:execute_chapter_generate_candidate",
+      "idempotency_key": "agent:chapter.generate",
+      "idempotency_policy": "required",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "_approval_id": {
+            "type": "string"
+          },
+          "chapter_mission": {
+            "type": "object"
+          },
+          "chapter_number": {
+            "type": "integer"
+          },
+          "generation_timeout_seconds": {
+            "type": "integer"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "min_word_count": {
+            "type": "integer"
+          },
+          "preset": {
+            "type": "string"
+          },
+          "segment_word_limit": {
+            "type": "integer"
+          },
+          "source_text": {
+            "type": "string"
+          },
+          "source_version_id": {
+            "type": "integer"
+          },
+          "style": {
+            "type": "string"
+          },
+          "target_word_count": {
+            "type": "integer"
+          },
+          "writing_notes": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_approval_id",
+          "chapter_number"
+        ],
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "chapter.generate",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": null,
+      "provider_version": null,
+      "requires_confirmation": true,
+      "risk_level": "write",
+      "source": "legacy",
+      "supports_stream": true,
+      "timeout_seconds": 300
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [
+        {
+          "argument_name": "chapter_number",
+          "required": false,
+          "source": "selected_chapter_number"
+        }
+      ],
+      "description": "读取项目章节与版本概览。",
+      "handler_identity": "app.agent.tool_adapters:execute_chapter_inspect",
+      "idempotency_key": "agent:chapter.inspect",
+      "idempotency_policy": "safe_read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "chapter_number": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "chapter.inspect",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": "structure-read",
+      "provider_version": "1.0.0",
+      "requires_confirmation": false,
+      "risk_level": "read",
+      "source": "builtin",
+      "supports_stream": false,
+      "timeout_seconds": 30
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [
+        {
+          "argument_name": "chapter_number",
+          "required": true,
+          "source": "selected_chapter_number"
+        },
+        {
+          "argument_name": "source_version_id",
+          "required": false,
+          "source": "selected_version_id"
+        }
+      ],
+      "description": "生成章节改写候选，审批后写入 artifact，不直接覆盖正文。",
+      "handler_identity": "app.agent.tool_adapters:execute_chapter_rewrite_candidate",
+      "idempotency_key": "agent:chapter.rewrite",
+      "idempotency_policy": "required",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "_approval_id": {
+            "type": "string"
+          },
+          "chapter_mission": {
+            "type": "object"
+          },
+          "chapter_number": {
+            "type": "integer"
+          },
+          "generation_timeout_seconds": {
+            "type": "integer"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "min_word_count": {
+            "type": "integer"
+          },
+          "preset": {
+            "type": "string"
+          },
+          "segment_word_limit": {
+            "type": "integer"
+          },
+          "source_text": {
+            "type": "string"
+          },
+          "source_version_id": {
+            "type": "integer"
+          },
+          "style": {
+            "type": "string"
+          },
+          "target_word_count": {
+            "type": "integer"
+          },
+          "writing_notes": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_approval_id",
+          "chapter_number"
+        ],
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "chapter.rewrite",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": null,
+      "provider_version": null,
+      "requires_confirmation": true,
+      "risk_level": "write",
+      "source": "legacy",
+      "supports_stream": true,
+      "timeout_seconds": 300
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [
+        {
+          "argument_name": "artifact_id",
+          "required": true,
+          "source": "artifact_id"
+        }
+      ],
+      "description": "接受已通过质量门的章节候选并创建新版本，旧版本保留。",
+      "handler_identity": "app.agent.tool_adapters:execute_chapter_version_accept",
+      "idempotency_key": "agent:chapter.version.accept",
+      "idempotency_policy": "required",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "_approval_id": {
+            "type": "string"
+          },
+          "artifact_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "type": "string"
+          },
+          "note": {
+            "maxLength": 2000,
+            "type": "string"
+          }
+        },
+        "required": [
+          "_approval_id",
+          "artifact_id"
+        ],
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "chapter.version.accept",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": null,
+      "provider_version": null,
+      "requires_confirmation": true,
+      "risk_level": "write",
+      "source": "legacy",
+      "supports_stream": false,
+      "timeout_seconds": 120
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [
+        {
+          "argument_name": "chapter_number",
+          "required": true,
+          "source": "comparison_chapter_number"
+        },
+        {
+          "argument_name": "from_version_id",
+          "required": true,
+          "source": "from_version_id"
+        },
+        {
+          "argument_name": "to_version_id",
+          "required": true,
+          "source": "to_version_id"
+        }
+      ],
+      "description": "比较同一章节两个版本，返回有界差异，不改变正文。",
+      "handler_identity": "app.agent.tool_adapters:execute_chapter_version_diff",
+      "idempotency_key": "agent:chapter.version.diff",
+      "idempotency_policy": "safe_read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "chapter_number": {
+            "type": "integer"
+          },
+          "from_version_id": {
+            "type": "integer"
+          },
+          "max_lines": {
+            "type": "integer"
+          },
+          "to_version_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "chapter_number",
+          "from_version_id",
+          "to_version_id"
+        ],
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "chapter.version.diff",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": "structure-read",
+      "provider_version": "1.0.0",
+      "requires_confirmation": false,
+      "risk_level": "read",
+      "source": "builtin",
+      "supports_stream": false,
+      "timeout_seconds": 30
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [
+        {
+          "argument_name": "chapter_number",
+          "required": false,
+          "source": "selected_chapter_number"
+        }
+      ],
+      "description": "读取章节版本的安全元数据，不返回正文。",
+      "handler_identity": "app.agent.tool_adapters:execute_chapter_version_list",
+      "idempotency_key": "agent:chapter.version.list",
+      "idempotency_policy": "safe_read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "chapter_number": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "chapter.version.list",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": "project-read",
+      "provider_version": "1.0.0",
+      "requires_confirmation": false,
+      "risk_level": "read",
+      "source": "builtin",
+      "supports_stream": false,
+      "timeout_seconds": 30
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [
+        {
+          "argument_name": "entity_refs",
+          "required": true,
+          "source": "selected_entity_refs"
+        }
+      ],
+      "description": "读取用户选中的人物、势力、伏笔、知识节点或研究工件摘要。",
+      "handler_identity": "app.agent.tool_adapters:execute_entity_inspect",
+      "idempotency_key": "agent:entity.inspect",
+      "idempotency_policy": "safe_read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_refs": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "entity_refs"
+        ],
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "entity.inspect",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": "project-read",
+      "provider_version": "1.0.0",
+      "requires_confirmation": false,
+      "risk_level": "read",
+      "source": "builtin",
+      "supports_stream": false,
+      "timeout_seconds": 30
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [],
+      "description": "读取项目伏笔与回收状态。",
+      "handler_identity": "app.agent.tool_adapters:execute_foreshadowing_inspect",
+      "idempotency_key": "agent:foreshadowing.inspect",
+      "idempotency_policy": "safe_read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "foreshadowing.inspect",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": "foreshadowing-read",
+      "provider_version": "1.0.0",
+      "requires_confirmation": false,
+      "risk_level": "read",
+      "source": "builtin",
+      "supports_stream": false,
+      "timeout_seconds": 30
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [],
+      "description": "读取项目知识图谱和关联信息。",
+      "handler_identity": "app.agent.tool_adapters:execute_knowledge_inspect",
+      "idempotency_key": "agent:knowledge.inspect",
+      "idempotency_policy": "safe_read",
+      "input_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "knowledge.inspect",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": "memory-read",
+      "provider_version": "1.0.0",
+      "requires_confirmation": false,
+      "risk_level": "read",
+      "source": "builtin",
+      "supports_stream": false,
+      "timeout_seconds": 30
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [],
+      "description": "读取项目提纲与剧情结构。",
+      "handler_identity": "app.agent.tool_adapters:execute_outline_inspect",
+      "idempotency_key": "agent:outline.inspect",
+      "idempotency_policy": "safe_read",
+      "input_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "outline.inspect",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": "project-read",
+      "provider_version": "1.0.0",
+      "requires_confirmation": false,
+      "risk_level": "read",
+      "source": "builtin",
+      "supports_stream": false,
+      "timeout_seconds": 30
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [],
+      "description": "读取当前小说项目的结构化上下文。",
+      "handler_identity": "app.agent.tool_adapters:execute_project_context",
+      "idempotency_key": "agent:project.context",
+      "idempotency_policy": "safe_read",
+      "input_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "project.context",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": "project-read",
+      "provider_version": "1.0.0",
+      "requires_confirmation": false,
+      "risk_level": "read",
+      "source": "builtin",
+      "supports_stream": false,
+      "timeout_seconds": 30
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [],
+      "description": "列出当前用户可访问的小说项目。",
+      "handler_identity": "app.agent.tool_adapters:execute_project_list",
+      "idempotency_key": "agent:project.list",
+      "idempotency_policy": "safe_read",
+      "input_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "project.list",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": false,
+      "provider_id": "project-read",
+      "provider_version": "1.0.0",
+      "requires_confirmation": false,
+      "risk_level": "read",
+      "source": "builtin",
+      "supports_stream": false,
+      "timeout_seconds": 30
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [
+        {
+          "argument_name": "quality_finding_refs",
+          "required": true,
+          "source": "selected_quality_finding_refs"
+        }
+      ],
+      "description": "读取作者选中的关系化质量发现摘要，不返回证据正文或候选正文。",
+      "handler_identity": "app.agent.tool_adapters:execute_quality_finding_inspect",
+      "idempotency_key": "agent:quality.finding.inspect",
+      "idempotency_policy": "safe_read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "quality_finding_refs": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "quality_finding_refs"
+        ],
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "quality.finding.inspect",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": null,
+      "provider_version": null,
+      "requires_confirmation": false,
+      "risk_level": "read",
+      "source": "legacy",
+      "supports_stream": false,
+      "timeout_seconds": 30
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [],
+      "description": "分析项目质量指标并返回建议。",
+      "handler_identity": "app.agent.tool_adapters:execute_quality_inspect",
+      "idempotency_key": "agent:quality.inspect",
+      "idempotency_policy": "safe_read",
+      "input_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "quality.inspect",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": null,
+      "provider_version": null,
+      "requires_confirmation": false,
+      "risk_level": "suggest",
+      "source": "legacy",
+      "supports_stream": false,
+      "timeout_seconds": 30
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [
+        {
+          "argument_name": "chapter_number",
+          "required": true,
+          "source": "selected_chapter_number"
+        },
+        {
+          "argument_name": "version_id",
+          "required": true,
+          "source": "selected_version_id"
+        }
+      ],
+      "description": "重新运行指定章节版本的结构质量门，不写入正文。",
+      "handler_identity": "app.agent.tool_adapters:execute_quality_retest",
+      "idempotency_key": "agent:quality.retest",
+      "idempotency_policy": "safe_read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "chapter_number": {
+            "type": "integer"
+          },
+          "version_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "chapter_number",
+          "version_id"
+        ],
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "quality.retest",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": null,
+      "provider_version": null,
+      "requires_confirmation": false,
+      "risk_level": "suggest",
+      "source": "legacy",
+      "supports_stream": false,
+      "timeout_seconds": 30
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [
+        {
+          "argument_name": "artifact_id",
+          "required": true,
+          "source": "artifact_id"
+        }
+      ],
+      "description": "读取候选 Artifact 的质量阻断改写建议，不返回候选正文、不执行改写。",
+      "handler_identity": "app.agent.tool_adapters:execute_quality_rewrite_instructions",
+      "idempotency_key": "agent:quality.rewrite_instructions",
+      "idempotency_policy": "safe_read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_id"
+        ],
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "quality.rewrite_instructions",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": null,
+      "provider_version": null,
+      "requires_confirmation": false,
+      "risk_level": "suggest",
+      "source": "legacy",
+      "supports_stream": false,
+      "timeout_seconds": 30
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [
+        {
+          "argument_name": "chapter_number",
+          "required": false,
+          "source": "selected_chapter_number"
+        }
+      ],
+      "description": "读取项目已归档研究摘要与状态，不启动联网研究。",
+      "handler_identity": "app.agent.tool_adapters:execute_research_inspect",
+      "idempotency_key": "agent:research.inspect",
+      "idempotency_policy": "safe_read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "chapter_number": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "scope": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "research.inspect",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": "project-read",
+      "provider_version": "1.0.0",
+      "requires_confirmation": false,
+      "risk_level": "read",
+      "source": "builtin",
+      "supports_stream": false,
+      "timeout_seconds": 30
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [],
+      "description": "读取项目章节、字数和质量门汇总，不读取正文。",
+      "handler_identity": "app.agent.tool_adapters:execute_statistics_project",
+      "idempotency_key": "agent:statistics.project",
+      "idempotency_policy": "safe_read",
+      "input_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "statistics.project",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": "project-read",
+      "provider_version": "1.0.0",
+      "requires_confirmation": false,
+      "risk_level": "read",
+      "source": "builtin",
+      "supports_stream": false,
+      "timeout_seconds": 30
+    },
+    {
+      "audit_event_type": "agent_tool_call",
+      "cancellation_policy": "cooperative",
+      "context_bindings": [],
+      "description": "读取当前项目可用和已应用的文风摘要，不提取或生成文风。",
+      "handler_identity": "app.agent.tool_adapters:execute_style_inspect",
+      "idempotency_key": "agent:style.inspect",
+      "idempotency_policy": "safe_read",
+      "input_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "manifest_version": "1.0",
+      "name": "style.inspect",
+      "output_schema": {
+        "type": "object"
+      },
+      "project_scoped": true,
+      "provider_id": null,
+      "provider_version": null,
+      "requires_confirmation": false,
+      "risk_level": "read",
+      "source": "legacy",
+      "supports_stream": false,
+      "timeout_seconds": 30
+    }
+  ]
+}

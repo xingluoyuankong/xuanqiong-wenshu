@@ -1,4 +1,4 @@
-﻿<!-- AIMETA P=版本详情弹窗_版本信息展示|R=版本对比_历史|NR=不含版本管理|E=component:WDVersionDetailModal|X=ui|A=版本弹窗|D=vue|S=dom|RD=./README.ai -->
+<!-- AIMETA P=版本详情弹窗_版本信息展示|R=版本对比_历史|NR=不含版本管理|E=component:WDVersionDetailModal|X=ui|A=版本弹窗|D=vue|S=dom|RD=./README.ai -->
 <template>
   <div v-if="show" class="xq-dialog-overlay" @click.self="$emit('close')">
     <div class="xq-dialog-shell xq-dialog-shell--wide m3-detail-dialog flex flex-col">
@@ -58,9 +58,9 @@
             <article v-if="consistencySummary" class="m3-review-card">
               <p class="m3-kicker">{{ pick('一致性检查', 'Continuity check') }}</p>
               <ul>
-                <li>{{ pick('状态', 'Status') }}{{ punct.colon }}{{ consistencySummary.is_consistent ? pick('通过', 'Passed') : pick('发现问题', 'Issues found') }}</li>
+                <li>{{ pick('状态', 'Status') }}{{ punct.colon }}{{ formatTriState(consistencySummary.is_consistent, pick('通过', 'Passed'), pick('发现问题', 'Issues found')) }}</li>
                 <li>{{ pick('问题数', 'Issue count') }}{{ punct.colon }}{{ consistencyIssueCount }}</li>
-                <li>{{ pick('自动修复', 'Auto fix') }}{{ punct.colon }}{{ consistencySummary.auto_fix_applied ? pick('已执行', 'Applied') : pick('未执行', 'Not applied') }}</li>
+                <li>{{ pick('自动修复', 'Auto fix') }}{{ punct.colon }}{{ formatTriState(consistencySummary.auto_fix_applied, pick('已执行', 'Applied'), pick('未执行', 'Not applied')) }}</li>
               </ul>
               <p v-if="consistencySummary.summary" class="m3-review-card__desc">{{ consistencySummary.summary }}</p>
             </article>
@@ -78,12 +78,14 @@
               <p class="m3-kicker">{{ pick('质量快照', 'Quality snapshot') }}</p>
               <ul>
                 <li>{{ pick('字数', 'Word count') }}{{ punct.colon }}{{ qualityMetricValue('word_count') }}</li>
+                <li>{{ pick('字数要求', 'Word requirement') }}{{ punct.colon }}{{ formatWordRequirement() }}</li>
                 <li>{{ pick('场景兑现', 'Scene fulfillment') }}{{ punct.colon }}{{ formatPercent(qualityMetrics.scene_fulfillment_rate) }}{{ punct.paren(`${qualityMetricValue('fulfilled_scene_count')}/${qualityMetricValue('scene_count')}`) }}</li>
                 <li>{{ pick('对白改局势', 'Dialogue changes state') }}{{ punct.colon }}{{ formatTriState(qualityMetrics.dialogue_changes_state, pick('通过', 'Passed'), pick('未通过', 'Not passed')) }}</li>
-                <li>{{ pick('章末递压', 'Ending pressure') }}{{ punct.colon }}{{ qualityMetrics.ending_pressure_passed ? pick('通过', 'Passed') : pick('未通过', 'Not passed') }}</li>
-                <li>{{ pick('静态描写风险', 'Static description risk') }}{{ punct.colon }}{{ qualityMetrics.static_description_risk ? pick('偏高', 'High') : pick('可控', 'Under control') }}</li>
+                <li>{{ pick('章末递压', 'Ending pressure') }}{{ punct.colon }}{{ formatTriState(qualityMetrics.ending_pressure_passed, pick('通过', 'Passed'), pick('未通过', 'Not passed')) }}</li>
+                <li>{{ pick('静态描写风险', 'Static description risk') }}{{ punct.colon }}{{ formatTriState(qualityMetrics.static_description_risk, pick('可控', 'Under control'), pick('偏高', 'High')) }}</li>
                 <!-- D-22 相关：事件密度此前完全没进这份快照，用户在版本详情里看不到它。 -->
-                <li>{{ pick('事件密度', 'Event density') }}{{ punct.colon }}{{ formatTriState(qualityMetrics.event_density_passed, pick('达标', 'Passed'), pick('不足', 'Too low')) }}</li>
+                <li>{{ pick('事件密度', 'Event density') }}{{ punct.colon }}{{ formatEventDensity() }}</li>
+                <li>{{ pick('长章密度', 'Long-chapter density') }}{{ punct.colon }}{{ formatTriState(qualityMetrics.long_chapter_density_passed, pick('达标', 'Passed'), pick('不足', 'Too low')) }}</li>
                 <li>{{ pick('局势变化间隔', 'State change interval') }}{{ punct.colon }}{{ formatTriState(qualityMetrics.state_change_interval_passed, pick('达标', 'Passed'), pick('过长', 'Too long')) }}</li>
               </ul>
             </article>
@@ -191,19 +193,28 @@ const runtimeMeta = computed<Record<string, any>>(() => {
   return metadata as Record<string, any>
 })
 const qualityMetrics = computed<Record<string, any> | null>(() => {
-  const direct = runtimeMeta.value.quality_metrics
-  if (direct && typeof direct === 'object') return direct as Record<string, any>
-  const finalMetrics = reviewSummaries.value.final_quality_metrics
-  if (finalMetrics && typeof finalMetrics === 'object') return finalMetrics as Record<string, any>
-  const guardSnapshot = runtimeMeta.value.story_progression_guard?.quality_metric_snapshot
-  if (guardSnapshot && typeof guardSnapshot === 'object') return guardSnapshot as Record<string, any>
-  return null
+  const candidates = [
+    runtimeMeta.value.quality_metrics,
+    reviewSummaries.value.final_quality_metrics,
+    runtimeMeta.value.story_progression_guard?.quality_metric_snapshot,
+  ]
+  const merged: Record<string, any> = {}
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== 'object') continue
+    for (const [key, value] of Object.entries(candidate as Record<string, any>)) {
+      // Explicit null is a real tri-state result; only an absent field may
+      // be filled from a legacy/fallback snapshot.
+      if (!(key in merged)) merged[key] = value
+    }
+  }
+  return Object.keys(merged).length ? merged : null
 })
 const qualityMetricValue = (key: string) => {
   const value = qualityMetrics.value?.[key]
   return value === null || value === undefined || value === '' ? '—' : value
 }
 const formatPercent = (value: unknown) => {
+  if (value == null || value === '') return '—'
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) return '—'
   return `${Math.round(numeric * 100)}%`
@@ -214,6 +225,25 @@ const formatPercent = (value: unknown) => {
 const formatTriState = (value: unknown, passed: string, failed: string) => {
   if (value === true) return passed
   if (value === false) return failed
+  return pick('不适用', 'Not applicable')
+}
+const formatEventDensity = () => {
+  const metrics = qualityMetrics.value
+  if (metrics?.event_density_evaluated === false) {
+    const reason = String(metrics.event_density_skip_reason || '').trim()
+    if (reason === 'sample_too_short') return pick('未评估（样本过短）', 'Not assessed (sample too short)')
+    return pick('未评估', 'Not assessed')
+  }
+  return formatTriState(metrics?.event_density_passed, pick('达标', 'Passed'), pick('不足', 'Too low'))
+}
+const formatWordRequirement = () => {
+  const metrics = qualityMetrics.value
+  if (metrics?.word_requirement_met === false || metrics?.word_count_below_min === true) {
+    return pick('未满足', 'Unmet')
+  }
+  if (metrics?.word_count_far_below_target === true) return pick('显著低于目标', 'Far below target')
+  if (metrics?.word_count_far_above_target === true) return pick('远超目标', 'Far above target')
+  if (metrics?.word_requirement_met === true) return pick('满足', 'Met')
   return pick('不适用', 'Not applicable')
 }
 const selfCritiquePriorityFixes = computed(() => {
@@ -253,15 +283,16 @@ const targetedDimensionsText = computed(() => {
   }
   return dimensions.map((item) => labelMap[String(item)] || String(item)).join(' / ')
 })
+const hasRuntimeWordValue = (value: unknown) => value !== null && value !== undefined && value !== ''
 const runtimeWordSummary = computed(() => {
   const actual = runtimeMeta.value.actual_word_count
   const min = runtimeMeta.value.min_word_count
   const target = runtimeMeta.value.target_word_count
-  if (!actual && !min && !target) return ''
+  if (!hasRuntimeWordValue(actual) && !hasRuntimeWordValue(min) && !hasRuntimeWordValue(target)) return ''
   const parts = []
-  if (actual) parts.push(pick(`实际 ${actual} 字`, `Actual ${actual} words`))
-  if (min) parts.push(pick(`最低 ${min} 字`, `Minimum ${min} words`))
-  if (target) parts.push(pick(`目标 ${target} 字`, `Target ${target} words`))
+  if (hasRuntimeWordValue(actual)) parts.push(pick(`实际 ${actual} 字`, `Actual ${actual} words`))
+  if (hasRuntimeWordValue(min)) parts.push(pick(`最低 ${min} 字`, `Minimum ${min} words`))
+  if (hasRuntimeWordValue(target)) parts.push(pick(`目标 ${target} 字`, `Target ${target} words`))
   return parts.join(' / ')
 })
 const runtimeWordReason = computed(() => {

@@ -419,7 +419,7 @@ async def _build_package(session, target_chapter: int):
     )
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_production_multi_chapter_short_and_long_continuity_chain(tmp_path, monkeypatch):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'multi-chapter-continuity.db'}")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -540,7 +540,7 @@ async def test_production_multi_chapter_short_and_long_continuity_chain(tmp_path
         await engine.dispose()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_longform_package_cross_chapter_freshness_after_sequential_updates(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'longform-freshness.db'}")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)

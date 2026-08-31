@@ -1,0 +1,16 @@
+{
+  "id": "benchmark-scifi-investigation-6000",
+  "target_word_count": 6000,
+  "min_word_count": 5400,
+  "chapter_mission": {
+    "chapter_purpose": "在轨道黎明前追查被伪造的空间站日志",
+    "scene_list": [
+      {
+        "goal": "读取空间站日志",
+        "conflict": "生命维持系统开始优先保障别的舱区",
+        "turn": "日志把调查者标成伪造者",
+        "end_hook": "空间站人工智能撤销了他们的权限"
+      }
+    ]
+  }
+}

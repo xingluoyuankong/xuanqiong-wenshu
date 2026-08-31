@@ -25,7 +25,7 @@ def test_normalize_blueprint_job_payload_defaults_metrics():
     assert payload["metrics"]["retry_events"] == []
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_set_blueprint_job_state_merges_retry_metrics(monkeypatch):
     run_id = "run-metrics-1"
     novels_router._BLUEPRINT_JOBS[run_id] = {

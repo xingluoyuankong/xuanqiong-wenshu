@@ -34,6 +34,46 @@ def test_quality_candidate_count_scales_with_chapter_size(
     ) == expected
 
 
+def test_busy_chapter_stale_guard_uses_persisted_generation_budget():
+    """长篇的忙碌保护不能在固定 30 分钟处误杀仍在预算内的任务。"""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    chapter = types.SimpleNamespace(
+        status="generating",
+        updated_at=now - timedelta(minutes=31),
+        created_at=now - timedelta(minutes=31),
+        real_summary=json.dumps(
+            {
+                "generation_runtime": {
+                    "heartbeat_at": (now - timedelta(minutes=31)).isoformat(),
+                    "timeout_seconds": 14_400,
+                }
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+    assert writer._is_busy_chapter_stale(chapter) is False
+    assert writer._busy_chapter_stale_after_minutes(chapter) == 243
+
+
+def test_busy_chapter_stale_guard_keeps_legacy_fixed_threshold_without_budget():
+    """没有可审计预算的历史任务仍保持原有 30 分钟保护。"""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    chapter = types.SimpleNamespace(
+        status="generating",
+        updated_at=now - timedelta(minutes=31),
+        created_at=now - timedelta(minutes=31),
+        real_summary="",
+    )
+
+    assert writer._is_busy_chapter_stale(chapter) is True
+    assert writer._busy_chapter_stale_after_minutes(chapter) == 30
+
+
 class _DummySession:
     async def refresh(self, _obj):
         return None
@@ -95,11 +135,11 @@ def test_compat_flow_config_invalid_json_keeps_defaults_without_name_error():
     assert config == baseline
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_generate_chapter_route_uses_request_chapter_number_when_claiming(monkeypatch):
     claimed: dict[str, int] = {}
 
-    async def fake_try_claim(session, *, chapter_id, chapter_number):
+    async def fake_try_claim(session, *, chapter_id, chapter_number, **kwargs):
         claimed["chapter_id"] = chapter_id
         claimed["chapter_number"] = chapter_number
         return "run-generate"
@@ -133,11 +173,11 @@ async def test_generate_chapter_route_uses_request_chapter_number_when_claiming(
     assert response["generation_runtime"]["min_word_count"] == 350
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_advanced_generate_route_uses_request_chapter_number_when_claiming(monkeypatch):
     claimed: dict[str, int] = {}
 
-    async def fake_try_claim(session, *, chapter_id, chapter_number):
+    async def fake_try_claim(session, *, chapter_id, chapter_number, **kwargs):
         claimed["chapter_id"] = chapter_id
         claimed["chapter_number"] = chapter_number
         return "run-advanced"
@@ -172,7 +212,7 @@ async def test_advanced_generate_route_uses_request_chapter_number_when_claiming
     assert response["generation_runtime"]["advanced_background_mode"] is True
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_advanced_generate_route_repairs_missing_outline_without_name_error(monkeypatch):
     class _MissingOutlineNovelService(_DummyNovelService):
         async def get_outline(self, project_id, chapter_number):
@@ -180,7 +220,7 @@ async def test_advanced_generate_route_repairs_missing_outline_without_name_erro
 
     captured: dict[str, object] = {}
 
-    async def fake_try_claim(session, *, chapter_id, chapter_number):
+    async def fake_try_claim(session, *, chapter_id, chapter_number, **kwargs):
         captured["chapter_number"] = chapter_number
         return "run-missing-outline"
 
@@ -207,7 +247,7 @@ async def test_advanced_generate_route_repairs_missing_outline_without_name_erro
     assert response["project_id"] == "project-missing-outline"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_advanced_generate_route_repairs_missing_outline_without_name_error(monkeypatch):
     class _MissingOutlineNovelService(_DummyNovelService):
         async def get_outline(self, project_id, chapter_number):
@@ -215,7 +255,7 @@ async def test_advanced_generate_route_repairs_missing_outline_without_name_erro
 
     captured: dict[str, object] = {}
 
-    async def fake_try_claim(session, *, chapter_id, chapter_number):
+    async def fake_try_claim(session, *, chapter_id, chapter_number, **kwargs):
         captured["chapter_number"] = chapter_number
         return "run-missing-outline"
 
@@ -242,7 +282,7 @@ async def test_advanced_generate_route_repairs_missing_outline_without_name_erro
     assert response["project_id"] == "project-missing-outline"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_longform_task_payload_contains_segment_contract_and_large_checkpoint(monkeypatch):
     captured: dict[str, object] = {}
 
@@ -283,7 +323,7 @@ async def test_longform_task_payload_contains_segment_contract_and_large_checkpo
     assert captured["plan_event"]["payload"]["longform_generation"] == runtime
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_persist_generation_execution_spec_is_durable(monkeypatch):
     captured = {}
 
@@ -311,6 +351,7 @@ async def test_persist_generation_execution_spec_is_durable(monkeypatch):
     assert captured["kwargs"]["owner_user_id"] == 7
     assert captured["payload"]["generation_spec"]["writing_notes"] == "保持上一段的压迫感"
     assert captured["payload"]["generation_spec"]["flow_config"]["target_word_count"] == 20000
+    assert captured["payload"]["generation_spec"]["normalized_generation_timeout_seconds"] >= 15 * 60
 
 
 def test_restore_generation_execution_spec_uses_latest_checkpoint():
@@ -336,7 +377,7 @@ def test_restore_generation_execution_spec_uses_latest_checkpoint():
     assert config["longform_runtime"]["checkpoint"]["next_segment_index"] == 2
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_resume_route_reuses_stale_run_and_checkpoint(monkeypatch):
     events = []
     background = BackgroundTasks()
@@ -420,7 +461,7 @@ async def test_resume_route_reuses_stale_run_and_checkpoint(monkeypatch):
     assert len(background.tasks) == 1
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("task_status", "task_type", "task_project_id", "owner_mismatch", "expected_status", "expected_code"),
     [
@@ -876,7 +917,7 @@ def test_outline_cancelling_state_does_not_mirror_as_running():
     assert writer._normalize_outline_job_payload(job)["status"] == "cancelling"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_terminal_task_event_retries_and_surfaces_persistence_failure(monkeypatch):
     class _SessionContext:
         async def __aenter__(self):
@@ -916,7 +957,7 @@ async def test_terminal_task_event_retries_and_surfaces_persistence_failure(monk
     assert calls["append"] == 2
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_non_terminal_task_event_remains_best_effort(monkeypatch):
     class _SessionContext:
         async def __aenter__(self):

@@ -23,6 +23,7 @@ os.environ["SQLITE_DB_PATH"] = str(db_path)
 sys.path.insert(0, str(ROOT))
 
 from app.main import app  # noqa: E402
+from app.utils.smoke_timeout import resolve_smoke_poll_timeout_seconds  # noqa: E402
 from app.api.routers.writer import stream_chapter_progress  # noqa: E402
 from app.db.session import AsyncSessionLocal, engine  # noqa: E402
 from app.models.novel import Chapter, NovelProject  # noqa: E402
@@ -102,9 +103,13 @@ async def main() -> int:
                 print(f"GENERATE_ERROR {_safe_error(generate)}")
                 return 1
 
-            # 后端章节流水线包含上下文、候选正文和质量门；单次 Provider
-            # 调用上限约 200 秒，验收窗口必须覆盖该上限及落库收尾时间。
-            deadline = time.monotonic() + 360
+            # 后端章节流水线的轮询窗口必须复用提交响应中的归一化预算，
+            # 不能用短于后端预算的固定 smoke deadline 误报超时。
+            submitted_payload = generate.json() if generate.content else {}
+            poll_timeout_seconds = resolve_smoke_poll_timeout_seconds(
+                submitted_payload, requested_timeout_seconds=900, fallback_timeout_seconds=900
+            )
+            deadline = time.monotonic() + poll_timeout_seconds
             last_stage = None
             terminal = {"successful", "failed", "waiting_for_confirm", "evaluation_failed", "cancelled"}
             status_payload: dict = {}
@@ -165,7 +170,7 @@ async def main() -> int:
             stream_events = stream_text.count("event:")
             print(
                 f"STREAM status=200 events={stream_events} "
-                f"content_deltas={stream_text.count('event: content_delta')} "
+                f"content_deltas={stream_text.count('event: content') + stream_text.count('event: content_delta')} "
                 f"terminal_completed={stream_text.count('event: task_completed')} "
                 f"terminal_failed={stream_text.count('event: task_failed')} "
                 f"terminal_cancelled={stream_text.count('event: task_cancelled')}"
@@ -180,7 +185,7 @@ async def main() -> int:
             # 只能看到更大的游标和终态，不能把已经消费的正文再送一次。
             content_event_ids = [
                 int(value)
-                for value in re.findall(r"^id: (\d+)\nevent: content_delta$", stream_text, flags=re.MULTILINE)
+                for value in re.findall(r"^id: (\d+)\nevent: (?:content|content_delta)$", stream_text, flags=re.MULTILINE)
             ]
             if not content_event_ids:
                 print("REPLAY_ERROR no content cursor available")
@@ -207,7 +212,7 @@ async def main() -> int:
             replay_ids = [int(value) for value in re.findall(r"^id: (\d+)$", replay_text, flags=re.MULTILINE)]
             print(
                 f"REPLAY after={resume_cursor} events={len(replay_ids)} "
-                f"content_deltas={replay_text.count('event: content_delta')} "
+                f"content_deltas={replay_text.count('event: content') + replay_text.count('event: content_delta')} "
                 f"terminal_completed={replay_text.count('event: task_completed')} "
                 f"terminal_failed={replay_text.count('event: task_failed')} "
                 f"terminal_cancelled={replay_text.count('event: task_cancelled')}"
@@ -257,6 +262,25 @@ async def main() -> int:
                     .order_by(ChapterVersion.id.desc())
                 )
                 metadata = version.metadata if version and isinstance(version.metadata, dict) else {}
+                cleanup_snapshot = metadata.get("deterministic_cleanup")
+                quality_gates_snapshot = metadata.get("quality_gates")
+                quality_metrics_snapshot = metadata.get("quality_metrics")
+                quality_gate_repairs = metadata.get("quality_gate_repairs")
+                print(
+                    f"PERSISTENCE metadata_cleanup={isinstance(cleanup_snapshot, dict)} "
+                    f"metadata_quality_gates={isinstance(quality_gates_snapshot, dict)} "
+                    f"metadata_quality_metrics={isinstance(quality_metrics_snapshot, dict)} "
+                    f"quality_gate_repairs={len(quality_gate_repairs) if isinstance(quality_gate_repairs, list) else 0} "
+                    f"quality_gate_passed={((quality_metrics_snapshot or {}).get('quality_gate_passed'))}"
+                )
+                if not (
+                    isinstance(cleanup_snapshot, dict)
+                    and isinstance(quality_gates_snapshot, dict)
+                    and isinstance(quality_metrics_snapshot, dict)
+                    and isinstance(quality_gate_repairs, list)
+                ):
+                    print("PERSISTENCE_ERROR selected chapter version is missing T-17 metadata snapshots")
+                    return 1
                 metrics = metadata.get("generation_call_metrics") if isinstance(metadata.get("generation_call_metrics"), list) else []
                 draft_calls = [
                     item for item in metrics

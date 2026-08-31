@@ -1,0 +1,16 @@
+{
+  "id": "benchmark-horror-transition-3000",
+  "target_word_count": 3000,
+  "min_word_count": 2700,
+  "chapter_mission": {
+    "chapter_purpose": "从废弃病区转入封闭地下室且持续施压",
+    "scene_list": [
+      {
+        "goal": "抵达地下档案室",
+        "conflict": "电梯停在楼层之间",
+        "turn": "一个声音复述只有主角知道的事实",
+        "end_hook": "紧急门自行打开"
+      }
+    ]
+  }
+}

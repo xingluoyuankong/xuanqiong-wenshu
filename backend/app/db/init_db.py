@@ -206,25 +206,68 @@ async def _ensure_database_exists() -> None:
         await admin_engine.dispose()
 
 
-async def _ensure_default_prompts(session: AsyncSession) -> None:
-    prompts_dir = Path(__file__).resolve().parents[2] / "prompts"
-    if not prompts_dir.is_dir():
-        return
+DEFAULT_PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
+WRITING_V2_PROMPT_NAME = "writing_v2"
+WRITING_V2_PROMPT_SEED_PATH = (
+    Path(__file__).resolve().parent / "seeds" / "prompts" / f"{WRITING_V2_PROMPT_NAME}.md"
+)
 
+
+async def _ensure_default_prompts(session: AsyncSession) -> None:
+    """Insert bundled prompts once, without ever overwriting user edits."""
     result = await session.execute(select(Prompt.name))
     existing_names = set(result.scalars().all())
 
-    for prompt_file in sorted(prompts_dir.glob("*.md")):
-        name = prompt_file.stem
-        if name in existing_names:
-            continue
-        content = prompt_file.read_text(encoding="utf-8")
-        try:
-            savepoint = await session.begin_nested()
-            session.add(Prompt(name=name, content=content))
-            await session.flush()
-            await savepoint.commit()
-            existing_names.add(name)
-        except IntegrityError:
-            await savepoint.rollback()
-            existing_names.add(name)
+    if DEFAULT_PROMPTS_DIR.is_dir():
+        for prompt_file in sorted(DEFAULT_PROMPTS_DIR.glob("*.md")):
+            name = prompt_file.stem
+            # writing_v2 is versioned as a dedicated DB seed below, rather than
+            # being implicitly seeded from the editable root prompt directory.
+            if name == WRITING_V2_PROMPT_NAME or name in existing_names:
+                continue
+            content = prompt_file.read_text(encoding="utf-8")
+            try:
+                savepoint = await session.begin_nested()
+                session.add(Prompt(name=name, content=content))
+                await session.flush()
+                await savepoint.commit()
+                existing_names.add(name)
+            except IntegrityError:
+                await savepoint.rollback()
+                existing_names.add(name)
+
+    await _ensure_writing_v2_prompt_seed(session, existing_names)
+
+
+async def _ensure_writing_v2_prompt_seed(
+    session: AsyncSession, existing_names: set[str] | None = None
+) -> bool:
+    """Insert the immutable writing_v2 seed only when that prompt is absent.
+
+    Existing database content is deliberately authoritative: administrators may
+    customize it through the prompt CRUD UI, and initialization must never
+    replace those edits.  A unique-key conflict is the concurrent equivalent
+    of an existing prompt and is therefore intentionally ignored.
+    """
+    if existing_names is None:
+        result = await session.execute(select(Prompt.name))
+        existing_names = set(result.scalars().all())
+
+    if WRITING_V2_PROMPT_NAME in existing_names:
+        return False
+    if not WRITING_V2_PROMPT_SEED_PATH.is_file():
+        logger.warning("writing_v2 prompt seed is missing: %s", WRITING_V2_PROMPT_SEED_PATH)
+        return False
+
+    content = WRITING_V2_PROMPT_SEED_PATH.read_text(encoding="utf-8")
+    savepoint = await session.begin_nested()
+    try:
+        session.add(Prompt(name=WRITING_V2_PROMPT_NAME, content=content))
+        await session.flush()
+        await savepoint.commit()
+        existing_names.add(WRITING_V2_PROMPT_NAME)
+        return True
+    except IntegrityError:
+        await savepoint.rollback()
+        existing_names.add(WRITING_V2_PROMPT_NAME)
+        return False

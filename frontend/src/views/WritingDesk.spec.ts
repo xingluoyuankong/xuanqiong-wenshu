@@ -1,14 +1,18 @@
 ﻿import { flushPromises, shallowMount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia } from 'pinia'
 
 const {
   pushMock,
+  routeMock,
+  openVersionSelectorMock,
   novelStoreMock,
   optimizerMocks,
   alertMocks,
 } = vi.hoisted(() => ({
   pushMock: vi.fn(),
+  routeMock: { query: {} as Record<string, string> },
+  openVersionSelectorMock: vi.fn(),
   novelStoreMock: {
     currentProject: null as any,
     currentConversationState: {},
@@ -45,7 +49,7 @@ const {
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: pushMock }),
-  useRoute: () => ({ query: {} }),
+  useRoute: () => routeMock,
 }))
 
 vi.mock('@/stores/novel', () => ({
@@ -122,7 +126,7 @@ vi.mock('@/components/writing-desk', () => ({
     emits: ['evaluateChapter', 'evaluateVersion', 'evaluateAllVersions', 'chapterUpdated', 'update:selectedVersionIndex'],
     methods: {
       openPrimaryReader() {},
-      openVersionSelector() {},
+      openVersionSelector: openVersionSelectorMock,
     },
     template: `
       <div
@@ -223,6 +227,8 @@ const buildProject = (status: 'successful' | 'evaluation_failed' | 'evaluating' 
   ],
 })
 
+const mountedWrappers: Array<{ unmount: () => void }> = []
+
 const mountView = async () => {
   const wrapper = shallowMount(WritingDesk, {
     props: { id: 'project-1' },
@@ -234,12 +240,23 @@ const mountView = async () => {
     },
   })
   await flushPromises()
+  mountedWrappers.push(wrapper)
   return wrapper
 }
 
 describe('WritingDesk', () => {
+  afterEach(() => {
+    // Each mounted desk owns polling timers and SSE handles.  Teardown prevents a
+    // previous case from issuing a status request after the next case replaces the
+    // shared mock, preserving the real one-in-flight request assertion.
+    for (const wrapper of mountedWrappers.splice(0)) {
+      wrapper.unmount()
+    }
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
+    routeMock.query = {}
     chapterWorkflowMocks.getChapterGenerationStatus.mockImplementation(async (_projectId: string, chapterNumber: number) => {
       const chapter = novelStoreMock.currentProject?.chapters?.find((item: any) => item.chapter_number === chapterNumber)
       if (!chapter) {
@@ -838,6 +855,36 @@ describe('WritingDesk', () => {
     expect((wrapper.vm as any).compareVersionIndex).toBe(null)
     expect(wrapper.findComponent({ name: 'WDWorkspace' }).props('selectedVersionIndex')).toBe(0)
   })
+
+  it('消费 Agent 深链并选中指定章节版本，同时打开版本选择器', async () => {
+    novelStoreMock.currentProject = {
+      ...buildProject('successful'),
+      chapters: [{
+        ...buildProject('successful').chapters[0],
+        versions: [
+          { id: 1, content: '候选正文一', style: '标准' },
+          { id: 2, content: '候选正文二', style: '克制' },
+        ],
+      }],
+    }
+    routeMock.query = { chapter: '1', version_id: '2', focus: 'version' }
+    const wrapper = await mountView()
+    const workspace = wrapper.findComponent({ name: 'WDWorkspace' })
+    expect(workspace.props('selectedVersionIndex')).toBe(1)
+    expect(workspace.props('showVersionSelector')).toBe(true)
+  })
+
+  it('深链版本不存在时不伪造版本索引并提示定位失败', async () => {
+    routeMock.query = { chapter: '1', version_id: '999', focus: 'version' }
+    const wrapper = await mountView()
+    const workspace = wrapper.findComponent({ name: 'WDWorkspace' })
+    expect(workspace.props('selectedVersionIndex')).toBe(0)
+    expect(alertMocks.showError).toHaveBeenCalledWith(
+      expect.stringContaining('未找到第 1 章的版本 999'),
+      '版本定位失败',
+    )
+  })
+
 })
 
 

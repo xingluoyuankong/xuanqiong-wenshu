@@ -25,7 +25,7 @@ from app.services.novel_service import (
 )
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_longform_context_package_classifies_due_hooks_and_cast_slots(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'longform.db'}")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -157,7 +157,7 @@ async def test_longform_context_package_classifies_due_hooks_and_cast_slots(tmp_
         await engine.dispose()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_foreshadowing_auto_resolve_records_resolution(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'foreshadowing.db'}")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -210,7 +210,7 @@ async def test_foreshadowing_auto_resolve_records_resolution(tmp_path):
         await engine.dispose()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_foreshadowing_auto_resolve_accepts_due_paraphrased_payoff(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'foreshadowing_paraphrase.db'}")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -267,7 +267,7 @@ async def test_foreshadowing_auto_resolve_accepts_due_paraphrased_payoff(tmp_pat
         await engine.dispose()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_memory_update_writes_causal_chains_into_longform_context(tmp_path):
     class FakeMemoryLLM:
         def __init__(self):
@@ -466,7 +466,7 @@ def test_legacy_supplemental_characters_are_cleaned_from_saved_blueprints():
     assert all("线索持有者13" not in {item["character_from"], item["character_to"]} for item in relationships)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_knowledge_graph_sync_backfills_blueprint_relationship_edges(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'knowledge-graph.db'}")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)

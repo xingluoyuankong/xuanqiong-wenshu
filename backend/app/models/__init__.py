@@ -161,4 +161,47 @@ __all__ = [
     "FactionRelationshipHistory",
     "TaskRuntime",
     "TaskRuntimeEvent",
+    "AgentSession",
+    "AgentMessage",
+    "AgentRun",
+    "AgentRunStep",
+    "AgentEventRecord",
+    "AgentApproval",
+    "AgentArtifactRef",
+    "AgentRunCommand",
+    "AgentJob",
+    "AgentCapabilityExecution",
+    "AgentRunCapabilitySnapshot",
+    "AgentCapabilityDefinition",
+    "AgentProviderRelease",
+    "AgentCatalogRelease",
+    "QualityResult",
+    "QualityFinding",
+    "QualityGate",
+    "ArtifactLineage",
+    "ContextSnapshot",
+    "ContextSnapshotRef",
+    "PlanRevision",
+    "ConversationSummary",
 ]
+
+# Agent 创作工作台持久化模型
+from .agent import AgentSession, AgentMessage, AgentRun, AgentRunStep, AgentEventRecord, AgentApproval, AgentArtifactRef, AgentRunCommand, AgentJob
+
+# Agent Catalog/Resolver 关系化模型
+from .agent_catalog import (
+    AgentCatalogRelease,
+    AgentProviderRelease,
+    AgentCapabilityDefinition,
+    AgentRunCapabilitySnapshot,
+    AgentCapabilityExecution,
+)
+
+# Agent Quality/Artifact/Lineage 关系化模型
+from .agent_quality import QualityResult, QualityFinding, QualityGate
+from .agent_lineage import ArtifactLineage
+
+# Agent P1-A context / plan / conversation immutable facts
+from .agent_context import ContextSnapshot, ContextSnapshotRef
+from .agent_plan import PlanRevision
+from .agent_conversation import ConversationSummary

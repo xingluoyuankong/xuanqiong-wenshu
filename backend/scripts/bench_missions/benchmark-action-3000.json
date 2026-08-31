@@ -1,0 +1,16 @@
+{
+  "id": "benchmark-action-3000",
+  "target_word_count": 3000,
+  "min_word_count": 2700,
+  "chapter_mission": {
+    "chapter_purpose": "从戒备森严的货运场取回钥匙",
+    "scene_list": [
+      {
+        "goal": "潜入货运场",
+        "conflict": "巡逻路线突然改变",
+        "turn": "找回的钥匙打开了错误的集装箱",
+        "end_hook": "场地主人在逃离前赶到"
+      }
+    ]
+  }
+}

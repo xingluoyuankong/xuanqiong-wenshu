@@ -22,7 +22,7 @@ from app.services.longform_context_service import LongformContextService
 from app.services.pipeline_orchestrator import PipelineOrchestrator
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_e2e_longform_package_includes_memory_foreshadow_clue_and_graph(tmp_path):
     """ch>1 package must carry memory/伏笔/线索/知识图 edges into prompt and digests."""
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'longform-e2e-package.db'}")
@@ -207,7 +207,7 @@ def test_evaluate_missing_package_exposes_degraded_metrics_for_api():
     assert "longform_context_missing" not in gate.metrics
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_pipeline_longform_build_failure_records_status_for_ch_gt_1(monkeypatch):
     """When package build fails on ch>1, runtime_metadata must mark continuity_degraded."""
     orchestrator = PipelineOrchestrator.__new__(PipelineOrchestrator)

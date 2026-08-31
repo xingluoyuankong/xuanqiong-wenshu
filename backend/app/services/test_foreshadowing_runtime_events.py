@@ -22,7 +22,7 @@ class _RetryThenSuccessLLM:
         return '{"foreshadowings_to_develop":[{"name":"潮印裂纹","urgency":"high","reason":"已接近回收窗口","suggested_development":"让裂纹在关键证据上再次响应。"}]}'
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_foreshadowing_reminder_reports_provider_jitter_to_runtime_callback():
     service = ForeshadowingTrackerService(None, _RetryThenSuccessLLM(), _PromptService())
 

@@ -32,6 +32,7 @@ from ...schemas.novel import (
 )
 from ...schemas.user import User as UserSchema, UserInDB
 from ...models import BlueprintGenerationJob, NovelProject
+from ...models.novel import Chapter, ChapterVersion
 from ...services.export_service import ExportService
 from ...services.import_service import ImportCancelledError, ImportService
 from ...services.generation_call_service import GenerationCallPolicy, GenerationJSONDecodeError, call_generation_json, call_generation_text, is_retryable_http_exception
@@ -46,6 +47,7 @@ from ...services.task_runtime import (
     TaskRuntimeService,
 )
 from ...services.prompt_service import PromptService
+from ...services.pipeline_orchestrator import PipelineOrchestrator
 from ...utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
 
 logger = logging.getLogger(__name__)
@@ -3200,6 +3202,362 @@ async def get_novel(
     novel_service = NovelService(session)
     logger.info("用户 %s 查询项目 %s", user_id, project_id)
     return await novel_service.get_project_schema(project_id, user_id)
+
+
+def _backfill_quality_observability_metrics(
+    metrics: Dict[str, Any],
+    *,
+    content: Optional[str],
+    chapter_mission: Optional[dict],
+    chapter_number: int = 1,
+) -> Dict[str, Any]:
+    """只读回填旧质量快照缺失的观测字段。
+
+    不写数据库、不返回正文；新快照已有字段优先，历史版本才从保存的正文重算。
+    """
+    result = dict(metrics or {})
+    # T-14：旧版本已保存 passed 结果但没有 evaluated 标记；只读补齐状态，
+    # 避免趋势页把“已评估”误留成未知。短正文且三个结果都为空时，明确标记为未评估。
+    if result.get("event_density_evaluated") is None:
+        density_fields = ("event_density_passed", "state_change_interval_passed", "long_chapter_density_passed")
+        if any(result.get(key) is not None for key in density_fields):
+            result["event_density_evaluated"] = True
+        elif content is not None and len("".join(str(content).split())) < PipelineOrchestrator.EVENT_DENSITY_MIN_SAMPLE_CHARS:
+            result["event_density_evaluated"] = False
+            result["event_density_skip_reason"] = result.get("event_density_skip_reason") or "sample_too_short"
+    # E-10：历史快照若未保存任务书体检结果，按已保存任务书只读重算；
+    # 没有任务书时保持 None，不能把“未检查”伪装成“任务书正常”。
+    if result.get("mission_quality_codes") is None and isinstance(chapter_mission, dict):
+        target_word_count = int(result.get("target_word_count") or 0)
+        mission_quality = PipelineOrchestrator._evaluate_mission_quality(
+            chapter_mission,
+            target_word_count,
+            chapter_number=max(1, int(chapter_number or 1)),
+        )
+        result["mission_quality_codes"] = list(mission_quality.get("mission_quality_codes") or [])
+    # E-07：历史快照可能保存了任务书承接锚点和正文，却没有保存 continuity
+    # 观测字段。趋势读取只读重算，并且只补缺失/显式 null，不覆盖已有结果。
+    continuity_keys = (
+        "continuity_inherit_missing",
+        "continuity_inherit_late",
+        "continuity_inherit_hit_count",
+        "inherit_hit_count",
+        "continuity_inherit_total_hit_count",
+        "continuity_inherit_match_mode",
+    )
+    if content is not None and isinstance(chapter_mission, dict):
+        continuity_missing = any(result.get(key) is None for key in continuity_keys)
+        if continuity_missing:
+            continuity = PipelineOrchestrator._evaluate_continuity_inherit(
+                str(content), chapter_mission
+            )
+            for key in continuity_keys:
+                if result.get(key) is None and key in continuity:
+                    result[key] = continuity.get(key)
+    # T-08/T-15：旧 guard 将静态段和章末压力保存在嵌套对象；趋势字段是扁平契约，
+    # 只读展开缺失键，不能让历史章节因快照版本不同而显示成“未观测”。
+    nested_quality_sources = {
+        "static_description_runs": ("static_paragraph_count", "max_static_run"),
+        "ending_pressure": (
+            "ending_pressure_passed",
+            "ending_semantic_hit_count",
+            "ending_weak_hit_count",
+            "flat_closure_markers",
+            "ending_core_chars",
+            "ending_core_semantic_hit_count",
+            "ending_core_weak_hit_count",
+            "ending_core_deflating",
+        ),
+    }
+    for source_key, target_keys in nested_quality_sources.items():
+        nested = result.get(source_key)
+        if not isinstance(nested, dict):
+            continue
+        for key in target_keys:
+            if result.get(key) is None and key in nested:
+                result[key] = nested.get(key)
+    nested_sources = {
+        "reversal_quality": ("reversal_signal_count", "reversal_in_late_section"),
+        "dialogue_speaker_distribution": ("speaker_count", "dominant_speaker_ratio"),
+        # 历史 guard 只保存嵌套诊断对象时，也必须还原趋势 API 的扁平字段。
+        "static_description_runs": ("static_paragraph_count", "max_static_run"),
+        "ending_pressure": (
+            "ending_pressure_passed",
+            "ending_semantic_hit_count",
+            "ending_weak_hit_count",
+            "ending_core_chars",
+            "ending_core_semantic_hit_count",
+            "ending_core_weak_hit_count",
+            "ending_core_deflating",
+        ),
+    }
+    for source_key, target_keys in nested_sources.items():
+        nested = result.get(source_key)
+        if isinstance(nested, dict):
+            for key in target_keys:
+                if result.get(key) is None and key in nested and nested.get(key) is not None:
+                    result[key] = nested[key]
+    ending_pressure = result.get("ending_pressure")
+    if isinstance(ending_pressure, dict):
+        if result.get("flat_closure_markers") is None and ending_pressure.get("flat_closure_markers") is not None:
+            result["flat_closure_markers"] = list(ending_pressure.get("flat_closure_markers") or [])
+
+    needed = {
+        "reversal_signal_count", "reversal_in_late_section",
+        "speaker_count", "dominant_speaker_ratio",
+        "hard_scene_cut_count", "summary_scene_cut_count", "scene_transition_warning",
+    }
+    # 旧 JSON 快照可能显式保存 null；null 与缺键都表示“尚未观测”，允许只读回填。
+    missing = {key for key in needed if result.get(key) is None}
+    if not content or not missing:
+        return result
+
+    text = str(content)
+    paragraphs = [item for item in text.splitlines() if item.strip()]
+    word_count = PipelineOrchestrator._count_words(text)
+    focus_names = PipelineOrchestrator._collect_focus_character_names(chapter_mission)
+    if {"speaker_count", "dominant_speaker_ratio"} & missing:
+        speaker = PipelineOrchestrator._evaluate_dialogue_speaker_distribution(text)
+        for key in ("speaker_count", "dominant_speaker_ratio"):
+            if key in missing:
+                result[key] = speaker.get(key)
+    if {"hard_scene_cut_count", "summary_scene_cut_count", "scene_transition_warning"} & missing:
+        transition = PipelineOrchestrator._evaluate_scene_transition_clarity(paragraphs)
+        for key in ("hard_scene_cut_count", "summary_scene_cut_count", "scene_transition_warning"):
+            if key in missing:
+                result[key] = transition.get(key)
+    if {"reversal_signal_count", "reversal_in_late_section"} & missing:
+        reversal = PipelineOrchestrator._evaluate_reversal_quality(text)
+        for key in ("reversal_signal_count", "reversal_in_late_section"):
+            if key in missing:
+                result[key] = reversal.get(key)
+    # E-04 is also a historical compact-snapshot backfill when old rows lack it.
+    balance_keys = {"dialogue_ratio", "action_ratio", "description_ratio", "content_balance_penalty"}
+    balance_missing = {key for key in balance_keys if result.get(key) is None}
+    if balance_missing:
+        balance = PipelineOrchestrator._evaluate_content_balance(
+            paragraphs,
+            word_count=word_count,
+            character_names=focus_names,
+        )
+        for key in balance_missing:
+            result[key] = balance.get(key)
+    return result
+
+
+def _redact_quality_trend_patch_suggestions(raw_suggestions: Any) -> List[Dict[str, str]]:
+    """Expose actionable patch context without returning chapter prose in trend payloads."""
+    if not isinstance(raw_suggestions, list):
+        return []
+    redacted: List[Dict[str, str]] = []
+    for item in raw_suggestions:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("code") or "").strip()
+        suggestion = str(item.get("suggestion") or "").strip()
+        if not code or not suggestion:
+            continue
+        # Runtime continuity hints can include an entire previous-chapter tail.
+        if "（待承接：" in suggestion:
+            suggestion = suggestion.split("（待承接：", 1)[0].rstrip() + "（待承接：上一章遗留）"
+        redacted.append({"code": code[:120], "suggestion": suggestion[:500]})
+    return redacted
+
+
+@router.get("/{project_id}/quality-trend")
+async def get_quality_trend(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Return redacted, cross-chapter quality metrics from existing version metadata."""
+    await get_project_owner_guard(project_id, session, current_user)
+    rows = list((await session.execute(
+        select(Chapter, ChapterVersion)
+        .outerjoin(ChapterVersion, Chapter.selected_version_id == ChapterVersion.id)
+        .where(Chapter.project_id == project_id)
+        .order_by(Chapter.chapter_number.asc())
+    )).all())
+    chapters: List[Dict[str, Any]] = []
+    blocker_counts: Dict[str, int] = {}
+    warning_counts: Dict[str, int] = {}
+    exemption_counts: Dict[str, int] = {}
+    for chapter, version in rows:
+        metadata = dict(getattr(version, "metadata", None) or {}) if version is not None else {}
+        metrics = dict(metadata.get("quality_metrics") or {})
+        # 历史版本的 compact snapshot 没有总分/场景告警，但完整 guard 仍保存了它们。
+        # 快照字段优先；仅回填缺失值，避免新版本的精简字段被旧结构覆盖。
+        stored_story_guard = metadata.get("story_progression_guard")
+        if isinstance(stored_story_guard, dict):
+            for key, value in stored_story_guard.items():
+                if key not in metrics and key not in {"quality_metric_snapshot", "quality_issue_summary"}:
+                    metrics[key] = value
+        gate = dict(metadata.get("quality_gate") or {})
+        if not gate:
+            quality_gates = metadata.get("quality_gates")
+            structural_gate = quality_gates.get("structural_gate") if isinstance(quality_gates, dict) else None
+            if isinstance(structural_gate, dict):
+                gate = dict(structural_gate)
+        # 拒绝章通常没有 selected_version：质量门诊断只存在 runtime 摘要。
+        # 仅在版本 metadata 缺失该 gate 时回退，且绝不把正文/原始错误文本输出到趋势 API。
+        runtime_gate: Dict[str, Any] = {}
+        raw_summary = getattr(chapter, "real_summary", None)
+        if raw_summary:
+            try:
+                runtime = (json.loads(raw_summary) or {}).get("generation_runtime") or {}
+                candidate_gate = runtime.get("quality_gate")
+                if isinstance(candidate_gate, dict):
+                    runtime_gate = candidate_gate
+            except (TypeError, ValueError, json.JSONDecodeError):
+                runtime_gate = {}
+        if not gate:
+            gate = dict(runtime_gate)
+        if not metrics and isinstance(runtime_gate.get("story_progression_guard"), dict):
+            metrics = dict(runtime_gate["story_progression_guard"])
+        chapter_mission = metadata.get("chapter_mission") if isinstance(metadata.get("chapter_mission"), dict) else None
+        metrics = _backfill_quality_observability_metrics(
+            metrics,
+            content=getattr(version, "content", None) if version is not None else None,
+            chapter_mission=chapter_mission,
+            chapter_number=int(chapter.chapter_number or 1),
+        )
+        blockers = gate.get("blockers") if isinstance(gate.get("blockers"), list) else []
+        warnings = gate.get("warnings") if isinstance(gate.get("warnings"), list) else []
+        blocker_codes = [str(item.get("code")) for item in blockers if isinstance(item, dict) and item.get("code")]
+        warning_codes = [str(item.get("code")) for item in warnings if isinstance(item, dict) and item.get("code")]
+        patch_suggestions = _redact_quality_trend_patch_suggestions(gate.get("patch_suggestions"))
+        exemptions = gate.get("exemptions") if isinstance(gate.get("exemptions"), list) else []
+        if not isinstance(gate.get("exemptions"), list):
+            metric_exemptions = metrics.get("critique_exemption_applied")
+            metric_gate_summary = metrics.get("quality_gate_summary")
+            summary_exemptions = (
+                metric_gate_summary.get("exemptions")
+                if isinstance(metric_gate_summary, dict)
+                else None
+            )
+            if isinstance(metric_exemptions, list):
+                exemptions = metric_exemptions
+            elif isinstance(summary_exemptions, list):
+                exemptions = summary_exemptions
+        critique_exemption_applied = (
+            gate.get("critique_exemption_applied")
+            if isinstance(gate.get("critique_exemption_applied"), list)
+            else (
+                metrics.get("critique_exemption_applied")
+                if isinstance(metrics.get("critique_exemption_applied"), list)
+                else list(exemptions)
+            )
+        )
+        def _quality_number(key: str) -> Any:
+            value = gate.get(key)
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                value = metrics.get(key)
+            return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+        def _quality_source() -> Optional[str]:
+            for value in (gate.get("selected_critique_source"), metrics.get("selected_critique_source")):
+                if isinstance(value, str) and value.strip():
+                    return value.strip()[:96]
+            return None
+
+        critique_score = _quality_number("self_critique_final_score")
+        critique_critical_count = _quality_number("self_critique_critical_count")
+        critique_major_count = _quality_number("self_critique_major_count")
+        selected_critique_source = _quality_source()
+        for code in blocker_codes:
+            blocker_counts[code] = blocker_counts.get(code, 0) + 1
+        for code in warning_codes:
+            warning_counts[code] = warning_counts.get(code, 0) + 1
+        for code in exemptions:
+            key = str(code)
+            exemption_counts[key] = exemption_counts.get(key, 0) + 1
+        chapters.append({
+            "chapter_number": chapter.chapter_number,
+            "status": chapter.status,
+            "score": metrics.get("score"),
+            "quality_gate_passed": metrics.get("quality_gate_passed", gate.get("passed")),
+            # 拒绝章可能没有 selected_version，或版本 metadata 只保留了
+            # quality_metrics 的部分字段；使用上面已归一化的 gate/metrics
+            # 回退值，避免 T-18 真实 exemption 样本丢失其诊断输入。
+            "self_critique_final_score": critique_score,
+            "self_critique_critical_count": critique_critical_count,
+            "self_critique_major_count": critique_major_count,
+            "selected_critique_source": selected_critique_source,
+            "word_count": metrics.get("word_count", chapter.word_count),
+            # T-10：保留重复段落的可解释诊断字段，而不仅是 blocker code。
+            "repetition_risk": metrics.get("repetition_risk"),
+            "repeated_paragraph_count": metrics.get("repeated_paragraph_count"),
+            "max_repeated_paragraph_count": metrics.get("max_repeated_paragraph_count"),
+            "repeated_paragraph_ratio": metrics.get("repeated_paragraph_ratio"),
+            "longest_repeated_paragraph_chars": metrics.get("longest_repeated_paragraph_chars"),
+            # T-11：前端需要知道质量门判定时使用了哪些焦点人物。
+            "focus_character_names": list(metrics.get("focus_character_names") or []),
+            "focus_character_hit_count": metrics.get("focus_character_hit_count"),
+            "missing_focus_characters": list(metrics.get("missing_focus_characters") or []),
+            # T-12：同时返回目标、下限、偏好线、上限及对应判罚状态。
+            "target_word_count": metrics.get("target_word_count"),
+            "min_word_count": metrics.get("min_word_count"),
+            "preferred_word_floor": metrics.get("preferred_word_floor"),
+            "upper_word_ceiling": metrics.get("upper_word_ceiling"),
+            "word_count_below_min": metrics.get("word_count_below_min"),
+            "word_count_far_above_target": metrics.get("word_count_far_above_target"),
+            "word_count_far_below_target": metrics.get("word_count_far_below_target"),
+            "word_requirement_met": metrics.get("word_requirement_met"),
+            # T-14：区分短样本未评估与事件密度实际不通过。
+            "event_density_evaluated": metrics.get("event_density_evaluated"),
+            "event_density_skip_reason": metrics.get("event_density_skip_reason"),
+            "event_density_passed": metrics.get("event_density_passed"),
+            "long_chapter_density_passed": metrics.get("long_chapter_density_passed"),
+            "state_change_interval_passed": metrics.get("state_change_interval_passed"),
+            "ending_pressure_passed": metrics.get("ending_pressure_passed"),
+            # T-15：保留章末压力的可解释命中与末段否决指标，不能只返回布尔结果。
+            "ending_semantic_hit_count": metrics.get("ending_semantic_hit_count"),
+            "ending_weak_hit_count": metrics.get("ending_weak_hit_count"),
+            "flat_closure_markers": list(metrics.get("flat_closure_markers") or []),
+            "ending_core_chars": metrics.get("ending_core_chars"),
+            "ending_core_semantic_hit_count": metrics.get("ending_core_semantic_hit_count"),
+            "ending_core_weak_hit_count": metrics.get("ending_core_weak_hit_count"),
+            "ending_core_deflating": metrics.get("ending_core_deflating"),
+            "dialogue_changes_state": metrics.get("dialogue_changes_state"),
+            # T-08：静态描写风险必须带上触发分支的计数，便于跨章趋势解释。
+            "static_description_risk": metrics.get("static_description_risk"),
+            "static_paragraph_count": metrics.get("static_paragraph_count"),
+            "max_static_run": metrics.get("max_static_run"),
+            "reversal_signal_count": metrics.get("reversal_signal_count"),
+            "reversal_in_late_section": metrics.get("reversal_in_late_section"),
+            "dialogue_ratio": metrics.get("dialogue_ratio"),
+            "action_ratio": metrics.get("action_ratio"),
+            "description_ratio": metrics.get("description_ratio"),
+            "speaker_count": metrics.get("speaker_count"),
+            "dominant_speaker_ratio": metrics.get("dominant_speaker_ratio"),
+            "hard_scene_cut_count": metrics.get("hard_scene_cut_count"),
+            "summary_scene_cut_count": metrics.get("summary_scene_cut_count"),
+            "scene_transition_warning": metrics.get("scene_transition_warning"),
+            "continuity_inherit_missing": metrics.get("continuity_inherit_missing"),
+            "continuity_inherit_late": metrics.get("continuity_inherit_late"),
+            "continuity_inherit_hit_count": metrics.get("continuity_inherit_hit_count"),
+            "inherit_hit_count": metrics.get("inherit_hit_count"),
+            "continuity_inherit_total_hit_count": metrics.get("continuity_inherit_total_hit_count"),
+            "continuity_inherit_match_mode": metrics.get("continuity_inherit_match_mode"),
+            "mission_quality_codes": list(metrics.get("mission_quality_codes") or []),
+            "blocker_codes": blocker_codes,
+            "warning_codes": warning_codes,
+            "patch_suggestions": patch_suggestions[:8],
+            "exemptions": [str(code) for code in exemptions],
+            "critique_exemption_applied": [str(code) for code in critique_exemption_applied],
+            "self_critique_final_score": critique_score,
+            "self_critique_critical_count": critique_critical_count,
+            "self_critique_major_count": critique_major_count,
+            "selected_critique_source": selected_critique_source,
+        })
+    return {
+        "project_id": project_id,
+        "chapter_count": len(chapters),
+        "chapters": chapters,
+        "blocker_counts": dict(sorted(blocker_counts.items())),
+        "warning_counts": dict(sorted(warning_counts.items())),
+        "exemption_counts": dict(sorted(exemption_counts.items())),
+    }
 
 
 @router.get("/{project_id}/sections/{section}", response_model=NovelSectionResponse)

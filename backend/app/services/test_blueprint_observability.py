@@ -188,7 +188,7 @@ class DummyPromptService:
     pass
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_finalize_chapter_defaults_to_background_ledger_sync(monkeypatch):
     from app.api.routers import writer as writer_router
 
@@ -237,7 +237,7 @@ async def test_finalize_chapter_defaults_to_background_ledger_sync(monkeypatch):
     assert runtime["events"][-1]["title"] == "定稿后台同步排队"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_finalize_chapter_can_still_run_sync_when_requested(monkeypatch):
     from app.api.routers import writer as writer_router
 
@@ -283,7 +283,7 @@ async def test_finalize_chapter_can_still_run_sync_when_requested(monkeypatch):
     assert chapter.selected_version_id == 333
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_run_finalize_pipeline_uses_explicit_chapter_number_without_touching_expired_chapter(monkeypatch):
     from app.api.routers import writer as writer_router
 
@@ -321,7 +321,7 @@ async def test_run_finalize_pipeline_uses_explicit_chapter_number_without_touchi
     assert result == {"finalize": {"success": True, "chapter_number": 7}}
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_run_finalize_pipeline_snapshots_selected_version_before_service_rollback(monkeypatch):
     from app.api.routers import writer as writer_router
 
@@ -763,7 +763,7 @@ def test_self_critique_deduplicates_cross_dimension_duplicate_major_issues():
 
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_self_critique_full_critique_tracks_raw_vs_deduped_issue_counts():
     responses = [
         json.dumps(
@@ -857,7 +857,7 @@ def test_self_critique_match_issue_to_paragraph_indexes_supports_paragraph_numbe
     assert indexes == [1, 3]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_self_critique_full_critique_adds_rule_based_duplicate_residue_issue():
     responses = [
         json.dumps({"overall_score": 82, "issues": [], "strengths": ["结构清楚"], "summary": "结构阶段未报问题。"}, ensure_ascii=False),
@@ -944,7 +944,7 @@ def test_quality_gate_still_blocks_when_eight_unique_majors_remain():
     assert any(item["code"] == "too_many_major_issues" for item in gate["blockers"])
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_post_consistency_self_critique_reuses_baseline_summary_when_content_unchanged(monkeypatch):
     orchestrator = PipelineOrchestrator(DummyAsyncSession())
     chapter_content = "林七把盐渍编号压进灯下，意识到旧账册已经反向盯住了自己。"
@@ -986,7 +986,7 @@ async def test_post_consistency_self_critique_reuses_baseline_summary_when_conte
     assert summary["merged_issue_count"] == 3
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_run_self_critique_preserves_rejected_candidate_diagnostics(monkeypatch):
     orchestrator = PipelineOrchestrator(DummyAsyncSession())
     chapter_content = "林七把借阅单压回压板下，决定先去核对终端记录。"
@@ -1337,7 +1337,7 @@ def test_self_critique_builds_strategy_specific_execution_requirements():
     assert any("章末只能保留一个主钩子" in item for item in delivery_requirements)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_stagewide_revision_prompt_keeps_dense_delivery_requirements_visible():
     chapter_content = "\n\n".join([
         "林七先在值班终端核对工号，结果第一条记录就显示查无此人。",
@@ -1480,7 +1480,7 @@ def test_self_critique_skips_local_plan_for_broad_character_stage_issue():
     assert plan is None
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_critique_dimension_batch_focus_prompt_only_verifies_selected_issues():
     llm = FakeLLMService(
         json.dumps(
@@ -1519,7 +1519,7 @@ async def test_critique_dimension_batch_focus_prompt_only_verifies_selected_issu
     assert result["issues"] == []
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_critique_dimension_batch_sanitizes_json_like_response_before_parsing():
     raw_response = """```json
     {
@@ -1625,7 +1625,7 @@ def test_self_critique_limits_stage_issues_to_distinct_root_causes():
     assert sum(1 for item in limited if item.get("location") == "中段追问库管") == 1
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_critique_and_revise_loop_runs_multiple_iterations_when_issues_remain(monkeypatch):
     service = SelfCritiqueService(DummyAsyncSession(), FakeLLMService(""), DummyPromptService())
     critiques = [
@@ -1692,7 +1692,7 @@ async def test_critique_and_revise_loop_runs_multiple_iterations_when_issues_rem
     assert result["status"] == "optimized"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_revise_chapter_defers_stagewide_fallback_without_manual_confirmation(monkeypatch):
     service = SelfCritiqueService(DummyAsyncSession(), FakeLLMService(""), DummyPromptService())
     issues = [
@@ -1749,7 +1749,7 @@ async def test_revise_chapter_defers_stagewide_fallback_without_manual_confirmat
     assert deferred["patch_suggestions"]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_revise_chapter_uses_stagewide_fallback_only_with_manual_confirmation(monkeypatch):
     service = SelfCritiqueService(DummyAsyncSession(), FakeLLMService(""), DummyPromptService())
     issues = [
@@ -1802,7 +1802,7 @@ async def test_revise_chapter_uses_stagewide_fallback_only_with_manual_confirmat
     assert any(item["mode"] == "stagewide" and item["accepted"] is True for item in logs[0]["attempts"])
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_revise_chapter_rejects_stagewide_candidate_when_targeted_major_issues_increase(monkeypatch):
     service = SelfCritiqueService(DummyAsyncSession(), FakeLLMService(""), DummyPromptService())
     issues = [
@@ -1842,7 +1842,7 @@ async def test_revise_chapter_rejects_stagewide_candidate_when_targeted_major_is
     assert any(item["mode"] == "stagewide" and item["reason"] == "major_issues_increased" for item in logs[0]["attempts"])
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_revise_chapter_rejects_stagewide_candidate_when_safety_snapshot_regresses(monkeypatch):
     service = SelfCritiqueService(DummyAsyncSession(), FakeLLMService(""), DummyPromptService())
     issues = [
@@ -1900,7 +1900,7 @@ async def test_revise_chapter_rejects_stagewide_candidate_when_safety_snapshot_r
     assert any(item["mode"] == "stagewide" and item["reason"] == "safety_critical_issues_increased" for item in logs[0]["attempts"])
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_revise_chapter_rejects_candidate_when_aggregate_strategy_snapshot_is_not_improved(monkeypatch):
     service = SelfCritiqueService(DummyAsyncSession(), FakeLLMService(""), DummyPromptService())
     issues = [
@@ -1950,7 +1950,7 @@ async def test_revise_chapter_rejects_candidate_when_aggregate_strategy_snapshot
     assert localized_attempt["aggregate_after"] == {"critical": 0, "major": 1, "minor": 0, "total": 1, "weighted": 10}
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_revise_chapter_retries_stagewide_with_aggregate_feedback(monkeypatch):
     service = SelfCritiqueService(DummyAsyncSession(), FakeLLMService(""), DummyPromptService())
     issues = [
@@ -2027,7 +2027,7 @@ async def test_revise_chapter_retries_stagewide_with_aggregate_feedback(monkeypa
     assert stagewide_attempts[1]["aggregate_after"] == {"critical": 0, "major": 0, "minor": 0, "total": 0, "weighted": 0}
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_revise_chapter_marks_stagewide_as_deferred_when_iteration_budget_is_locked(monkeypatch):
     service = SelfCritiqueService(DummyAsyncSession(), FakeLLMService(""), DummyPromptService())
     issues = [
@@ -2058,7 +2058,7 @@ async def test_revise_chapter_marks_stagewide_as_deferred_when_iteration_budget_
     assert any(item["mode"] == "stagewide" and item["reason"] == "stagewide_deferred" for item in logs[0]["attempts"])
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_revise_chapter_skips_stagewide_for_long_form_delivery_polish_with_limited_issues(monkeypatch):
     service = SelfCritiqueService(DummyAsyncSession(), FakeLLMService(""), DummyPromptService())
     issues = [
@@ -2099,7 +2099,7 @@ async def test_revise_chapter_skips_stagewide_for_long_form_delivery_polish_with
     assert logs[0]["stagewide_accepted"] is False
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_critique_and_revise_loop_frontloads_deferred_stage_on_next_iteration(monkeypatch):
     service = SelfCritiqueService(DummyAsyncSession(), FakeLLMService(""), DummyPromptService())
     logic_issue = {"dimension": "logic", "severity": "major", "location": "中段", "problem": "规则边界没钉实", "suggestion": "补规则后果"}
@@ -2190,7 +2190,7 @@ async def test_critique_and_revise_loop_frontloads_deferred_stage_on_next_iterat
     assert all(log["stagewide_deferred"] is True for log in result["optimization_logs"])
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_critique_and_revise_loop_adds_one_extra_iteration_to_drain_deferred_stagewide_work(monkeypatch):
     service = SelfCritiqueService(DummyAsyncSession(), FakeLLMService(""), DummyPromptService())
     logic_issue = {"dimension": "logic", "severity": "major", "location": "中段", "problem": "规则边界没钉实", "suggestion": "补规则后果"}
@@ -2535,7 +2535,7 @@ def test_consistency_fallback_fix_guard_accepts_anchored_full_chapter_repair():
     ) is None
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_consistency_auto_fix_skips_full_chapter_fallback_without_confirmation(monkeypatch):
     service = ConsistencyService(db=None, llm_service=FakeLLMService(""))
 
@@ -2570,7 +2570,7 @@ async def test_consistency_auto_fix_skips_full_chapter_fallback_without_confirma
     assert result is None
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_consistency_auto_fix_allows_full_chapter_fallback_when_confirmed(monkeypatch):
     service = ConsistencyService(db=None, llm_service=FakeLLMService(""))
     original = "\n\n".join(
@@ -2670,7 +2670,7 @@ def test_should_reject_consistency_improvement_when_only_swapping_one_critical_f
     assert after_counts == {"critical": 0, "major": 4, "total": 4, "weighted": 4}
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_run_consistency_check_retries_with_post_fix_feedback(monkeypatch):
     orchestrator = PipelineOrchestrator(DummyAsyncSession())
     orchestrator.llm_service = FakeLLMService("")
@@ -2758,7 +2758,7 @@ async def test_run_consistency_check_retries_with_post_fix_feedback(monkeypatch)
     assert report["repair_attempts"][1]["retry_source"] == "post_fix_feedback"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_run_consistency_check_reports_deferred_full_chapter_fallback(monkeypatch):
     orchestrator = PipelineOrchestrator(DummyAsyncSession())
     orchestrator.llm_service = FakeLLMService("")
@@ -2811,7 +2811,7 @@ async def test_run_consistency_check_reports_deferred_full_chapter_fallback(monk
     ]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_call_llm_with_stage_retries_recovers_from_retryable_provider_jitter():
     stages = []
 
@@ -2838,7 +2838,7 @@ async def test_call_llm_with_stage_retries_recovers_from_retryable_provider_jitt
     assert stages == [("generating", "测试阶段遇到上游抖动，正在进行第 1/2 次重试")]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_repair_blueprint_character_names_assigns_concrete_name():
     llm = FakeLLMService(
         json.dumps(
@@ -2897,7 +2897,7 @@ async def test_repair_blueprint_character_names_assigns_concrete_name():
     assert repaired["one_sentence_summary"].startswith("林渡")
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_resolve_llm_config_falls_back_to_settings_when_process_env_missing(monkeypatch):
     session = DummyAsyncSession()
     service = LLMService(session)
@@ -2917,7 +2917,7 @@ async def test_resolve_llm_config_falls_back_to_settings_when_process_env_missin
     assert config["model"] == "settings-model"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_resolve_llm_config_recovers_from_stale_db_session():
     session = DummyAsyncSession()
     service = LLMService(session)
@@ -2948,7 +2948,7 @@ async def test_resolve_llm_config_recovers_from_stale_db_session():
     assert session.rollback_calls == 1
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_resolve_llm_config_recovers_from_session_contention():
     session = DummyAsyncSession()
     service = LLMService(session)
@@ -2979,7 +2979,7 @@ async def test_resolve_llm_config_recovers_from_session_contention():
     assert session.rollback_calls == 1
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_resolve_llm_config_caches_user_specific_result():
     session = DummyAsyncSession()
     service = LLMService(session)
@@ -3013,7 +3013,7 @@ async def test_resolve_llm_config_caches_user_specific_result():
     assert second["model"] == "cached-model"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_get_config_value_recovers_from_session_contention():
     session = DummyAsyncSession()
     service = LLMService(session)
@@ -3035,7 +3035,7 @@ async def test_get_config_value_recovers_from_session_contention():
     assert session.rollback_calls == 1
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_resolve_llm_config_charges_daily_limit_once_per_async_task(monkeypatch):
     session = DummyAsyncSession()
     service = LLMService(session)
@@ -3085,7 +3085,7 @@ async def test_resolve_llm_config_charges_daily_limit_once_per_async_task(monkey
     assert session.commit_calls == 1
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_stream_single_model_retries_once_after_rate_limit(monkeypatch):
     session = DummyAsyncSession()
     service = LLMService(session)
@@ -3202,6 +3202,63 @@ def test_runtime_stale_uses_chapter_updated_at_when_runtime_timestamp_missing():
     assert runtime["stale"] is True
     assert runtime["stale_seconds"] >= 15 * 60
     assert runtime["stale_reason"] == "generation_runtime_has_not_updated"
+
+
+def test_runtime_stale_prefers_heartbeat_and_persisted_longform_budget():
+    old_time = datetime.now(timezone.utc) - timedelta(minutes=31)
+    chapter = DummyChapter(
+        real_summary=json.dumps(
+            {
+                "generation_runtime": {
+                    "progress_stage": "generate_variants",
+                    "updated_at": old_time.isoformat(),
+                    "heartbeat_at": old_time.isoformat(),
+                    "timeout_seconds": 14_400,
+                }
+            }
+        ),
+        status="generating",
+        updated_at=old_time,
+        created_at=old_time,
+    )
+
+    runtime = _extract_generation_runtime_payload(chapter)
+
+    assert runtime["stale"] is False
+    assert runtime["stale_seconds"] >= 31 * 60
+
+
+@pytest.mark.asyncio
+async def test_stale_recovery_preserves_live_longform_budgeted_chapter():
+    from unittest.mock import AsyncMock, Mock
+
+    old_time = datetime.now(timezone.utc) - timedelta(minutes=31)
+    chapter = DummyChapter(
+        id=7,
+        chapter_number=1,
+        real_summary=json.dumps(
+            {
+                "generation_runtime": {
+                    "progress_stage": "generate_variants",
+                    "heartbeat_at": old_time.isoformat(),
+                    "timeout_seconds": 14_400,
+                }
+            }
+        ),
+        status="generating",
+        updated_at=old_time,
+        created_at=old_time,
+        selected_version_id=None,
+    )
+    session = type("Session", (), {"add": Mock(), "commit": AsyncMock()})()
+
+    await NovelService(session)._recover_stale_busy_chapters(
+        type("Project", (), {"id": "project-longform", "chapters": [chapter]})()
+    )
+
+    assert chapter.status == "generating"
+    session.add.assert_not_called()
+    session.commit.assert_not_awaited()
 
 
 def test_runtime_stale_reports_unknown_when_no_timestamp_available():
@@ -3800,7 +3857,7 @@ def test_normalize_blueprint_error_detail_extracts_provider_timeout_message():
     assert retryable is True
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_generate_novel_outline_builds_total_outline_when_missing():
     stages = []
 
@@ -3984,7 +4041,7 @@ def test_has_complete_chapter_outline_uses_expected_count_when_available():
     assert _has_complete_chapter_outline(partial, expected_count=4) is True
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_generate_executable_chapter_outline_builds_outline_when_missing():
     stages = []
 
@@ -4056,7 +4113,7 @@ async def test_generate_executable_chapter_outline_builds_outline_when_missing()
     assert len(llm.calls) == 3
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_polish_outline_reports_polishing_progress_and_sanitizes_json():
     stages = []
 
@@ -4131,7 +4188,7 @@ def test_recoverable_blueprint_schema_requires_core_fields():
     assert _is_recoverable_blueprint_schema(broken) is False
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_finished_blueprint_job_recovers_from_persisted_project(monkeypatch):
     monkeypatch.setattr("app.api.routers.novels.NovelService", FakeRecoverService)
 
@@ -4155,7 +4212,7 @@ async def test_finished_blueprint_job_recovers_from_persisted_project(monkeypatc
     assert recovered["blueprint"].title == "恢复后的蓝图"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_finished_blueprint_job_does_not_recover_broken_project_blueprint(monkeypatch):
     monkeypatch.setattr("app.api.routers.novels.NovelService", FakeBrokenRecoverService)
 
@@ -4175,7 +4232,7 @@ async def test_finished_blueprint_job_does_not_recover_broken_project_blueprint(
     assert recovered is None
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_chapter_outline_job_does_not_recover_from_total_outline_only(monkeypatch):
     monkeypatch.setattr("app.api.routers.novels.NovelService", FakePartialRecoverService)
 
@@ -4196,7 +4253,7 @@ async def test_chapter_outline_job_does_not_recover_from_total_outline_only(monk
     assert recovered is None
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_replace_blueprint_serializes_nested_pydantic_models(tmp_path):
     database_url = f"sqlite+aiosqlite:///{tmp_path / 'replace_blueprint.db'}"
     engine = create_async_engine(database_url)
@@ -4287,7 +4344,7 @@ async def test_replace_blueprint_serializes_nested_pydantic_models(tmp_path):
         await engine.dispose()
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_upsert_and_load_blueprint_job_from_db(tmp_path):
     database_url = f"sqlite+aiosqlite:///{tmp_path / 'blueprint_jobs.db'}"
     engine = create_async_engine(database_url)
@@ -4370,7 +4427,7 @@ def test_db_blueprint_job_payload_preserves_user_id_and_blueprint():
     assert payload["ai_message"] == "已完成"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_load_latest_blueprint_job_prefers_db_over_history(monkeypatch):
     db_payload = {"run_id": "db-run", "project_id": "project-1", "status": "successful"}
     history_payload = {"run_id": "history-run", "project_id": "project-1", "status": "failed"}
@@ -4389,7 +4446,7 @@ async def test_load_latest_blueprint_job_prefers_db_over_history(monkeypatch):
     assert loaded == db_payload
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_load_latest_blueprint_job_falls_back_to_history_when_db_missing(monkeypatch):
     history_payload = {"run_id": "history-run", "project_id": "project-1", "status": "failed"}
 
@@ -4407,7 +4464,7 @@ async def test_load_latest_blueprint_job_falls_back_to_history_when_db_missing(m
     assert loaded == history_payload
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_blueprint_recovery_schedules_once(monkeypatch):
     """重启后重复轮询不能为同一持久化任务重复创建 worker。"""
     class Collector:
@@ -4432,7 +4489,7 @@ async def test_blueprint_recovery_schedules_once(monkeypatch):
     novels_router._BLUEPRINT_SCHEDULED_RUNS.discard(run_id)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_persisted_blueprint_recovery_is_scheduled_after_restart(monkeypatch):
     """复用进程重启后的 queued/stale 任务时必须重新派发 worker。"""
     class Collector:

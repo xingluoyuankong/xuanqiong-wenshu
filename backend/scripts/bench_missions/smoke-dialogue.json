@@ -1,0 +1,22 @@
+{
+  "id": "smoke-dialogue",
+  "target_word_count": 1200,
+  "min_word_count": 900,
+  "chapter_mission": {
+    "chapter_purpose": "逼迫证人作出选择",
+    "dialogue_strategy": {
+      "purpose": [
+        "施压并制造反转"
+      ]
+    },
+    "scene_list": [
+      {
+        "goal": "逼证人开口",
+        "conflict": "证人拒绝说话",
+        "turn": "证人说出隐藏买主的名字",
+        "end_hook": "买主打来电话"
+      }
+    ]
+  },
+  "fixture_content": "顾沉把录音笔放到桌上，问道：“你现在还想替他遮掩吗？”证人沉默片刻，忽然把地址写在纸上：“买走证据的人正在楼下。”电话随即响起，陌生人说他已经看见窗边的灯。"
+}

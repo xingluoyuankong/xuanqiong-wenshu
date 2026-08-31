@@ -1,0 +1,17 @@
+{
+  "id": "smoke-pressure",
+  "target_word_count": 1200,
+  "min_word_count": 900,
+  "chapter_mission": {
+    "chapter_purpose": "在闸门关闭前逃出去",
+    "scene_list": [
+      {
+        "goal": "赶到闸门",
+        "conflict": "积水截断楼梯间",
+        "turn": "钥匙只能打开外侧的门",
+        "end_hook": "倒计时开始"
+      }
+    ]
+  },
+  "fixture_content": "水声从地下室涌上来，许晚宁抓住栏杆往下冲。铁门前的锁孔里插着半截钥匙，她刚转动它，广播便开始倒计时：三分钟后闸门关闭。门后有人敲了两下，问她是否愿意用名单换一条路。"
+}

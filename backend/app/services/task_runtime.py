@@ -25,6 +25,61 @@ TERMINAL_STATUSES = {
 }
 VALID_STATUSES = {item.value for item in TaskRuntimeStatus}
 
+# Chapter generation has an explicit provider/background budget. The generic
+# sweeper must not declare such a task dead before that budget has elapsed,
+# while ordinary jobs retain the normal short zombie-task threshold.
+_CHAPTER_GENERATION_TASK_TYPE = "chapter_generation"
+_TASK_RUNTIME_BUDGET_GRACE_SECONDS = 180
+_MAX_RUNTIME_BUDGET_SECONDS = 24 * 60 * 60
+
+
+def _coerce_positive_seconds(value: Any) -> Optional[int]:
+    try:
+        seconds = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds > 0 else None
+
+
+def _extract_normalized_generation_timeout(payload: Any) -> Optional[int]:
+    """Read the persisted, normalized budget without importing writer code."""
+    if not isinstance(payload, dict):
+        return None
+
+    spec = payload.get("generation_spec")
+    spec = spec if isinstance(spec, dict) else {}
+    flow_config = spec.get("flow_config")
+    flow_config = flow_config if isinstance(flow_config, dict) else {}
+    limits = payload.get("chapter_generation_limits")
+    limits = limits if isinstance(limits, dict) else {}
+
+    for value in (
+        payload.get("normalized_generation_timeout_seconds"),
+        payload.get("runtime_timeout_seconds"),
+        limits.get("timeout_seconds"),
+        spec.get("normalized_generation_timeout_seconds"),
+        spec.get("runtime_timeout_seconds"),
+        flow_config.get("generation_timeout_seconds"),
+    ):
+        seconds = _coerce_positive_seconds(value)
+        if seconds is not None:
+            return min(_MAX_RUNTIME_BUDGET_SECONDS, seconds)
+    return None
+
+
+def _effective_stale_after_seconds(task: TaskRuntime, default_seconds: int) -> int:
+    """Return a per-task stale threshold while preserving default job behavior."""
+    base = max(1, int(default_seconds))
+    if task.task_type != _CHAPTER_GENERATION_TASK_TYPE:
+        return base
+    budget = _extract_normalized_generation_timeout(task.payload)
+    if budget is None:
+        return base
+    return min(
+        _MAX_RUNTIME_BUDGET_SECONDS,
+        max(base, budget + _TASK_RUNTIME_BUDGET_GRACE_SECONDS),
+    )
+
 
 class TaskRuntimeError(Exception):
     """任务运行时基础异常。"""
@@ -159,6 +214,7 @@ class TaskRuntimeService:
         project_id: Optional[str] = None,
         chapter_id: Optional[str] = None,
         payload: Optional[dict[str, Any]] = None,
+        correlation_id: Optional[str] = None,
         max_retries: int = 3,
         input_hash: Optional[str] = None,
         config_snapshot_id: Optional[str] = None,
@@ -189,6 +245,7 @@ class TaskRuntimeService:
             artifact_ref=artifact_ref,
             artifact_revision=artifact_revision,
             project_id=project_id,
+            correlation_id=(str(correlation_id).strip()[:36] or None) if correlation_id else None,
             chapter_id=chapter_id,
             payload=payload or {},
             max_retries=max_retries,
@@ -241,6 +298,7 @@ class TaskRuntimeService:
         event_payload.setdefault("event_sequence", None)
         event = TaskRuntimeEvent(
             task_id=task.task_id,
+            correlation_id=task.correlation_id,
             event_type=event_type,
             status=status,
             stage=stage,
@@ -439,16 +497,17 @@ class TaskRuntimeService:
         now = self._now()
         if task.status in TERMINAL_STATUSES and task.status != TaskRuntimeStatus.STALE.value:
             raise TaskRuntimeConflict(f"cannot claim terminal task {task.status}")
+        effective_stale_after = _effective_stale_after_seconds(task, stale_after_seconds)
         heartbeat = self._normalize_datetime(task.heartbeat_at)
         if (
             task.status == TaskRuntimeStatus.RUNNING.value
             and task.lease_owner == lease_owner
             and heartbeat is not None
-            and now - heartbeat < timedelta(seconds=stale_after_seconds)
+            and now - heartbeat < timedelta(seconds=effective_stale_after)
         ):
             return task
 
-        cutoff = now - timedelta(seconds=stale_after_seconds)
+        cutoff = now - timedelta(seconds=effective_stale_after)
         reclaimable = or_(
             TaskRuntime.status.in_([TaskRuntimeStatus.QUEUED.value, TaskRuntimeStatus.STALE.value]),
             and_(
@@ -518,7 +577,7 @@ class TaskRuntimeService:
         owner_user_id: Optional[int] = None,
     ) -> list[TaskRuntime]:
         """将心跳超时的运行中任务标记为 stale，供重启/巡检恢复。"""
-        cutoff = self._now() - timedelta(seconds=stale_after_seconds)
+        cutoff = self._now() - timedelta(seconds=max(1, int(stale_after_seconds)))
         stmt = select(TaskRuntime).where(
             TaskRuntime.status.in_([TaskRuntimeStatus.RUNNING.value, TaskRuntimeStatus.CANCELLING.value]),
             (TaskRuntime.heartbeat_at.is_(None) | (TaskRuntime.heartbeat_at < cutoff)),
@@ -534,6 +593,11 @@ class TaskRuntimeService:
             # read the same stale row; only the first one may transition it and
             # append the durable task_stale event.
             now = self._now()
+            effective_stale_after = _effective_stale_after_seconds(candidate, stale_after_seconds)
+            effective_cutoff = now - timedelta(seconds=effective_stale_after)
+            heartbeat = self._normalize_datetime(candidate.heartbeat_at)
+            if heartbeat is not None and heartbeat >= effective_cutoff:
+                continue
             result = await self.session.execute(
                 update(TaskRuntime)
                 .where(
@@ -542,7 +606,7 @@ class TaskRuntimeService:
                         TaskRuntimeStatus.RUNNING.value,
                         TaskRuntimeStatus.CANCELLING.value,
                     ]),
-                    (TaskRuntime.heartbeat_at.is_(None) | (TaskRuntime.heartbeat_at < cutoff)),
+                    (TaskRuntime.heartbeat_at.is_(None) | (TaskRuntime.heartbeat_at < effective_cutoff)),
                 )
                 .values(
                     status=TaskRuntimeStatus.STALE.value,

@@ -14,7 +14,11 @@
     "type-check": "vue-tsc --build",
     "test": "vitest",
     "test:run": "vitest run",
-    "format": "prettier --write src/", "prod": "npm run build && npm run preview"
+    "format": "prettier --write src/",
+    "prod": "npm run build && npm run preview",
+    "e2e": "playwright test",
+    "e2e:real": "playwright test -c playwright.real.config.ts",
+    "e2e:real-provider": "playwright test -c playwright.real-provider.config.ts"
   },
   "dependencies": {
     "@fontsource/noto-sans-sc": "^5.2.8",
@@ -31,6 +35,7 @@
     "vue-router": "^4.5.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4.1.13",
     "@tailwindcss/typography": "^0.5.18",
     "@tsconfig/node22": "^22.0.2",

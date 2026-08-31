@@ -55,6 +55,7 @@ class ConsistencyCheckResult:
     summary: str
     check_time_ms: int = 0
     status: str = "passed"
+    provider_attempts: Optional[Dict[str, Any]] = None
 
 
 CONSISTENCY_CHECK_PROMPT = """请检查下面章节是否与既有信息存在明显冲突。
@@ -292,6 +293,7 @@ class ConsistencyService:
                     timeout=120.0,
                     policy=GenerationCallPolicy(
                         stage_label="跨章节一致性检查",
+                        attempt_role="quality",
                         progress_stage="continuity_gate",
                         retry_attempts=2,
                         response_format="json_object",
@@ -301,6 +303,7 @@ class ConsistencyService:
                     ),
                 )
                 result = self._parse_check_response(json.dumps(json_result.data, ensure_ascii=False))
+                result.provider_attempts = json_result.provider_attempts
                 result.check_time_ms = int((time.time() - started_at) * 1000)
                 return result
             except Exception as exc:
@@ -387,6 +390,7 @@ class ConsistencyService:
                 timeout=150.0,
                 policy=GenerationCallPolicy(
                     stage_label="局部一致性修复",
+                    attempt_role="quality",
                     progress_stage="consistency",
                     retry_attempts=2,
                     response_format=None,
@@ -480,6 +484,7 @@ class ConsistencyService:
                     timeout=240.0,
                     policy=GenerationCallPolicy(
                         stage_label="一致性补丁兜底",
+                        attempt_role="quality",
                         progress_stage="consistency",
                         retry_attempts=2,
                         response_format=None,

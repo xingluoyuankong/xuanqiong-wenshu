@@ -3,7 +3,7 @@ import pytest
 from app.services.generation_log_service import GenerationLogService
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_log_tasks_are_isolated_by_owner():
     service = GenerationLogService()
     task_id = service.create_task("task-owner-1", owner_user_id=1)
@@ -20,7 +20,7 @@ async def test_log_tasks_are_isolated_by_owner():
     assert await service.get_all_tasks(owner_user_id=2) == []
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_custom_task_id_cannot_be_rebound_to_another_owner():
     service = GenerationLogService()
     service.create_task("task-owner-1", owner_user_id=1)

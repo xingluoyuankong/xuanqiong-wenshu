@@ -1,7 +1,7 @@
 # AIMETA P=路由聚合_注册所有子路由到主路由|R=路由注册|NR=不含具体端点实现|E=api_router|X=http|A=APIRouter聚合|D=fastapi|S=none|RD=./README.ai
 from fastapi import APIRouter
 from pydantic import BaseModel
-from . import admin, auth, llm_config, novels, optimizer, updates, writer, analytics, analytics_enhanced, foreshadowing, projects, review, outline, style, knowledge_graph, patch_diff, token_budget, clue_tracker, writing_skills, research, task_runtime
+from . import admin, agent, auth, llm_config, novels, optimizer, updates, writer, analytics, analytics_enhanced, foreshadowing, projects, review, outline, style, knowledge_graph, patch_diff, token_budget, clue_tracker, writing_skills, research, task_runtime
 
 # emotion_curve.py 已明确下线，统一走 analytics.py 中的 /api/analytics/{project_id}/emotion-curve。
 
@@ -20,6 +20,7 @@ api_router.include_router(review.router)
 api_router.include_router(research.router)
 api_router.include_router(auth.router)
 api_router.include_router(task_runtime.router)
+api_router.include_router(agent.router)
 
 # 新增：剧情演进路由
 api_router.include_router(outline.router, prefix="/api/novels/{project_id}", tags=["outline-evolution"])

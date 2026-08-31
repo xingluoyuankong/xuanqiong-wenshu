@@ -1,0 +1,22 @@
+{
+  "id": "benchmark-dialogue-romance-1500",
+  "target_word_count": 1500,
+  "min_word_count": 1350,
+  "chapter_mission": {
+    "chapter_purpose": "让决裂的搭档谈判结成危险联盟",
+    "dialogue_strategy": {
+      "purpose": [
+        "改变筹码与信任"
+      ],
+      "pressure_change": "其中一人必须做出代价高昂的选择"
+    },
+    "scene_list": [
+      {
+        "goal": "谈成联盟",
+        "conflict": "两人彼此都不信任",
+        "turn": "一条私密消息揭开过去的谎言",
+        "end_hook": "他们必须立刻一起离开"
+      }
+    ]
+  }
+}

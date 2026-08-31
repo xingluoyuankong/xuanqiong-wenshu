@@ -33,7 +33,7 @@
 
         <div class="wd-workspace-head__side">
           <div class="wd-workspace-head__meta">
-            <span v-if="selectedChapter?.word_count">{{ pick(`正文 ${selectedChapter.word_count} 字`, `Draft: ${selectedChapter.word_count} words`) }}</span>
+            <span v-if="selectedChapter?.word_count != null">{{ pick(`正文 ${selectedChapter.word_count} 字`, `Draft: ${selectedChapter.word_count} words`) }}</span>
             <span v-if="selectedChapter?.versions?.length">{{ pick(`候选 ${selectedChapter.versions.length} 版`, `${selectedChapter.versions.length} candidates`) }}</span>
             <span v-if="chapterWordGoalText">{{ chapterWordGoalText }}</span>
             <span v-if="chapterWordExecutionText" :class="['wd-workspace-head__meta-pill', chapterWordExecutionClass]">{{ chapterWordExecutionText }}</span>
@@ -219,12 +219,13 @@ import { computed, defineAsyncComponent, nextTick, onUnmounted, ref, watch } fro
 import { useRouter } from 'vue-router'
 import { BookOpen, Loader2, Pencil, RefreshCw, Wrench, X } from 'lucide-vue-next'
 import { globalAlert } from '@/composables/useAlert'
-import type { Chapter, ChapterGenerationResponse, ChapterVersion, NovelProject } from '@/api/novel'
+import type { Chapter, ChapterGenerationResponse, ChapterVersion, GenerationRuntime, NovelProject } from '@/api/novel'
 import { normalizeChapterContent } from '@/utils/chapterContent'
 import {
   isBusyChapterStatus,
   isRecoverableVersionStatus,
   resolveChapterActionDecision,
+  resolveActualWordCount,
   resolveChapterRuntime,
   resolveStageProgressWindow,
 } from '@/utils/chapterGeneration'
@@ -253,7 +254,7 @@ interface Props {
   evaluatingVersionIndex?: number | null
   deletingVersionIndex?: number | null
   optimizerSuggestionNotes?: string
-  generationRuntime?: Record<string, any> | null
+  generationRuntime?: GenerationRuntime | null
   lastStatusSyncAt?: string | null
   terminatingChapter?: number | null
   statusFetchFailureCount?: number
@@ -435,8 +436,8 @@ const chapterWordRequirementReasonLabelMap = (): Record<string, string> => ({
 })
 
 const chapterWordExecutionText = computed(() => {
-  const actual = chapterRuntime.value?.actual_word_count ?? selectedChapter.value?.word_count
-  if (actual) return pick(`实际 ${actual} 字`, `Actual ${actual} words`)
+  const actual = resolveActualWordCount(chapterRuntime.value, selectedChapter.value?.word_count)
+  if (actual !== null) return pick(`实际 ${actual} 字`, `Actual ${actual} words`)
   return ''
 })
 const chapterWordStatusHint = computed(() => {

@@ -59,7 +59,7 @@ def test_daily_limit_scope_reuses_parent_scope_when_nested():
     assert llm_service_module._DAILY_LIMIT_SCOPE_STATE.get() is None
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_preview_generation_scope_reuses_outer_logical_run():
     expanded_chapter = "\n\n".join(
         [
@@ -135,7 +135,7 @@ def test_preview_expansion_guard_rejects_short_or_fragmented_full_chapter():
     ) == ""
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_chapter_review_scope_reuses_outer_logical_run():
     llm = ScopeAwareLLM(
         [
@@ -209,7 +209,7 @@ async def test_chapter_review_scope_reuses_outer_logical_run():
     assert all(scope_id == outer_scope_id for scope_id in llm.scope_ids)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_reader_simulation_scope_reuses_outer_logical_run():
     llm = ScopeAwareLLM(
         [
@@ -274,7 +274,7 @@ async def test_reader_simulation_scope_reuses_outer_logical_run():
     assert all(scope_id == outer_scope_id for scope_id in llm.scope_ids)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_memory_update_scope_reuses_outer_logical_run(monkeypatch):
     class CommitOnlyDB:
         async def commit(self):
@@ -376,7 +376,7 @@ async def test_memory_update_scope_reuses_outer_logical_run(monkeypatch):
     assert all(scope_id == outer_scope_id for scope_id in llm.scope_ids)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_self_critique_full_scope_reuses_outer_logical_run():
     llm = ScopeAwareLLM(
         [
@@ -438,7 +438,7 @@ async def test_self_critique_full_scope_reuses_outer_logical_run():
     assert all(scope_id == outer_scope_id for scope_id in llm.scope_ids)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_ai_review_scope_reuses_outer_logical_run():
     llm = ScopeAwareLLM(
         [
@@ -476,7 +476,7 @@ async def test_ai_review_scope_reuses_outer_logical_run():
     assert all(scope_id == outer_scope_id for scope_id in llm.scope_ids)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_consistency_scope_reuses_outer_logical_run(monkeypatch):
     llm = ScopeAwareLLM(
         [
@@ -528,7 +528,7 @@ async def test_consistency_scope_reuses_outer_logical_run(monkeypatch):
     assert all(scope_id == outer_scope_id for scope_id in llm.scope_ids)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_knowledge_retrieval_scopes_reuse_outer_logical_run(monkeypatch):
     llm = ScopeAwareLLM(
         [
@@ -616,7 +616,7 @@ async def test_knowledge_retrieval_scopes_reuse_outer_logical_run(monkeypatch):
     assert all(scope_id == outer_scope_id for scope_id in llm.scope_ids)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_style_rag_scopes_reuse_outer_logical_run(monkeypatch):
     llm = ScopeAwareLLM(
         [
@@ -730,7 +730,7 @@ async def test_style_rag_scopes_reuse_outer_logical_run(monkeypatch):
     assert all(scope_id == outer_scope_id for scope_id in llm.scope_ids)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_import_service_scope_reuses_outer_logical_run(monkeypatch):
     llm = ScopeAwareLLM(
         [
@@ -807,7 +807,7 @@ async def test_import_service_scope_reuses_outer_logical_run(monkeypatch):
     assert all(scope_id == outer_scope_id for scope_id in llm.scope_ids)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_memory_compress_scope_reuses_outer_logical_run():
     llm = ScopeAwareLLM(["压缩后的早期剧情摘要"])
 

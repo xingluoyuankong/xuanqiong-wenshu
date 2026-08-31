@@ -10,7 +10,7 @@ AIReviewService: AI 评审服务
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from ..services.generation_call_service import GenerationCallPolicy, call_generation_text
@@ -30,8 +30,11 @@ class ReviewResult:
     critical_flaws: List[str]
     refinement_suggestions: str
     final_recommendation: str
+    # Optional per-candidate rubric scores; legacy providers may omit this field.
+    candidate_scores: Dict[str, Dict[str, int]] = field(default_factory=dict)
     raw_response: Optional[str] = None
     status: str = "passed"
+    provider_attempts: Optional[Dict[str, Any]] = None
 
 
 class AIReviewService:
@@ -94,6 +97,7 @@ class AIReviewService:
                     timeout=180.0,
                     policy=GenerationCallPolicy(
                         stage_label="多候选版本 AI 评审",
+                        attempt_role="quality",
                         progress_stage="review",
                         retry_attempts=2,
                         response_format="json_object",
@@ -106,6 +110,7 @@ class AIReviewService:
 
                 result = self._parse_review_response(normalized)
                 result.raw_response = cleaned
+                result.provider_attempts = text_result.provider_attempts
 
                 logger.info(
                     "AI 评审完成: 最佳版本=%s, 综合评分=%.1f",
@@ -533,6 +538,7 @@ class AIReviewService:
                 timeout=180.0,
                 policy=GenerationCallPolicy(
                     stage_label="单候选版本 AI 评审",
+                    attempt_role="quality",
                     progress_stage="review",
                     retry_attempts=2,
                     response_format="json_object",
@@ -568,6 +574,22 @@ class AIReviewService:
             best_version_index = data.get("best_version_index")
             if not isinstance(best_version_index, int):
                 best_version_index = None
+            raw_candidate_scores = data.get("candidate_scores")
+            candidate_scores: Dict[str, Dict[str, int]] = {}
+            if isinstance(raw_candidate_scores, dict):
+                for candidate_key, rubric in raw_candidate_scores.items():
+                    if not isinstance(rubric, dict):
+                        continue
+                    normalized: Dict[str, int] = {}
+                    for rubric_key, value in rubric.items():
+                        if isinstance(value, bool):
+                            continue
+                        try:
+                            normalized[str(rubric_key)] = max(0, min(10, int(value)))
+                        except (TypeError, ValueError):
+                            continue
+                    if normalized:
+                        candidate_scores[str(candidate_key)] = normalized
             return ReviewResult(
                 best_version_index=best_version_index,
                 scores=data.get("scores", {}),
@@ -575,6 +597,7 @@ class AIReviewService:
                 critical_flaws=data.get("critical_flaws", []),
                 refinement_suggestions=data.get("refinement_suggestions", ""),
                 final_recommendation=data.get("final_recommendation", ""),
+                candidate_scores=candidate_scores,
                 status="passed" if best_version_index is not None else "failed",
             )
         except json.JSONDecodeError:
