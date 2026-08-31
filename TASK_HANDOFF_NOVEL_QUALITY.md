@@ -68432,3 +68432,72 @@ GET /api/health -> 200
 本接续文档中本轮部署阶段出现的 `2026-09-01` 目录名、日志时间和段落标签来自 Bohrium-2 容器/本机的运行时钟与 `20260901` 运行编号。按当前项目记录口径，本轮实际工作日期统一为 **2026-08-31**；这些 `2026-09-01` 值不表示未来计划或未发生的工作。
 
 后续新增优化记录统一使用 2026-08-31，直至项目运行环境的日期口径变更并在本文件中明确记录。
+
+---
+
+# 2026-08-31｜Bohrium-2 原生发布流程固化｜OPS-BOHRIUM-NATIVE-RELEASE
+
+## 任务目标
+
+把 Bohrium-2 当前手工部署过程固化为可重复、可回退、可审计的发布脚本，后续每次后端或前端优化都按同一流程执行，不直接覆盖运行数据，不依赖破坏性 Git 操作。
+
+## 新增文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\deploy\scripts\bohrium_native_release.sh
+```
+
+脚本职责：
+
+```text
+1. 校验 Git worktree、runtime.env、独立 Supervisor 配置、Python venv 和 SQLite 数据库存在。
+2. 为当前 SQLite 数据库创建带 UTC 时间戳的 logical backup。
+3. 备份 novel_imports 和 style_uploads 上传目录。
+4. 默认从 origin 指定分支 fetch；网络受限时支持 --bundle 离线 Git bundle。
+5. 只执行 git merge --ff-only，不改写历史，不覆盖工作树。
+6. 安装后端 requirements.txt。
+7. 执行 npm ci 和 npm run build-only，或使用明确的 --skip-frontend-build。
+8. 只重启 xuanqiong-wenshu-api 和 xuanqiong-wenshu-nginx 独立进程。
+9. 执行本机 /api/health 检查。
+10. 从 stdout/stderr 两个 Tunnel 日志中读取最新地址。
+11. 更新 run/release.json 的 commit、数据库 hash、Tunnel URL 和备份目录。
+```
+
+## 脚本校验
+
+```text
+bash -n deploy/scripts/bohrium_native_release.sh：通过
+```
+
+已修复的边界：
+
+```text
+Git worktree 的 .git 既可能是目录也可能是文件，因此使用 -e 检查。
+```
+
+## 后续执行标准
+
+```text
+Bohrium-2 修改源码
+  -> 补回归测试
+  -> 运行专项和全量门禁
+  -> 追加本任务文档实际结果
+  -> 单独 commit
+  -> push 到 origin/codex/bohrium-integration-20260831
+  -> Bohrium-2 fast-forward 或 bundle 同步
+  -> 执行 bohrium_native_release.sh
+  -> 校验 Supervisor、健康接口、首页、Tunnel
+  -> 记录提交号、数据 hash、备份目录和回退点
+```
+
+当前脚本不会自动操作 OpenClaw 的端口和进程，也不会删除旧发布目录或 SQLite 数据。固定公网域名、Named Tunnel 和 Bohrium 平台固定端口仍属于后续运维优化。
+
+## 本批次状态
+
+```text
+脚本实现：completed
+语法校验：passed
+GitHub 推送：待本批提交
+Bohrium-2 同步：待 SSH 恢复
+当前下一主线：CARD-007 Agent Durable Event Delivery 与跨实例恢复验收
+```
