@@ -68424,3 +68424,11 @@ GET /api/health -> 200
 ```
 
 旧的 `translate-properties-sussex-subscription.trycloudflare.com` 已返回 DNS NXDOMAIN，已明确废弃，不再作为当前入口。Quick Tunnel 本身仍是临时入口，重启后地址可变化；每次 Tunnel 重启都必须重新验证 DNS、首页和 /api/health，再更新 /opt/xuanqiong-wenshu/run/release.json 与本任务文档。
+
+---
+
+## 日期口径更正｜2026-08-31
+
+本接续文档中本轮部署阶段出现的 `2026-09-01` 目录名、日志时间和段落标签来自 Bohrium-2 容器/本机的运行时钟与 `20260901` 运行编号。按当前项目记录口径，本轮实际工作日期统一为 **2026-08-31**；这些 `2026-09-01` 值不表示未来计划或未发生的工作。
+
+后续新增优化记录统一使用 2026-08-31，直至项目运行环境的日期口径变更并在本文件中明确记录。
