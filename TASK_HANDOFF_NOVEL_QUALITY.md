@@ -68380,9 +68380,9 @@ production_readiness：false
 该组结果覆盖后端 SSE 建流预检、Agent 事件链路、前端工作区三栏重构和既有项目回归。测试运行出现的 Pinia injection warning、Browserslist 数据更新提醒均未造成失败。
 
 ```text
-最终验证提交：71a0a87
+最终验证提交：b0e6de4
 GitHub 推送：已执行
-Bohrium-2 fast-forward：待当前提交推送后执行
+Bohrium-2 fast-forward：待通过离线 Git bundle 对齐
 ```
 
 ---
@@ -68391,8 +68391,8 @@ Bohrium-2 fast-forward：待当前提交推送后执行
 
 ```text
 GitHub 分支：origin/codex/bohrium-integration-20260831
-GitHub HEAD：fc2209a8702b5e44d217f44189b560d9b170d485
-Bohrium-2 HEAD：fc2209a8702b5e44d217f44189b560d9b170d485
+GitHub HEAD：b0e6de4efa3cab03024469fb987a7ad9a7e3958f
+Bohrium-2 HEAD：a6d8772782f87f05715be5186bd83f8014f48511（待离线 bundle 对齐）
 远端工作树：clean
 远端 API：RUNNING
 远端 Nginx：RUNNING
@@ -68418,9 +68418,9 @@ Bohrium-2 HEAD：fc2209a8702b5e44d217f44189b560d9b170d485
 
 独立 Supervisor 重启 Tunnel 后，cloudflared 将新的 Quick Tunnel 信息写入 cloudflared-error.log，而旧日志文件仍保留了已经失效的历史地址。发布清单解析已改为同时读取 stdout/stderr 的最新地址；当前经 DNS 和 HTTP 双重验证的地址为：
 
-`	ext
+```text
 https://sugar-sorted-atlantic-whilst.trycloudflare.com
 GET /api/health -> 200
-`
+```
 
-旧的 	ranslate-properties-sussex-subscription.trycloudflare.com 已返回 DNS NXDOMAIN，已明确废弃，不再作为当前入口。Quick Tunnel 本身仍是临时入口，重启后地址可变化；每次 Tunnel 重启都必须重新验证 DNS、首页和 /api/health，再更新 /opt/xuanqiong-wenshu/run/release.json 与本任务文档。
+旧的 `translate-properties-sussex-subscription.trycloudflare.com` 已返回 DNS NXDOMAIN，已明确废弃，不再作为当前入口。Quick Tunnel 本身仍是临时入口，重启后地址可变化；每次 Tunnel 重启都必须重新验证 DNS、首页和 /api/health，再更新 /opt/xuanqiong-wenshu/run/release.json 与本任务文档。
