@@ -68413,3 +68413,14 @@ Bohrium-2 HEAD：fc2209a8702b5e44d217f44189b560d9b170d485
 当前公开入口仍为 Quick Tunnel 临时地址；固定域名、稳定 Tunnel 和 Bohrium 平台固定端口属于后续 CARD-007 运维项。之后每次优化必须遵循：Bohrium-2 修改 → 测试 → 任务文档记录 → 独立 commit → GitHub push → Bohrium-2 fast-forward → 健康检查 → 回退点记录。
 
 本项目仍未修改小说正文，也未生成十万字小说。
+
+## Quick Tunnel 地址更正（2026-08-31）
+
+独立 Supervisor 重启 Tunnel 后，cloudflared 将新的 Quick Tunnel 信息写入 cloudflared-error.log，而旧日志文件仍保留了已经失效的历史地址。发布清单解析已改为同时读取 stdout/stderr 的最新地址；当前经 DNS 和 HTTP 双重验证的地址为：
+
+`	ext
+https://sugar-sorted-atlantic-whilst.trycloudflare.com
+GET /api/health -> 200
+`
+
+旧的 	ranslate-properties-sussex-subscription.trycloudflare.com 已返回 DNS NXDOMAIN，已明确废弃，不再作为当前入口。Quick Tunnel 本身仍是临时入口，重启后地址可变化；每次 Tunnel 重启都必须重新验证 DNS、首页和 /api/health，再更新 /opt/xuanqiong-wenshu/run/release.json 与本任务文档。
