@@ -68066,10 +68066,79 @@ python -m py_compile backend/app/api/routers/agent.py：通过
 ## 提交与推送记录
 
 ```text
-提交号：待本批次提交后回填
+提交号：d080022
 推送目标：origin/codex/bohrium-integration-20260831
-推送状态：待执行
+推送状态：已推送，远端分支已创建
 回退点：codex/pre-bohrium-sync-20260901 + audit/rollback-snapshots/20260901/baseline-head.bundle
 ```
 
 ---
+
+
+---
+
+# 2026-09-01｜前端工作区布局优化批次｜LAYOUT-20260901
+
+## 任务目标
+
+针对 Agent 工作区“左侧标签页太多太大、层级混乱；中间对话框太小；日志框过大并占用中间阅读区域”的实际问题，完成布局重构：
+
+```text
+左侧：压缩宽度，按项目与内容、会话、工具、数据与候选分组，并支持折叠
+中间：作为唯一主阅读面，扩大聊天列，保留消息流、输入框和候选预览
+右侧：独立承载运行检查器、运行日志、运行详情和规则，不遮挡聊天正文
+响应式：大屏三栏、中屏聊天优先且活动栏下移、移动端单列
+``
+
+## 实际修改文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
+``
+
+## 实际变更
+
+### AgentWorkspaceShell
+
+- 桌面端布局改为 `minmax(176px, 13.5rem) minmax(0, 1fr) minmax(238px, 18rem)`。
+- 中间聊天列占剩余最大宽度，不再被左右面板挤压。
+- 左右栏设置独立滚动和视口高度上限，长列表不会把聊天内容推出屏幕。
+- 中屏将运行活动栏移到聊天下方，避免三栏同时压缩聊天。
+- 手机端切换为单列，取消 sticky 和固定高度。
+- 关键列增加 `min-width: 0`，避免长文本或表格撑破布局。
+
+### AgentWorkspace
+
+- 左侧内容改为四个 `details` 分组：
+  - 项目与内容：默认展开
+  - 会话：默认展开
+  - 项目工具：默认收起
+  - 数据与候选：默认收起
+- 右侧新增独立运行日志面板，运行日志只在右侧活动栏展示。
+- 运行检查器、运行日志、运行详情、执行规则和质量来源统一移出中间聊天阅读区。
+- 中间区域保留聊天消息、助手流式输出、输入框和候选预览。
+- 日志/事件仍保留数据兼容投影，但可见日志节点不再挤占聊天主区。
+
+## 验证结果
+
+```text
+工作台定向测试：2 files passed，17 tests passed
+npm run type-check：退出码 0
+``
+
+现有测试环境仍会出现 Pinia injection warning；这些是测试挂载提示，不影响退出码和断言结果。
+
+## 本批次回退点与推送
+
+```text
+上一批整合提交：d080022
+本批提交号：待提交后回填
+推送目标：origin/codex/bohrium-integration-20260831
+本批状态：待提交
+回退方式：回退到 d080022 即撤销本布局批次；不触碰数据库和运行数据
+``
+
+本批次未修改小说正文，未生成十万字小说。
