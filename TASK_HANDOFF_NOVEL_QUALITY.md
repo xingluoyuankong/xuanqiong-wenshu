@@ -71750,3 +71750,57 @@ backend/app/services/test_agent_conversation_runtime.py
 2. 验证原子完成提交后、Job acknowledge 前崩溃时的 stale Job 收敛。
 3. 每批继续独立代码/文档提交与推送。
 ```
+---
+
+# CARD-019 — 原子完成后中断的 stale visible_response Job 收敛（2026-09-01）
+
+## 根因
+
+CARD-018 已原子提交最终消息与 completed Run；若外层 Worker 在 Job=succeeded 确认前中断，Job 会保持 running/过期租约，而 completed Run 不再满足普通 Job claim 条件，导致 Job 永久滞留。
+
+## 实现
+
+新增 `AgentJobService.reconcile_completed_visible_response_jobs()`，仅处理：
+
+```text
+kind=visible_response
+Job=running 且 lease 已过期
+Run=completed
+Run.context_json 含 visible_response_final_message_id
+```
+
+满足时直接收敛：
+
+```text
+Job=succeeded
+result_json={"visible_response_job_id": JOB_ID}
+清除 lease
+```
+
+`AgentWorker.poll_once()` 先执行一次该收敛，再领取普通 Job。没有 final marker、非 visible_response、非 completed Run、未过期 lease 均不会被收敛或重新调用 Provider。
+
+## 验证
+
+```text
+stale acknowledgement 回归：1 passed，14 deselected，5.23s
+反向验证：禁用 final marker 条件后收敛失败（exit 1）；恢复后通过
+Worker 组：15 passed，58.11s
+后端全量：1432 passed，426.11s
+```
+
+断言收敛后：一条最终 assistant 消息、一次 assistant_completed、一次 run_completed，Job 变 succeeded，第二次 poll 返回 False。
+
+## 回退
+
+```text
+上一回退点：f25a255 docs: record card 018 atomic final response
+代码回退点：7f32512 fix: settle stale completed visible response jobs（已推送）
+本批文档提交：docs: record card 019 stale job settlement
+```
+
+## 下一任务
+
+```text
+1. 转回前端真实浏览器验收：/agent 浮卡遮挡、Inspector 展开、1280/1024/768/390 截图矩阵。
+2. 继续检查 Agent 页面右栏日志、活动区和全局导航的真实可读性。
+```
