@@ -73703,3 +73703,180 @@ Run-A 的 Artifact 质量阻断/预览/差异请求尚未返回时，用户切�
 4. 增加延迟 Promise 回归、故意移除代次检查的反向验证。
 5. 前端门禁后代码与文档继续分别提交、分别推送。
 ```
+
+---
+
+# CARD-037 — Run 切换后的 Artifact 异步结果代次隔离（2026-09-01）
+
+## 问题
+
+Agent 工作台的 Artifact 质量阻断、差异和预览状态部分是单值 UI 状态，而请求结果来自异步 API。旧实现没有记录请求开始时的 Run/Artifact 上下文，也没有在结果返回前验证当前选择是否仍然一致。
+
+真实时序：
+
+```text
+1. 用户查看 Run-A / Artifact-A。
+2. 点击“定位质量阻断”，请求发出但尚未返回。
+3. 用户立即切换到 Run-B。
+4. resetArtifactFacts() 清空当前 UI 状态。
+5. Run-A 请求晚返回。
+6. 旧结果重新写入全局 qualityBlockers。
+7. 当前页面是 Run-B，却显示 Artifact-A 的质量问题。
+```
+
+同根因也影响：
+
+```text
+loadRewriteInstructions
+compareArtifact
+compareArtifactWithVersion
+previewArtifact
+```
+
+如果只修质量阻断，旧差异或旧候选正文仍可能污染新 Run。
+
+## 修改文件
+
+```text
+frontend/src/features/agent/composables/useAgentWorkspaceRuntime.ts
+frontend/src/features/agent/composables/useAgentWorkspaceRuntime.spec.ts
+```
+
+## 具体实现
+
+新增 Artifact 视图代次：
+
+```text
+artifactViewGeneration
+ArtifactViewRequest = {
+  generation,
+  runId,
+  artifactId,
+}
+```
+
+每次新的 Artifact 单值请求都会创建新代次；`resetArtifactFacts()` 也会提升代次，使所有未完成旧请求失效。
+
+写回前统一检查：
+
+```text
+generation 仍是当前代次
+当前 selectedRunId 仍等于请求的 runId
+```
+
+质量阻断额外保持：
+
+```text
+旧请求不写 qualityBlockers
+旧请求不写 loading=false
+旧请求不追加“已载入”或“读取失败”活动
+```
+
+`loadArtifactFacts()` 对质量事实和 lineage 结果也增加代次检查，Run 切换后旧请求不会重新填充清空后的 Artifact fact map。
+
+四条单值路径均采用同一隔离策略：
+
+```text
+质量阻断：qualityBlockers
+重写指令：rewriteInstructions
+候选差异：artifactDiff
+候选正文：artifactPreview
+```
+
+当前 Run 的新请求仍按正常流程写回，不影响现有 Artifact 工作台功能。
+
+## 失败驱动回归
+
+新增测试：
+
+```text
+drops stale artifact blockers after switching the selected Run and keeps the new Run isolated
+```
+
+测试构造：
+
+```text
+Run-A / Artifact-A 的 blockers 请求延迟
+切换到 Run-B 并调用 resetArtifactFacts()
+释放 Run-A 旧 Promise
+断言 qualityBlockers 仍为空
+断言 loading 仍为 false
+断言旧请求没有追加成功活动
+发起 Run-B / Artifact-B 请求
+断言 Run-B 自己的 blocker 正常显示
+```
+
+旧实现会在旧 Promise 返回后把 `A-QUALITY-001` 写进当前列表；修复后旧结果被丢弃，Run-B 结果正常显示。
+
+## 反向验证
+
+临时移除质量阻断写回前的代次判断：
+
+```text
+旧 Run-A blocker 重新写入 qualityBlockers
+测试失败：期望 []，实际 [Run-A blocker]
+REVERSE_EXIT=1
+```
+
+恢复代次检查后：
+
+```text
+RESTORED_EXIT=0
+9 passed
+```
+
+## 验证
+
+```text
+定向 runtime composable：9 passed
+
+npm run type-check：通过
+
+npm run test:run：74 files / 435 tests passed，245.20s
+
+npm run build-only：通过，38.75s
+```
+
+最终 type-check 之前曾捕获测试夹具缺少 `AgentQualityBlocker` 类型导入；补齐导入后重新执行完整门禁，以上结果为最终源码的独立结果。
+
+## 运行状态
+
+本批期间后端通过前台可观测 Uvicorn 会话恢复：
+
+```text
+PID 40100
+127.0.0.1:8013 LISTENING
+GET /health → HTTP 200
+响应：{"status":"healthy","app":"玄穹文枢 API","version":"1.0.0"}
+```
+
+前端：
+
+```text
+127.0.0.1:5174
+GET /agent → HTTP 200
+```
+
+## 回退
+
+```text
+上一回退点：cacc94a docs: record card 036 chat priority breakpoint
+本批代码提交：fa79e5a fix: drop stale artifact responses（已推送）
+本批文档提交：待本次文档提交生成
+回退方式：git revert fa79e5a
+```
+
+## 下一任务
+
+```text
+CARD-038：
+1. 继续真实浏览器多视口验收，优先复用当前已恢复的前端/后端服务。
+2. 验证 1280 / 1024 / 960 / 900 / 768 / 390 视口下：
+   - 960px 聊天优先单列断点；
+   - 左侧项目内容树内部滚动；
+   - 中央聊天不被日志或侧栏挤压；
+   - 右侧日志底部尾随与上翻保护；
+   - Inspector Attempt 摘要折行；
+   - Run 切换后 Artifact 结果不串线。
+3. 如果视觉通道仍不可复核，则继续审查 Artifact 状态按 Run/Artifact 双键隔离的剩余边界。
+```
