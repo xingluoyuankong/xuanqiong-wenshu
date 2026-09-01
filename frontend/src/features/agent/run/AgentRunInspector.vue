@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AgentProviderProvenance, AgentRun, AgentRunCommandType, AgentRunStep, AgentStateProjection, AgentToolResult } from '@/api/agent'
+import type { AgentProviderAttemptSnapshot, AgentProviderProvenance, AgentRun, AgentRunCommandType, AgentRunStep, AgentStateProjection, AgentToolResult } from '@/api/agent'
 import type { SSEConnectionState } from '@/utils/sseStream'
 import AgentRunControlBar from '@/features/agent/AgentRunControlBar.vue'
 import AgentRunCommandHistory from '@/features/agent/AgentRunCommandHistory.vue'
@@ -48,6 +48,18 @@ const providerStatus = (called?: boolean | null, fallback?: string | null) =>
       : called === false
         ? '未调用 Provider'
         : '尚无运行事实'
+const providerAttemptSummary = (snapshot?: AgentProviderAttemptSnapshot | null) => {
+  const attempts = snapshot?.provider_attempts || []
+  if (!attempts.length) return ''
+  const last = attempts[attempts.length - 1] || {}
+  const selected = snapshot?.selected_provider_attempt
+  const parts = [`${attempts.length} 次调用`]
+  if (typeof selected === 'number') parts.push(`已选 #${selected}`)
+  if (snapshot?.fallback_used) parts.push('含 fallback')
+  const errorCategory = typeof last.error_category === 'string' ? last.error_category : ''
+  if (last.status === 'failed' && errorCategory) parts.push(`最后失败：${errorCategory}`)
+  return parts.join(' · ')
+}
 </script>
 
 <template>
@@ -66,9 +78,9 @@ const providerStatus = (called?: boolean | null, fallback?: string | null) =>
           <dt>事件账本</dt><dd data-testid="agent-sequence-gap-status">{{ gapStatus(gapRepairState) }}</dd>
         </template>
         <template v-if="provenance">
-          <dt>规划 Provider</dt><dd data-testid="agent-planner-provider-provenance">{{ providerStatus(provenance.planner_provider_called, provenance.planner_provider_fallback_reason) }}</dd>
-          <dt>回复 Provider</dt><dd data-testid="agent-response-provider-provenance">{{ providerStatus(provenance.response_provider_called, provenance.response_provider_fallback_reason) }}</dd>
-          <dt>候选正文 Provider</dt><dd data-testid="agent-candidate-writer-provider-provenance">{{ providerStatus(provenance.candidate_writer_provider_called, provenance.candidate_writer_provider_fallback_reason) }}<span v-if="provenance.candidate_writer_model_ref"> · {{ provenance.candidate_writer_model_ref }}</span></dd>
+          <dt>规划 Provider</dt><dd data-testid="agent-planner-provider-provenance">{{ providerStatus(provenance.planner_provider_called, provenance.planner_provider_fallback_reason) }}<span v-if="providerAttemptSummary(provenance.planner_provider_attempts)" data-testid="agent-planner-provider-attempts"> · {{ providerAttemptSummary(provenance.planner_provider_attempts) }}</span></dd>
+          <dt>回复 Provider</dt><dd data-testid="agent-response-provider-provenance">{{ providerStatus(provenance.response_provider_called, provenance.response_provider_fallback_reason) }}<span v-if="providerAttemptSummary(provenance.response_provider_attempts)" data-testid="agent-response-provider-attempts"> · {{ providerAttemptSummary(provenance.response_provider_attempts) }}</span></dd>
+          <dt>候选正文 Provider</dt><dd data-testid="agent-candidate-writer-provider-provenance">{{ providerStatus(provenance.candidate_writer_provider_called, provenance.candidate_writer_provider_fallback_reason) }}<span v-if="provenance.candidate_writer_model_ref"> · {{ provenance.candidate_writer_model_ref }}</span><span v-if="providerAttemptSummary(provenance.candidate_writer_provider_attempts)" data-testid="agent-candidate-writer-provider-attempts"> · {{ providerAttemptSummary(provenance.candidate_writer_provider_attempts) }}</span></dd>
         </template>
       </dl>
       <AgentRunControlBar :run="run" :pending="Boolean(run && controlPending)" :allowed-commands="state?.allowed_commands || run?.allowed_commands || []" @command="emit('command', $event)" />

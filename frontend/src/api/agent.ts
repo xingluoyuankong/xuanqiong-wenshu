@@ -98,19 +98,23 @@ export interface AgentMessage {
   sequence: number
   created_at: string
 }
+export interface AgentProviderAttemptSnapshot {
+  provider_attempts: Array<Record<string, unknown>>
+  selected_provider_attempt?: number | null
+  fallback_used?: boolean
+}
+
 export interface AgentProviderProvenance {
   planner_provider_called: boolean | null
   planner_provider_fallback_reason: string | null
+  planner_provider_attempts?: AgentProviderAttemptSnapshot | null
   response_provider_called: boolean | null
   response_provider_fallback_reason: string | null
+  response_provider_attempts?: AgentProviderAttemptSnapshot | null
   candidate_writer_provider_called: boolean | null
   candidate_writer_provider_fallback_reason: string | null
   candidate_writer_model_ref: string | null
-  candidate_writer_provider_attempts?: {
-    provider_attempts: Array<Record<string, unknown>>
-    selected_provider_attempt?: number | null
-    fallback_used?: boolean
-  } | null
+  candidate_writer_provider_attempts?: AgentProviderAttemptSnapshot | null
 }
 
 export interface AgentRun {

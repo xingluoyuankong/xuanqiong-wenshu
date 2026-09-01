@@ -91,8 +91,10 @@ describe('AgentAPI timeline and artifact diff', () => {
       json: async () => ({
         planner_provider_called: true,
         planner_provider_fallback_reason: null,
+        planner_provider_attempts: { provider_attempts: [{ status: 'succeeded' }], selected_provider_attempt: 1, fallback_used: false },
         response_provider_called: false,
         response_provider_fallback_reason: 'ProviderTimeout',
+        response_provider_attempts: { provider_attempts: [{ status: 'failed', error_category: 'TIMEOUT' }], selected_provider_attempt: null, fallback_used: false },
         candidate_writer_provider_called: null,
         candidate_writer_provider_fallback_reason: null,
         candidate_writer_model_ref: null,
@@ -106,8 +108,10 @@ describe('AgentAPI timeline and artifact diff', () => {
     expect(result).toEqual({
       planner_provider_called: true,
       planner_provider_fallback_reason: null,
+      planner_provider_attempts: { provider_attempts: [{ status: 'succeeded' }], selected_provider_attempt: 1, fallback_used: false },
       response_provider_called: false,
       response_provider_fallback_reason: 'ProviderTimeout',
+      response_provider_attempts: { provider_attempts: [{ status: 'failed', error_category: 'TIMEOUT' }], selected_provider_attempt: null, fallback_used: false },
       candidate_writer_provider_called: null,
       candidate_writer_provider_fallback_reason: null,
       candidate_writer_model_ref: null,
