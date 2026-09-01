@@ -3,6 +3,7 @@ import asyncio
 import logging
 import os
 import threading
+import time
 from contextlib import contextmanager
 
 from pathlib import Path
@@ -22,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 
 _MIGRATION_THREAD_LOCK = threading.Lock()
+_MIGRATION_LOCK_WAIT_SECONDS = 60.0
+_MIGRATION_LOCK_RETRY_SECONDS = 0.1
 
 
 def _migration_lock_path() -> Path:
@@ -57,8 +60,22 @@ def _migration_lock():
                 lock_file.seek(0)
                 lock_file.write(b"0")
                 lock_file.flush()
-                lock_file.seek(0)
-                msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+                # ``LK_LOCK`` can raise EDEADLK instead of waiting when a
+                # second Uvicorn process starts against the same fresh SQLite
+                # database.  Use an explicit non-blocking retry loop so the
+                # loser waits for the first process to finish Alembic rather
+                # than aborting application startup.
+                deadline = time.monotonic() + _MIGRATION_LOCK_WAIT_SECONDS
+                while True:
+                    try:
+                        lock_file.seek(0)
+                        msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                        break
+                    except OSError as exc:
+                        retryable = exc.errno in {13, 36} or getattr(exc, "winerror", None) in {32, 33, 36}
+                        if not retryable or time.monotonic() >= deadline:
+                            raise
+                        time.sleep(_MIGRATION_LOCK_RETRY_SECONDS)
                 try:
                     yield
                 finally:

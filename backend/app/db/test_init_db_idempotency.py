@@ -1,3 +1,7 @@
+import os
+import sys
+import types
+
 import pytest
 from sqlalchemy.exc import IntegrityError
 
@@ -152,3 +156,24 @@ async def _assert_writing_v2_unchanged(session, expected_content):
     await init_module._ensure_writing_v2_prompt_seed(session)
     assert session.records["writing_v2"] == expected_content
     assert session.added == []
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows msvcrt file-lock behavior")
+def test_windows_migration_lock_retries_edeadlk_before_entering_critical_section(tmp_path, monkeypatch):
+    """A second Uvicorn startup must wait through Windows Errno 36, not exit."""
+    attempts: list[int] = []
+    fake_msvcrt = types.SimpleNamespace(LK_NBLCK=1, LK_UNLCK=2)
+
+    def locking(_fd, mode, _size):
+        attempts.append(mode)
+        if mode == fake_msvcrt.LK_NBLCK and attempts.count(fake_msvcrt.LK_NBLCK) == 1:
+            raise OSError(36, "Resource deadlock avoided")
+
+    fake_msvcrt.locking = locking
+    monkeypatch.setitem(sys.modules, "msvcrt", fake_msvcrt)
+    monkeypatch.setattr(init_module.settings, "database_url", f"sqlite+aiosqlite:///{(tmp_path / 'retry-lock.sqlite').as_posix()}")
+    monkeypatch.setattr(init_module, "_MIGRATION_LOCK_RETRY_SECONDS", 0)
+
+    with init_module._migration_lock():
+        assert attempts == [fake_msvcrt.LK_NBLCK, fake_msvcrt.LK_NBLCK]
+
+    assert attempts == [fake_msvcrt.LK_NBLCK, fake_msvcrt.LK_NBLCK, fake_msvcrt.LK_UNLCK]
