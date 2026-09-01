@@ -70778,3 +70778,425 @@ CARD-014：completed
 3. 验证 lease 过期 Worker 被恢复器重新领取的跨进程状态链。
 4. 完成 Worker 第二阶段后，进行真实浏览器布局验收和优化：左侧标签压缩、聊天区宽度、日志右侧独立滚动。
 ```
+
+
+---
+
+# 2026-09-01｜CARD-015 前端子批次｜Agent 工作区三栏布局实测重构
+
+## 1. 本批任务目标
+
+落实用户对 Agent 小说生成主界面的直接要求：
+
+```text
+左侧标签页/项目内容不要过宽、过大、过乱
+中间聊天阅读区要成为唯一主阅读面并扩大
+运行日志不要挤占中间对话
+日志放在右侧并保持独立滚动
+运行检查器等诊断信息按需展开，不抢占聊天空间
+```
+
+本批不是只调 CSS 数值，而是先使用真实浏览器测量当前运行页面，再依据实际覆盖关系重构布局规则，并完成真实浏览器复测。
+
+## 2. 实际浏览器首轮审查
+
+浏览器任务：
+
+```text
+Tabbit task：xuanqiong-agent-layout-audit
+页面：http://127.0.0.1:5174/agent
+视口：1440 × 980
+```
+
+首轮页面曾短暂显示空白，进一步 reload 后发现是页面懒加载尚未完成；console 只有 Vite connecting/connected，没有 pageerror 或 requestfailed。页面随后正常渲染，说明不是应用运行时崩溃。
+
+首轮真实尺寸：
+
+```text
+全局导航：72px
+Agent layout：216px / 800px / 288px
+左侧栏：216px
+中央聊天：800px
+右侧活动栏：288px
+聊天消息容器：763px 宽，627px 高，scrollHeight=1524px
+运行日志：235px 高，scrollHeight=6644px
+右侧活动栏：scrollHeight=2149px
+```
+
+首轮截图已保留于 Tabbit 运行产物；首轮测量明确显示：
+
+```text
+左侧与右侧固定列过宽
+中央聊天可用宽度被压缩
+日志虽然已经位于右栏，但右栏其它诊断内容把日志推到较下方
+```
+
+## 3. 实际根因
+
+仓库存在两套同名布局 CSS：
+
+### 3.1 壳层规则
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.vue
+```
+
+原壳层规则：
+
+```css
+grid-template-columns: minmax(176px, 13.5rem) minmax(0, 1fr) minmax(238px, 18rem);
+```
+
+### 3.2 页面重复规则
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+重复规则：
+
+```css
+.agent-layout {
+  grid-template-columns: minmax(210px, 0.85fr) minmax(0, 1.8fr) minmax(210px, 0.75fr);
+}
+```
+
+页面还存在重复的 `.agent-sidebar/.agent-main/.agent-activity` display/gap 定义，以及 `1050px` 媒体查询对 `.agent-layout` 的重新排列。
+
+真实浏览器 computed style 显示最终列为：
+
+```text
+216px 800px 288px
+```
+
+因此问题不是用户感觉偏差，而是同名页面规则覆盖壳层设计，导致布局事实与组件职责不一致。
+
+## 4. 实际修改文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.spec.ts
+```
+
+本批没有修改后端、数据库或小说正文。
+
+## 5. 实现内容
+
+### 5.1 三栏布局职责集中到 AgentWorkspaceShell
+
+壳层现在统一管理三栏尺寸：
+
+```css
+grid-template-columns: minmax(160px, 11rem) minmax(0, 1fr) minmax(220px, 15rem);
+```
+
+在中等桌面宽度下：
+
+```css
+grid-template-columns: minmax(156px, 10.5rem) minmax(0, 1fr) minmax(208px, 14rem);
+```
+
+页面组件不再重复定义 `.agent-layout` 的列数、间距和响应式排列，避免后续页面级样式再次覆盖壳层。
+
+### 5.2 删除 AgentWorkspace.vue 重复布局规则
+
+移除：
+
+```text
+页面级 .agent-layout 三列 grid-template-columns
+页面级 .agent-sidebar/.agent-main/.agent-activity display/gap 重复定义
+1050px 下将中间栏挪到第一行的重复媒体查询
+650px 下重复的一列布局声明
+```
+
+保留页面业务样式：
+
+```text
+侧栏 label/select 外观
+聊天 composer 外观
+时间线/审批/运行详情业务样式
+移动端 hero/composer 排列
+```
+
+### 5.3 压缩右侧日志
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+日志容器由：
+
+```css
+max-height: min(15rem, 24vh);
+```
+
+调整为：
+
+```css
+max-height: min(11rem, 18vh);
+overflow-y: auto;
+```
+
+这使日志框保持紧凑，长日志在自己的滚动容器中查看，不把大量事件文本推高右栏或挤压中间对话。
+
+### 5.4 运行检查器默认折叠
+
+原来 `AgentRunInspector` 直接占据右栏顶部并展开全部状态、Provider、步骤、命令和工具结果。
+
+现在包裹为：
+
+```html
+<details class="workspace-section workspace-inspector-section" data-testid="agent-inspector-section">
+  <summary>
+    <span>当前运行</span>
+    <small>状态 · 进度</small>
+  </summary>
+  <!-- AgentRunInspector 仍保留完整事实与控制能力 -->
+</details>
+```
+
+默认状态：
+
+```text
+collapsed = true
+摘要显示当前运行状态与百分比
+展开后保留原有控制、恢复、重连、Provider、步骤和工具结果
+```
+
+因此诊断信息仍然完整，但不会默认抢占右栏垂直空间。
+
+### 5.5 运行日志优先于运行检查器
+
+右侧活动栏顺序现在为：
+
+```text
+1. 本会话运行选择器
+2. 运行日志（固定高度、独立滚动）
+3. 当前运行（默认折叠）
+4. 运行详情（计划、审批、候选）
+```
+
+测试与浏览器复测均确认：
+
+```text
+agent-log-panel 出现在 agent-inspector-section 之前
+日志属于 .agent-activity 右侧轨道
+聊天区内 data-testid=agent-process-stream 继续 display:none
+```
+
+## 6. 新增布局回归约束
+
+`AgentWorkspaceShell.spec.ts` 新增 CSS contract：
+
+```text
+壳层必须包含紧凑桌面三栏：
+minmax(160px, 11rem) / 1fr / minmax(220px, 15rem)
+
+中等宽度必须包含：
+minmax(156px, 10.5rem) / 1fr / minmax(208px, 14rem)
+
+AgentWorkspace.vue 不得重新出现旧的：
+minmax(210px, 0.85fr) / 1.8fr / minmax(210px, 0.75fr)
+
+日志必须限制为：
+max-height: min(11rem, 18vh)
+
+必须存在默认折叠的 agent-inspector-section
+agent-log-panel 的源码位置必须早于 agent-inspector-section
+```
+
+这些断言直接防止“页面重复 CSS 回归”和“日志重新被放回中间/检查器前面”。
+
+## 7. 实际验证结果
+
+### 7.1 前端布局定向回归
+
+```text
+npm run test:run -- src/features/agent/AgentWorkspaceShell.spec.ts src/views/AgentWorkspace.spec.ts
+结果：2 files passed，18 tests passed
+```
+
+### 7.2 真实浏览器复测
+
+视口仍为：
+
+```text
+1440 × 980
+```
+
+修复后 computed layout：
+
+```text
+Agent layout：176px / 888px / 240px
+左侧栏：176px
+中央聊天：888px
+右侧活动栏：240px
+```
+
+对比：
+
+```text
+左栏：216px -> 176px，减少 40px
+聊天：800px -> 888px，增加 88px
+右栏：288px -> 240px，减少 48px
+```
+
+修复后日志：
+
+```text
+log height：235px -> 176px
+log overflowY：auto
+log scrollHeight：6753px
+```
+
+修复后运行检查器：
+
+```text
+agent-inspector-section open=false
+摘要高度约 40px
+完整 Inspector 内容仅在展开后显示
+```
+
+修复后右栏位置：
+
+```text
+日志 panel y=320
+日志 list y=399
+折叠运行检查器 y=597
+```
+
+这证明日志位于检查器之前，且没有进入中央聊天列。
+
+### 7.3 真实浏览器最终截图
+
+最终截图路径：
+
+```text
+C:\Users\XZXyuan\AppData\Local\Tabbit\User Data\LocalAgent\Runtime\artifacts\task-fb4a85cd-c43a-4fd4-9052-612ba4a567d4\xuanqiong-agent-layout-audit-final-shot-d3af94e5-fd72-442c-9491-1ec606852027.png
+```
+
+视觉检查结论：
+
+```text
+左侧导航和项目控制明显收窄
+中央“创作对话”成为页面主视觉区
+聊天文本横向可读范围扩大
+日志位于右侧，不再占用聊天中间区域
+运行检查器折叠后不再吞掉右栏垂直空间
+```
+
+## 8. 受控反向验证
+
+临时把壳层新网格：
+
+```css
+grid-template-columns: minmax(160px, 11rem) minmax(0, 1fr) minmax(220px, 15rem);
+```
+
+替换回旧网格：
+
+```css
+grid-template-columns: minmax(176px, 13.5rem) minmax(0, 1fr) minmax(238px, 18rem);
+```
+
+运行：
+
+```text
+npm run test:run -- src/features/agent/AgentWorkspaceShell.spec.ts -t 紧凑侧栏
+```
+
+实际结果：
+
+```text
+退出码 1
+紧凑布局 CSS contract 失败
+```
+
+随后 finally 自动恢复 `AgentWorkspaceShell.vue`。
+
+反向验证日志：
+
+```text
+D:\小说写作\xuanqiong-wenshu\logs\live\agent-layout-reverse-validation.log
+```
+
+恢复源码后的定向测试重新通过。
+
+## 9. 双端标准门禁
+
+前端类型检查：
+
+```text
+npm run type-check
+结果：通过
+```
+
+前端全量测试：
+
+```text
+npm run test:run
+结果：74 files passed，428 tests passed，395.68s
+```
+
+前端生产构建：
+
+```text
+npm run build-only
+结果：通过，Vite build 64s 左右
+```
+
+后端本批未改业务代码；最新后端全量基线：
+
+```text
+1427 passed in 342.45s
+```
+
+## 10. 当前状态
+
+```text
+三栏重复 CSS 覆盖：completed
+左栏 216px -> 176px：completed and browser-verified
+中央聊天 800px -> 888px：completed and browser-verified
+右栏 288px -> 240px：completed and browser-verified
+日志从中间聊天区隔离：completed
+日志独立滚动：completed
+日志优先于运行检查器：completed
+运行检查器默认折叠：completed
+运行详情按需展开：completed
+移动端 880px/650px 响应式：保留并通过现有组件测试
+真实浏览器截图验收：completed
+真实浏览器交互点击展开检查器后的完整功能回归：pending
+不同视口 1280/1024/768/390 的截图矩阵：pending
+CARD-015：completed
+```
+
+## 11. 提交、推送与回退
+
+```text
+上一回退点：99c1211
+本批代码与测试提交：2277a38（fix: prioritize agent chat layout，已推送）
+本批文档记录提交：本次提交后回填
+推送分支：origin/codex/bohrium-integration-20260831
+数据库：未修改
+小说正文：未修改
+浏览器截图和反向验证日志：未纳入 Git
+```
+
+## 12. 下一任务目标
+
+继续前端真实浏览器验收，再恢复后端 Worker 深度闭环：
+
+```text
+1. 在真实浏览器中点击 agent-inspector-section，验证展开后运行控制、步骤、Provider 和工具结果仍可操作。
+2. 对 1280、1024、768、390 视口运行布局截图矩阵，确认左栏/聊天/右栏在断点处没有重叠或横向溢出。
+3. 检查“后台任务”全局导航与 Agent 右侧日志是否仍有重复信息，进一步压缩信息密度。
+4. 后端继续 Worker 第二阶段：第二次 --once 领取 visible_response Job，验证 assistant_message/run_completed/Job succeeded。
+5. 继续完善任务接续文档，每一批代码、测试、文档保持独立提交、推送和回退点。
+```
