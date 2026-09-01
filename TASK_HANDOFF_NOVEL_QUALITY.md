@@ -74276,3 +74276,205 @@ CARD-038、CARD-039 的代码均已独立提交并推送；
 窄屏下聊天优先显示，侧栏按顺序折叠到下方；
 现有 435 个前端测试和构建门禁保持通过。
 ```
+
+# CARD-040：Agent 工作台聊天主区优先布局
+
+## 本批目标
+
+直接处理用户反馈的三项界面问题：左侧项目/会话/工具/数据标签太多、太大、太乱；中央对话区可用空间太小；运行日志区域过大并干扰聊天阅读。此次只调整 Agent 工作台真实布局和密度，不改聊天业务逻辑、SSE 数据协议和后端接口。
+
+## 失败驱动验证
+
+先把 CSS contract 测试改成目标布局，再在旧实现上运行：
+
+```text
+AgentWorkspaceShell.spec.ts：8 tests
+6 passed，2 failed
+```
+
+旧实现缺少以下目标约束：
+
+```text
+更窄的左右轨道
+更小的日志窗口
+更大的聊天主区高度
+更紧凑的 section summary
+```
+
+失败结果证明测试先锁定了用户要求，而不是改完样式再补一个永远通过的测试。
+
+## 实际代码变更
+
+### 1. 壳层扩大中央聊天可用宽度
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.vue
+```
+
+宽屏三列从：
+
+```css
+grid-template-columns: minmax(160px, 11rem) minmax(0, 1fr) minmax(220px, 15rem);
+```
+
+调整为：
+
+```css
+grid-template-columns: minmax(132px, 9rem) minmax(0, 1fr) minmax(176px, 12rem);
+```
+
+中窄三列从：
+
+```css
+grid-template-columns: minmax(156px, 10.5rem) minmax(0, 1fr) minmax(208px, 14rem);
+```
+
+调整为：
+
+```css
+grid-template-columns: minmax(124px, 8.5rem) minmax(0, 1fr) minmax(168px, 11rem);
+```
+
+中央列仍使用 `minmax(0, 1fr)`，保证长文本和日志不会把聊天列撑破。既有 `960px` 聊天优先单列断点保持不变。
+
+### 2. 左侧标签和内容列表压缩
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+调整：
+
+```text
+section summary 最小高度：2.15rem → 1.9rem
+summary 内边距：0.52rem 0.65rem → 0.4rem 0.5rem
+section body 间距：0.55rem → 0.4rem
+section body 内边距：0 0.35rem 0.4rem → 0 0.25rem 0.3rem
+工具/时间线内部滚动上限：15rem → 10rem
+```
+
+这样左栏保留项目、会话、工具、数据四个可折叠功能组，但默认收纳非当前组，展开后内部内容也不会无限占高。
+
+### 3. 日志独立窗口进一步收窄
+
+```css
+.workspace-log-list {
+  max-height: min(8rem, 14vh);
+  overflow-y: auto;
+}
+```
+
+日志仍然位于 `activity` 独立插槽和右侧 rail，不写入聊天消息 DOM；只缩小可视窗口并保留独立滚动，长日志不会把中央聊天文字推走。
+
+### 4. 增大聊天主区
+
+```text
+聊天列最小高度：min(72vh, 56rem) → min(78vh, 60rem)
+聊天面板最小高度：同步提高到 min(78vh, 60rem)
+消息区最小高度：min(24rem, 42vh) → min(30rem, 52vh)
+消息区最大高度：min(64vh, 52rem) → min(70vh, 58rem)
+```
+
+移动端原有独立的 16rem/55vh 消息区约束保留，避免小屏输入框和消息区同时挤压。
+
+## 回归测试
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.spec.ts
+```
+
+新增/更新 CSS contract：
+
+```text
+左右 rail 宽度目标
+聊天主区高度目标
+日志窗口高度目标
+section summary 密度目标
+960px 和 650px 聊天优先顺序
+日志面板在 Inspector 之前且位于 activity 区
+日志有界渲染与底部尾随保护
+```
+
+修复后定向结果：
+
+```text
+8 passed
+```
+
+## 全量前端门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+```
+
+```text
+通过
+```
+
+```powershell
+npm run test:run
+```
+
+```text
+74 files passed
+436 tests passed
+```
+
+```powershell
+npm run build-only
+```
+
+```text
+4905 modules transformed
+built successfully
+```
+
+最终门禁均基于本批最终源码执行；Vitest 中已有的 Pinia 注入提示和业务失败场景 stderr 只属于测试夹具日志，不影响通过结果。
+
+## 浏览器证据状态
+
+本批完成了真实 DOM/CSS contract、单元回归和生产构建验证。真实浏览器多视口截图与手势证据继续受当前桌面浏览器兼容通道限制，仍标记为 pending，不把源码断言冒充截图证据。服务可直接查看：
+
+```text
+前端：http://127.0.0.1:5174/agent
+后端：http://127.0.0.1:8013/health
+```
+
+## 提交、推送与回退
+
+```text
+上一回退点：b1933ed docs: record card 039 plan projection
+本批代码提交：fb2387d fix: prioritize agent chat workspace layout
+代码已推送：origin/codex/bohrium-integration-20260831
+本批文档提交：待本次文档提交生成
+```
+
+回退方式：
+
+```text
+git revert fb2387d
+```
+
+文档与代码分开回退；回退代码不会触碰 CARD-038、CARD-039 的后端提交。
+
+## 下一任务：CARD-041（前端 Artifact 状态并发隔离）
+
+在布局主区完成后，继续修复前端 Artifact facts 与操作状态的竞态，避免界面看起来变大了但数据仍串线：
+
+```text
+1. 为 run_id + artifact_id + action 建立请求上下文和独立 generation；
+2. 同一 Artifact 重复 facts 请求只保留最新结果，旧请求不得覆盖新结果；
+3. loading 使用 pending 计数收敛，任何旧请求结束都不能让新请求永久卡在 loading；
+4. reset、Run 切换和 selectedRunId 为空时使所有旧请求失效；
+5. lineage facts 增加独立 loading/error 状态，不能用“没有结果”掩盖等待或失败；
+6. blocker、rewrite、diff、preview 增加结果归属 Artifact，失败时清空旧结果；
+7. AgentArtifactWorkbench 的按钮按 Artifact 局部禁用，并显示当前结果归属；
+8. 每个竞态先新增旧实现失败测试，再实现、反向破坏验证、执行 type-check/test/build，独立提交代码和文档并推送。
+```
