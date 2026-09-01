@@ -68690,3 +68690,87 @@ GitHub 推送：已推送，提交 8dd4abc
 ```
 
 本批次未修改小说正文，未生成小说内容。
+
+---
+
+# 2026-09-01｜CARD-007 后端子批次｜HTTP 非法 Last-Event-ID 输入矩阵
+
+## 任务目标
+
+继续强化 Agent SSE 的真实 HTTP 输入边界，验证非法或异常格式的 `Last-Event-ID` 在 FastAPI/Starlette 层不会造成错误游标、错误 422 或数据库整数异常。
+
+## 实际修改文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_stream_http.py
+```
+
+新增 HTTP 层参数化覆盖：
+
+```text
+空 Header
+空白 Header
+普通非法字符串
+负数
+带加号数字
+超出 SQL INTEGER 上限的数字
+合法 0
+```
+
+契约：
+
+```text
+非法 Header -> 使用 after_sequence=0
+合法 0 -> 使用游标 0
+返回 200 text/event-stream
+终态事件全部可回放
+```
+
+## 实际验证结果
+
+HTTP 专项：
+
+```text
+python -m pytest -q app/api/routers/test_agent_stream_http.py
+结果：10 passed in 8.94s
+```
+
+CARD-007 后端相关专项：
+
+```text
+python -m pytest -q app/api/routers/test_agent_stream_resume.py app/api/routers/test_agent_stream_http.py app/api/routers/test_agent_stream_pagination.py app/agent/test_work_trace_contract.py app/services/test_agent_runtime.py app/api/routers/test_agent_runtime_route.py
+结果：72 passed
+```
+
+当前后端全量：
+
+```text
+python -m pytest -q
+结果：1413 passed in 318.61s（5分18秒）
+```
+
+## 状态变化
+
+```text
+HTTP 层合法 Last-Event-ID：completed
+HTTP 层非法 Last-Event-ID：completed
+空白/负数/符号/超大 Header：completed
+SSE 事件输出与终态关闭：completed
+终态 499/500/501/1000 分页：completed
+跨进程 Worker replay：pending
+数据库异常矩阵：pending
+固定公网入口：pending
+CARD-007：in_progress
+```
+
+## 提交与回退
+
+```text
+上一回退点：18f2cbd
+本批提交：待提交后回填
+推送目标：origin/codex/bohrium-integration-20260831
+本批数据：未修改
+小说正文：未修改
+```
+
+下一批继续后端：跨进程 Worker replay、数据库异常和认证失败矩阵；前端细化在后端事件投递验收完成后继续。

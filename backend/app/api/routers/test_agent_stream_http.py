@@ -127,3 +127,54 @@ async def test_agent_stream_http_rejects_unknown_run_without_opening_sse(task_se
         assert response.json()["detail"]["code"] == "AGENT_NOT_FOUND"
     finally:
         app.dependency_overrides.pop(get_current_user, None)
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("last_event_id", "expected_sequences"),
+    [
+        ("", [1, 2]),
+        ("   ", [1, 2]),
+        ("bad-header", [1, 2]),
+        ("-1", [1, 2]),
+        ("+10", [1, 2]),
+        ("2_147_483_648", [1, 2]),
+        ("0", [1, 2]),
+    ],
+)
+async def test_agent_stream_http_normalizes_invalid_last_event_id(
+    task_session, monkeypatch, last_event_id: str, expected_sequences: list[int]
+):
+    user = await _user(task_session, 1330 + len(expected_sequences), f"stream-http-cursor-{len(expected_sequences)}")
+    runtime = AgentRuntimeService(task_session)
+    agent_session = await runtime.create_session(user_id=user.id)
+    run = await runtime.create_run(session_id=agent_session.id, user_id=user.id)
+    await runtime.append_event(
+        run_id=run.id, user_id=user.id, event_type="run_started", summary="first", data={"phase": "observe"}
+    )
+    await runtime.update_run(run_id=run.id, user_id=user.id, status="completed", progress=100)
+    await runtime.append_event(
+        run_id=run.id, user_id=user.id, event_type="run_completed", summary="done", data={"phase": "finish"}
+    )
+
+    monkeypatch.setattr(agent_router, "AsyncSessionLocal", async_sessionmaker(task_session.bind, expire_on_commit=False))
+
+    async def override_current_user():
+        return SimpleNamespace(id=user.id)
+
+    app.dependency_overrides[get_current_user] = override_current_user
+    try:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=True)
+        async with httpx.AsyncClient(transport=transport, base_url="http://agent-http") as client:
+            response = await client.get(
+                f"/api/agent/sessions/{agent_session.id}/runs/{run.id}/stream?after_sequence=0",
+                headers={"Last-Event-ID": last_event_id},
+            )
+
+        assert response.status_code == 200
+        emitted = [
+            int(line.removeprefix("id: "))
+            for line in response.text.splitlines()
+            if line.startswith("id: ")
+        ]
+        assert emitted == expected_sequences
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
