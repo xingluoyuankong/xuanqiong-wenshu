@@ -68774,3 +68774,90 @@ CARD-007：in_progress
 ```
 
 下一批继续后端：跨进程 Worker replay、数据库异常和认证失败矩阵；前端细化在后端事件投递验收完成后继续。
+
+---
+
+# 2026-09-01｜CARD-007 后端子批次｜SSE 账本异常可观察性
+
+## 1. 任务目标
+
+把 Agent SSE 运行中事件账本故障从“无说明断流”改成可识别、可重连、无敏感信息泄露的公开错误契约：
+
+```text
+建流预检数据库故障 -> HTTP 503
+运行中事件查询数据库故障 -> stream_error SSE 事件
+错误事件不推进 Last-Event-ID / durable sequence
+错误事件标注 retryable=true
+错误事件不携带数据库驱动原始文本
+```
+
+## 2. 实际修改文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_stream_http.py
+```
+
+### 后端实现
+
+- 引入 `SQLAlchemyError`，把建流预检阶段的账本异常映射为 503。
+- 公开错误码固定为 `AGENT_EVENT_LEDGER_UNAVAILABLE`。
+- 公开错误消息固定为“Agent 事件账本暂时不可用，请稍后重连。”。
+- 运行中查询异常时发送 `event: stream_error`。
+- `stream_error` payload 只包含 `run_id`、`error_code`、`retryable`、`cursor`。
+- 不返回数据库驱动异常文本，不写入 `id:`，不推进 durable cursor，连接随后结束，客户端可从最后确认 sequence 重新连接。
+
+## 3. 实际测试结果
+
+HTTP 异常专项：
+
+```text
+python -m pytest -q app/api/routers/test_agent_stream_http.py
+结果：12 passed in 9.95s
+```
+
+覆盖：
+
+```text
+HTTP 503 预检错误
+错误码稳定性
+驱动文本脱敏
+运行中 stream_error
+retryable=true
+游标保持原值
+```
+
+后端全量回归：
+
+```text
+python -m pytest -q
+结果：1415 passed in 243.96s（4分03秒）
+```
+
+## 4. 当前状态
+
+```text
+HTTP SSE 正常回放：completed
+Last-Event-ID 合法/非法输入：completed
+终态 499/500/501/1000 分页：completed
+事件账本预检错误：completed
+事件账本运行中错误：completed
+错误信息脱敏：completed
+跨进程 Worker replay：pending
+数据库故障跨进程实测：pending
+前端 stream_error 展示和重连原因投影：pending
+固定公网入口：pending
+CARD-007：in_progress
+```
+
+## 5. 回退与推送
+
+```text
+上一回退点：352da5b
+本批提交：待提交后回填
+推送目标：origin/codex/bohrium-integration-20260831
+本地数据库：未修改
+小说正文：未修改
+```
+
+下一批继续优先后端：跨进程 Worker replay、数据库故障恢复矩阵和认证失败矩阵；随后再将 `stream_error` 接入前端连接状态与运行日志。 

@@ -11,6 +11,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...agent.executor import UnknownAgentTool, build_agent_plan
@@ -61,6 +62,14 @@ def _error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=404, detail={"code": "AGENT_NOT_FOUND", "message": str(exc)})
     if isinstance(exc, (AgentScopeViolation, ProjectScopeViolation)):
         return HTTPException(status_code=403, detail={"code": "AGENT_SCOPE_VIOLATION", "message": str(exc)})
+    if isinstance(exc, SQLAlchemyError):
+        return HTTPException(
+            status_code=503,
+            detail={
+                "code": "AGENT_EVENT_LEDGER_UNAVAILABLE",
+                "message": "Agent 事件账本暂时不可用，请稍后重连。",
+            },
+        )
     if isinstance(exc, AgentJobNotFound):
         return HTTPException(status_code=404, detail={"code": "AGENT_JOB_NOT_FOUND", "message": str(exc)})
     if isinstance(exc, AgentJobError):
@@ -507,7 +516,7 @@ async def stream_agent_events(session_id: str, run_id: str, request: Request, af
     if not await request.is_disconnected():
         try:
             await _validate_agent_stream_scope(session_id=session_id, run_id=run_id, user_id=user_id)
-        except AgentRuntimeError as exc:
+        except (AgentRuntimeError, SQLAlchemyError) as exc:
             raise _error(exc) from exc
     initial_cursor = resolve_agent_stream_cursor(request.headers.get("last-event-id"), after_sequence)
 
@@ -524,6 +533,17 @@ async def stream_agent_events(session_id: str, run_id: str, request: Request, af
                         return
                     events = await service.list_events(run_id=run_id, user_id=user_id, after_sequence=cursor, limit=500)
                 except AgentRuntimeError:
+                    return
+                except SQLAlchemyError:
+                    # Do not expose driver text or advance the durable cursor.
+                    # The client can reconnect from its last acknowledged event.
+                    payload = {
+                        "run_id": run_id,
+                        "error_code": "AGENT_EVENT_LEDGER_UNAVAILABLE",
+                        "retryable": True,
+                        "cursor": cursor,
+                    }
+                    yield f"event: stream_error\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
                     return
             for event in events:
                 cursor = max(cursor, event.sequence)

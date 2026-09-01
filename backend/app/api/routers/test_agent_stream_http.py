@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api.routers import agent as agent_router
@@ -178,3 +179,69 @@ async def test_agent_stream_http_normalizes_invalid_last_event_id(
         assert emitted == expected_sequences
     finally:
         app.dependency_overrides.pop(get_current_user, None)
+@pytest.mark.asyncio
+async def test_agent_stream_http_maps_preflight_database_failure_to_retryable_503(task_session, monkeypatch):
+    class BrokenSession:
+        async def __aenter__(self):
+            raise SQLAlchemyError("driver secret should not be returned")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(agent_router, "AsyncSessionLocal", lambda: BrokenSession())
+
+    async def override_current_user():
+        return SimpleNamespace(id=1313)
+
+    app.dependency_overrides[get_current_user] = override_current_user
+    try:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=True)
+        async with httpx.AsyncClient(transport=transport, base_url="http://agent-http") as client:
+            response = await client.get(
+                "/api/agent/sessions/session-missing-from-broken-db/runs/run-missing-from-broken-db/stream"
+            )
+
+        assert response.status_code == 503
+        detail = response.json()["detail"]
+        assert detail["code"] == "AGENT_EVENT_LEDGER_UNAVAILABLE"
+        assert "driver secret" not in response.text
+        assert response.headers.get("content-type", "").startswith("application/json")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+@pytest.mark.asyncio
+async def test_agent_stream_emits_redacted_retryable_error_when_ledger_fails_during_poll(task_session, monkeypatch):
+    user = await _user(task_session, 1314, "stream-ledger-error-owner")
+    runtime = AgentRuntimeService(task_session)
+    agent_session = await runtime.create_session(user_id=user.id)
+    run = await runtime.create_run(session_id=agent_session.id, user_id=user.id)
+
+    monkeypatch.setattr(agent_router, "AsyncSessionLocal", async_sessionmaker(task_session.bind, expire_on_commit=False))
+
+    async def broken_list_events(self, *, run_id, user_id, after_sequence=0, limit=500):
+        raise SQLAlchemyError("raw database driver details")
+
+    monkeypatch.setattr(AgentRuntimeService, "list_events", broken_list_events)
+
+    async def is_disconnected():
+        return False
+
+    response = await agent_router.stream_agent_events(
+        agent_session.id,
+        run.id,
+        SimpleNamespace(headers={}, is_disconnected=is_disconnected),
+        after_sequence=7,
+        current_user=SimpleNamespace(id=user.id),
+    )
+    body = "".join(
+        [
+            chunk.decode() if isinstance(chunk, bytes) else chunk
+            async for chunk in response.body_iterator
+        ]
+    )
+
+    assert "event: stream_error" in body
+    assert "AGENT_EVENT_LEDGER_UNAVAILABLE" in body
+    assert '"retryable": true' in body
+    assert '"cursor": 7' in body
+    assert "raw database driver details" not in body
