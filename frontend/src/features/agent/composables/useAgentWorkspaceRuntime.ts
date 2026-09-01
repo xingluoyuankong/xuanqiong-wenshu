@@ -322,10 +322,19 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
 
   const loadArtifactsWithFacts = async (runId: string) => {
     if (typeof AgentAPI.listArtifacts !== 'function') return []
+    const batchGeneration = artifactViewGeneration
+    const selectedRunAtStart = options.selectedRunId.value
+    const isCurrentBatch = () =>
+      batchGeneration === artifactViewGeneration &&
+      selectedRunAtStart === runId &&
+      options.selectedRunId.value === runId &&
+      options.runProjection.hasRun(runId)
     const artifacts = await AgentAPI.listArtifacts(runId)
-    if (!options.runProjection.hasRun(runId)) return artifacts
+    if (!isCurrentBatch()) return artifacts
     options.runProjection.setRunArtifacts(runId, artifacts)
-    await Promise.all(artifacts.map((artifact) => loadArtifactFacts(artifact).catch(() => undefined)))
+    await Promise.all(
+      artifacts.map((artifact) => loadArtifactFacts(artifact, batchGeneration).catch(() => undefined)),
+    )
     return artifacts
   }
 

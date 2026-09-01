@@ -7,6 +7,7 @@ const {
   getRunContextSnapshotMock,
   getRunPlanRevisionMock,
   listRunConversationSummariesMock,
+  listArtifactsMock,
   getArtifactQualityMock,
   getArtifactLineageMock,
   listArtifactQualityBlockersMock,
@@ -22,6 +23,7 @@ const {
   getRunContextSnapshotMock: vi.fn(),
   getRunPlanRevisionMock: vi.fn(),
   listRunConversationSummariesMock: vi.fn(),
+  listArtifactsMock: vi.fn(),
   getArtifactQualityMock: vi.fn(),
   getArtifactLineageMock: vi.fn(),
   listArtifactQualityBlockersMock: vi.fn(),
@@ -40,6 +42,7 @@ vi.mock('@/api/agent', () => ({
     getRunContextSnapshot: getRunContextSnapshotMock,
     getRunPlanRevision: getRunPlanRevisionMock,
     listRunConversationSummaries: listRunConversationSummariesMock,
+    listArtifacts: listArtifactsMock,
     getArtifactQuality: getArtifactQualityMock,
     getArtifactLineage: getArtifactLineageMock,
     listArtifactQualityBlockers: listArtifactQualityBlockersMock,
@@ -120,6 +123,26 @@ describe('useAgentWorkspaceRuntime', () => {
     })
     return { runtime, projection, session, streaming, stream, addActivity, onTerminalRefresh }
   }
+
+
+  it('does not start stale Artifact fact loads after the selected Run changes during a batch', async () => {
+    const { runtime, projection } = createRuntime()
+    const runB = { ...run, id: 'runtime-run-b' }
+    let resolveArtifacts: (value: typeof artifact[]) => void = () => undefined
+    const artifactsPromise = new Promise<typeof artifact[]>((resolve) => { resolveArtifacts = resolve })
+    listArtifactsMock.mockReturnValueOnce(artifactsPromise)
+
+    const request = runtime.loadArtifactsWithFacts(run.id)
+    projection.upsertRun(runB, { select: true })
+    runtime.resetArtifactFacts()
+    resolveArtifacts([artifact])
+    await request
+
+    expect(getArtifactQualityMock).not.toHaveBeenCalledWith(artifact.id)
+    expect(getArtifactLineageMock).not.toHaveBeenCalledWith(artifact.id)
+    expect(runtime.artifactQualityFactsLoading.value).not.toHaveProperty(artifact.id)
+    expect(runtime.artifactQualityFactsErrors.value).not.toHaveProperty(artifact.id)
+  })
 
   it('loads stage-separated provenance into the selected Run without event-stream inference', async () => {
     const { runtime } = createRuntime()
