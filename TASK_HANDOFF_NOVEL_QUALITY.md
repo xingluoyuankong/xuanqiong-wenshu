@@ -72650,3 +72650,208 @@ CARD-028 的实施边界：
 4. 验证响应不泄漏 prompt、原始 Provider 文本、API key、headers、reasoning_content 或其他私有字段。
 5. 完整后端门禁后，代码和文档继续分别提交、分别推送；再回到前端 SSE 日志滚动锚定优化。
 ```
+
+---
+
+# CARD-028 — Provider Attempt Ledger 三阶段持久化与受限查询投影（2026-09-01）
+
+## 任务目标
+
+修复 Agent Provider 异常、超时、fallback 和 Worker retry 中已生成的 Attempt Ledger 在 Runtime 层静默丢失的问题，使 planner、response、candidate writer 三个阶段都能保留同一种受限、可回溯的调用证据，并通过用户范围的 provenance API 读取。
+
+## 实际发现
+
+`AgentRuntimeService` 的 provenance 白名单从一开始就允许：
+
+```text
+planner_provider_attempts
+response_provider_attempts
+candidate_writer_provider_attempts
+```
+
+`runner.py` 在可见回复正常完成和异常重试路径中也确实调用：
+
+```text
+update_run_provider_provenance({"response_provider_attempts": snapshot})
+```
+
+但 Runtime 旧写入分支只处理：
+
+```text
+candidate_writer_provider_attempts
+```
+
+planner / response 两类 snapshot 既不报 unknown field，也不写入 Run context。Provider Timeout、连接异常和 fallback 的账本只存在于本次内存对象；Job 虽然会 queued/dead_letter、Run 虽然会显示 fallback reason、事件虽然有 retry pending，但跨 Worker retry 后无法回看原始 Attempt 链。
+
+Provenance 路由也只投影 Candidate Writer snapshot，导致即使补上 Runtime 保存，前端仍无法读取 planner/response 调用证据。
+
+## 修改文件
+
+```text
+backend/app/services/agent_runtime.py
+backend/app/agent/schemas.py
+backend/app/api/routers/agent.py
+backend/app/services/test_agent_runtime.py
+backend/app/api/routers/test_agent_runtime_route.py
+```
+
+## 具体实现
+
+### 1. 共享受限 Attempt Snapshot 清洗器
+
+新增：
+
+```text
+clean_provider_attempt_snapshot(value)
+```
+
+它是 Runtime 写入与 API 读取共同使用的边界，而不是把任意 `context_json` 直接返回给前端。清洗规则：
+
+```text
+- 最多 16 条 provider_attempts。
+- 每条仅允许 attempt、role、provider_ref、model_ref、status、时间字段、
+  error_category、http_status、retry_index、fallback_from_attempt、
+  cancel_observed、output_digest。
+- role、Provider/模型引用、时间和摘要字段统一截断。
+- attempt / retry / HTTP 状态码使用数值范围校验。
+- status 与 error_category 使用固定集合；畸形值收敛为 unknown 或丢弃。
+- selected_provider_attempt 只有指向已保留 attempt 时才返回。
+- 不复制 headers、authorization、api_key、prompt、原始 Provider 文本、
+  reasoning_content、system prompt 或私有推理字段。
+```
+
+这让当前 Ledger 的标准 JSON 可完整保留，同时也保护历史 Run context、未来迁移和畸形内部写入不会绕过 API 边界泄漏字段。
+
+### 2. Runtime 三阶段持久化
+
+`update_run_provider_provenance()` 由只匹配 Candidate Writer 改为：
+
+```text
+key.endswith("_provider_attempts")
+→ clean_provider_attempt_snapshot(value)
+→ 写入既有 Run context
+```
+
+因此三个阶段共用一致的持久化、上限和脱敏规则：
+
+```text
+planner_provider_attempts
+response_provider_attempts
+candidate_writer_provider_attempts
+```
+
+原有 Provider called / fallback reason / candidate writer model ref 处理不变。
+
+### 3. Provenance API 投影
+
+`AgentProviderProvenanceRead` 新增：
+
+```text
+planner_provider_attempts
+response_provider_attempts
+```
+
+`GET /api/agent/runs/{run_id}/provider-provenance` 现在对三类 snapshot 都再次调用清洗器后投影。重复清洗是刻意的：Runtime 写入保证新数据安全，路由读取保证已有或迁移前数据安全。
+
+## 失败驱动与回归
+
+先扩展既有 Runtime 测试，提交 planner / response 两份包含伪造私有字段的 snapshot：
+
+```text
+planner: headers / prompt
+response: api_key / reasoning_content
+```
+
+旧实现失败：
+
+```text
+KeyError: planner_provider_attempts
+```
+
+再扩展 provenance 路由测试，旧 schema/route 失败：
+
+```text
+AgentProviderProvenanceRead 没有 planner_provider_attempts
+```
+
+修复后断言：
+
+```text
+1. planner / response snapshot 都保存在 Run context。
+2. API 都返回 role=planner / role=response 与 TIMEOUT 分类。
+3. headers、prompt、api_key、reasoning_content 不存在于保存结果和路由 model_dump。
+4. 原有 user scope：其他用户读取仍返回 404。
+```
+
+## 反向验证
+
+临时撤去：
+
+```text
+1. Runtime 对 planner/response 的 _provider_attempts 写入分支。
+2. Route 对 planner/response 的 provenance 投影字段。
+```
+
+两条回归均失败：
+
+```text
+Runtime：KeyError planner_provider_attempts
+Route：planner_provider_attempts 为 None
+REVERSE_EXIT=1
+```
+
+恢复源码后：
+
+```text
+2 passed
+RESTORED_EXIT=0
+```
+
+## 验证结果
+
+相关 Provider/Runtime/Route 集合：
+
+```text
+63 passed in 33.12s
+```
+
+完整后端门禁：
+
+```text
+cd backend
+.\.venv\Scripts\python.exe -m pytest -q
+
+1434 passed in 451.95s（7 分 31 秒）
+```
+
+## 当前状态
+
+```text
+CARD-028：completed and pushed
+Provider Attempt Ledger：planner / response / candidate writer 均可持久化
+查询投影：三阶段 snapshot 均可由 user-scoped provenance API 读取
+私有数据：Runtime 写入和 API 读取均执行字段白名单、限额和截断
+Worker retry：已有 Runner 调用不再被 Runtime 静默丢弃
+```
+
+## 回退
+
+```text
+上一回退点：83d75d8 docs: record card 027 terminal handoff recovery
+本批代码提交：76924b8 fix: persist agent provider attempt provenance（已推送）
+本批文档提交：待本次文档提交生成
+回退方式：git revert 76924b8
+```
+
+## 下一任务目标
+
+转入前端 `CARD-029`：检查 Agent 右栏运行日志高频 SSE 更新下的滚动锚定。
+
+```text
+目标：
+1. 用户停留在日志底部时，新增事件自动保持底部可见。
+2. 用户向上查看历史时，新增事件不强制把滚动位置拉回底部。
+3. 只渲染最近 120 条的 CARD-022 边界继续保持；隐藏计数不影响滚动判断。
+4. 增加 DOM/组件回归测试，并在真实浏览器通道恢复后补多视口和手势滚动证据。
+5. 前端 type-check、test:run、build-only 后，代码与文档继续分别提交、分别推送。
+```
