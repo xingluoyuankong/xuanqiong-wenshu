@@ -71692,3 +71692,61 @@ docs: record card 017 retry recovery
 2. 补真实浏览器会话下 /agent 页面浮卡遮挡、Inspector 展开、1280/1024/768/390 多视口截图证据。
 3. 每批保持：代码→定向测试→反向验证→全量门禁→独立代码提交/推送→独立文档提交/推送→回退点。
 ```
+---
+
+# CARD-018 — 最终可见回复原子完成与崩溃窗口幂等（2026-09-01）
+
+## 目标与根因
+
+旧 Runner 将最终 assistant 消息、Run completed、assistant_completed、run_completed 分别提交。若进程在消息提交后崩溃，恢复可能再次生成最终回复，造成重复消息和重复完成事件。
+
+## 实现
+
+新增 `AgentRuntimeService.finalize_visible_response()`，单事务内完成：
+
+```text
+assistant message
++ Run status=completed / phase=summary
++ context_json.visible_response_final_message_id/sequence
++ assistant_completed
++ run_completed
+```
+
+同一 Run 再次调用时按 final-message marker 返回既有消息，不追加新消息或完成事件。`runner.py` 已改用该原子完成器，摘要归档和公开活动记录仍保留在提交后流程。
+
+## 修改文件
+
+```text
+backend/app/services/agent_runtime.py
+backend/app/agent/runner.py
+backend/app/agent/test_progress_updates.py
+backend/app/services/test_agent_conversation_runtime.py
+```
+
+## 验证
+
+```text
+原子完成幂等测试：2 passed，3 deselected
+相关 Worker/Progress/Conversation 组：23 passed，58.39s
+反向验证：禁用 final-message marker 后第二次完成调用失败（exit 1）；恢复后通过
+后端全量：1431 passed，407.87s
+```
+
+## 状态与回退
+
+```text
+原子最终消息/Run/完成事件：completed
+重复完成调用：返回同一消息，completed
+数据库迁移：未新增（复用 AgentRun.context_json）
+上一回退点：849be34 docs: record card 017 retry recovery
+代码回退点：30a1696 fix: finalize visible responses atomically（已推送）
+本批文档提交：紧随本记录创建 docs: record card 018 atomic final response
+```
+
+## 下一任务
+
+```text
+1. 真实浏览器验收 /agent 浮卡遮挡、Inspector 展开和多视口截图矩阵。
+2. 验证原子完成提交后、Job acknowledge 前崩溃时的 stale Job 收敛。
+3. 每批继续独立代码/文档提交与推送。
+```
