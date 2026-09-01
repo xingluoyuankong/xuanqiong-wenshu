@@ -73144,3 +73144,86 @@ CARD-031 同时尝试恢复本地 Tabbit 浏览器验收。持久协议因 stdin
 CARD-032：审查 Candidate Writer 的重入/恢复路径是否覆盖 candidate_writer_provider_attempts；
 浏览器通道可用时补 Agent 主界面真实多视口交互证据。
 ```
+
+---
+
+# CARD-032 — Candidate Writer 单一权威 Provider Attempt（2026-09-01）
+
+## 实际发现
+
+`execute_approved_write()` 传入 `ProviderAttemptLedger` 给真实 LLM/Provider Gateway，Gateway 会创建并完成/失败一条 `writer` Attempt；写执行器同时又手工创建 `candidate_writer` Attempt、手工标记首 token、完成和失败。真实写入会产生重复账本：
+
+```text
+candidate_writer: running/succeeded/failed
+writer: Gateway 实际 Provider 调用结果
+```
+
+这会让一次 Provider 调用在 provenance 中出现两条记录，且手工状态可能与实际 Gateway 状态不一致。
+
+## 修改
+
+```text
+backend/app/agent/write_executor.py
+backend/app/agent/test_write_executor.py
+```
+
+移除 Candidate Writer 的手工 Attempt begin / first-token / finish / fail / cancel 生命周期；保留传给 `LLMService.stream_visible_response()` 的 ledger 和 `attempt_role="writer"`，让 Provider Gateway 成为唯一权威调用记录源。成功、Timeout、取消和 fallback 的 snapshot 仍通过原有 Runtime provenance 写入。
+
+## 回归
+
+成功 fixture 模拟 Gateway：在传入 ledger 中创建并完成一条 `writer` Attempt。断言：
+
+```text
+candidate_writer_provider_attempts.statuses = [succeeded]
+role = writer
+```
+
+Timeout fixture 模拟 Gateway：创建并标记 Timeout Attempt。断言：
+
+```text
+candidate_writer_provider_attempts.statuses = [failed]
+error_category = TIMEOUT
+Run = failed
+approval = execution_failed
+```
+
+旧实现失败：Timeout snapshot 为 `[failed, failed]`；成功路径存在 `[running, succeeded]`。
+
+## 反向验证
+
+临时插入一个多余手工 Attempt：
+
+```text
+成功路径 snapshot = [running, succeeded]
+新增单记录断言失败
+REVERSE_EXIT=1
+```
+
+恢复后：
+
+```text
+RESTORED_EXIT=0
+```
+
+## 验证
+
+```text
+Provider/写执行器相关集合：19 passed in 5.76s
+完整后端：1434 passed in 465.11s（7 分 45 秒）
+```
+
+## 回退
+
+```text
+上一回退点：909c415 docs: record card 031 planner replan attempts
+本批代码提交：ca458ac fix: avoid duplicate candidate writer attempts（已推送）
+本批文档提交：待本次文档提交生成
+回退方式：git revert ca458ac
+```
+
+## 下一任务
+
+```text
+CARD-033：继续真实浏览器通道恢复与多视口验收；
+后端转向 Provider Attempt Snapshot 的 API 前端展示、跨阶段可读性和历史 Run 查询边界审查。
+```
