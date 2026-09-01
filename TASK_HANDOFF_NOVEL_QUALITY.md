@@ -68501,3 +68501,126 @@ GitHub 推送：待本批提交
 Bohrium-2 同步：待 SSH 恢复
 当前下一主线：CARD-007 Agent Durable Event Delivery 与跨实例恢复验收
 ```
+
+---
+
+# 2026-09-01｜CARD-007 后端子批次｜HTTP SSE 契约与终态分页边界
+
+## 1. 子批次目标
+
+在本地继续 CARD-007，优先强化后端 Agent Durable Event Delivery：
+
+```text
+将 SSE 游标优先级从路由函数级测试提升到真实 FastAPI/Starlette HTTP 层。
+验证终态事件在 499、500、501、1000 条历史边界下无遗漏、无重复、有限轮询后关闭。
+验证 session/run 作用域错误在 StreamingResponse 建立前返回明确 HTTP 错误。
+```
+
+本子批次只修改后端测试和工程验收覆盖，不修改小说正文，不生成小说内容。
+
+## 2. 新增测试文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_stream_http.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_stream_pagination.py
+```
+
+## 3. 测试覆盖
+
+### HTTP 层
+
+```text
+httpx.AsyncClient + httpx.ASGITransport
+真实 /api/agent/sessions/{session_id}/runs/{run_id}/stream 路由
+Last-Event-ID=1 与 after_sequence=0 同时发送
+响应 Content-Type=text/event-stream
+Cache-Control=no-cache
+X-Accel-Buffering=no
+旧 sequence 不重复回放
+work_trace_delta 保持独立 event type
+session/run 不匹配 -> 403 JSON
+未知 Run -> 404 JSON
+```
+
+### 终态分页
+
+```text
+completed + 499 条事件
+completed + 500 条事件
+completed + 501 条事件
+completed + 1000 条事件
+```
+
+每个场景均断言：
+
+```text
+输出 sequence 严格等于 1..N
+输出无重复
+输出无遗漏
+满页后继续读取下一页
+最后一页后停止轮询
+```
+
+## 4. 实际验证结果
+
+后端 CARD-007 相关专项：
+
+```text
+命令：
+python -m pytest -q app/api/routers/test_agent_stream_resume.py app/api/routers/test_agent_stream_http.py app/api/routers/test_agent_stream_pagination.py app/agent/test_work_trace_contract.py app/services/test_agent_runtime.py app/api/routers/test_agent_runtime_route.py
+
+结果：72 passed in 33.71s
+```
+
+后端全量回归：
+
+```text
+命令：python -m pytest -q
+结果：1406 passed in 308.57s（5分08秒）
+```
+
+编译与差异检查：
+
+```text
+python -m py_compile app/api/routers/agent.py app/api/routers/test_agent_stream_http.py app/api/routers/test_agent_stream_pagination.py：通过
+git diff --check：通过
+```
+
+## 5. 本子批次完成状态
+
+```text
+真实 FastAPI HTTP SSE 契约：completed
+Last-Event-ID Header 优先级 HTTP 覆盖：completed
+SSE 响应头契约：completed
+session/run 建流前作用域错误：completed
+终态 499 条边界：completed
+终态 500 条边界：completed
+终态 501 条边界：completed
+终态 1000 条边界：completed
+sequence 无遗漏/无重复：completed
+后端全量回归：passed
+CARD-007 总体状态：in_progress
+```
+
+## 6. 未完成边界
+
+```text
+尚未完成两个独立操作系统进程之间的真实 Worker replay smoke。
+尚未完成 Docker/MySQL/Nginx 组合下的真实网络缓冲与超时测试。
+尚未完成跨节点数据库故障、认证失败矩阵和指标 dashboard。
+尚未完成 WorkTrace 所有字段组合的敏感内容测试。
+尚未完成前端真实浏览器 SSE 到 AgentWorkspace 的组合链路。
+固定公网域名/Named Tunnel 仍未配置。
+```
+
+## 7. 本批次回退与推送
+
+```text
+回退点：66dbbc3
+本批提交：待提交后回填
+推送目标：origin/codex/bohrium-integration-20260831
+本地数据：未修改
+小说正文：未修改
+```
+
+下一子批次继续优先后端：跨进程 Worker replay 与认证/作用域/数据库异常矩阵；完成后再进入前端布局细化和真实浏览器组合验证。
