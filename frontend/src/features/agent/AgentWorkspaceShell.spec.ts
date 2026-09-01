@@ -56,15 +56,23 @@ describe('AgentWorkspaceShell', () => {
 
 
   it('把紧凑侧栏、聊天主栏和右侧活动栏的宽度约束集中在壳层', () => {
-    expect(shellSource).toContain('grid-template-columns: minmax(160px, 11rem) minmax(0, 1fr) minmax(220px, 15rem);')
-    expect(shellSource).toContain('grid-template-columns: minmax(156px, 10.5rem) minmax(0, 1fr) minmax(208px, 14rem);')
+    expect(shellSource).toContain('grid-template-columns: minmax(132px, 9rem) minmax(0, 1fr) minmax(176px, 12rem);')
+    expect(shellSource).toContain('grid-template-columns: minmax(124px, 8.5rem) minmax(0, 1fr) minmax(168px, 11rem);')
     expect(workspaceSource).not.toContain('grid-template-columns: minmax(210px, 0.85fr) minmax(0, 1.8fr) minmax(210px, 0.75fr);')
-    expect(workspaceSource).toContain('max-height: min(11rem, 18vh);')
+    expect(workspaceSource).toContain('max-height: min(8rem, 14vh);')
     expect(workspaceSource).toContain('class="workspace-section workspace-inspector-section"')
     expect(workspaceSource).toContain('data-testid="agent-inspector-section"')
     expect(workspaceSource.indexOf('data-testid="agent-log-panel"')).toBeLessThan(
       workspaceSource.indexOf('data-testid="agent-inspector-section"'),
     )
+  })
+
+  it('把聊天主区做大并压缩两侧轨道和日志窗口', () => {
+    expect(shellSource).toContain('grid-template-columns: minmax(132px, 9rem) minmax(0, 1fr) minmax(176px, 12rem);')
+    expect(shellSource).toContain('grid-template-columns: minmax(124px, 8.5rem) minmax(0, 1fr) minmax(168px, 11rem);')
+    expect(workspaceSource).toContain('min-height: min(78vh, 60rem);')
+    expect(workspaceSource).toContain('min-height: min(30rem, 52vh);')
+    expect(workspaceSource).toContain('min-height: 1.9rem;')
   })
 
   it('把中窄与手机断点的聊天优先规则固定为 CSS contract', () => {

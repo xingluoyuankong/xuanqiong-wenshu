@@ -1307,7 +1307,7 @@ onBeforeUnmount(() => {
 }
 .blocker-list {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.4rem;
   margin: 0.6rem 0 0;
   padding: 0;
   list-style: none;
@@ -1521,7 +1521,7 @@ onBeforeUnmount(() => {
   gap: 0.65rem;
 }
 .workspace-chat-column {
-  min-height: min(72vh, 56rem);
+  min-height: min(78vh, 60rem);
 }
 .workspace-section {
   min-width: 0;
@@ -1534,9 +1534,9 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  min-height: 2.15rem;
+  min-height: 1.9rem;
   box-sizing: border-box;
-  padding: 0.52rem 0.65rem;
+  padding: 0.4rem 0.5rem;
   cursor: pointer;
   list-style: none;
   color: var(--xq-ink);
@@ -1565,8 +1565,8 @@ onBeforeUnmount(() => {
 .workspace-section-body {
   display: grid;
   min-width: 0;
-  gap: 0.55rem;
-  padding: 0 0.35rem 0.4rem;
+  gap: 0.4rem;
+  padding: 0 0.25rem 0.3rem;
 }
 .workspace-sidebar-stack :deep(.xq-panel),
 .workspace-activity-stack :deep(.xq-panel) {
@@ -1600,7 +1600,7 @@ onBeforeUnmount(() => {
 }
 .workspace-sidebar-stack :deep(.tool-list),
 .workspace-sidebar-stack :deep(.timeline-list) {
-  max-height: 15rem;
+  max-height: 10rem;
   overflow: auto;
 }
 .workspace-activity-stack {
@@ -1618,7 +1618,7 @@ onBeforeUnmount(() => {
 }
 .workspace-log-list {
   min-height: 3rem;
-  max-height: min(11rem, 18vh);
+  max-height: min(8rem, 14vh);
   overflow-y: auto;
   padding-right: 0.2rem;
   scrollbar-gutter: stable;
@@ -1635,11 +1635,11 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 .workspace-chat-column :deep(.xq-panel--ink) {
-  min-height: min(72vh, 56rem);
+  min-height: min(78vh, 60rem);
 }
 .workspace-chat-column :deep(.messages) {
-  min-height: min(24rem, 42vh);
-  max-height: min(64vh, 52rem);
+  min-height: min(30rem, 52vh);
+  max-height: min(70vh, 58rem);
   scrollbar-gutter: stable;
 }
 .workspace-chat-column :deep(.composer textarea) {
