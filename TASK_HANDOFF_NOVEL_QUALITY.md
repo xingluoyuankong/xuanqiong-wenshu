@@ -71852,3 +71852,45 @@ npm run build-only：通过，34.92s
 1. 可用浏览器会话下补 /agent 真实 1280/1024/768/390 截图和 Inspector 展开交互。
 2. 保持当前左栏紧凑、聊天主读区、右栏日志独立滚动的布局边界。
 ```
+---
+
+# CARD-021 — Agent 中间聊天区移除重复运行日志渲染（2026-09-01）
+
+## 实际问题
+
+运行事件已由右侧 `agent-log-panel` 独立展示，但 AgentConversation 仍接收 `events` prop 并构建一个 CSS 隐藏的 `agent-process-stream`。该隐藏 DOM 仍会随事件列表更新，造成聊天列重复渲染和无效数据传递。
+
+## 修改
+
+```text
+frontend/src/features/agent/AgentConversation.vue
+frontend/src/features/agent/AgentConversation.spec.ts
+frontend/src/views/AgentWorkspace.vue
+frontend/src/views/AgentWorkspace.spec.ts
+```
+
+聊天组件删除 events prop、隐藏事件 DOM、对应类型和 CSS；父工作台不再把 events 传入聊天。右侧 `agent-log-panel` 保留唯一的 `agent-process-stream`，继续独立滚动。
+
+## 验证
+
+```text
+AgentConversation + AgentWorkspace 定向：16 passed
+反向验证：临时把聊天输入伪装为 agent-process-stream 后，聊天无日志节点断言失败（exit 1）；恢复后通过
+npm run type-check：通过
+npm run test:run：74 files / 430 tests passed，77.16s
+npm run build-only：通过，15.33s
+```
+
+## 回退
+
+```text
+上一回退点：ec46b63 docs: record card 020 responsive layout contracts
+代码回退点：ff8eb63 fix: keep agent runtime logs out of chat（已推送）
+本批文档提交：docs: record card 021 chat log deduplication
+```
+
+## 下一任务
+
+```text
+继续补可用浏览器会话下的 /agent 多视口截图与 Inspector 展开交互；自动化控制内核当前仍有本机路径错误，未把视觉验收伪造为完成。
+```
