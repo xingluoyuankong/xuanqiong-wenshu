@@ -72280,3 +72280,373 @@ CARD-026：completed and pushed
 5. 代码独立提交并推送，随后在本文件记录实现、证据、测试、回退点和下一任务，再独立提交并推送文档。
 6. 后端批次完成后继续前端：检查右侧运行日志在高频 SSE 更新下的滚动锚定、自动滚动与“查看历史时不被强制拉回底部”行为。
 ```
+
+---
+
+# CARD-027 — Agent 终态交接 Job 收敛与成功错误投影清理（2026-09-01）
+
+## 任务目标
+
+在 CARD-017 至 CARD-019 已经修复“可见回复失败可重试”“最终消息/Run 完成原子化”“可见回复原子完成后 Worker ack 丢失”的基础上，继续审查 Agent Runtime、Worker 租约、Job、Run 和事件账本之间的终态一致性。
+
+本批要求：
+
+```text
+1. 不让已完成 Run 遗留过期 running Job。
+2. 只在有同一 Run 内、可核验的 durable handoff 证据时把前置 Job 标记成功。
+3. Provider 首次失败而后续成功时，不让 succeeded Job 保留陈旧失败字段。
+4. 不改变取消、死信、暂停、失败和人工重放的既有诊断语义。
+5. 新增最小回归测试、失败驱动验证、反向验证和完整后端门禁。
+```
+
+## 实际发现一：execution → visible response 交接后的确认丢失窗口
+
+`agent_execution` Worker 成功执行计划和工具步骤后，会先完成以下持久化动作：
+
+```text
+1. 创建同一 Run 的 visible_response Job。
+2. 在 Run context 写入 execution_job_id。
+3. 在 Run context 写入 visible_response_job_id / job_id。
+4. 将 Run 推进到 assistant_response。
+5. 写入 assistant_queued 和公开活动事件。
+6. 从 handler 返回。
+```
+
+外层 `AgentWorker.poll_once()` 是在 handler 返回以后，才调用 `AgentJobService.complete(agent_execution)`。因此存在真实进程崩溃窗口：
+
+```text
+agent_execution 已持久化交接给 visible_response
+→ Worker 在 acknowledge agent_execution 前终止
+→ agent_execution 保持 running，lease 之后过期
+→ visible_response 可正常完成最终消息和 Run
+→ Run 已 completed，但旧 agent_execution Job 仍是 running + expired lease
+```
+
+旧 CARD-019 reconciliation 只覆盖：
+
+```text
+kind = visible_response
+Run = completed
+visible_response_final_message_id 存在
+visible_response Job 的 lease 已过期
+```
+
+因此它不能收敛已经完成交接的 `agent_execution` Job。又因为 Job 重新领取要求父 Run 处于可执行状态，Run 成为 `completed` 后，这个旧 Job 既不会被重新领取，也不会变成终态，会永久悬挂在运行中。
+
+在 Run 尚未完成但旧 execution lease 已过期的更早窗口中，旧 Job 还可能被重新领取；下游 visible response 的幂等键只能避免重复创建回复 Job，无法阻止 planner、只读工具、步骤事件和阶段状态被重复执行。
+
+## 实际发现二：成功 Job 残留 Provider 失败诊断
+
+`AgentJobService.fail()` 在可重试 Provider 超时后会保存：
+
+```text
+error_type = ProviderTimeout
+error_detail = 第一次 Provider 调用失败的说明
+status = queued
+```
+
+后续成功领取后，原 `complete()` 只把状态写为 `succeeded`，并没有清空 `error_type/error_detail`。CARD-019 的可见回复确认收敛路径同样保留了旧字段。
+
+这会产生错误投影：
+
+```text
+Job.status = succeeded
+Job.result_json = 已成功结果
+Job.error_type = ProviderTimeout（来自早期失败）
+```
+
+状态投影、运行诊断和死信/Job 检视会把已经成功的工作误显示为仍有当前失败。失败、dead letter、replay 和暂停路径的历史诊断仍需要保留；只有成功终态才应清除陈旧错误。
+
+## 修改文件
+
+```text
+backend/app/agent/jobs.py
+backend/app/agent/worker.py
+backend/app/agent/test_jobs.py
+backend/app/agent/test_worker.py
+```
+
+## 具体实现
+
+### 1. 正常成功完成清理旧错误
+
+`AgentJobService.complete()` 在写入：
+
+```text
+status = succeeded
+result_json = 正常结果
+```
+
+的同一条件更新中追加：
+
+```text
+error_type = None
+error_detail = None
+```
+
+因此可重试的第一次 Provider 失败仍保留在 queued Job 上，但最终成功确认会准确反映为无当前错误的 succeeded Job。
+
+### 2. 统一终态交接 reconciliation
+
+新增：
+
+```text
+AgentJobService.reconcile_completed_handoff_jobs()
+```
+
+`AgentWorker.poll_once()` 在领取新 Job 前优先调用该方法。保留兼容方法：
+
+```text
+reconcile_completed_visible_response_jobs()
+```
+
+它委托给新的统一实现，避免已有内部调用失效。
+
+统一方法先保留 CARD-019 的 `visible_response` 分支，并增加取消栅栏：
+
+```text
+kind = visible_response
+status = running
+lease 已过期
+cancel_requested_at 为空
+Run.status = completed
+Run context 存在 visible_response_final_message_id
+```
+
+成功收敛写入：
+
+```text
+status = succeeded
+result_json = {"visible_response_job_id": JOB_ID}
+error_type = None
+error_detail = None
+lease_owner = None
+lease_expires_at = None
+finished_at = now
+```
+
+### 3. 严格收敛 execution handoff Job
+
+新增 `agent_execution` 分支不会凭 `Run.status == completed` 推断成功；必须同时满足：
+
+```text
+1. Job.kind = agent_execution。
+2. Job.status = running，且 lease 已过期。
+3. Job.cancel_requested_at 为空。
+4. Run.status = completed。
+5. Run.context_json.execution_job_id 与当前 execution Job.id 精确相等。
+6. Run.context_json.visible_response_job_id 非空。
+7. 同一 Run、同一用户、该精确 id 的 visible_response Job 存在，且 status = succeeded。
+```
+
+这组条件复用执行器已经在真实交接中持久化的两个 Job id，不引入新的冗余 schema，也避免仅通过阶段名 `assistant_response` 误收敛其他 Job。
+
+成功后把前置 execution Job 原子收敛为：
+
+```json
+{
+  "status": "assistant_queued",
+  "visible_response_job_id": "<已成功的下游 Job ID>",
+  "reconciled_after_handoff": true
+}
+```
+
+并同步清理 lease 和旧错误字段。由于更新仍限定为 `running + expired lease + 未取消`，同一条 Job 只有第一个成功更新的 Worker 会收敛；下一次 poll 不会重复处理。
+
+## 回归测试
+
+### A. Provider 重试后成功
+
+新增：
+
+```text
+test_successful_retry_clears_prior_provider_failure_details
+```
+
+构造：
+
+```text
+第一次 claim → ProviderTimeout → queued（保留错误）
+第二次 claim → complete
+```
+
+断言最终：
+
+```text
+status = succeeded
+result_json = {"provider": "recovered"}
+error_type is None
+error_detail is None
+```
+
+### B. CARD-019 可见回复确认收敛
+
+现有原子完成后确认收敛测试补入陈旧 `ProviderTimeout` 诊断，并断言 reconciliation 后：
+
+```text
+status = succeeded
+error_type is None
+error_detail is None
+最终 assistant message = 1
+assistant_completed = 1
+run_completed = 1
+```
+
+### C. 新增 execution handoff 进程崩溃恢复
+
+新增：
+
+```text
+test_worker_settles_expired_execution_ack_after_completed_visible_response_handoff
+```
+
+模拟完整时序：
+
+```text
+1. execution Job 已 claim。
+2. 创建并成功完成同一 Run 的 visible_response Job。
+3. Run context 写入 execution_job_id / visible_response_job_id。
+4. finalize_visible_response 原子产生最终消息并把 Run 完成。
+5. 模拟 execution Worker 在 acknowledge 前崩溃：execution Job 保持 running，lease 设为过期。
+6. 空 handlers Worker 执行 poll_once()。
+```
+
+断言：
+
+```text
+execution Job = succeeded
+execution Job lease_owner / lease_expires_at = None
+execution Job 的旧 ProviderTimeout = None
+execution Job result_json 含 visible_response_job_id 和 reconciled_after_handoff=true
+visible_response Job = succeeded
+Run = completed
+最终 assistant message = 1
+assistant_completed = 1
+run_completed = 1
+第二次 poll_once() = False
+```
+
+## 失败驱动与反向验证
+
+### 失败驱动：旧错误字段
+
+先只新增两个 `error_type/error_detail is None` 断言，不改生产代码：
+
+```text
+正常重试成功：失败，succeeded Job 仍是 ProviderTimeout。
+CARD-019 reconciliation：失败，succeeded Job 仍是 ProviderTimeout。
+```
+
+### 失败驱动：跨阶段 handoff
+
+先只新增 execution handoff 测试，不改 reconciliation：
+
+```text
+预期 Worker.poll_once() is True
+实际 Worker.poll_once() is False
+```
+
+说明完成 Run 中的过期 execution Job 在旧实现里没有任何可领取或收敛路径。
+
+### 修复后关键测试
+
+```text
+3 passed
+- 正常 retry success 清理错误
+- visible response atomic ack reconciliation 清理错误
+- execution → visible response terminal handoff reconciliation
+```
+
+### 反向验证
+
+临时删除 `agent_execution` reconciliation 分支，再运行三项关键回归：
+
+```text
+2 passed / 1 failed
+```
+
+失败点为：
+
+```text
+assert await worker.poll_once() is True
+实际为 False
+```
+
+恢复源码后：
+
+```text
+3 passed
+REVERSE_EXIT = 1
+RESTORED_EXIT = 0
+```
+
+该证据证明新增测试确实卡住“交接成功、旧 execution ack 丢失”的缺陷，而不是只验证构造数据或事件存在。
+
+## 验证结果
+
+相关后端测试集合：
+
+```text
+app/agent/test_jobs.py
+app/agent/test_worker.py
+app/services/test_agent_runtime.py
+
+60 passed in 81.84s
+```
+
+完整后端门禁：
+
+```text
+cd backend
+.\.venv\Scripts\python.exe -m pytest -q
+
+1434 passed in 434.49s（7 分 14 秒）
+```
+
+## 当前状态
+
+```text
+CARD-027：completed and pushed
+正常成功确认：会清理陈旧 Job 错误字段
+visible_response atomic ack：继续安全收敛
+agent_execution handoff ack：已安全收敛，不再因 Run 完成而永久 hanging
+取消/失败/死信/重放：未修改其保留错误诊断的现有语义
+```
+
+## 回退
+
+```text
+上一回退点：52718a4 docs: record card 026 bounded content tree
+本批代码提交：22f8a7e fix: reconcile terminal agent job handoffs（已推送）
+本批文档提交：待本次文档提交生成
+回退方式：git revert 22f8a7e
+```
+
+## 下一任务目标
+
+执行 `CARD-028`，优先修复 Provider Attempt Ledger 的持久化与查询投影断层。审查已确认：
+
+```text
+response_provider_attempts / planner_provider_attempts 已在 provenance 白名单中，
+Runner 也会在正常、超时和重试路径尝试提交它们，
+但 update_run_provider_provenance() 只真正写入 candidate_writer_provider_attempts。
+```
+
+因此 Provider 超时、网络错误、fallback 和 Worker retry 的 Attempt Ledger 会在内存中生成，却被 Runtime 静默丢弃，导致：
+
+```text
+Job：保留 retry/dead-letter 事实
+Run：保留 fallback reason
+Event：保留 retry pending
+Attempt Ledger：缺失可回溯的失败链
+```
+
+CARD-028 的实施边界：
+
+```text
+1. Runtime 持久化 response / planner / candidate writer 三类脱敏、受限 Provider Attempt Snapshot。
+2. 只在 Run context 与 provenance API 暴露完整账本；Event 仅保留扁平、脱敏的数量和最近错误类别摘要。
+3. 为 Runtime 写入、visible response timeout retry、provenance API 查询各增加回归测试。
+4. 验证响应不泄漏 prompt、原始 Provider 文本、API key、headers、reasoning_content 或其他私有字段。
+5. 完整后端门禁后，代码和文档继续分别提交、分别推送；再回到前端 SSE 日志滚动锚定优化。
+```
