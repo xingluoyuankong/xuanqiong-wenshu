@@ -25,7 +25,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.agent.worker import AgentWorker, handle_agent_execution_job, handle_visible_response_job
 from app.core.config import settings
-from app.db.session import AsyncSessionLocal
+from app.db.session import AsyncSessionLocal, engine
 
 
 def _parse_args() -> argparse.Namespace:
@@ -56,12 +56,18 @@ async def _run() -> None:
         poll_interval=args.poll_interval,
     )
     log.info("Agent worker started: worker_id=%s", worker.worker_id)
-    if args.once:
-        worked = await worker.poll_once()
-        log.info("Agent worker once completed: worked=%s", worked)
-    else:
-        await worker.run_forever(stop_event)
-    log.info("Agent worker stopped: worker_id=%s", worker.worker_id)
+    try:
+        if args.once:
+            worked = await worker.poll_once()
+            log.info("Agent worker once completed: worked=%s", worked)
+        else:
+            await worker.run_forever(stop_event)
+    finally:
+        # Match the command-worker lifecycle: Windows/aiosqlite may retain a
+        # background connection thread after --once unless the global engine is
+        # explicitly disposed before process exit.
+        await engine.dispose()
+        log.info("Agent worker stopped: worker_id=%s", worker.worker_id)
 
 
 if __name__ == "__main__":

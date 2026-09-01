@@ -262,3 +262,99 @@ async def test_worker_b_replays_events_written_via_worker_a_http_to_shared_sqlit
             assert payload["event_type"] == event_type
     finally:
         _stop_workers(workers)
+
+
+@pytest.mark.asyncio
+async def test_independent_worker_once_claims_agent_job_created_via_http(tmp_path: Path):
+    """A queued HTTP Agent job is claimed by the separate worker CLI exactly once.
+
+    The explicit read-only project.list tool avoids any Provider call: this test
+    exercises the durable HTTP -> Job -> worker process -> HTTP ledger path.
+    """
+    database_path = (tmp_path / "worker-once-http.sqlite").resolve()
+    database_url = f"sqlite+aiosqlite:///{database_path.as_posix()}"
+    writer_port = _free_local_port()
+    await _prepare_current_schema(database_url)
+    log_dir = tmp_path / "worker-once-logs"
+    log_dir.mkdir()
+    environment = _worker_environment(database_url, log_dir)
+    workers: list[subprocess.Popen[str]] = []
+    writer_base_url = f"http://127.0.0.1:{writer_port}"
+    try:
+        writer = _start_worker(port=writer_port, environment=environment)
+        workers.append(writer)
+        _wait_for_health(port=writer_port, worker=writer)
+
+        async with httpx.AsyncClient(timeout=25) as client:
+            login_response = await client.post(
+                f"{writer_base_url}/api/auth/login",
+                data={"username": TEST_ADMIN_USERNAME, "password": TEST_ADMIN_PASSWORD},
+            )
+            assert login_response.status_code == 200
+            headers = {"Authorization": f"Bearer {login_response.json()['access_token']}"}
+            session_response = await client.post(
+                f"{writer_base_url}/api/agent/sessions",
+                headers=headers,
+                json={"title": "CARD-014 worker once"},
+            )
+            assert session_response.status_code == 201
+            session_id = session_response.json()["id"]
+            message_response = await client.post(
+                f"{writer_base_url}/api/agent/sessions/{session_id}/messages",
+                headers=headers,
+                json={
+                    "content": "使用 project.list 验证独立 Worker 领取 durable Job。",
+                    "tools": ["project.list"],
+                    "arguments": {},
+                    "context_refs": [],
+                    "tool_arguments": {},
+                },
+            )
+            assert message_response.status_code == 201
+            response_payload = message_response.json()
+            run_id = response_payload["run"]["id"]
+            execution_job_id = response_payload["execution_job"]["id"]
+            assert response_payload["execution_job"]["kind"] == "agent_execution"
+            assert response_payload["execution_job"]["status"] == "queued"
+
+        worker_result = subprocess.run(
+            [sys.executable, "scripts/agent_worker.py", "--once", "--worker-id", "card014-worker-once"],
+            cwd=str(BACKEND_ROOT),
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=75,
+        )
+        assert worker_result.returncode == 0, worker_result.stdout
+        assert worker_result.returncode == 0
+
+        async with httpx.AsyncClient(timeout=25) as client:
+            jobs_response = await client.get(f"{writer_base_url}/api/agent/jobs", headers=headers)
+            events_response = await client.get(
+                f"{writer_base_url}/api/agent/sessions/{session_id}/runs/{run_id}/events?after_sequence=0",
+                headers=headers,
+            )
+            state_response = await client.get(f"{writer_base_url}/api/agent/runs/{run_id}/state", headers=headers)
+
+        assert jobs_response.status_code == 200
+        jobs = {item["id"]: item for item in jobs_response.json()}
+        assert jobs[execution_job_id]["status"] == "succeeded"
+        visible_jobs = [item for item in jobs.values() if item["run_id"] == run_id and item["kind"] == "visible_response"]
+        assert len(visible_jobs) == 1
+        assert visible_jobs[0]["status"] == "queued"
+
+        assert events_response.status_code == 200
+        event_types = [item["event_type"] for item in events_response.json()]
+        assert "run_started" in event_types
+        assert "plan_created" in event_types
+        assert "assistant_queued" in event_types
+
+        assert state_response.status_code == 200
+        state_jobs = {item["id"]: item for item in state_response.json()["jobs"]}
+        assert state_jobs[execution_job_id]["status"] == "succeeded"
+        assert state_jobs[visible_jobs[0]["id"]]["status"] == "queued"
+    finally:
+        _stop_workers(workers)

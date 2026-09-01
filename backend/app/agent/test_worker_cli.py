@@ -21,6 +21,7 @@ def test_worker_cli_is_explicit_process_entrypoint():
     text = script.read_text(encoding='utf-8')
     assert 'if __name__ == "__main__"' in text
     assert 'await worker.run_forever(stop_event)' in text
+    assert 'await engine.dispose()' in text
     assert 'init_db' not in text
 
 
