@@ -4,7 +4,8 @@
     <p v-else-if="error" class="error" data-testid="agent-content-tree-error">{{ error }}</p>
     <p v-else-if="!volumes.length" class="muted" data-testid="agent-content-tree-empty">当前项目还没有可展示的章节目录。</p>
 
-    <ol v-else class="content-volume-list" data-testid="agent-content-volume-list">
+    <div v-else class="content-tree-scroll" data-testid="agent-content-tree-scroll">
+      <ol class="content-volume-list" data-testid="agent-content-volume-list">
       <li v-for="volume in volumes" :key="volume.id" class="content-volume">
         <strong>{{ volume.label }}</strong>
         <ol class="content-chapter-list">
@@ -23,7 +24,8 @@
           </li>
         </ol>
       </li>
-    </ol>
+      </ol>
+    </div>
 
     <section v-if="selectedChapterNumber" class="content-preview" data-testid="agent-content-preview">
       <header>
@@ -104,5 +106,5 @@ const previewText = computed(() => {
 </script>
 
 <style scoped>
-.content-volume-list,.content-chapter-list,.content-version-list{display:grid;gap:.5rem;margin:0;padding:0;list-style:none}.content-volume{display:grid;gap:.45rem;padding:.55rem;border:1px solid var(--xq-border);border-radius:.6rem;background:rgba(255,255,255,.48)}.content-chapter-button{display:grid;gap:.18rem;width:100%;text-align:left;border:1px solid transparent;border-radius:.5rem;padding:.55rem;background:rgba(255,255,255,.68);font:inherit;cursor:pointer}.content-chapter-button:hover,.content-chapter-button.selected{border-color:var(--xq-jade);background:rgba(61,143,125,.08)}.content-chapter-button span,.content-chapter-button small,.content-preview small{color:var(--xq-ink-muted);line-height:1.45}.content-preview{display:grid;gap:.65rem;margin-top:.8rem;padding-top:.8rem;border-top:1px dashed var(--xq-border)}.content-preview header{display:flex;align-items:start;justify-content:space-between;gap:.7rem}.content-preview header>div{display:grid;gap:.2rem}.content-version-list{display:flex;flex-wrap:wrap}.content-version-list button{border:1px solid var(--xq-border);border-radius:999px;padding:.28rem .55rem;background:rgba(255,255,255,.7);font:inherit;cursor:pointer}.content-version-list button.selected{border-color:var(--xq-jade);color:var(--xq-jade)}.content-preview-text{max-height:18rem;overflow:auto;margin:0;padding:.7rem;border-radius:.55rem;background:rgba(15,23,42,.05);white-space:pre-wrap;line-height:1.65;font:inherit}.muted{color:var(--xq-ink-muted)}.error{color:var(--xq-cinnabar)}@media(max-width:560px){.content-preview header{align-items:stretch;flex-direction:column}}
+.content-tree-scroll{max-height:min(34rem,42vh);overflow-y:auto;overflow-x:hidden;padding-right:.2rem;scrollbar-gutter:stable}.content-volume-list,.content-chapter-list,.content-version-list{display:grid;gap:.5rem;margin:0;padding:0;list-style:none}.content-volume{display:grid;gap:.45rem;padding:.55rem;border:1px solid var(--xq-border);border-radius:.6rem;background:rgba(255,255,255,.48)}.content-chapter-button{display:grid;gap:.18rem;width:100%;text-align:left;border:1px solid transparent;border-radius:.5rem;padding:.55rem;background:rgba(255,255,255,.68);font:inherit;cursor:pointer}.content-chapter-button:hover,.content-chapter-button.selected{border-color:var(--xq-jade);background:rgba(61,143,125,.08)}.content-chapter-button span,.content-chapter-button small,.content-preview small{color:var(--xq-ink-muted);line-height:1.45}.content-preview{display:grid;gap:.65rem;margin-top:.8rem;padding-top:.8rem;border-top:1px dashed var(--xq-border)}.content-preview header{display:flex;align-items:start;justify-content:space-between;gap:.7rem}.content-preview header>div{display:grid;gap:.2rem}.content-version-list{display:flex;flex-wrap:wrap}.content-version-list button{border:1px solid var(--xq-border);border-radius:999px;padding:.28rem .55rem;background:rgba(255,255,255,.7);font:inherit;cursor:pointer}.content-version-list button.selected{border-color:var(--xq-jade);color:var(--xq-jade)}.content-preview-text{max-height:18rem;overflow:auto;margin:0;padding:.7rem;border-radius:.55rem;background:rgba(15,23,42,.05);white-space:pre-wrap;line-height:1.65;font:inherit}.muted{color:var(--xq-ink-muted)}.error{color:var(--xq-cinnabar)}@media(max-width:560px){.content-preview header{align-items:stretch;flex-direction:column}}
 </style>

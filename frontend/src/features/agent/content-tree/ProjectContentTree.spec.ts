@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
 import ProjectContentTree from './ProjectContentTree.vue'
+import source from './ProjectContentTree.vue?raw'
 
 describe('ProjectContentTree', () => {
   const baseProps = {
@@ -13,6 +14,9 @@ describe('ProjectContentTree', () => {
 
   it('renders lightweight tree, emits selection, and bounds chapter preview', async () => {
     const wrapper = mount(ProjectContentTree, { props: { ...baseProps, previewLimit: 200 } })
+    expect(wrapper.find('[data-testid="agent-content-tree-scroll"]').exists()).toBe(true)
+    expect(source).toContain('max-height:min(34rem,42vh)')
+    expect(source).toContain('overflow-y:auto')
     expect(wrapper.get('[data-testid="agent-content-chapter-7"]').text()).toContain('第 7 章 · 试炼')
     expect(wrapper.get('[data-testid="agent-content-version-22"]').classes()).toContain('selected')
     expect(wrapper.get('[data-testid="agent-content-preview-text"]').text()).toContain('SAFE_PREVIEW_TEXT')
