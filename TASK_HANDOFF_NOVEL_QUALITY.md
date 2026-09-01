@@ -76145,3 +76145,390 @@ Artifact action：CARD-048 已统一 Run + Artifact + Action 状态键；
 5. 加入 Run 切换、同名 Artifact、并发请求和 reset 的组合回归；
 6. 完成失败驱动、反向验证、完整前端门禁、代码推送和文档推送。
 ```
+
+# CARD-049 完成记录：当前操作投影恢复与 action loading 收敛
+
+## 本批实际目标
+
+本批处理 CARD-048 遗留的运行时投影问题：操作结果虽然已经按 `run_id:artifact_id` 保存，但 Run 切换时的 `resetArtifactFacts()` 会把这些历史结果全部清空，导致用户切回旧 Run 后，质量阻断、候选差异和候选正文预览无法恢复。该问题不是数据存储问题，而是“作用域历史状态”和“当前面板投影”没有分层。
+
+本批最终要求：
+
+```text
+1. Run 切换清空当前面板，保留按 Run + Artifact 保存的历史 action 结果；
+2. Artifact 批次载入完成后，将当前 Run 最近一次 action 结果重新投影到面板；
+3. blocker、diff、preview 的最近操作指针使用同一个 run_id:artifact_id 状态键；
+4. 旧请求在 Run 切换或 reset 后继续失效，不能回写当前面板；
+5. 全局 reset 仍然完整清理所有作用域历史结果；
+6. 失败状态也按作用域保存并可在 Run 切换后恢复；
+7. 代码、测试、文档分别完成验证、提交和推送。
+```
+
+## 失败驱动证据
+
+新增回归测试：
+
+```text
+文件：D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.spec.ts
+测试：keeps blocker, diff and preview action results scoped to reused Artifact IDs
+```
+
+旧实现的真实失败结果：
+
+```text
+expected [Run-B blocker] to deeply equal []
+```
+
+失败根因：
+
+```text
+Run-A 与 Run-B 的 action 结果已经进入 qualityBlockersByKey、artifactDiffByKey、artifactPreviewByKey；
+resetArtifactFacts() 仍然将这些 map 置为空对象；
+loadArtifactsWithFacts() 只重新读取 Artifact facts，没有历史 action 投影恢复步骤；
+所以 Run-B 的当前面板在 reset 后显示为空。
+```
+
+## 实际代码变更
+
+### 1. 作用域历史状态与当前投影分层
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.ts
+```
+
+新增作用域错误状态：
+
+```text
+qualityBlockersErrorByKey
+artifactDiffErrorByKey
+artifactPreviewErrorByKey
+```
+
+新增最近操作指针：
+
+```text
+lastArtifactActionKeyByRun
+```
+
+指针结构按 Run 保存各类 action 最近一次使用的状态键：
+
+```text
+lastArtifactActionKeyByRun[run_id].quality-blockers = run_id:artifact_id
+lastArtifactActionKeyByRun[run_id].rewrite          = run_id:artifact_id
+lastArtifactActionKeyByRun[run_id].diff             = run_id:artifact_id
+lastArtifactActionKeyByRun[run_id].preview          = run_id:artifact_id
+```
+
+操作请求内部仍使用带 action 的请求键进行并发代次隔离：
+
+```text
+quality-blockers:run_id:artifact_id
+rewrite:run_id:artifact_id
+diff:run_id:artifact_id
+preview:run_id:artifact_id
+```
+
+这两个键的职责明确分离：
+
+```text
+状态键：用于读取和恢复某个 Run + Artifact 的已完成投影；
+请求键：用于判断当前请求代次，阻止旧请求 finally 或 late response 污染新请求。
+```
+
+### 2. Run 切换的保留式 reset
+
+`resetArtifactFacts()` 现在接受：
+
+```ts
+resetArtifactFacts({ preserveScopedState: true })
+```
+
+该模式的行为：
+
+```text
+清空 qualityBlockers、artifactDiff、artifactPreview 等当前面板单值；
+清空当前面板 Artifact ID、loading、全局 error；
+递增 artifactViewGeneration，使旧批次和旧 action 失效；
+清空 artifactActionGeneration、artifactFactsRequestGeneration、qualityBlockerRequestGeneration；
+保留 qualityBlockersByKey、artifactDiffByKey、artifactPreviewByKey；
+保留三类作用域 error map；
+保留 lastArtifactActionKeyByRun；
+```
+
+默认调用 `resetArtifactFacts()` 仍然是完整清理：
+
+```text
+项目/会话全局 reset 会清除所有历史 action map、错误 map 和最近操作指针；
+不会因为切换项目或新建会话而显示旧项目的 Artifact 结果。
+```
+
+### 3. Artifact 批次完成后恢复当前 Run 投影
+
+新增内部函数：
+
+```text
+restoreArtifactProjection(runId, artifacts)
+```
+
+`loadArtifactsWithFacts(runId)` 在当前批次完成并通过现有 generation、selected Run 和 projection guard 后执行恢复：
+
+```text
+1. 用当前返回的 artifacts 建立 run_id:artifact_id -> Artifact 索引；
+2. 从 lastArtifactActionKeyByRun[runId] 读取 blocker/diff/preview 最近状态键；
+3. 只恢复当前批次仍然存在的 Artifact；
+4. 恢复质量阻断列表及其错误状态；
+5. 恢复差异对象、差异 Artifact ID 及其错误状态；
+6. 恢复正文预览、预览 Artifact ID 及其错误状态；
+7. 不恢复不属于当前 Run 的同名 Artifact。
+```
+
+如果最近状态指向的 Artifact 已经不在当前批次返回结果中，则跳过该投影，避免把已删除或已脱离当前 Run 的内容显示出来。
+
+### 4. action 写入点统一记录最近操作
+
+以下入口在开始 action 时记录当前 Run 的状态键，并在成功/失败时写入对应 map：
+
+```text
+loadQualityBlockers()
+loadRewriteInstructions()
+compareArtifact()
+compareArtifactWithVersion()
+previewArtifact()
+```
+
+失败结果不再只写入全局单值 error，同时写入当前 `run_id:artifact_id` 对应的 error map。因此 Run 切换后恢复的是完整的可见状态，而不是只有成功内容。
+
+### 5. 页面 Run 切换调用点
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+`selectRunAction()` 改为：
+
+```ts
+resetArtifactFacts({ preserveScopedState: true })
+```
+
+项目/会话整体重置仍使用：
+
+```ts
+resetArtifactFacts()
+```
+
+因此页面行为变为：
+
+```text
+切换 Run：当前面板先清空，载入新 Run 的 artifacts 后恢复该 Run 最近 action 投影；
+重置工作台：全部作用域历史 action 结果清空；
+```
+
+## 回归覆盖
+
+当前 CARD-049 复用 CARD-048 的跨 Run 同名 Artifact 场景，并增加 reset 后恢复断言：
+
+```text
+Run-A 与 Run-B 复用同一个 Artifact ID；
+两边分别载入 blocker；
+两边分别执行 diff；
+两边分别执行 preview；
+确认四类历史 map 仍按 run_id:artifact_id 隔离；
+执行 resetArtifactFacts({ preserveScopedState: true })；
+重新载入 Run-B artifacts；
+确认当前面板恢复 Run-B blocker、diff 和 preview。
+```
+
+已验证不回退既有行为：
+
+```text
+旧 Run 批次请求隔离保持；
+重复质量请求代次隔离保持；
+lineage 独立 loading/error 保持；
+rewrite/diff/preview 并发 action guard 保持；
+全局 reset 仍清空旧结果；
+```
+
+## 反向验证
+
+反向验证步骤：
+
+```text
+临时移除 loadArtifactsWithFacts() 中的 restoreArtifactProjection(runId, artifacts) 调用；
+执行 CARD-049 定向恢复测试；
+确认测试失败；
+恢复真实实现；
+再次执行同一测试并确认通过。
+```
+
+实际结果：
+
+```text
+移除恢复调用：1 failed，失败断言为 Run-B blocker 为空；
+恢复实现后：1 passed；
+```
+
+这证明新增测试锁定的是实际的“reset 后重新投影”行为，而不是仅检查静态 map 存在。
+
+## 本批验证结果
+
+### 定向测试
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run test:run -- src/features/agent/composables/useAgentWorkspaceRuntime.spec.ts -t "keeps blocker, diff and preview action results scoped"
+```
+
+结果：
+
+```text
+1 passed
+```
+
+### Runtime 全集合
+
+```powershell
+npm run test:run -- src/features/agent/composables/useAgentWorkspaceRuntime.spec.ts
+```
+
+结果：
+
+```text
+23 tests passed
+```
+
+### 类型检查
+
+```powershell
+npm run type-check
+```
+
+结果：
+
+```text
+通过
+```
+
+### 前端全量回归
+
+```powershell
+npm run test:run
+```
+
+结果：
+
+```text
+74 files passed
+455 tests passed
+```
+
+### 生产构建
+
+```powershell
+npm run build-only
+```
+
+结果：
+
+```text
+4905 modules transformed
+built successfully
+```
+
+## 提交、推送与回退点
+
+代码提交：
+
+```text
+cff6365 fix: restore scoped artifact actions on run switch
+```
+
+代码推送：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+代码回退：
+
+```powershell
+git revert cff6365
+```
+
+上一回退点：
+
+```text
+3d2dfa1 docs: record card 048 action key scope
+```
+
+本批文档提交：待本次文档提交生成。
+
+文档回退时只回退本批文档提交，不触碰 `cff6365` 代码提交及 CARD-001 至 CARD-049 的历史记录。完整回退本批时，先回退文档提交，再回退代码提交。
+
+## 当前实际状态（2026-09-02）
+
+```text
+分支：codex/bohrium-integration-20260831
+代码分支已与 origin/codex/bohrium-integration-20260831 推送同步；
+前端：http://127.0.0.1:5174/agent，HTTP 200；
+后端：http://127.0.0.1:8013/health，HTTP 200；
+后端健康响应：{"status":"healthy","app":"玄穹文枢 API","version":"1.0.0"}；
+CARD-040 的聊天主区优先布局和右侧独立日志区域仍保留；
+CARD-041 至 CARD-049 的 Run/Artifact/facts/action 隔离链路已保留；
+当前工作树仍存在历史审计文件、备份、临时脚本和 node_modules 未跟踪项；
+这些未跟踪项没有被本批提交、删除或覆盖。
+```
+
+## 下一任务目标：CARD-050（后端 Agent 运行时审查与第一项后端增量优化）
+
+本任务从前端 action 投影收尾转入后端优先，但不改变最终产品目标：中央聊天区作为主工作区，Agent 通过项目内工具能力编排小说项目操作，右侧日志独立展示，左侧项目/会话/工具/数据区域保持紧凑可折叠。
+
+CARD-050 的执行顺序：
+
+```text
+1. 以当前后端真实代码、测试和运行接口为准，审查 Agent 请求入口、任务运行时、Provider 通道、计划/步骤持久化、事件账本和 SSE 流；
+2. 形成后端模块清单和状态机边界，区分事实来源、运行时投影、事件回放和 UI 兼容层；
+3. 选择一个可回归、可回退、能直接改善 Agent 自主编排能力的最小增量；
+4. 先写失败测试，再实现代码；
+5. 验证旧 Run、旧会话、Provider fallback、事件流和错误状态不回退；
+6. 执行后端全量门禁：
+   cd D:\小说写作\xuanqiong-wenshu\backend
+   .\.venv\Scripts\python.exe -m pytest -q
+7. 如触及前端契约，再执行前端 type-check、test:run、build-only；
+8. 代码独立提交并推送；
+9. 将 CARD-050 结果、实际测试数字、回退命令和下一步继续写入本文件；
+10. 文档独立提交并推送，禁止把多个优化批次压成一次无法定位的提交。
+```
+
+CARD-050 的重点审查问题：
+
+```text
+A. Agent 是否通过工具描述、ContextRef 和运行时状态调用项目能力，而不是把小说规则硬编码在页面；
+B. 计划、步骤、工具结果和事件是否拥有唯一稳定 ID，并能在刷新、重连、Run 切换后恢复；
+C. Provider planner/response/fallback 的真实状态是否可追溯且不会被事件流摘要覆盖；
+D. 长任务排队、暂停、取消、失败、重试和终态是否共享同一状态机；
+E. 后端错误是否以结构化字段返回，使聊天区显示可读摘要而右侧日志保留详细事件；
+F. 后端接口是否能支持下一阶段的流式 token、实时进度和 Agent 自主选择项目内工具。
+```
+
+CARD-050 的预期代码检查范围：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\
+D:\小说写作\xuanqiong-wenshu\backend\app\services\
+D:\小说写作\xuanqiong-wenshu\backend\app\models\
+D:\小说写作\xuanqiong-wenshu\backend\tests\
+```
+
+CARD-050 当前状态：
+
+```text
+已设置为下一任务目标；
+尚未声称后端优化已完成；
+下一次执行必须先产出现状审查证据，再选定具体代码改动；
+完成一项后端优化后立即单独提交、推送并更新本文件。
+```
