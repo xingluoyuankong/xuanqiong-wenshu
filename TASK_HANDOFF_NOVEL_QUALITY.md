@@ -1,4 +1,4 @@
-# 任务接续文档：小说生成质量优化（xuanqiong-wenshu）
+﻿# 任务接续文档：小说生成质量优化（xuanqiong-wenshu）
 
 > **当前权威入口**：请优先阅读文末 2026-08-26 23:59｜Provider 原子合并缺陷修复与最终门禁复核。历史章节保留作为审计证据；如与文末最新权威章节冲突，以文末状态、精确门禁和未完成边界为准。
 
@@ -71182,7 +71182,7 @@ CARD-015：completed
 ```text
 上一回退点：99c1211
 本批代码与测试提交：2277a38（fix: prioritize agent chat layout，已推送）
-本批文档记录提交：本次提交后回填
+本批文档记录提交：94ea0e6（docs: record agent chat layout batch，已推送）
 推送分支：origin/codex/bohrium-integration-20260831
 数据库：未修改
 小说正文：未修改
@@ -71199,4 +71199,207 @@ CARD-015：completed
 3. 检查“后台任务”全局导航与 Agent 右侧日志是否仍有重复信息，进一步压缩信息密度。
 4. 后端继续 Worker 第二阶段：第二次 --once 领取 visible_response Job，验证 assistant_message/run_completed/Job succeeded。
 5. 继续完善任务接续文档，每一批代码、测试、文档保持独立提交、推送和回退点。
+```
+
+---
+
+# CARD-016 — Agent 运行信息去重与双 `--once` Worker 终态闭环（2026-09-01）
+
+## 1. 本批任务目标
+
+```text
+1. 移除 /agent 页面 GlobalNavBar 固定后台任务浮卡对 Agent 右栏运行日志/检查器的覆盖。
+2. 保留后台任务数据读取、轮询、取消、重试及其它页面的任务浮卡。
+3. 补齐独立 Worker 第二次 --once 领取 visible_response Job 的真实进程级终态验证。
+4. 完成定向、反向、前端全量、后端全量验证；独立提交、推送并记录可回退点。
+```
+
+## 2. 实际发现
+
+### 2.1 GlobalNavBar 与 Agent 右栏重复/遮挡
+
+`.global-task-mini` 使用 `position: fixed`、右上角定位、`z-index: 90`、最大 320px 宽度。此前只在 `writing-desk` 路由隐藏；因此 `agent-workspace` 发生 running/queued 后台任务时，会渲染一个覆盖 Agent 右栏的全局浮卡。
+
+CARD-015 已将 Agent 的运行选择器、日志、折叠运行检查器和运行详情集中到右栏；全局浮卡在 Agent 页既重复又遮挡，不应继续渲染。
+
+### 2.2 Durable Worker 验证缺口
+
+生产入口 `backend/scripts/agent_worker.py` 已注册：
+
+```python
+handlers={
+    "agent_execution": handle_agent_execution_job,
+    "visible_response": handle_visible_response_job,
+}
+```
+
+但原 CARD-014 HTTP/独立 Worker 测试只验证第一个 `--once`：`agent_execution` 成功、`visible_response` 排队，缺少第二个独立进程完成可见回复后的 Job、Run、Ledger 与 assistant Message 终态证据。
+
+## 3. 修改文件与实现
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\components\GlobalNavBar.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\components\GlobalNavBar.spec.ts
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_asgi_worker_event_replay.py
+```
+
+### 3.1 前端
+
+新增：
+
+```ts
+const isAgentWorkspaceRoute = computed(() => route.name === 'agent-workspace')
+```
+
+`globalTaskVisible` 增加 `!isAgentWorkspaceRoute.value`。结果：
+
+```text
+/agent：不渲染 .global-task-mini，避免遮挡，Agent 自身右栏负责 Agent Run 状态。
+非 /agent 页面：保持既有浮卡行为。
+任务列表读取、轮询、取消、失败重试：未删除。
+```
+
+新增 `Agent 工作台不显示覆盖式全局后台任务浮卡` 回归测试：注入 running durable task，断言 `.global-task-mini` 不存在，同时 `TaskRuntimeAPI.listTasks` 仍被调用。
+
+### 3.2 后端真实双阶段 Worker 测试
+
+扩展 ASGI HTTP 测试为：
+
+```text
+临时 SQLite 执行 Alembic head
+→ 独立 Uvicorn ASGI 进程 HTTP 登录 / 创建 Session / 创建 Message
+→ 第一个 scripts/agent_worker.py --once 完成 agent_execution
+→ HTTP 确认 execution=succeeded、visible_response=queued
+→ 仅监听 127.0.0.1 临时端口的 OpenAI-compatible SSE fixture 返回固定可见回复
+→ 第二个 scripts/agent_worker.py --once 完成 visible_response
+→ HTTP 回读 Job、Run State Projection、Event Ledger、Session Detail messages
+```
+
+本机测试 SSE fixture 不调用 `.env` 中真实 Provider。它验证：
+
+```text
+两个 Job 均 succeeded
+visible_response attempt_count=1
+visible_response result_json 正确
+Run State Projection 顶层 status=completed
+assistant_queued → assistant_started → assistant_delta
+assistant_completed 紧邻 run_completed
+存在 public_work_summary checkpoint
+最终 assistant 持久化消息为“独立 Worker 已完成可见回复。”
+```
+
+测试实现过程中按真实契约修正三项错误假设：
+
+```text
+- WARNING 日志级别下不把 INFO worked=True 当作执行证据，改为持久化 API 证据。
+- public_work_summary 可在整个流程中多次出现，不用第一次位置判断结束顺序。
+- Run State Projection 的 status/jobs 在顶层；读取 messages 使用 GET /api/agent/sessions/{session_id}，而不是只支持 POST 的 /messages 路径。
+```
+
+## 4. 实测验证
+
+### 4.1 前端
+
+```text
+npm run test:run -- src/components/GlobalNavBar.spec.ts
+1 file passed，6 tests passed
+
+npm run type-check
+通过
+
+npm run test:run
+74 files passed，429 tests passed，127.48s
+
+npm run build-only
+通过，Vite production build 25.17s
+```
+
+### 4.2 前端反向验证
+
+临时移除 `!isAgentWorkspaceRoute.value` 后，目标测试实际失败：
+
+```text
+退出码 1
+expected true to be false
+```
+
+finally 恢复源码后同一目标测试重新通过：`1 passed，5 skipped`。
+
+### 4.3 后端
+
+```text
+两阶段跨进程终态测试：1 passed，1 deselected，20.13s
+Agent Worker 组：17 passed，86.81s
+后端全量：1427 passed，432.42s（7m12s）
+```
+
+### 4.4 后端反向验证
+
+临时从 `backend/scripts/agent_worker.py` handler 映射移除：
+
+```python
+"visible_response": handle_visible_response_job
+```
+
+跨进程终态测试按预期失败，退出码 1；finally 恢复生产脚本后目标测试重跑通过：`1 passed，1 deselected，22.21s`。
+
+### 4.5 运行服务
+
+```text
+GET http://127.0.0.1:5174/agent → HTTP 200
+GET http://127.0.0.1:8013/health → HTTP 200
+health.status = healthy
+```
+
+## 5. 浏览器验证边界
+
+本批的 DOM 行为已由组件回归测试、前端全量测试、类型检查、构建及 `/agent` HTTP 存活检查覆盖。真实浏览器截图没有写为 completed：内置浏览器运行时初始化报本机路径错误，Tabbit 持久通道被当前命令宿主关闭 stdin。未把未得到的视觉证据伪造为完成。
+
+下一批需在可用浏览器会话中创建 running/queued 任务后检查：
+
+```text
+.global-task-mini 不渲染
+Agent 右栏的运行选择器、日志、折叠检查器可见且可操作
+保存截图和 computed layout 证据
+```
+
+## 6. 当前状态
+
+```text
+Agent 路由浮卡遮挡修复：completed
+其它页面全局任务浮卡保留：completed
+Agent 页后台任务读取保留：completed
+第二次 --once visible_response 终态闭环：completed and process-verified
+Job / Run / Event Ledger / assistant Message：completed and HTTP-verified
+前端 type-check / full test / production build：completed
+后端 Worker 组 / full pytest：completed
+真实浏览器视觉截图：pending（未伪造）
+数据库、小说正文：未修改
+```
+
+## 7. 提交、推送与回退
+
+```text
+上一完整远程回退点：
+94ea0e66d587003f8e0b231b20d99bc66477a642
+docs: record agent chat layout batch
+
+CARD-016 代码与测试回退点：
+5f0d2928d246abc04a44acc04e405597b89536ad
+test: verify durable agent worker completion
+已推送到 origin/codex/bohrium-integration-20260831
+
+本批文档提交：紧随本记录创建独立 docs 提交并推送；提交消息：
+docs: record card 016 agent workspace completion
+
+未纳入 Git：历史 audit、未跟踪临时脚本、数据库备份、node_modules、测试运行目录、浏览器工件。
+```
+
+## 8. 下一任务目标
+
+```text
+1. 在真实浏览器会话补 /agent 浮卡遮挡截图和交互证据。
+2. 补 CARD-015 Inspector 展开交互与 1280/1024/768/390 多视口持久化截图矩阵。
+3. 后端继续验证 visible_response 失败/死信/重试的 idempotency：失败重试不得重复 assistant_message 或 run_completed。
+4. 每批继续遵循：代码→定向测试→反向验证→全量门禁→独立代码提交/推送→独立文档提交/推送→记录回退点。
 ```
