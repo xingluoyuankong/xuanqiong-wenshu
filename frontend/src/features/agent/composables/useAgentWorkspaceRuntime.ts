@@ -62,6 +62,18 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
   const GAP_REPAIR_PAGE_LIMIT = 500
   const GAP_REPAIR_MAX_PAGES = 8
   let lifecycleGeneration = 0
+  let artifactViewGeneration = 0
+  type ArtifactViewRequest = { generation: number; runId: string; artifactId: string }
+  const beginArtifactViewRequest = (artifact: AgentArtifact): ArtifactViewRequest => ({
+    generation: ++artifactViewGeneration,
+    runId: artifact.run_id,
+    artifactId: artifact.id,
+  })
+  const isCurrentArtifactContext = (generation: number, runId: string) =>
+    generation === artifactViewGeneration &&
+    (!options.selectedRunId.value || options.selectedRunId.value === runId)
+  const isCurrentArtifactRequest = (request: ArtifactViewRequest) =>
+    isCurrentArtifactContext(request.generation, request.runId)
 
   const materializePlanSteps = (loaded: AgentRunStep[]) =>
     loaded
@@ -224,26 +236,29 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     }
   }
 
-  const loadArtifactFacts = async (artifact: AgentArtifact) => {
+  const loadArtifactFacts = async (artifact: AgentArtifact, generation = artifactViewGeneration) => {
+    const isCurrent = () => isCurrentArtifactContext(generation, artifact.run_id)
     const tasks: Promise<void>[] = []
     if (typeof AgentAPI.getArtifactQuality === 'function') {
       artifactQualityFactsLoading.value = { ...artifactQualityFactsLoading.value, [artifact.id]: true }
       artifactQualityFactsErrors.value = { ...artifactQualityFactsErrors.value, [artifact.id]: '' }
       tasks.push(AgentAPI.getArtifactQuality(artifact.id).then((value) => {
-        artifactQualityFacts.value = { ...artifactQualityFacts.value, [artifact.id]: value }
+        if (isCurrent()) artifactQualityFacts.value = { ...artifactQualityFacts.value, [artifact.id]: value }
       }).catch((error) => {
-        artifactQualityFactsErrors.value = {
-          ...artifactQualityFactsErrors.value,
-          [artifact.id]: error instanceof Error ? error.message : '请求失败',
+        if (isCurrent()) {
+          artifactQualityFactsErrors.value = {
+            ...artifactQualityFactsErrors.value,
+            [artifact.id]: error instanceof Error ? error.message : '请求失败',
+          }
         }
         throw error
       }).finally(() => {
-        artifactQualityFactsLoading.value = { ...artifactQualityFactsLoading.value, [artifact.id]: false }
+        if (isCurrent()) artifactQualityFactsLoading.value = { ...artifactQualityFactsLoading.value, [artifact.id]: false }
       }))
     }
     if (typeof AgentAPI.getArtifactLineage === 'function') {
       tasks.push(AgentAPI.getArtifactLineage(artifact.id).then((value) => {
-        artifactLineageFacts.value = { ...artifactLineageFacts.value, [artifact.id]: value }
+        if (isCurrent()) artifactLineageFacts.value = { ...artifactLineageFacts.value, [artifact.id]: value }
       }))
     }
     await Promise.all(tasks)
@@ -260,45 +275,51 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
 
   const loadQualityBlockers = async (artifact: AgentArtifact) => {
     if (typeof AgentAPI.listArtifactQualityBlockers !== 'function') return
+    const request = beginArtifactViewRequest(artifact)
     qualityBlockersLoading.value = true
     try {
-      await loadArtifactFacts(artifact)
-      qualityBlockers.value = await AgentAPI.listArtifactQualityBlockers(artifact.id)
-      options.addActivity('质量阻断定位已载入', `${qualityBlockers.value.length} 项阻断`)
+      await loadArtifactFacts(artifact, request.generation)
+      const blockers = await AgentAPI.listArtifactQualityBlockers(artifact.id)
+      if (!isCurrentArtifactRequest(request)) return
+      qualityBlockers.value = blockers
+      options.addActivity('质量阻断定位已载入', `${blockers.length} 项阻断`)
     } catch (error) {
-      options.addActivity('质量阻断读取失败', error instanceof Error ? error.message : '无法读取质量阻断')
+      if (isCurrentArtifactRequest(request)) options.addActivity('质量阻断读取失败', error instanceof Error ? error.message : '无法读取质量阻断')
     } finally {
-      qualityBlockersLoading.value = false
+      if (isCurrentArtifactRequest(request)) qualityBlockersLoading.value = false
     }
   }
 
   const loadRewriteInstructions = async (artifact: AgentArtifact) => {
     if (typeof AgentAPI.listArtifactRewriteInstructions !== 'function') return
+    const request = beginArtifactViewRequest(artifact)
     rewriteLoading.value = { ...rewriteLoading.value, [artifact.id]: true }
     try {
-      rewriteInstructions.value = {
-        ...rewriteInstructions.value,
-        [artifact.id]: await AgentAPI.listArtifactRewriteInstructions(artifact.id),
-      }
+      const instructions = await AgentAPI.listArtifactRewriteInstructions(artifact.id)
+      if (!isCurrentArtifactRequest(request)) return
+      rewriteInstructions.value = { ...rewriteInstructions.value, [artifact.id]: instructions }
       options.addActivity('修复指令已生成', `${artifact.id.slice(0, 8)} 已生成结构化 rewrite instruction`)
     } catch (error) {
-      options.addActivity('修复指令生成失败', error instanceof Error ? error.message : '无法生成修复指令')
+      if (isCurrentArtifactRequest(request)) options.addActivity('修复指令生成失败', error instanceof Error ? error.message : '无法生成修复指令')
     } finally {
-      rewriteLoading.value = { ...rewriteLoading.value, [artifact.id]: false }
+      if (isCurrentArtifactRequest(request)) rewriteLoading.value = { ...rewriteLoading.value, [artifact.id]: false }
     }
   }
 
   const compareArtifact = async (artifact: AgentArtifact) => {
     const against = options.artifacts.value.find((item) => item.id !== artifact.id)
     if (!against || typeof AgentAPI.getArtifactDiff !== 'function') return
+    const request = beginArtifactViewRequest(artifact)
     artifactDiffLoading.value = true
     try {
-      artifactDiff.value = await AgentAPI.getArtifactDiff(artifact.id, against.id)
+      const diff = await AgentAPI.getArtifactDiff(artifact.id, against.id)
+      if (!isCurrentArtifactRequest(request)) return
+      artifactDiff.value = diff
       options.addActivity('候选差异已载入', `${artifact.id.slice(0, 8)} 与 ${against.id.slice(0, 8)} 已完成比较`)
     } catch (error) {
-      options.addActivity('候选差异读取失败', error instanceof Error ? error.message : '无法读取候选差异')
+      if (isCurrentArtifactRequest(request)) options.addActivity('候选差异读取失败', error instanceof Error ? error.message : '无法读取候选差异')
     } finally {
-      artifactDiffLoading.value = false
+      if (isCurrentArtifactRequest(request)) artifactDiffLoading.value = false
     }
   }
 
@@ -311,25 +332,30 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
       options.addActivity('正式版本比较不可用', '候选没有受控来源版本，无法建立正式版本差异。')
       return
     }
+    const request = beginArtifactViewRequest(artifact)
     artifactDiffLoading.value = true
     try {
-      artifactDiff.value = await AgentAPI.getArtifactVersionDiff(artifact.id, {
+      const diff = await AgentAPI.getArtifactVersionDiff(artifact.id, {
         projectId: options.selectedProjectId.value, chapterNumber, versionId,
       })
+      if (!isCurrentArtifactRequest(request)) return
+      artifactDiff.value = diff
       options.addActivity('正式版本差异已载入', `${artifact.id.slice(0, 8)} 与第 ${chapterNumber} 章版本 ${versionId} 已完成比较`)
     } catch (error) {
-      options.addActivity('正式版本差异读取失败', error instanceof Error ? error.message : '无法读取正式版本差异')
+      if (isCurrentArtifactRequest(request)) options.addActivity('正式版本差异读取失败', error instanceof Error ? error.message : '无法读取正式版本差异')
     } finally {
-      artifactDiffLoading.value = false
+      if (isCurrentArtifactRequest(request)) artifactDiffLoading.value = false
     }
   }
 
   const previewArtifact = async (artifact: AgentArtifact) => {
     if (typeof AgentAPI.getArtifactContent !== 'function') return
+    const request = beginArtifactViewRequest(artifact)
     try {
-      artifactPreview.value = await AgentAPI.getArtifactContent(artifact.id)
+      const content = await AgentAPI.getArtifactContent(artifact.id)
+      if (isCurrentArtifactRequest(request)) artifactPreview.value = content
     } catch (error) {
-      options.addActivity('候选预览失败', error instanceof Error ? error.message : '无法读取候选正文')
+      if (isCurrentArtifactRequest(request)) options.addActivity('候选预览失败', error instanceof Error ? error.message : '无法读取候选正文')
     }
   }
 

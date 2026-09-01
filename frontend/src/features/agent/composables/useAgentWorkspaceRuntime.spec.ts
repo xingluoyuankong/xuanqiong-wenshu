@@ -9,6 +9,11 @@ const {
   listRunConversationSummariesMock,
   getArtifactQualityMock,
   getArtifactLineageMock,
+  listArtifactQualityBlockersMock,
+  getArtifactDiffMock,
+  getArtifactVersionDiffMock,
+  getArtifactContentMock,
+  listArtifactRewriteInstructionsMock,
   listEventsMock,
   listRunActivityMock,
   sessionStreamUrlMock,
@@ -19,6 +24,11 @@ const {
   listRunConversationSummariesMock: vi.fn(),
   getArtifactQualityMock: vi.fn(),
   getArtifactLineageMock: vi.fn(),
+  listArtifactQualityBlockersMock: vi.fn(),
+  getArtifactDiffMock: vi.fn(),
+  getArtifactVersionDiffMock: vi.fn(),
+  getArtifactContentMock: vi.fn(),
+  listArtifactRewriteInstructionsMock: vi.fn(),
   listEventsMock: vi.fn(),
   listRunActivityMock: vi.fn(),
   sessionStreamUrlMock: vi.fn(),
@@ -32,6 +42,11 @@ vi.mock('@/api/agent', () => ({
     listRunConversationSummaries: listRunConversationSummariesMock,
     getArtifactQuality: getArtifactQualityMock,
     getArtifactLineage: getArtifactLineageMock,
+    listArtifactQualityBlockers: listArtifactQualityBlockersMock,
+    getArtifactDiff: getArtifactDiffMock,
+    getArtifactVersionDiff: getArtifactVersionDiffMock,
+    getArtifactContent: getArtifactContentMock,
+    listArtifactRewriteInstructions: listArtifactRewriteInstructionsMock,
     listEvents: listEventsMock,
     listRunActivity: listRunActivityMock,
     sessionStreamUrl: sessionStreamUrlMock,
@@ -39,6 +54,7 @@ vi.mock('@/api/agent', () => ({
 }))
 
 import { useAgentWorkspaceRuntime } from './useAgentWorkspaceRuntime'
+import type { AgentQualityBlocker } from '@/api/agent'
 import { useAgentRunProjection } from '@/features/agent/stores/agentRunProjection'
 
 const run = {
@@ -67,6 +83,11 @@ describe('useAgentWorkspaceRuntime', () => {
     listRunConversationSummariesMock.mockResolvedValue([])
     getArtifactQualityMock.mockResolvedValue({ artifact_id: artifact.id, quality_result: null, findings: [], gate: { decision: 'passed', blocker_count: 0 } })
     getArtifactLineageMock.mockResolvedValue({ artifact_id: artifact.id, upstream_edges: [], downstream_edges: [] })
+    listArtifactQualityBlockersMock.mockResolvedValue([])
+    getArtifactDiffMock.mockResolvedValue({ artifact_id: artifact.id, lines: [] })
+    getArtifactVersionDiffMock.mockResolvedValue({ artifact_id: artifact.id, lines: [] })
+    getArtifactContentMock.mockResolvedValue('')
+    listArtifactRewriteInstructionsMock.mockResolvedValue([])
     listEventsMock.mockResolvedValue([])
     listRunActivityMock.mockResolvedValue([])
     sessionStreamUrlMock.mockImplementation((sessionId: string, runId: string, afterSequence: number) => `/stream/${sessionId}/${runId}/${afterSequence}`)
@@ -97,7 +118,7 @@ describe('useAgentWorkspaceRuntime', () => {
       addActivity,
       onTerminalRefresh,
     })
-    return { runtime, session, streaming, stream, addActivity, onTerminalRefresh }
+    return { runtime, projection, session, streaming, stream, addActivity, onTerminalRefresh }
   }
 
   it('loads stage-separated provenance into the selected Run without event-stream inference', async () => {
@@ -110,6 +131,34 @@ describe('useAgentWorkspaceRuntime', () => {
       response_provider_called: false,
       response_provider_fallback_reason: 'TimeoutError',
     })
+  })
+
+  it('drops stale artifact blockers after switching the selected Run and keeps the new Run isolated', async () => {
+    const { runtime, projection, addActivity } = createRuntime()
+    const runB = { ...run, id: 'runtime-run-b' }
+    const artifactB = { ...artifact, id: 'artifact-runtime-b', run_id: runB.id }
+    let resolveOld: (value: AgentQualityBlocker[]) => void = () => undefined
+    const oldBlockers = new Promise<AgentQualityBlocker[]>((resolve) => { resolveOld = resolve })
+    const oldBlocker = { artifact_id: artifact.id, code: 'A-QUALITY-001', message: 'Run-A blocker' } as AgentQualityBlocker
+    const newBlocker = { artifact_id: artifactB.id, code: 'B-QUALITY-001', message: 'Run-B blocker' } as AgentQualityBlocker
+    listArtifactQualityBlockersMock
+      .mockReturnValueOnce(oldBlockers)
+      .mockResolvedValueOnce([newBlocker])
+
+    const staleRequest = runtime.loadQualityBlockers(artifact)
+    await vi.waitFor(() => expect(listArtifactQualityBlockersMock).toHaveBeenCalledWith(artifact.id))
+    projection.upsertRun(runB, { select: true })
+    runtime.resetArtifactFacts()
+    resolveOld([oldBlocker])
+    await staleRequest
+
+    expect(runtime.qualityBlockers.value).toEqual([])
+    expect(runtime.qualityBlockersLoading.value).toBe(false)
+    expect(addActivity).not.toHaveBeenCalledWith('质量阻断定位已载入', expect.anything())
+
+    await runtime.loadQualityBlockers(artifactB)
+    expect(runtime.qualityBlockers.value).toEqual([newBlocker])
+    expect(addActivity).toHaveBeenCalledWith('质量阻断定位已载入', '1 项阻断')
   })
 
   it('keeps an Artifact fail-closed while authority facts are loading or unavailable', async () => {
