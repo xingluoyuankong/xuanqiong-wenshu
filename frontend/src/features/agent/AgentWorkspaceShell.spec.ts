@@ -76,4 +76,11 @@ describe('AgentWorkspaceShell', () => {
     expect(shellSource).toContain('.agent-sidebar, .agent-main, .agent-activity { grid-column: auto; position: static; max-height: none; overflow: visible; }')
     expect(shellSource).toContain(`.agent-main {\n  min-height: min(72vh, 56rem);\n}`)
   })
+  it('把右栏运行日志限制为有界渲染窗口', () => {
+    expect(workspaceSource).toContain('const LOG_RENDER_LIMIT = 120')
+    expect(workspaceSource).toContain('const visibleLogEvents = computed(() => events.value.slice(-LOG_RENDER_LIMIT))')
+    expect(workspaceSource).toContain('const hiddenLogEventCount = computed(() => Math.max(0, events.value.length - visibleLogEvents.value.length))')
+    expect(workspaceSource).toContain('v-if="hiddenLogEventCount" class="workspace-log-window"')
+    expect(workspaceSource).toContain('v-for="event in visibleLogEvents"')
+  })
 })
