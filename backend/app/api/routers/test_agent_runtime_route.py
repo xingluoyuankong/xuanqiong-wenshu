@@ -775,3 +775,95 @@ async def test_agent_run_provider_provenance_route_is_scoped_and_stage_specific(
 
 
 
+
+@pytest.mark.asyncio
+async def test_agent_run_plan_route_projects_latest_revision_payload_over_mutable_run_context(task_session):
+    owner = await _route_user(task_session, 1027, "plan-revision-projection-owner")
+    created = await create_agent_session(
+        AgentSessionCreateRequest(), session=task_session, current_user=SimpleNamespace(id=owner.id)
+    )
+    runtime = AgentRuntimeService(task_session)
+    session = await runtime.get_session(created.id, owner.id)
+    run = await runtime.create_run(
+        session_id=session.id,
+        user_id=owner.id,
+        context={
+            "goal": "已变更的临时目标",
+            "plan_mode": "explore",
+            "planner_provider_called": False,
+            "plan_steps": [{"order": 1, "tool_name": "chapter.inspect", "intent": "临时步骤"}],
+        },
+    )
+    snapshot = await AgentContextService(task_session).create_snapshot(
+        run=run,
+        session=session,
+        context_json={"goal": "持久化计划上下文"},
+    )
+    await AgentPlanService(task_session).create_revision(
+        run=run,
+        session=session,
+        context_snapshot=snapshot,
+        plan_json={
+            "schema_version": 1,
+            "goal": "持久化计划目标",
+            "mode": "strict",
+            "phase": "planning",
+            "steps": [
+                {
+                    "order": 1,
+                    "tool_name": "chapter.version.list",
+                    "intent": "读取持久化版本",
+                    "expected_result": "版本列表",
+                    "depends_on": [],
+                    "planner_arguments": {"limit": 7},
+                }
+            ],
+            "provider_called": True,
+            "fallback_reason": "provider-timeout",
+        },
+    )
+
+    plan = await get_agent_run_plan(run.id, session=task_session, current_user=SimpleNamespace(id=owner.id))
+
+    assert plan.goal == "持久化计划目标"
+    assert plan.mode == "strict"
+    assert plan.provider_called is True
+    assert plan.planner_fallback_reason == "provider-timeout"
+    assert [(step.tool_name, step.intent, step.expected_result, step.planner_arguments) for step in plan.steps] == [
+        ("chapter.version.list", "读取持久化版本", "版本列表", {"limit": 7})
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agent_run_plan_route_does_not_fallback_to_mutable_steps_when_revision_steps_are_malformed(task_session):
+    owner = await _route_user(task_session, 1028, "plan-revision-malformed-owner")
+    created = await create_agent_session(
+        AgentSessionCreateRequest(), session=task_session, current_user=SimpleNamespace(id=owner.id)
+    )
+    runtime = AgentRuntimeService(task_session)
+    session = await runtime.get_session(created.id, owner.id)
+    run = await runtime.create_run(
+        session_id=session.id,
+        user_id=owner.id,
+        context={
+            "goal": "临时目标",
+            "plan_steps": [{"order": 1, "tool_name": "chapter.inspect", "intent": "不应投影"}],
+        },
+    )
+    snapshot = await AgentContextService(task_session).create_snapshot(
+        run=run,
+        session=session,
+        context_json={"goal": "持久化目标"},
+    )
+    await AgentPlanService(task_session).create_revision(
+        run=run,
+        session=session,
+        context_snapshot=snapshot,
+        plan_json={"goal": "持久化目标", "mode": "strict", "steps": {"invalid": True}},
+    )
+
+    plan = await get_agent_run_plan(run.id, session=task_session, current_user=SimpleNamespace(id=owner.id))
+
+    assert plan.goal == "持久化目标"
+    assert plan.mode == "strict"
+    assert plan.steps == []

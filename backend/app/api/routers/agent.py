@@ -726,7 +726,16 @@ async def get_agent_run_plan(
     try:
         run = await AgentRuntimeService(session).get_run(run_id, current_user.id)
         context = dict(run.context_json or {})
-        raw_steps = context.get("plan_steps") if isinstance(context.get("plan_steps"), list) else []
+        revision = await AgentPlanService(session).get_latest_revision_for_run(
+            run_id=run.id,
+            session_id=run.session_id,
+            user_id=current_user.id,
+        )
+        revision_payload = dict(revision.plan_json or {}) if revision is not None else {}
+        if revision is not None:
+            raw_steps = revision_payload.get("steps") if isinstance(revision_payload.get("steps"), list) else []
+        else:
+            raw_steps = context.get("plan_steps") if isinstance(context.get("plan_steps"), list) else []
         steps: list[AgentPlanStep] = []
         for raw in sorted((item for item in raw_steps if isinstance(item, dict)), key=lambda item: int(item.get("order") or 0)):
             order = int(raw.get("order") or 0)
@@ -754,25 +763,32 @@ async def get_agent_run_plan(
                     planner_arguments=planner_arguments,
                 )
             )
-        mode = str(context.get("plan_mode") or "explore")
+        goal_source = revision_payload.get("goal") if revision is not None else context.get("goal")
+        mode_source = revision_payload.get("mode") if revision is not None else context.get("plan_mode")
+        mode = str(mode_source or "explore")
         if mode not in {"explore", "strict"}:
             mode = "explore"
-        revision = await AgentPlanService(session).get_latest_revision_for_run(
-            run_id=run.id,
-            session_id=run.session_id,
-            user_id=current_user.id,
-        )
         plan_id = UUID(revision.revision_id) if revision is not None else None
+        provider_called_source = (
+            revision_payload.get("provider_called")
+            if revision is not None
+            else context.get("planner_provider_called")
+        )
+        fallback_source = (
+            revision_payload.get("fallback_reason") or revision_payload.get("planner_provider_fallback_reason")
+            if revision is not None
+            else context.get("planner_fallback_reason")
+        )
         return AgentPlan(
             plan_id=plan_id,
-            goal=str(context.get("goal") or ""),
+            goal=str(goal_source or context.get("goal") or ""),
             project_id=run.project_id,
             mode=mode,
             created_by_user_id=run.user_id,
             steps=steps,
             events=[],
-            provider_called=bool(context.get("planner_provider_called")),
-            planner_fallback_reason=(str(context.get("planner_fallback_reason"))[:160] if context.get("planner_fallback_reason") else None),
+            provider_called=bool(provider_called_source),
+            planner_fallback_reason=(str(fallback_source)[:160] if fallback_source else None),
         )
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
