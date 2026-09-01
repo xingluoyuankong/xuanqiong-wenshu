@@ -176,7 +176,6 @@
           :has-sequence-gap="runProjection.activeEventProjection.value.hasSequenceGap"
           :replay-required="runProjection.replayRequired.value"
           :pending-sequences="runProjection.activeEventProjection.value.pendingSequences"
-          :events="events"
           :context-refs="activeContextRefs"
           :project-title="selectedProject?.title"
           :chapter-title="contentSelectedChapter?.title"
@@ -1603,10 +1602,6 @@ onBeforeUnmount(() => {
 }
 .workspace-chat-column :deep(.xq-panel--ink) {
   min-height: min(72vh, 56rem);
-}
-/* AgentConversation 仍保留事件投影以兼容现有数据流；可见日志只在右侧日志面板呈现。 */
-.workspace-chat-column :deep([data-testid="agent-process-stream"]) {
-  display: none;
 }
 .workspace-chat-column :deep(.messages) {
   min-height: min(24rem, 42vh);

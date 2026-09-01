@@ -22,7 +22,6 @@ describe('AgentConversation', () => {
         streamConnectionState: 'live',
         runtimeSupported: true,
         goal: '检查第三章',
-        events: [{ id: 'event-1', label: '计划已建立', detail: '开始质量检查', sequence: 1, eventType: 'planning' }],
         publicWorkSummary: {
           action_id: 'planner:1',
           phase: 'planning',
@@ -36,7 +35,7 @@ describe('AgentConversation', () => {
     expect(wrapper.get('[data-testid="agent-session-status"]').text()).toContain('会话：第三章质量审查')
     expect(wrapper.get('[data-testid="agent-message-list"]').text()).toContain(message.content)
     expect(wrapper.get('[data-testid="agent-public-work-summary"]').text()).toContain('正在建立创作计划。')
-    expect(wrapper.get('[data-testid="agent-process-stream"]').text()).toContain('计划已建立')
+    expect(wrapper.find('[data-testid="agent-process-stream"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('实时运行流已连接')
 
     await wrapper.get('[data-testid="agent-message-input"]').setValue('改写第三章开头')

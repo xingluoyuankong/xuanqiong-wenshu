@@ -202,6 +202,7 @@ describe('AgentWorkspace', () => {
     expect(wrapper.find('[data-testid="agent-activity-stack"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="agent-log-panel"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="agent-activity-stack"] [data-testid="agent-process-stream"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="agent-chat-column"] [data-testid="agent-process-stream"]').exists()).toBe(false)
 
     const projectSection = wrapper.get('[data-testid="agent-project-section"]').element as HTMLDetailsElement
     const toolsSection = wrapper.get('[data-testid="agent-tools-section"]').element as HTMLDetailsElement

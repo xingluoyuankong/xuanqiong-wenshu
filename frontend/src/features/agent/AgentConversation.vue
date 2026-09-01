@@ -31,9 +31,6 @@
       :replay-required="replayRequired"
       :pending-sequences="pendingSequences"
     />
-    <div class="events" data-testid="agent-process-stream">
-      <article v-for="event in events" :key="event.id"><strong>{{ event.label }}</strong><p>{{ event.detail }}</p></article>
-    </div>
     <form class="composer" @submit.prevent="emit('submit')">
       <AgentContextChips :refs="contextRefs" :project-title="projectTitle || undefined" :chapter-title="chapterTitle || undefined" @remove="emit('remove-context-ref', $event)" />
       <label class="sr-only" for="agent-goal">给小说 Agent 的指令</label>
@@ -50,7 +47,7 @@
 import { computed } from 'vue'
 import type { AgentContextRef, AgentMessage, AgentPublicWorkSummary as AgentPublicWorkSummaryType } from '@/api/agent'
 import type { SSEConnectionState } from '@/utils/sseStream'
-import type { AgentDisplayEvent, AgentWorkTraceDelta } from './reducers/agentEventReducer'
+import type { AgentWorkTraceDelta } from './reducers/agentEventReducer'
 import AgentContextChips from './AgentContextChips.vue'
 import AgentPublicWorkSummary from './AgentPublicWorkSummary.vue'
 import { XqButton, XqPanel } from '@/shared/ui'
@@ -73,7 +70,6 @@ const props = withDefaults(
     hasSequenceGap?: boolean
     replayRequired?: boolean
     pendingSequences?: number[]
-    events?: AgentDisplayEvent[]
     contextRefs?: AgentContextRef[]
     projectTitle?: string | null
     chapterTitle?: string | null
@@ -95,7 +91,6 @@ const props = withDefaults(
     hasSequenceGap: false,
     replayRequired: false,
     pendingSequences: () => [],
-    events: () => [],
     contextRefs: () => [],
     projectTitle: null,
     chapterTitle: null,
@@ -131,9 +126,6 @@ const updateGoal = (event: Event) => {
 .message-user { justify-self: end; background: rgba(8, 145, 178, 0.35); }
 .message-assistant { justify-self: start; background: rgba(255, 255, 255, 0.12); }
 .empty-chat { color: rgba(255, 255, 255, 0.7); line-height: 1.6; }
-.events { display: grid; gap: 0.65rem; max-height: 28rem; overflow: auto; }
-.events article { border-left: 3px solid #0891b2; padding: 0.15rem 0.75rem; }
-.events p { margin: 0.25rem 0; line-height: 1.55; }
 .composer { display: grid; gap: 0.65rem; margin-top: 1rem; }
 .composer textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--xq-border); border-radius: 0.7rem; padding: 0.7rem; background: rgba(255, 255, 255, 0.85); font: inherit; resize: vertical; line-height: 1.6; }
 .composer > div { display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; }
