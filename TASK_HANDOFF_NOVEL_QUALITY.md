@@ -69249,3 +69249,210 @@ CARD-008：completed
 3. 真实 ASGI 多 Worker replay：在可控本地进程组合中验证 durable ledger 不依赖单进程内存。
 4. 再推进前端：结合已有三栏布局继续压缩左侧标签密度、保持聊天正文宽度，并针对日志面板进行真实浏览器尺寸验证。
 ```
+
+
+---
+
+# 2026-09-01｜CARD-009 后端子批次｜Agent 事件账本 HTTP 错误语义与认证矩阵
+
+## 1. 本批任务目标
+
+继续后端优先的可靠性闭环，审查 Agent Durable Event Ledger 三条读取路径：
+
+```text
+会话作用域事件列表：GET /api/agent/sessions/{session_id}/runs/{run_id}/events
+Run 活动回放列表：GET /api/agent/runs/{run_id}/activity
+实时 SSE 回放流：GET /api/agent/sessions/{session_id}/runs/{run_id}/stream
+```
+
+目标是确保这三条路径在认证、用户作用域与账本数据库异常时拥有一致、公开、可重试且不会泄漏驱动原文的响应语义。
+
+## 2. 实际发现
+
+SSE 已有两层数据库故障语义：
+
+```text
+建流前 scope preflight 的 SQLAlchemyError -> HTTP 503 / AGENT_EVENT_LEDGER_UNAVAILABLE
+运行中 list_events 的 SQLAlchemyError -> event: stream_error，retryable=true，cursor 保持最后 durable sequence
+```
+
+但普通 `events` 与 `activity` HTTP 路由原先只捕获 `AgentRuntimeError`：
+
+```text
+SQLAlchemyError 会逃逸到全局异常处理器
+虽然可能得到 503，但没有由 Agent ledger 路由明确固定、测试化 AGENT_EVENT_LEDGER_UNAVAILABLE 契约
+```
+
+这是本批实际修复点，而不是报告层猜测。
+
+## 3. 修改文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_stream_http.py
+```
+
+## 4. 实现内容
+
+### 4.1 统一普通 Ledger HTTP 读取的错误映射
+
+以下两个路由将异常捕获从：
+
+```python
+except AgentRuntimeError as exc:
+```
+
+改为：
+
+```python
+except (AgentRuntimeError, SQLAlchemyError) as exc:
+```
+
+并统一通过既有 `_error()` 映射：
+
+```text
+SQLAlchemyError
+-> HTTP 503
+-> detail.code = AGENT_EVENT_LEDGER_UNAVAILABLE
+-> detail.message = Agent 事件账本暂时不可用，请稍后重连。
+-> 全局异常中间件可追加 request_id
+-> 不返回数据库驱动、连接串、密码或原始异常文本
+```
+
+涉及端点：
+
+```text
+GET /sessions/{session_id}/runs/{run_id}/events
+GET /runs/{run_id}/activity
+```
+
+### 4.2 认证与存储访问顺序
+
+新增 HTTP 测试用一个最小 FastAPI App 覆盖三条读取路径：
+
+```text
+events
+activity
+stream
+```
+
+将 `get_current_user` 覆盖为 401 后，三者均在进入存储读取前返回：
+
+```json
+{"detail":{"code":"AUTH_REQUIRED"}}
+```
+
+这验证路由持续依赖当前用户身份，而不是把缺失身份降级为匿名的账本读取。
+
+### 4.3 503 响应测试化
+
+测试通过 monkeypatch 令 `AgentRuntimeService.list_events()` 抛出包含伪造敏感字段的异常：
+
+```text
+raw database password=should-not-leak
+```
+
+对普通 `events` 与 `activity` 端点断言：
+
+```text
+HTTP 503
+AGENT_EVENT_LEDGER_UNAVAILABLE
+公开的中文重连提示
+存在非空 request_id（全局异常中间件提供）
+HTTP body 中不包含 password=should-not-leak
+content-type 为 application/json
+```
+
+## 5. 回归与反向验证
+
+新增 HTTP 测试：
+
+```text
+test_agent_event_ledger_http_routes_map_database_failures_to_redacted_503
+test_agent_event_ledger_endpoints_require_current_user_before_accessing_storage
+```
+
+定向 HTTP 专项：
+
+```text
+python -m pytest -q app/api/routers/test_agent_stream_http.py
+结果：14 passed in 7.21s
+```
+
+联合事件可靠性回归：
+
+```text
+python -m pytest -q app/api/routers/test_agent_stream_http.py app/api/routers/test_agent_stream_resume.py app/api/routers/test_agent_stream_pagination.py app/api/routers/test_agent_runtime_route.py app/services/test_agent_runtime.py
+结果：81 passed in 25.03s
+```
+
+受控反向验证：
+
+```text
+临时将两个普通读取路由的：
+except (AgentRuntimeError, SQLAlchemyError) as exc:
+
+替换为：
+except AgentRuntimeError as exc:
+
+运行：python -m pytest -q app/api/routers/test_agent_stream_http.py
+结果：退出码 1；test_agent_event_ledger_http_routes_map_database_failures_to_redacted_503 失败
+随后 finally 自动恢复 backend/app/api/routers/agent.py
+反向验证运行日志：D:\小说写作\xuanqiong-wenshu\logs\live\agent-ledger-http-reverse-validation.log
+```
+
+恢复源码后的再验证：
+
+```text
+python -m pytest -q app/api/routers/test_agent_stream_http.py
+结果：14 passed in 5.95s
+```
+
+后端完整回归：
+
+```text
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+结果：1420 passed in 245.40s（4分05秒）
+```
+
+## 6. 当前状态
+
+```text
+SSE preflight 数据库异常 -> 503：completed
+SSE 运行中数据异常 -> stream_error：completed
+普通 events 数据库异常 -> 503：completed
+普通 activity 数据库异常 -> 503：completed
+错误码公开且驱动原文脱敏：tested
+错误响应 request_id：tested
+三条 Ledger 读取端点未认证 -> 401：tested
+同用户 session/run 不匹配 -> 403：已有 HTTP 覆盖
+跨用户 Run 读取 -> 404：已有运行时覆盖
+真实过期/伪造 JWT 走全局完整 ASGI 认证栈：pending
+真实 MySQL/网络连接中断：pending
+CARD-009：completed
+```
+
+## 7. 提交、推送与回退
+
+```text
+上一回退点：038cf11
+本批代码与测试提交：bfe66e4（fix: normalize agent ledger read failures，已推送）
+本批文档记录提交：本次提交后回填
+推送分支：origin/codex/bohrium-integration-20260831
+数据库：未修改
+小说正文：未修改
+反向验证日志：未纳入 Git
+```
+
+## 8. 下一任务目标
+
+后端继续优先，下一批执行真实 ASGI 多 Worker durable replay 设计与可运行验证：
+
+```text
+1. 通过两个独立 Uvicorn 进程或等价独立 ASGI 进程共享同一测试数据库。
+2. Worker A 读取/写入 durable AgentEventRecord，Worker B 使用 after_sequence/Last-Event-ID 回放。
+3. 验证事件顺序、无重复、跨进程可见性、终态事件与请求作用域。
+4. 固化启动/清理流程，避免 Windows aiosqlite 资源泄漏。
+5. 再回到前端，做真实浏览器尺寸审查：压缩左栏、维持中间聊天宽度、右侧日志保持可折叠与独立滚动。
+```
