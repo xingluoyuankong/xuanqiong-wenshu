@@ -63,6 +63,8 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
   const GAP_REPAIR_MAX_PAGES = 8
   let lifecycleGeneration = 0
   let artifactViewGeneration = 0
+  const artifactFactsRequestGeneration = new Map<string, number>()
+  const artifactFactsRequestKey = (artifact: AgentArtifact) => `${artifact.run_id}:${artifact.id}`
   type ArtifactViewRequest = { generation: number; runId: string; artifactId: string }
   const beginArtifactViewRequest = (artifact: AgentArtifact): ArtifactViewRequest => ({
     generation: ++artifactViewGeneration,
@@ -237,13 +239,21 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
   }
 
   const loadArtifactFacts = async (artifact: AgentArtifact, generation = artifactViewGeneration) => {
-    const isCurrent = () => isCurrentArtifactContext(generation, artifact.run_id)
+    const requestKey = artifactFactsRequestKey(artifact)
+    const requestGeneration = (artifactFactsRequestGeneration.get(requestKey) || 0) + 1
+    artifactFactsRequestGeneration.set(requestKey, requestGeneration)
+    const isCurrent = () =>
+      isCurrentArtifactContext(generation, artifact.run_id) &&
+      artifactFactsRequestGeneration.get(requestKey) === requestGeneration
     const tasks: Promise<void>[] = []
     if (typeof AgentAPI.getArtifactQuality === 'function') {
       artifactQualityFactsLoading.value = { ...artifactQualityFactsLoading.value, [artifact.id]: true }
       artifactQualityFactsErrors.value = { ...artifactQualityFactsErrors.value, [artifact.id]: '' }
       tasks.push(AgentAPI.getArtifactQuality(artifact.id).then((value) => {
-        if (isCurrent()) artifactQualityFacts.value = { ...artifactQualityFacts.value, [artifact.id]: value }
+        if (isCurrent()) {
+          artifactQualityFacts.value = { ...artifactQualityFacts.value, [artifact.id]: value }
+          artifactQualityFactsErrors.value = { ...artifactQualityFactsErrors.value, [artifact.id]: '' }
+        }
       }).catch((error) => {
         if (isCurrent()) {
           artifactQualityFactsErrors.value = {
@@ -472,6 +482,7 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     artifactDiff.value = null
     artifactDiffLoading.value = false
     artifactPreview.value = ''
+    artifactFactsRequestGeneration.clear()
     artifactQualityFacts.value = {}
     artifactQualityFactsLoading.value = {}
     artifactQualityFactsErrors.value = {}

@@ -203,6 +203,42 @@ describe('useAgentWorkspaceRuntime', () => {
     expect(runtime.artifactLineageFacts.value).toEqual({})
     expect(runtime.artifactQualityFactsLoading.value).toEqual({})
   })
+  it('keeps the latest quality facts when duplicate requests resolve out of order', async () => {
+    const { runtime } = createRuntime()
+    let resolveFirst: (value: AgentArtifactQuality) => void = () => undefined
+    const firstPromise = new Promise<AgentArtifactQuality>((resolve) => { resolveFirst = resolve })
+    const secondFacts = { artifact_id: artifact.id, quality_result: null, findings: [], gate: { decision: 'passed', blocker_count: 0 } } as unknown as AgentArtifactQuality
+    const firstFacts = { artifact_id: artifact.id, quality_result: null, findings: [], gate: { decision: 'waived', blocker_count: 0 } } as unknown as AgentArtifactQuality
+    getArtifactQualityMock.mockReturnValueOnce(firstPromise).mockResolvedValueOnce(secondFacts)
+
+    const firstRequest = runtime.loadArtifactFacts(artifact)
+    const secondRequest = runtime.loadArtifactFacts(artifact)
+    await secondRequest
+    resolveFirst(firstFacts)
+    await firstRequest
+
+    expect(runtime.artifactQualityFacts.value[artifact.id]).toEqual(secondFacts)
+    expect(runtime.artifactQualityFactsErrors.value[artifact.id]).toBe('')
+    expect(runtime.artifactQualityFactsLoading.value[artifact.id]).toBe(false)
+  })
+
+  it('does not let an older failed quality request poison a newer success', async () => {
+    const { runtime } = createRuntime()
+    let rejectFirst: (reason?: unknown) => void = () => undefined
+    const firstPromise = new Promise<AgentArtifactQuality>((_resolve, reject) => { rejectFirst = reject })
+    const secondFacts = { artifact_id: artifact.id, quality_result: null, findings: [], gate: { decision: 'passed', blocker_count: 0 } } as unknown as AgentArtifactQuality
+    getArtifactQualityMock.mockReturnValueOnce(firstPromise).mockResolvedValueOnce(secondFacts)
+
+    const firstRequest = runtime.loadArtifactFacts(artifact)
+    const secondRequest = runtime.loadArtifactFacts(artifact)
+    await secondRequest
+    rejectFirst(new Error('older quality request failed'))
+    await expect(firstRequest).rejects.toThrow('older quality request failed')
+
+    expect(runtime.artifactQualityFacts.value[artifact.id]).toEqual(secondFacts)
+    expect(runtime.artifactQualityFactsErrors.value[artifact.id]).toBe('')
+    expect(runtime.artifactQualityFactsLoading.value[artifact.id]).toBe(false)
+  })
   it('keeps an Artifact fail-closed while authority facts are loading or unavailable', async () => {
     const { runtime } = createRuntime()
     const promise = runtime.loadArtifactFacts(artifact)
