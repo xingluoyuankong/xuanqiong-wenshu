@@ -72053,3 +72053,47 @@ npm run build-only：通过，18.03s
 2. 点击展开 Inspector，验证右栏日志、运行控制、Provider 信息和步骤内容仍可操作。
 3. 检查平板单列顺序在真实页面中是否符合聊天→项目→活动区预期。
 ```
+---
+
+# CARD-025 — 右栏运行详情默认收纳（2026-09-01）
+
+## 实际问题
+
+右栏的“运行详情”包含计划、审批、候选、上下文和治理信息。此前它默认展开，与运行选择器、日志一起占用首屏高度，降低运行日志和中央聊天的可读性。
+
+## 修改
+
+```text
+frontend/src/views/AgentWorkspace.vue
+frontend/src/views/AgentWorkspace.spec.ts
+```
+
+移除 `agent-run-details-section` 的默认 `open` 属性；右栏首屏现在只显示运行选择器、有限日志和折叠的运行详情。点击“运行详情”摘要后，原有计划/审批/候选内容继续正常展开。
+
+同时修正测试文件中一个提前关闭 `describe` 的结构问题，使控制测试和新增展开测试处于同一测试集合内；不改变业务代码。
+
+## 验证
+
+```text
+AgentWorkspace 定向：15 passed
+展开交互：默认 open=false，点击 summary 后 open=true，内容存在
+反向：临时恢复 open 属性后两个默认折叠断言失败（exit 1）；恢复后通过
+npm run type-check：通过
+npm run test:run：74 files / 432 tests passed，75.27s
+npm run build-only：通过，18.04s
+```
+
+## 回退
+
+```text
+上一回退点：5a33a23 docs: record card 024 tablet chat priority
+代码回退点：b4f8cec fix: collapse agent runtime details by default（已推送）
+本批文档提交：docs: record card 025 collapse runtime details
+```
+
+## 下一任务
+
+```text
+1. 在可用真实浏览器会话中补 /agent 的 1280/1024/768/390 截图和 Inspector/运行详情展开证据。
+2. 继续检查右栏运行日志、选择器与折叠详情在真实页面中的可读性。
+```
