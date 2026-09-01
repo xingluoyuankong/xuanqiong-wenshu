@@ -73061,3 +73061,86 @@ CARD-031：真实浏览器通道恢复后，完成 /agent 的 1280/1024/768/390 
 若通道仍不可用，则继续后端审查 Planner retry、Candidate Writer retry 和 Provider Attempt Ledger 的跨阶段边界，
 每批继续执行测试、反向验证、代码/文档独立提交和推送。
 ```
+
+---
+
+# CARD-031 — Planner replan 保留 Provider Attempt Ledger（2026-09-01）
+
+## 实际发现
+
+初始规划使用 `planner_attempts` 并写入 `planner_provider_attempts`。当只读步骤失败触发一次受控 replan 时，第二次 `AgentOrchestrator.plan()` 未传入该 ledger，且 revision Job 的 durable context 未写入 replan 后 snapshot。结果：初始规划 Attempt 可以查询，replan Provider 调用却不在同一账本中，下一 revision Job 也无法恢复完整历史。
+
+## 修改
+
+```text
+backend/app/agent/execution.py
+backend/app/agent/test_worker.py
+```
+
+replan 调用现在传入：
+
+```text
+attempt_ledger=planner_attempts
+```
+
+创建 revision Job 前，`replan_run_context` 显式写入：
+
+```text
+planner_provider_attempts = planner_attempts.snapshot()
+```
+
+因此初始 planner 与 replan planner 的 Attempt 会连续保存在下一 revision 的 durable context 中。
+
+## 回归与反向验证
+
+既有 digest-driven replan Worker 测试的 FakePlanner 为每次收到的 ledger 写入成功 Attempt。
+
+新增断言：在初始 execution 完成、revision Job queued 时：
+
+```text
+planner_provider_attempts.statuses = [succeeded, succeeded]
+retry_index = [0, 1]
+```
+
+旧实现失败：只保留第一条 Attempt。
+
+反向验证临时移除：
+
+```text
+attempt_ledger=planner_attempts
+planner_provider_attempts=planner_attempts.snapshot()
+```
+
+结果：
+
+```text
+REVERSE_EXIT=1
+RESTORED_EXIT=0
+```
+
+## 验证
+
+```text
+相关集合：59 passed in 110.06s
+完整后端：1434 passed in 577.19s（9 分 37 秒）
+```
+
+## 真实浏览器边界
+
+CARD-031 同时尝试恢复本地 Tabbit 浏览器验收。持久协议因 stdin 被宿主关闭而终止；Windows 兼容重定向调用被本机命令策略拦截。两次均未启动页面、未创建截图、未修改项目数据，因此 1280/1024/768/390 的真实视觉证据继续标记 pending，不以 HTTP、组件测试或构建代替。
+
+## 回退
+
+```text
+上一回退点：ed1dc72 docs: record card 030 retry attempt continuity
+本批代码提交：e44b28c fix: retain planner attempts across replans（已推送）
+本批文档提交：待本次文档提交生成
+回退方式：git revert e44b28c
+```
+
+## 下一任务
+
+```text
+CARD-032：审查 Candidate Writer 的重入/恢复路径是否覆盖 candidate_writer_provider_attempts；
+浏览器通道可用时补 Agent 主界面真实多视口交互证据。
+```
