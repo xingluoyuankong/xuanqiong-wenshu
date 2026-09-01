@@ -73402,3 +73402,164 @@ CARD-035：继续恢复真实浏览器验收；
 检查 Provider Attempt snapshot 在空态、历史 Run 切换、API 缺字段时的前端降级；
 并继续审查 Agent 左栏和中间聊天的可读性边界。
 ```
+
+---
+
+# CARD-035 — Provider provenance API 响应归一化与畸形空态保护（2026-09-02）
+
+## 问题
+
+CARD-028 已在后端对 Provider Attempt snapshot 做持久化和 API 清洗，CARD-033 已在 Inspector 展示三阶段摘要，但前端 `AgentAPI.getRunProviderProvenance()` 仍把响应 JSON 原样透传为 TypeScript 类型。
+
+当历史 Run 来自旧版本、代理返回字段类型错误，或服务端上下文含未知字段时，前端可能出现：
+
+```text
+1. planner_provider_attempts.provider_attempts 不是数组却进入 Inspector。
+2. api_key、prompt、headers、injected 等未知字段被带到前端。
+3. selected_provider_attempt 指向不存在的记录却显示“已选”。
+4. 缺失字段在历史 Run 切换时产生不稳定的 undefined 形态。
+```
+
+## 修改文件
+
+```text
+frontend/src/api/agent.ts
+frontend/src/api/agent.spec.ts
+```
+
+## 具体实现
+
+新增前端 API 边界归一化：
+
+```text
+normalizeProviderAttemptSnapshot()
+normalizeAgentProviderProvenance()
+```
+
+`getRunProviderProvenance()` 现在先请求未知 JSON，再归一化为稳定的 `AgentProviderProvenance`。
+
+归一化规则：
+
+```text
+- 根对象不是对象：按空 provenance 处理。
+- provider_attempts 不是数组：该阶段 snapshot 返回 null。
+- 最多保留 16 条 Attempt。
+- 每条只投影 Inspector 所需的 attempt、role、status、error_category、
+  retry_index、fallback_from_attempt、cancel_observed。
+- status 只接受 running / succeeded / failed。
+- 文本字段按阶段上限截断。
+- selected_provider_attempt 只有指向已保留 Attempt 时才保留，否则为 null。
+- fallback_used 只接受显式 true。
+- 未知字段、prompt、headers、api_key、reasoning_content 等不进入前端对象。
+- planner / response / candidate writer 三阶段缺失时统一为 null。
+```
+
+这层与后端清洗器重复但职责不同：后端保证持久化和服务端输出边界，前端保证旧数据、代理数据和 schema 漂移不会直接污染界面。
+
+## 失败驱动
+
+新增 API 回归构造：
+
+```json
+{
+  "planner_provider_attempts": {
+    "provider_attempts": "invalid",
+    "api_key": "secret"
+  },
+  "response_provider_attempts": {
+    "provider_attempts": [
+      {
+        "status": "failed",
+        "error_category": "TIMEOUT",
+        "prompt": "private",
+        "injected": true
+      }
+    ],
+    "selected_provider_attempt": 99,
+    "fallback_used": true
+  }
+}
+```
+
+旧实现失败：
+
+```text
+planner_provider_attempts 原样保留 invalid 对象
+api_key 未被剔除
+response 未归一化未知字段
+```
+
+同时更新合法 provenance API 期望，明确三个阶段字段的稳定空态。
+
+## 修复后回归
+
+```text
+planner_provider_attempts = null
+response_provider_attempts = {
+  provider_attempts: [{status: "failed", error_category: "TIMEOUT"}],
+  selected_provider_attempt: null,
+  fallback_used: true
+}
+```
+
+未知字段均不会出现在返回对象中。
+
+## 反向验证
+
+临时把 `getRunProviderProvenance()` 改回原始 JSON 透传：
+
+```text
+合法响应兼容断言失败：归一化结果新增稳定 null 字段缺失。
+畸形 snapshot 测试失败：planner_provider_attempts 保留 invalid/api_key。
+REVERSE_EXIT=1
+```
+
+恢复归一化后：
+
+```text
+15 passed
+RESTORED_EXIT=0
+```
+
+## 验证
+
+```text
+API 定向测试：15 passed
+API + Inspector 定向测试：16 passed
+npm run type-check：通过
+npm run test:run：74 files / 434 tests passed，97.70s
+npm run build-only：通过，28.20s
+```
+
+既有 Pinia mount 警告与 Browserslist 数据提示未造成失败。
+
+## 浏览器边界
+
+真实浏览器通道本批仍未取得可复核截图和交互证据，因此以下状态继续保持 pending：
+
+```text
+1280 / 1024 / 768 / 390 多视口
+左栏折叠与内容树独立滚动
+中央聊天主区实际宽度
+右栏日志尾随/上翻手势
+Inspector 展开后的真实折行
+```
+
+API、组件测试和构建结果没有被当作视觉验收替代品。
+
+## 回退
+
+```text
+上一回退点：ca9be69 docs: record card 034 inspector compact layout
+本批代码提交：d5f5876 fix: normalize provider provenance responses（已推送）
+本批文档提交：待本次文档提交生成
+回退方式：git revert d5f5876
+```
+
+## 下一任务
+
+```text
+CARD-036：继续真实浏览器多视口验收；
+若浏览器通道仍不可用，则继续前端 schema 漂移和历史 Run 切换的错误呈现审查，
+同时保持后端 Provider retry / Job / Run 一致性门禁。
+```
