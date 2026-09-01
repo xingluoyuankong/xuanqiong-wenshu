@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import AgentRunInspector from './AgentRunInspector.vue'
+import source from './AgentRunInspector.vue?raw'
 
 describe('AgentRunInspector', () => {
   it('renders Planner, visible response, and candidate writer provenance as separate facts', () => {
@@ -38,5 +39,7 @@ describe('AgentRunInspector', () => {
     expect(wrapper.get('[data-testid="agent-response-provider-attempts"]').text()).toContain('最后失败：TIMEOUT')
     expect(wrapper.get('[data-testid="agent-candidate-writer-provider-attempts"]').text()).toContain('1 次调用 · 已选 #1 · 含 fallback')
     expect(wrapper.get('[data-testid="agent-sequence-gap-status"]').text()).toContain('正在补齐事件账本')
+    expect(source).toContain('.run-summary dd { min-width: 0;')
+    expect(source).toContain('.provider-model-ref, .provider-attempt-summary { display: block;')
   })
 })

@@ -78,9 +78,9 @@ const providerAttemptSummary = (snapshot?: AgentProviderAttemptSnapshot | null) 
           <dt>事件账本</dt><dd data-testid="agent-sequence-gap-status">{{ gapStatus(gapRepairState) }}</dd>
         </template>
         <template v-if="provenance">
-          <dt>规划 Provider</dt><dd data-testid="agent-planner-provider-provenance">{{ providerStatus(provenance.planner_provider_called, provenance.planner_provider_fallback_reason) }}<span v-if="providerAttemptSummary(provenance.planner_provider_attempts)" data-testid="agent-planner-provider-attempts"> · {{ providerAttemptSummary(provenance.planner_provider_attempts) }}</span></dd>
-          <dt>回复 Provider</dt><dd data-testid="agent-response-provider-provenance">{{ providerStatus(provenance.response_provider_called, provenance.response_provider_fallback_reason) }}<span v-if="providerAttemptSummary(provenance.response_provider_attempts)" data-testid="agent-response-provider-attempts"> · {{ providerAttemptSummary(provenance.response_provider_attempts) }}</span></dd>
-          <dt>候选正文 Provider</dt><dd data-testid="agent-candidate-writer-provider-provenance">{{ providerStatus(provenance.candidate_writer_provider_called, provenance.candidate_writer_provider_fallback_reason) }}<span v-if="provenance.candidate_writer_model_ref"> · {{ provenance.candidate_writer_model_ref }}</span><span v-if="providerAttemptSummary(provenance.candidate_writer_provider_attempts)" data-testid="agent-candidate-writer-provider-attempts"> · {{ providerAttemptSummary(provenance.candidate_writer_provider_attempts) }}</span></dd>
+          <dt>规划 Provider</dt><dd data-testid="agent-planner-provider-provenance">{{ providerStatus(provenance.planner_provider_called, provenance.planner_provider_fallback_reason) }}<span v-if="providerAttemptSummary(provenance.planner_provider_attempts)" class="provider-attempt-summary" data-testid="agent-planner-provider-attempts">{{ providerAttemptSummary(provenance.planner_provider_attempts) }}</span></dd>
+          <dt>回复 Provider</dt><dd data-testid="agent-response-provider-provenance">{{ providerStatus(provenance.response_provider_called, provenance.response_provider_fallback_reason) }}<span v-if="providerAttemptSummary(provenance.response_provider_attempts)" class="provider-attempt-summary" data-testid="agent-response-provider-attempts">{{ providerAttemptSummary(provenance.response_provider_attempts) }}</span></dd>
+          <dt>候选正文 Provider</dt><dd data-testid="agent-candidate-writer-provider-provenance">{{ providerStatus(provenance.candidate_writer_provider_called, provenance.candidate_writer_provider_fallback_reason) }}<span v-if="provenance.candidate_writer_model_ref" class="provider-model-ref">{{ provenance.candidate_writer_model_ref }}</span><span v-if="providerAttemptSummary(provenance.candidate_writer_provider_attempts)" class="provider-attempt-summary" data-testid="agent-candidate-writer-provider-attempts">{{ providerAttemptSummary(provenance.candidate_writer_provider_attempts) }}</span></dd>
         </template>
       </dl>
       <AgentRunControlBar :run="run" :pending="Boolean(run && controlPending)" :allowed-commands="state?.allowed_commands || run?.allowed_commands || []" @command="emit('command', $event)" />
@@ -98,7 +98,8 @@ const providerAttemptSummary = (snapshot?: AgentProviderAttemptSnapshot | null) 
 <style scoped>
 .run-summary { display: grid; grid-template-columns: auto 1fr; gap: .45rem .75rem; margin: 0; }
 .run-summary dt { color: var(--xq-ink-muted); }
-.run-summary dd { margin: 0; font-weight: 700; }
+.run-summary dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-weight: 700; }
+.provider-model-ref, .provider-attempt-summary { display: block; margin-top: .16rem; color: var(--xq-ink-muted); font-size: .78rem; font-weight: 600; line-height: 1.42; }
 .step-list { display: grid; gap: .55rem; margin: 0; padding-left: 1.2rem; }
 .step-list li { display: grid; gap: .15rem; }
 .step-list span, .step-list small { color: var(--xq-ink-muted); }
