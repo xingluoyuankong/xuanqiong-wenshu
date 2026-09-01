@@ -76791,3 +76791,272 @@ CARD-051 当前状态：
 尚未实施；
 下一步先读取真实代码和测试，输出可复现缺口，再锁定具体文件和失败测试；
 ```
+
+# CARD-051 完成记录：可见进度事件绑定稳定 action_id
+
+## 本批目标
+
+本批继续后端优先，处理 Agent 可见进度事件的动作身份缺口。此前 `publish_progress()` 会持久化 `progress`、`phase`、`step`、`tool_name` 和 `progress_message`，但事件没有稳定的 `action_id`。前端实时流和历史回放只能根据 phase/step 猜当前动作，工具调用、计划阶段、回复阶段在并发或回放后容易失去统一关联。
+
+本批不把 Provider 私有 reasoning 写入聊天或日志，而是把公开的阶段进度绑定到可追踪动作：
+
+```text
+1. publish_progress() 接受可选 action_id；
+2. 显式 action_id 原样限长后进入 progress_update 事件；
+3. 旧调用未传 action_id 时自动生成 phase:step 或 phase:run；
+4. progress_update 的可见事件白名单允许 action_id；
+5. 持久化事件、SSE 回放和前端 reducer 使用同一动作标识；
+6. 不改变进度单调性、状态机、事件序列重试和旧调用兼容；
+7. 完成失败驱动、全量后端门禁、反向验证、代码推送和文档推送。
+```
+
+## 失败驱动证据
+
+修改前将现有进度测试改为传入明确动作标识：
+
+```text
+文件：D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_progress_updates.py
+测试：test_publish_progress_is_persisted_visible_and_monotonic
+新增输入：action_id="plan:build"
+action_id="tool:chapter.inspect"
+新增期望：progress_update.data_json.action_id == "tool:chapter.inspect"
+```
+
+旧实现第一次失败：
+
+```text
+TypeError: AgentRuntimeService.publish_progress() got an unexpected keyword argument 'action_id'
+```
+
+加入参数后，第二层真实失败：
+
+```text
+publish_progress() 已经构造 action_id，但 _VISIBLE_EVENT_KEYS 的 progress_update 白名单将其剔除；
+事件 data_json 中没有 action_id；
+```
+
+这两次失败分别锁定了运行时函数签名和可见事件契约两个实际缺口。
+
+## 实际代码变更
+
+### 1. Runtime API 接受 action_id
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+```
+
+`AgentRuntimeService.publish_progress()` 新增：
+
+```python
+action_id: str | None = None
+```
+
+动作标识解析规则：
+
+```python
+resolved_action_id = str(
+    action_id or f"{run.current_phase}:{run.current_step if step is not None else 'run'}"
+).strip()[:160]
+```
+
+写入事件的公开字段：
+
+```text
+progress
+phase
+action_id
+progress_message
+step（有 step 时）
+tool_name（有 tool_name 时）
+```
+
+兼容行为：
+
+```text
+旧代码继续省略 action_id 也能执行；
+planning 无 step 时生成 planning:run；
+tool_execution step=1 未传时生成 tool_execution:1；
+调用方显式传 action_id 时使用调用方动作标识；
+标识最多 160 个字符，避免异常输入膨胀事件 payload。
+```
+
+### 2. 可见事件白名单开放 action_id
+
+同一文件中的 `_VISIBLE_EVENT_KEYS` 更新为：
+
+```text
+progress_update: tool_name、step、progress、phase、action_id、progress_message
+```
+
+这是必要的第二层修复：Runtime 内部构造字段并不等于用户可见事件字段，只有通过白名单后，字段才会进入数据库事件、SSE 回放和前端事件 reducer。
+
+### 3. 当前事件契约分层
+
+CARD-051 后，Agent 进度事件的身份关系为：
+
+```text
+事件 envelope：event.id、run_id、sequence、event_type、created_at；
+进度 payload：progress、phase、action_id、progress_message、step、tool_name；
+Run 状态投影：status、current_phase、current_step、progress；
+Provider provenance：Provider/Model、attempt、fallback、错误分类；
+```
+
+因此：
+
+```text
+聊天区可以按 action_id 聚合当前动作的公开进度；
+右侧日志可以按 sequence 回放完整事件；
+Run 切换可以用 run_id 隔离动作；
+Provider 私有 reasoning 仍不进入 assistant_delta 或 progress_update；
+```
+
+## 回归覆盖
+
+当前测试继续覆盖：
+
+```text
+进度值单调不回退；
+planning -> tool_execution 的状态转换保持；
+step 与 tool_name 仍按旧规则写入；
+显式 action_id 在事件 data_json 中可见；
+progress_update 仍通过事件序列持久化；
+```
+
+与既有测试的兼容结果：
+
+```text
+Agent runner 的可见回复起始/增量/保存进度保持；
+Provider timeout 与 fallback provenance 保持；
+暂停、取消、终态 Run 不会被 late progress 复活；
+SQLite 事件序列冲突重试保持；
+SSE 分页、回放、重连测试保持。
+```
+
+## 反向验证
+
+执行步骤：
+
+```text
+1. 备份 agent_runtime.py；
+2. 临时从 progress_update 的可见事件白名单移除 action_id；
+3. 执行 test_publish_progress_is_persisted_visible_and_monotonic；
+4. 确认 data_json 丢失 action_id 并测试失败；
+5. 恢复 agent_runtime.py；
+6. 再次执行 progress_updates 全集合。
+```
+
+实际结果：
+
+```text
+移除白名单字段：1 failed，期望 action_id、实际事件缺少 action_id；
+恢复实现：4 passed。
+```
+
+## 本批验证结果
+
+### 定向进度测试
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_progress_updates.py
+```
+
+结果：
+
+```text
+4 passed in 4.83s（首次修复后）
+4 passed in 3.14s（反向验证恢复后）
+```
+
+### 后端全量门禁
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+结果：
+
+```text
+1439 passed in 431.55s
+```
+
+### 服务运行状态
+
+```text
+前端：http://127.0.0.1:5174/agent
+后端：http://127.0.0.1:8013/health
+```
+
+本批没有重启健康服务；此前服务已处于可访问状态，代码热加载/运行状态继续由本地工作台验证。
+
+## 提交、推送与回退点
+
+代码提交：
+
+```text
+a8b4f5a feat: attach action ids to progress events
+```
+
+代码推送：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+代码回退：
+
+```powershell
+git revert a8b4f5a
+```
+
+上一回退点：
+
+```text
+99be85a docs: record card 050 provider recovery
+```
+
+本批文档提交：待本次文档提交生成。
+
+文档和代码保持独立回退：只回退文档时不触碰 `a8b4f5a`；完整回退 CARD-051 时先回退本批文档提交，再回退代码提交。CARD-050、CARD-049 及更早批次保持不变。
+
+## 当前实际状态（2026-09-01）
+
+```text
+当前分支：codex/bohrium-integration-20260831；
+代码 HEAD 已推送到 origin/codex/bohrium-integration-20260831；
+前端最近全量：74 files / 455 tests passed；
+前端构建：4905 modules transformed，built successfully；
+后端最近全量：1439 passed；
+Provider 快照中断 attempt 已在 CARD-050 闭合；
+可见进度事件 action_id 已在 CARD-051 绑定；
+前端聊天主区优先、左右区域紧凑化和右侧独立日志布局继续保留；
+历史审计文件、备份、临时脚本、数据库旁车文件和 node_modules 等未跟踪成果继续原样保留；
+本批没有执行全量 add、批量删除或覆盖式清理。
+```
+
+## 下一任务目标：CARD-052（前端接入 action_id 并继续收敛聊天/日志展示）
+
+CARD-052 在后端契约稳定后逐步回到前端，目标不是增加新的小说硬编码，而是让 UI 使用 Agent 的公开动作事件：
+
+```text
+1. 审查 frontend/src/api/agent.ts 的 AgentEvent 类型和 data 归一化；
+2. 审查 frontend/src/features/agent/reducers/agentEventReducer.ts 对 progress_update 的投影；
+3. 审查 frontend/src/features/agent/AgentConversation.vue 与 AgentWorkspace.vue 的消息/进度边界；
+4. 将 action_id 纳入前端事件类型、运行时进度状态和回放测试；
+5. 中央聊天区只展示作者可读的 assistant_delta 和公开 progress 摘要；
+6. 右侧日志独立显示事件 sequence、phase、action_id 和详细事件摘要，不挤占聊天主区；
+7. 左侧项目/会话/工具/数据区域继续保持紧凑、可折叠和按需加载；
+8. 先写前端失败测试，再实现；
+9. 执行 npm run type-check、npm run test:run、npm run build-only；
+10. 每次代码优化独立 commit + push；文档独立 commit + push；写明回退点。
+```
+
+CARD-052 当前状态：
+
+```text
+已设置为下一任务目标；
+尚未实施；
+下一步先以真实后端事件样本和前端类型/Reducer 为证据，锁定 action_id 丢失或未展示的具体位置；
+```
