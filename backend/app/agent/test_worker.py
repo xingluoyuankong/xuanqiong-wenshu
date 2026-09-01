@@ -756,13 +756,22 @@ async def test_visible_response_provider_retry_uses_real_runner_and_completes_on
             def __init__(self, _session):
                 pass
 
-            async def stream_visible_response(self, **_kwargs):
+            async def stream_visible_response(self, **kwargs):
                 nonlocal attempts
                 attempts += 1
+                ledger = kwargs["attempt_ledger"]
+                record = ledger.begin(
+                    role=kwargs["attempt_role"],
+                    provider_ref="retry-fixture",
+                    model_ref="retry-model",
+                    retry_index=attempts - 1,
+                )
                 if attempts == 1:
+                    ledger.fail(record.attempt_id, ProviderTimeout("fixture-provider-timeout"))
                     if False:
                         yield ""
                     raise ProviderTimeout("fixture-provider-timeout")
+                ledger.finish(record.attempt_id, output="重试后只生成这一条最终可见回复。")
                 yield "重试后只生成这一条最终可见回复。"
 
         monkeypatch.setattr("app.agent.runner.AsyncSessionLocal", factory)
@@ -806,6 +815,10 @@ async def test_visible_response_provider_retry_uses_real_runner_and_completes_on
             assert [(message.role, message.content) for message in messages] == [
                 ("assistant", "重试后只生成这一条最终可见回复。"),
             ]
+            snapshot = completed_run.context_json["response_provider_attempts"]
+            assert [item["status"] for item in snapshot["provider_attempts"]] == ["failed", "succeeded"]
+            assert [item["error_category"] for item in snapshot["provider_attempts"][:1]] == ["TIMEOUT"]
+            assert snapshot["selected_provider_attempt"] == 2
             assert event_types.count("visible_response_retry_pending") == 1
             assert event_types.count("assistant_completed") == 1
             assert event_types.count("run_completed") == 1

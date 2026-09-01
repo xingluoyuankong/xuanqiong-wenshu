@@ -64,6 +64,45 @@ class ProviderAttemptLedger:
         self.max_attempts = max(1, min(int(max_attempts), 64))
         self._records: dict[str, ProviderAttemptRecord] = {}
 
+    @classmethod
+    def from_snapshot(cls, *, run_id: str, snapshot: Any, max_attempts: int = 16) -> "ProviderAttemptLedger":
+        """Rehydrate bounded persisted history before a durable Job retry appends."""
+        ledger = cls(run_id=run_id, max_attempts=max_attempts)
+        raw = snapshot if isinstance(snapshot, dict) else {}
+        records = raw.get("provider_attempts") if isinstance(raw.get("provider_attempts"), list) else []
+        valid_statuses = {"running", "succeeded", "failed"}
+        for index, item in enumerate(records[:ledger.max_attempts], start=1):
+            if not isinstance(item, dict):
+                continue
+            try:
+                attempt = int(item.get("attempt") or index)
+            except (TypeError, ValueError):
+                attempt = index
+            if attempt < 1 or attempt > ledger.max_attempts:
+                attempt = index
+            status = str(item.get("status") or "unknown").strip().lower()
+            if status not in valid_statuses:
+                status = "failed"
+            key = f"{ledger.run_id}:restored:{attempt}:{index}"
+            ledger._records[key] = ProviderAttemptRecord(
+                attempt_id=key,
+                attempt=attempt,
+                role=_ref(item.get("role"), 80) or "unknown",
+                provider_ref=_ref(item.get("provider_ref")),
+                model_ref=_ref(item.get("model_ref")),
+                status=status,
+                started_at=_ref(item.get("started_at"), 64) or _now(),
+                first_token_at=_ref(item.get("first_token_at"), 64),
+                finished_at=_ref(item.get("finished_at"), 64),
+                error_category=_ref(item.get("error_category"), 40),
+                http_status=int(item["http_status"]) if isinstance(item.get("http_status"), int) else None,
+                retry_index=max(0, int(item.get("retry_index") or 0)),
+                fallback_from_attempt=int(item["fallback_from_attempt"]) if isinstance(item.get("fallback_from_attempt"), int) else None,
+                cancel_observed=bool(item.get("cancel_observed")),
+                output_digest=_ref(item.get("output_digest"), 128),
+            )
+        return ledger
+
     def begin(self, *, role: str, provider_ref: Any, model_ref: Any, retry_index: int = 0, fallback_from_attempt: int | None = None, attempt_id: str | None = None) -> ProviderAttemptRecord:
         if len(self._records) >= self.max_attempts and not attempt_id: raise ValueError("provider attempt budget exhausted")
         number = len(self._records) + 1

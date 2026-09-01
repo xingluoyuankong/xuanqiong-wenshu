@@ -264,6 +264,10 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
             )
             run_generation = int(claimed_run.lease_generation or 0)
             run_snapshot = await runtime.get_run(run_id, user_id)
+            response_attempts = ProviderAttemptLedger.from_snapshot(
+                run_id=run_id,
+                snapshot=(run_snapshot.context_json or {}).get("response_provider_attempts"),
+            )
             if is_recovery_ready(status=run_snapshot.status, phase=getattr(run_snapshot, "current_phase", None)):
                 await runtime.update_run(
                     run_id=run_id,
