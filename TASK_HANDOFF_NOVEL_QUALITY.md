@@ -74478,3 +74478,188 @@ git revert fb2387d
 7. AgentArtifactWorkbench 的按钮按 Artifact 局部禁用，并显示当前结果归属；
 8. 每个竞态先新增旧实现失败测试，再实现、反向破坏验证、执行 type-check/test/build，独立提交代码和文档并推送。
 ```
+
+# CARD-041：Artifact facts 的 Run 重置代次隔离
+
+## 本批目标
+
+修复前端 Artifact 事实读取在 Run 重置/取消选择期间的旧响应回写问题。用户切换项目、切换 Run 或清空当前 Run 时，已经发出的质量事实和谱系事实请求必须失效，不能重新写回刚刚清空的工作台状态。
+
+## 根因
+
+`artifactViewGeneration` 原本只由具体 Artifact 操作递增，`resetArtifactFacts()` 清空 map 却不递增代次；同时 `selectedRunId` 为空时，旧判断把任意 Run 都当成当前上下文：
+
+```ts
+!options.selectedRunId.value || options.selectedRunId.value === runId
+```
+
+因此旧请求返回时可能重新写入已清空的：
+
+```text
+artifactQualityFacts
+artifactQualityFactsLoading
+artifactQualityFactsErrors
+artifactLineageFacts
+```
+
+## 实际代码变更
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.ts
+```
+
+变更一：当前 Artifact 上下文必须精确匹配当前 Run：
+
+```ts
+generation === artifactViewGeneration &&
+options.selectedRunId.value === runId
+```
+
+变更二：重置事实时先使所有旧请求失效：
+
+```ts
+const resetArtifactFacts = () => {
+  artifactViewGeneration += 1
+  // 再清空各事实 map 和状态
+}
+```
+
+这样既不会让无 Run 状态接收旧响应，也不会让同一 Run 在显式 reset 后重新接收旧代次结果。
+
+## 失败驱动回归
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.spec.ts
+```
+
+新增测试：
+
+```text
+drops late Artifact facts after the selected Run is reset
+invalidates late Artifact facts when the facts state is explicitly reset
+```
+
+测试时序：
+
+```text
+1. 质量事实和谱系事实同时保持 pending；
+2. 清空 Projection 或直接 resetArtifactFacts；
+3. 旧请求随后返回成功结果；
+4. 断言事实、loading、error map 仍为空。
+```
+
+先在旧实现上运行：
+
+```text
+测试失败：旧 quality facts 被重新写入空状态；
+REVERSE/失败驱动证明旧响应确实可以污染 reset 后状态。
+```
+
+## 修复后验证
+
+定向测试：
+
+```text
+2 passed
+```
+
+反向验证步骤：
+
+```text
+临时恢复宽松 selectedRun 判断；
+临时移除 resetArtifactFacts() 的 generation 递增；
+重新执行两个 Artifact facts 测试；
+```
+
+结果：
+
+```text
+2 failed, 9 skipped
+REVERSE_EXIT=1
+```
+
+恢复真实实现后：
+
+```text
+2 passed, 9 skipped
+RESTORED_EXIT=0
+```
+
+该反向验证同时锁定了“精确 Run 匹配”和“reset 递增代次”两个行为。
+
+## 全量前端门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+```
+
+```text
+通过
+```
+
+```powershell
+npm run test:run
+```
+
+```text
+74 files passed
+438 tests passed
+```
+
+```powershell
+npm run build-only
+```
+
+```text
+4905 modules transformed
+built successfully
+```
+
+## 提交、推送与回退
+
+```text
+上一回退点：5b1a42c docs: record card 040 chat-first layout
+本批代码提交：47a3c1e fix: fence late artifact facts after reset
+代码已推送：origin/codex/bohrium-integration-20260831
+本批文档提交：待本次文档提交生成
+```
+
+回退方式：
+
+```text
+git revert 47a3c1e
+```
+
+只回退本批时保留 CARD-040 的 `fb2387d` 和 `5b1a42c`；文档提交与代码提交分开处理。
+
+## 当前前端待处理边界
+
+本批只处理 reset/空 Run 的旧事实回写，以下竞态仍作为后续任务保留：
+
+```text
+1. 同一 Artifact 重复 facts 请求的最新结果覆盖问题；
+2. 旧请求 finally 被全局代次拦截后 loading 永久残留；
+3. lineage facts 独立 loading/error 可观测性；
+4. 旧 Run 批量 facts 请求污染全局 map；
+5. blocker 结果归属和失败清空；
+6. Workbench 按 Artifact 的按钮去重与禁用。
+```
+
+## 下一任务：CARD-042
+
+优先处理同一 Artifact 重复 facts 请求的并发竞态：
+
+```text
+1. 以 run_id + artifact_id + facts 类型建立请求状态；
+2. 新请求获得更高 generation，旧质量/谱系结果不得覆盖新结果；
+3. success 清除同 Artifact 的旧 error，旧失败不得污染新成功；
+4. loading 以当前请求的 pending 状态收敛，不因旧请求结束提前变 false；
+5. quality 与 lineage 使用 Promise.allSettled 或独立状态，不让可选 lineage 失败阻断质量 facts；
+6. 先写旧实现必失败的竞态测试，再实现和反向破坏验证；
+7. 完成 type-check、全量 test、build，代码独立提交推送，文档独立提交推送。
+```
