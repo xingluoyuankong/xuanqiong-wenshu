@@ -68861,3 +68861,86 @@ CARD-007：in_progress
 ```
 
 下一批继续优先后端：跨进程 Worker replay、数据库故障恢复矩阵和认证失败矩阵；随后再将 `stream_error` 接入前端连接状态与运行日志。 
+
+---
+
+# 2026-09-01｜CARD-007 后端子批次｜独立 Worker Session Durable Replay
+
+## 1. 任务目标
+
+继续验收 Agent Durable Event Delivery 的持久化事实源：模拟 Worker A 写入并提交事件、Worker B 使用独立数据库 Session 读取事件，验证 replay 不依赖进程内队列或同一 ORM Session 缓存。
+
+本批次验证的是“独立 Session/Worker 语义”，不把它夸大为两个操作系统进程或两个部署节点的实测。
+
+## 2. 新增文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_durable_event_replay.py
+```
+
+## 3. 实际覆盖
+
+```text
+独立 SQLite 数据库文件
+独立 async_sessionmaker
+Worker A 创建 Session、Run 并提交 run_started
+Worker B 从 after_sequence=0 读取已提交事件
+Worker A 追加并提交 work_trace_delta
+Worker B 从前一 sequence 读取新增事件
+Worker A 提交 completed 状态和 run_completed
+Worker B 只读取终态新增事件
+相同 sequence 不同用户不可读取他人 Run 事件
+```
+
+核心断言：
+
+```text
+Worker B 的首次 replay = [sequence 1]
+Worker B 的增量 replay = [sequence 2]
+Worker B 的终态 replay = [sequence 3]
+每次按游标只返回游标之后的事件
+事件 payload 保持公开 WorkTrace 字段
+跨用户读取触发 AgentNotFound/作用域异常
+```
+
+## 4. 实际验证结果
+
+独立 Worker/事件专项：
+
+```text
+python -m pytest -q app/agent/test_durable_event_replay.py app/api/routers/test_agent_stream_resume.py app/api/routers/test_agent_stream_http.py app/api/routers/test_agent_stream_pagination.py app/agent/test_work_trace_contract.py app/services/test_agent_runtime.py app/api/routers/test_agent_runtime_route.py
+结果：83 passed in 41.89s
+```
+
+后端全量：
+
+```text
+python -m pytest -q
+结果：1417 passed in 380.26s（6分20秒）
+```
+
+## 5. 状态变化
+
+```text
+持久化 AgentEventRecord 作为事实源：completed
+独立数据库 Session replay：completed
+游标增量读取：completed
+WorkTrace 公开字段回放：completed
+跨用户事件隔离：completed
+真实跨 OS 进程 replay：pending
+真实跨 Worker ASGI 部署：pending
+Docker/MySQL/Nginx 运行态：pending
+CARD-007：in_progress
+```
+
+## 6. 回退与推送
+
+```text
+上一回退点：f08cf4d
+本批提交：待提交后回填
+推送目标：origin/codex/bohrium-integration-20260831
+本地数据库：未修改
+小说正文：未修改
+```
+
+下一批继续后端：真实 subprocess/ASGI Worker replay、数据库异常恢复矩阵和认证失败矩阵；完成后再把 `stream_error` 接入前端连接状态和运行日志投影。
