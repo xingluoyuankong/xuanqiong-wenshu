@@ -234,3 +234,52 @@ async def test_worker_mode_visible_response_provider_failure_keeps_run_retryable
     assert "run_failed" not in event_types
     assert event_types.count("assistant_completed") == 0
     assert event_types.count("run_completed") == 0
+
+
+@pytest.mark.asyncio
+async def test_finalize_visible_response_is_atomic_and_idempotent(task_session):
+    runtime, session, run = await _create_runtime_run(task_session, user_id=2864)
+    await runtime.update_run(
+        run_id=run.id,
+        user_id=run.user_id,
+        status="running",
+        phase="assistant_response",
+        progress=99,
+    )
+    completion_data = {
+        "phase": "summary",
+        "length": 12,
+        "provider_called": True,
+        "response_provider_called": True,
+        "response_provider_fallback_reason": None,
+    }
+
+    first = await runtime.finalize_visible_response(
+        run_id=run.id,
+        user_id=run.user_id,
+        session_id=session.id,
+        content="只应保存一次的最终回复。",
+        completion_data=completion_data,
+    )
+    duplicate = await runtime.finalize_visible_response(
+        run_id=run.id,
+        user_id=run.user_id,
+        session_id=session.id,
+        content="不应再次写入的文本。",
+        completion_data=completion_data,
+    )
+
+    stored_run = await runtime.get_run(run.id, run.user_id)
+    messages = await runtime.list_messages(session_id=session.id, user_id=run.user_id)
+    events = await runtime.list_events(run_id=run.id, user_id=run.user_id)
+    event_types = [event.event_type for event in events]
+
+    assert duplicate.id == first.id
+    assert stored_run.status == "completed"
+    assert stored_run.context_json["visible_response_final_message_id"] == first.id
+    assert stored_run.context_json["visible_response_final_message_sequence"] == first.sequence
+    assert [(message.role, message.content) for message in messages] == [
+        ("assistant", "只应保存一次的最终回复。"),
+    ]
+    assert event_types.count("assistant_completed") == 1
+    assert event_types.count("run_completed") == 1

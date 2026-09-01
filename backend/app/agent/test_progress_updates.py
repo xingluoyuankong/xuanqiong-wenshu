@@ -142,6 +142,10 @@ async def test_visible_response_emits_progress_for_start_delta_and_save(monkeypa
             messages.append(kwargs["content"])
             return SimpleNamespace(sequence=1)
 
+
+        async def finalize_visible_response(self, **kwargs):
+            messages.append(kwargs["content"])
+            return SimpleNamespace(sequence=1)
         async def update_run(self, **kwargs):
             return SimpleNamespace(progress=kwargs.get("progress"), status=kwargs["status"])
 

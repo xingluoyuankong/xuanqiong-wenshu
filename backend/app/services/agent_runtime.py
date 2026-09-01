@@ -332,6 +332,77 @@ class AgentRuntimeService:
             await self.session.refresh(message)
         return message
 
+    async def finalize_visible_response(
+        self,
+        *,
+        run_id: str,
+        user_id: int,
+        session_id: str,
+        content: str,
+        completion_data: dict[str, Any],
+    ) -> AgentMessage:
+        """Atomically persist one final assistant reply and its terminal Run facts.
+
+        A worker may die after this commit but before it acknowledges its Job.
+        The Run-scoped marker makes a later recovery return the existing message
+        instead of generating another final response.
+        """
+        run = await self._locked_run(run_id, user_id)
+        if run.session_id != session_id:
+            raise AgentConflict("visible response session does not match run")
+        context = dict(run.context_json or {})
+        marker_id = str(context.get("visible_response_final_message_id") or "").strip()
+        if marker_id:
+            existing = (await self.session.execute(
+                select(AgentMessage).where(
+                    AgentMessage.id == marker_id,
+                    AgentMessage.session_id == session_id,
+                    AgentMessage.user_id == user_id,
+                    AgentMessage.role == "assistant",
+                )
+            )).scalar_one_or_none()
+            if existing is None:
+                raise AgentConflict("visible response final message marker is invalid")
+            return existing
+        if run.status in TERMINAL_RUN_STATUSES:
+            raise AgentConflict("terminal run has no visible response final marker")
+        message = await self.append_message(
+            session_id=session_id,
+            user_id=user_id,
+            role="assistant",
+            content=content,
+            commit=False,
+        )
+        context["visible_response_final_message_id"] = message.id
+        context["visible_response_final_message_sequence"] = message.sequence
+        run.context_json = context
+        await self.update_run(
+            run_id=run_id,
+            user_id=user_id,
+            status="completed",
+            phase="summary",
+            progress=100,
+            commit=False,
+        )
+        await self.append_event(
+            run_id=run_id,
+            user_id=user_id,
+            event_type="assistant_completed",
+            summary="Agent 回复已完成",
+            data=completion_data,
+            commit=False,
+        )
+        await self.append_event(
+            run_id=run_id,
+            user_id=user_id,
+            event_type="run_completed",
+            summary="Agent 运行已完成",
+            data=completion_data,
+            commit=False,
+        )
+        await self.session.commit()
+        await self.session.refresh(message)
+        return message
     async def list_messages(self, *, session_id: str, user_id: int, limit: int = 200) -> list[AgentMessage]:
         await self._session(session_id, user_id)
         stmt = select(AgentMessage).where(AgentMessage.session_id == session_id, AgentMessage.user_id == user_id).order_by(AgentMessage.sequence.asc()).limit(min(max(limit, 1), 500))

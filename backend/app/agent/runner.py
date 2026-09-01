@@ -369,27 +369,26 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
                 user_id=user_id,
                 updates={"response_provider_attempts": response_attempts.snapshot()},
             )
-            final_message = await runtime.append_message(
-                session_id=session_id,
+            response_fallback_reason = None if response_provider_called else "empty_response"
+            completion_data = {
+                "phase": "summary",
+                "length": len(full_text),
+                "provider_called": response_provider_called,
+                "response_provider_called": response_provider_called,
+                "response_provider_fallback_reason": response_fallback_reason,
+            }
+            final_message = await runtime.finalize_visible_response(
+                run_id=run_id,
                 user_id=user_id,
-                role="assistant",
+                session_id=session_id,
                 content=full_text[:200000],
+                completion_data=completion_data,
             )
             await _record_visible_response_summary(
                 runtime=runtime,
                 run_id=run_id,
                 user_id=user_id,
                 final_message_sequence=final_message.sequence,
-            )
-            await runtime.update_run(run_id=run_id, user_id=user_id, status="completed", phase="summary", progress=100)
-            response_fallback_reason = None if response_provider_called else "empty_response"
-            await runtime.append_event(
-                run_id=run_id, user_id=user_id, event_type="assistant_completed", summary="Agent 回复已完成",
-                data={"phase": "summary", "length": len(full_text), "response_provider_called": response_provider_called, "response_provider_fallback_reason": response_fallback_reason},
-            )
-            await runtime.append_event(
-                run_id=run_id, user_id=user_id, event_type="run_completed", summary="Agent 运行已完成",
-                data={"phase": "summary", "provider_called": response_provider_called, "response_provider_called": response_provider_called, "response_provider_fallback_reason": response_fallback_reason},
             )
             await _publish_response_activity(
                 runtime,
