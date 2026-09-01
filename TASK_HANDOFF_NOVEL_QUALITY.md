@@ -72855,3 +72855,98 @@ Worker retry：已有 Runner 调用不再被 Runtime 静默丢弃
 4. 增加 DOM/组件回归测试，并在真实浏览器通道恢复后补多视口和手势滚动证据。
 5. 前端 type-check、test:run、build-only 后，代码与文档继续分别提交、分别推送。
 ```
+
+---
+
+# CARD-029 — Agent 右栏日志尾随与历史阅读保护（2026-09-01）
+
+## 问题
+
+右栏日志已经在 CARD-021 移出聊天列、CARD-022 限制为最近 120 条、CARD-025 收纳运行详情，但 SSE 高频追加事件时没有容器级滚动锚定策略。用户阅读较早日志时，后续渲染可能造成位置跳动；用户停留在底部时，也没有明确的“新事件可见”保证。
+
+## 修改
+
+```text
+frontend/src/views/AgentWorkspace.vue
+frontend/src/features/agent/AgentWorkspaceShell.spec.ts
+```
+
+日志容器新增：
+
+```text
+ref="logListEl"
+@scroll="onLogScroll"
+LOG_TAIL_THRESHOLD = 24
+logFollowTail
+```
+
+行为契约：
+
+```text
+1. 容器距底部不超过 24px：视为正在跟随尾部；新增 visibleLogEvents 后 nextTick 滚到 scrollHeight。
+2. 用户上翻：scroll 事件把 logFollowTail 设为 false；新增 SSE 事件不写 scrollTop，不强制拉回底部。
+3. 切换 Run：重新进入尾随模式，并在新 Run 事件渲染后定位到尾部。
+4. 仅影响右侧 agent-process-stream；聊天列不接收日志、不参与任何滚动写入。
+5. CARD-022 的 visibleLogEvents.slice(-120) 与隐藏计数保持不变。
+```
+
+## 回归与反向验证
+
+Shell contract 新增断言：
+
+```text
+- 日志 ref 与 scroll handler 存在。
+- 24px 尾部阈值存在。
+- scrollHeight - scrollTop - clientHeight 判断存在。
+- 只有 logFollowTail=true 才写 scrollTop=scrollHeight。
+- visibleLogEvents 变化和 selectedRunId 切换均受 watch 覆盖。
+```
+
+反向验证：临时移除 `logFollowTail` 守卫后测试失败；恢复后通过。
+
+```text
+REVERSE_EXIT=1
+RESTORED_EXIT=0
+```
+
+## 验证
+
+```text
+AgentWorkspaceShell 定向：7 passed
+npm run type-check：通过
+npm run test:run：74 files / 433 tests passed，177.84s
+npm run build-only：通过，39.85s
+```
+
+既有 Pinia mount 警告和 Browserslist 数据提示未导致失败。
+
+## 运行与视觉边界
+
+```text
+http://127.0.0.1:5174/agent → HTTP 200
+http://127.0.0.1:8013/health → HTTP 200
+```
+
+真实浏览器多视口截图及人工滚动手势仍待浏览器控制通道恢复后补充；本批不把 DOM 契约或 HTTP 结果伪装为视觉证据。
+
+## 回退
+
+```text
+上一回退点：859cfa9 docs: record card 028 provider attempt provenance
+本批代码提交：60e387f fix: preserve agent log scroll position（已推送）
+本批文档提交：待本次文档提交生成
+回退方式：git revert 60e387f
+```
+
+## 下一任务
+
+```text
+CARD-030：在真实浏览器通道可用后补 /agent 1280/1024/768/390 截图，验证：
+- 左栏折叠与内容树独立滚动；
+- 中央聊天主读区尺寸；
+- 右栏日志尾随和上翻保护；
+- Inspector 展开；
+- GlobalNavBar 不遮挡活动区。
+
+并继续审查后端 Provider retry 的跨 Job Attempt Ledger 合并需求。
+```
