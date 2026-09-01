@@ -73227,3 +73227,97 @@ Provider/写执行器相关集合：19 passed in 5.76s
 CARD-033：继续真实浏览器通道恢复与多视口验收；
 后端转向 Provider Attempt Snapshot 的 API 前端展示、跨阶段可读性和历史 Run 查询边界审查。
 ```
+
+---
+
+# CARD-033 — Agent Inspector 三阶段 Provider Attempt 摘要（2026-09-01）
+
+## 实际发现
+
+CARD-028 至 CARD-032 已使后端保存并查询 planner、response、candidate writer 三阶段的 Provider Attempt snapshot，但前端 `AgentProviderProvenance` 类型只声明 Candidate Writer snapshot，`AgentRunInspector` 也只显示“是否调用/降级原因”。历史 Run 切换后，用户无法从运行详情确认调用次数、选中的成功 Attempt、fallback 或最后失败类别。
+
+## 修改
+
+```text
+frontend/src/api/agent.ts
+frontend/src/api/agent.spec.ts
+frontend/src/features/agent/run/AgentRunInspector.vue
+frontend/src/features/agent/run/AgentRunInspector.spec.ts
+```
+
+新增共享 `AgentProviderAttemptSnapshot` 类型，并把它用于：
+
+```text
+planner_provider_attempts
+response_provider_attempts
+candidate_writer_provider_attempts
+```
+
+Inspector 在已折叠的“当前运行”详情中为三个阶段追加紧凑安全摘要：
+
+```text
+N 次调用
+已选 #N（存在 selected_provider_attempt 时）
+含 fallback（存在时）
+最后失败：ERROR_CATEGORY（最后一条为 failed 时）
+```
+
+仅使用后端受限 snapshot 的状态/数量字段；不显示 prompt、原始 Provider 输出、headers、密钥、思维链或其他私有数据。
+
+## 回归与反向验证
+
+API 测试验证 planner/response snapshot 随 provenance 请求返回。
+
+Inspector 测试构造：
+
+```text
+planner：2 次成功，已选 #2
+response：TIMEOUT 失败
+candidate writer：1 次成功，已选 #1，含 fallback
+```
+
+断言三个测试定位点均显示对应摘要。
+
+反向验证临时删除 Response Attempt 摘要 DOM：
+
+```text
+agent-response-provider-attempts 不存在
+Inspector 测试失败
+REVERSE_EXIT=1
+```
+
+恢复后：
+
+```text
+RESTORED_EXIT=0
+```
+
+## 验证
+
+```text
+定向 API + Inspector：15 passed
+npm run type-check：通过
+npm run test:run：74 files / 433 tests passed，126.47s
+npm run build-only：通过，16.90s
+```
+
+## 浏览器边界
+
+运行详情默认收纳仍保持；真实浏览器通道未产出可复核截图或手势证据，因此只把此批记为组件/API/构建验收完成，视觉多视口验收继续 pending。
+
+## 回退
+
+```text
+上一回退点：5ccffb2 docs: record card 032 candidate attempt source
+本批代码提交：0ddeb54 feat: show agent provider attempt summaries（已推送）
+本批文档提交：待本次文档提交生成
+回退方式：git revert 0ddeb54
+```
+
+## 下一任务
+
+```text
+CARD-034：继续真实浏览器多视口验收；
+检查 Inspector 内 Attempt 摘要在长 Run 下的密度、折行和历史 Run 切换；
+同时审查 Provider Attempt snapshot 的前端空态和 API schema 漂移边界。
+```
