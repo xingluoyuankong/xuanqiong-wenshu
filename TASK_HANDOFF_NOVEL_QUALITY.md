@@ -74124,3 +74124,155 @@ P2：lineage facts 缺少独立 loading/error 状态；
 P2：旧 Run 批量 facts 请求污染全局 loading/error map；
 P2：Workbench 操作按钮缺少按 Artifact 的去重和状态显示。
 ```
+
+# CARD-039：`/plan` 内容来源切换到持久化 PlanRevision
+
+## 本批目标
+
+在 CARD-038 稳定 `plan_id` 的基础上，修复 `/api/agent/runs/{run_id}/plan` 仍然从可变 `Run.context_json` 投影计划内容的问题。新 Run 的关系型 `PlanRevision.plan_json` 才是计划事实来源；如果继续混用两个来源，会出现“ID 来自 revision、步骤来自旧 context、目标来自另一份 JSON”的裂缝，前端看到的计划身份和计划内容可能不属于同一版本。
+
+## 根因与影响
+
+CARD-038 之前的路由读取顺序是：
+
+```text
+plan_id：最新 PlanRevision.revision_id
+goal/mode/steps/provider 状态：Run.context_json
+```
+
+`Run.context_json` 会随着执行、重试和 replan 更新，而 `PlanRevision.plan_json` 是 append-only 的计划事实。发生 replan 或旧 JSON 残留时，同一个 `plan_id` 可能对应另一组步骤和目标。
+
+## 实际代码变更
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+```
+
+`get_agent_run_plan()` 现在按以下规则投影：
+
+```text
+1. 先按 run_id + session_id + user_id 查询最新 PlanRevision；
+2. 有 PlanRevision 时，steps 来自 revision.plan_json.steps；
+3. 有 PlanRevision 时，goal/mode/provider_called/fallback_reason 优先来自同一 revision.plan_json；
+4. revision.plan_json.steps 缺失或畸形时返回空 steps，不回退到可变 context.plan_steps；
+5. 没有 PlanRevision 的旧 Run 才继续使用 context.plan_steps、context.goal 和旧 provider 字段；
+6. tool_name 仍通过 DEFAULT_TOOL_REGISTRY 解析，风险等级和确认要求由当前工具清单计算，不信任持久化 JSON 直接注入；
+7. plan_id 继续使用稳定的 revision_id，旧 Run 继续返回 null。
+```
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_runtime_route.py
+```
+
+新增回归覆盖：
+
+```text
+test_agent_run_plan_route_projects_latest_revision_payload_over_mutable_run_context
+test_agent_run_plan_route_does_not_fallback_to_mutable_steps_when_revision_steps_are_malformed
+```
+
+测试验证持久化 revision 的目标、模式、步骤、步骤元数据、Provider 状态和 fallback 原因被完整投影，同时阻止畸形 revision 步骤重新读取旧 context 步骤。
+
+## 失败驱动验证
+
+临时恢复“全部从 context 投影”的旧逻辑后运行新增测试：
+
+```text
+2 failed, 21 deselected
+FAILURE_DRIVEN_EXIT=1
+```
+
+失败表现：
+
+```text
+持久化目标被旧临时目标覆盖；
+畸形 revision 没有得到空 steps，而是错误地显示旧 context 步骤。
+```
+
+恢复实现后：
+
+```text
+2 passed, 21 deselected
+RESTORED_EXIT=0
+```
+
+相关后端集合：
+
+```text
+27 passed in 15.20s
+```
+
+## 全量门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+结果：
+
+```text
+1438 passed in 422.09s (0:07:02)
+```
+
+## 提交、推送与回退
+
+```text
+上一回退点：6d53be5 docs: record card 038 stable plan identity
+本批代码提交：9b70543 fix: project agent plans from durable revisions
+代码已推送：origin/codex/bohrium-integration-20260831
+本批文档提交：待本次文档提交生成
+```
+
+回退方式：
+
+```text
+git revert 9b70543
+```
+
+若只回退文档，使用本批文档提交；若完整回退本批，先回退文档提交，再回退 `9b70543`，保留 CARD-038 的 `b75f287` 和 `6d53be5`。
+
+## 当前后端状态
+
+```text
+CARD-038、CARD-039 的代码均已独立提交并推送；
+后端全量门禁已连续通过：CARD-038 为 1436 passed，CARD-039 为 1438 passed；
+本地 API：127.0.0.1:8013/health → HTTP 200；
+前端：127.0.0.1:5174/agent → HTTP 200；
+既有未跟踪审计文件、备份、临时脚本和 node_modules 继续保留，未被纳入本批提交。
+```
+
+## 下一任务：CARD-040（前端工作台布局主区优先）
+
+### 目标
+
+把 Agent 工作台真正调整为“中央聊天是主阅读区、左侧导航紧凑按需展开、右侧日志独立滚动”的结构，直接解决左侧标签太多太大、中央对话框过小、日志框过大并挤占聊天的问题。
+
+### 实施顺序
+
+```text
+1. 读取当前 AgentWorkspaceShell、左侧分组、聊天面板和运行日志组件的真实 DOM/CSS；
+2. 建立布局不变量：聊天主区 min-width:0、占据剩余宽度，日志不参与聊天流布局；
+3. 将左侧项目/会话/工具/数据压缩为分组导航，默认只展开当前分组，内容树在分组内部滚动；
+4. 将右侧日志固定为独立 rail，独立 scroll container，SSE 新事件只更新日志状态；
+5. 以 1280、1024、960、900、768、390 视口分别补回归测试；
+6. 对 960px 以下采用聊天优先的顺序：聊天、项目/内容、运行/日志；
+7. 真实浏览器通道可用时补充截图和实际滚动证据，通道不可用时保留 pending，不把 DOM 单测冒充视觉证据；
+8. 每次修改均执行失败驱动、反向验证、前端 type-check/test/build，代码独立提交推送，再独立提交文档推送。
+```
+
+### CARD-040 首批验收标准
+
+```text
+聊天消息列在宽屏下拥有最大可用宽度；
+左侧标签不再以多个大卡片同时占据主空间；
+右侧日志有自己的滚动条，长日志不会把聊天文字推走；
+聊天正文不出现运行日志重复内容；
+高频 SSE 日志更新不改变聊天消息 DOM 文本；
+窄屏下聊天优先显示，侧栏按顺序折叠到下方；
+现有 435 个前端测试和构建门禁保持通过。
+```
