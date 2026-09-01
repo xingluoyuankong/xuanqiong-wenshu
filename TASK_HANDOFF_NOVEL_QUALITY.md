@@ -72950,3 +72950,114 @@ CARD-030：在真实浏览器通道可用后补 /agent 1280/1024/768/390 截图�
 
 并继续审查后端 Provider retry 的跨 Job Attempt Ledger 合并需求。
 ```
+
+---
+
+# CARD-030 — 可见回复跨 Job 重试保留 Provider Attempt 历史（2026-09-01）
+
+## 问题
+
+CARD-028 已让 `response_provider_attempts` 能保存到 Run context，但 `visible_response` Job 每次重试都会新建空 `ProviderAttemptLedger(run_id)`。第二次 Job 成功时会把仅包含本次成功 Attempt 的 snapshot 覆盖回 context，第一次 Provider Timeout 记录丢失。
+
+实际不一致：
+
+```text
+Job.attempt_count = 2
+retry_pending event = 1
+Run.response_provider_attempts = [第二次 succeeded]
+第一次 TIMEOUT 无法再从 Run provenance 追溯
+```
+
+## 修改
+
+```text
+backend/app/agent/provider_attempt.py
+backend/app/agent/runner.py
+backend/app/agent/test_worker.py
+```
+
+新增 `ProviderAttemptLedger.from_snapshot()`：从已经受 Runtime 限制/清洗的 snapshot 复原至多 16 条历史记录，保留 attempt、角色、Provider/模型引用、状态、时间、错误类别、HTTP 状态、重试与 fallback 元数据；畸形记录收敛为受限默认值。
+
+`_run_visible_response()` 在成功取得并锁定 Run snapshot 后执行：
+
+```text
+response_attempts = ProviderAttemptLedger.from_snapshot(
+  run_id=run_id,
+  snapshot=run.context_json.response_provider_attempts,
+)
+```
+
+后续 Provider 调用在恢复的账本后继续 append，而不是覆盖早期失败。首次执行仍从空 ledger 开始。
+
+## 失败驱动与回归
+
+扩展既有真实 Worker retry 测试：
+
+```text
+第一次 LLM fixture：begin Attempt #1 → fail ProviderTimeout → Job queued
+第二次 LLM fixture：从 context 恢复 → begin Attempt #2 → finish → Run completed
+```
+
+旧实现失败：
+
+```text
+实际 snapshot statuses = [succeeded]
+期望 = [failed, succeeded]
+```
+
+修复后断言：
+
+```text
+provider_attempts.statuses = [failed, succeeded]
+第一条 error_category = TIMEOUT
+selected_provider_attempt = 2
+Job.status / attempt_count = succeeded / 2
+最终可见消息只有一条
+```
+
+## 反向验证
+
+临时移除 Runner 的 `ProviderAttemptLedger.from_snapshot()` 调用：
+
+```text
+重试测试失败，snapshot 回退为 [succeeded]
+REVERSE_EXIT=1
+```
+
+恢复源码后：
+
+```text
+RESTORED_EXIT=0
+```
+
+## 验证
+
+```text
+相关集合：62 passed in 86.12s
+```
+
+第一次紧接相关集合的全量 pytest 进程被外部终止，返回 `code -1` 且没有失败输出，未作为门禁证据。随后单独重新执行完整门禁：
+
+```text
+cd backend
+.\.venv\Scripts\python.exe -m pytest -q
+
+1434 passed in 470.04s（7 分 50 秒）
+```
+
+## 回退
+
+```text
+上一回退点：aef5fa4 docs: record card 029 agent log anchoring
+本批代码提交：34f7147 fix: retain provider attempts across job retries（已推送）
+本批文档提交：待本次文档提交生成
+回退方式：git revert 34f7147
+```
+
+## 下一任务
+
+```text
+CARD-031：真实浏览器通道恢复后，完成 /agent 的 1280/1024/768/390 视觉和交互验收；
+若通道仍不可用，则继续后端审查 Planner retry、Candidate Writer retry 和 Provider Attempt Ledger 的跨阶段边界，
+每批继续执行测试、反向验证、代码/文档独立提交和推送。
+```
