@@ -70278,3 +70278,264 @@ CARD-012：completed
 4. 固定 Job 数据库异常、租约过期和重复 claim 的公开错误语义。
 5. 后端 Worker 状态闭环完成后继续前端真实浏览器验收：左栏折叠/压缩、中央聊天宽度、右侧日志独立滚动。
 ```
+
+
+---
+
+# 2026-09-01｜CARD-013 后端 + 前端子批次｜Agent Job 数据库异常契约与独立 Worker 状态提示
+
+## 1. 本批任务目标
+
+完成 Agent Job/Worker 可恢复边界中的两项实际优化：
+
+```text
+1. Job 路由在数据库异常时与其它 Agent 路由保持同一 503/脱敏错误契约。
+2. 前端数据面板移除“独立 worker 仍在建设中”的过期表述，准确呈现 Job 已由独立 Worker 领取、未启动时仍会 durable queue 的实际行为。
+```
+
+本批没有假设 Worker 自动常驻部署已经完成；验证的是已存在的 durable Job、`scripts/agent_worker.py`、Job list/死信/replay/cancel API 和跨进程工作基础。
+
+## 2. 实际发现
+
+### 2.1 Job API 的数据库异常覆盖缺口
+
+以下路由原先仅捕获 `AgentJobError`：
+
+```text
+GET  /api/agent/jobs
+POST /api/agent/jobs/{job_id}/cancel
+GET  /api/agent/dead-letters
+POST /api/agent/dead-letters/{job_id}/replay
+```
+
+因此 `SQLAlchemyError` 会绕过 Agent `_error()`，与 CARD-009/CARD-012 已完成的事件、Session、Message 路由错误语义不一致。
+
+### 2.2 前端 Job 面板文案已落后于当前代码事实
+
+`AgentDataPanel.vue` 曾显示：
+
+```text
+当前为可恢复 Job 契约；独立 worker 仍在建设中。
+```
+
+这与当前仓库已有事实不一致：
+
+```text
+backend/scripts/agent_worker.py：独立 durable Agent Worker 入口
+backend/scripts/agent_command_worker.py：独立 Run Command Worker 入口
+AgentWorker：claim_next_job / poll_once / run_forever
+CARD-010：两个真实 ASGI Worker 跨进程 durable replay 已验证
+```
+
+过期文案会让用户误以为 queued Job 无法被独立 Worker 领取。
+
+## 3. 实际修改文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_database_errors.py
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\data\AgentDataPanel.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\data\AgentDataPanel.spec.ts
+```
+
+## 4. 实现内容
+
+### 4.1 Job 路由统一数据库异常映射
+
+四个 Job 路由现在捕获：
+
+```python
+except (AgentJobError, SQLAlchemyError) as exc:
+    raise _error(exc) from exc
+```
+
+死信列表路由也新增显式 try/except，而不是让 `list_dead_letters()` 的数据库异常逃逸。
+
+统一公开结果：
+
+```text
+HTTP 503
+code = AGENT_EVENT_LEDGER_UNAVAILABLE
+message = Agent 事件账本暂时不可用，请稍后重连。
+主应用追加 request_id / X-Request-ID
+不返回数据库驱动原文
+```
+
+### 4.2 前端 Job 面板状态提示纠正
+
+面板 subtitle 更新为：
+
+```text
+已接入独立 Worker；未启动时 Job 会保留在队列，重启后可继续领取。
+```
+
+Job 行项目现在显示：
+
+```text
+本地化状态标签：
+queued -> 等待 Worker
+running -> 执行中
+succeeded -> 已完成
+failed -> 执行失败
+dead_letter -> 死信待处理
+cancel_requested -> 取消中
+cancelled -> 已取消
+
+同时保留原始状态码，例如：状态码 queued
+```
+
+这让用户能够区分“没有 Worker 运行导致排队”和“任务已失败/进入死信”，同时不隐藏后端返回的原始状态。
+
+## 5. 新增/更新测试
+
+### 5.1 Job 数据库异常回归
+
+`test_agent_job_routes_map_database_failures_to_ledger_503` 注入：
+
+```text
+AgentJobService.list_jobs -> SQLAlchemyError
+AgentJobService.request_cancel -> SQLAlchemyError
+AgentJobService.list_dead_letters -> SQLAlchemyError
+AgentJobService.replay_dead_letter -> SQLAlchemyError
+```
+
+逐一断言：
+
+```text
+HTTPException.status_code == 503
+error detail code == AGENT_EVENT_LEDGER_UNAVAILABLE
+驱动 secret 文本不公开
+```
+
+### 5.2 前端状态文案回归
+
+`AgentDataPanel.spec.ts` 增加断言：
+
+```text
+Job 面板包含“已接入独立 Worker”
+running 显示为“执行中”
+保留“状态码 running”
+```
+
+## 6. 实际验证结果
+
+后端 Job/Worker/数据库异常专项：
+
+```text
+.\.venv\Scripts\python.exe -m pytest -q app/api/routers/test_agent_database_errors.py app/api/routers/test_agent_runtime_route.py app/agent/test_command_worker.py app/agent/test_worker_cli.py
+结果：33 passed in 43.57s
+```
+
+前端 Job 面板定向：
+
+```text
+npm run test:run -- src/features/agent/data/AgentDataPanel.spec.ts
+结果：1 file passed，3 tests passed，26.85s
+```
+
+前端类型检查：
+
+```text
+npm run type-check
+结果：通过
+```
+
+前端全量测试：
+
+```text
+npm run test:run
+结果：74 files passed，427 tests passed，152.84s
+```
+
+前端生产构建：
+
+```text
+npm run build-only
+结果：通过，57.70s
+```
+
+后端完整回归：
+
+```text
+.\.venv\Scripts\python.exe -m pytest -q
+结果：1426 passed in 389.60s（6分29秒）
+```
+
+前端构建/测试仍有既有的 Browserslist 数据过期提示；未影响类型、测试或构建通过，不与本批 Job 契约改动混合升级。
+
+## 7. 受控反向验证
+
+临时将 Job 路由的：
+
+```python
+except (AgentJobError, SQLAlchemyError) as exc:
+```
+
+全部退回为：
+
+```python
+except AgentJobError as exc:
+```
+
+运行：
+
+```text
+.\.venv\Scripts\python.exe -m pytest -q app/api/routers/test_agent_database_errors.py -k job_routes_map_database_failures
+```
+
+实际结果：
+
+```text
+退出码 1
+test_agent_job_routes_map_database_failures_to_ledger_503 失败
+```
+
+随后 finally 自动恢复 `agent.py`。
+
+反向验证日志：
+
+```text
+D:\小说写作\xuanqiong-wenshu\logs\live\agent-job-error-reverse-validation.log
+```
+
+恢复后后端 Job/Worker 专项重新通过 `33 passed`。
+
+## 8. 当前状态
+
+```text
+inline=false 创建的 execution Job durable queue：已有路由回归
+独立 Agent Worker CLI：已有并且测试覆盖
+独立 Command Worker CLI：已有并且测试覆盖
+Job list/cancel/dead-letter/replay SQLAlchemyError -> 503：completed
+Job 状态投影可见：已有 AgentStateProjection
+Worker 未启动时 queued Job 可见：已有 durable Job + 前端状态提示
+前端“独立 worker 仍在建设中”过期文案：removed
+Worker 常驻进程部署/守护配置：pending
+queued Job 真实 Worker --once 成功处理的 HTTP 端到端矩阵：pending
+Worker lease 过期后的真实 HTTP 恢复矩阵：pending
+CARD-013：completed
+```
+
+## 9. 提交、推送与回退
+
+```text
+上一回退点：c7374a1
+本批代码与测试提交：81c8348（fix: surface durable agent worker state，已推送）
+本批文档记录提交：本次提交后回填
+推送分支：origin/codex/bohrium-integration-20260831
+数据库：未修改
+小说正文：未修改
+反向验证日志：未纳入 Git
+```
+
+## 10. 下一任务目标
+
+继续后端优先的 Worker 执行闭环：
+
+```text
+1. 使用真实 HTTP 在 inline=false 创建 Agent Message/Job。
+2. 启动真实 agent_worker.py --once 领取该 Job，验证 Job 状态和 Run event 的 durable 变化。
+3. 对 Worker 成功、执行失败、未知 Job kind、lease 过期恢复做跨进程/HTTP 证据。
+4. 明确 Worker 的长期运行部署入口与状态观测，不把 Worker 未运行伪装成正在生成。
+5. 完成后进入前端真实浏览器布局验收：压缩左栏标签密度、扩大中间对话阅读区、右侧日志保持独立滚动和可折叠。
+```
