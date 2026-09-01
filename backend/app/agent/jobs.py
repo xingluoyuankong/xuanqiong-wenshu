@@ -298,6 +298,8 @@ class AgentJobService:
             .values(
                 status="succeeded",
                 result_json=_clean(result or {}),
+                error_type=None,
+                error_detail=None,
                 finished_at=now,
                 lease_owner=None,
                 lease_expires_at=None,
@@ -378,10 +380,18 @@ class AgentJobService:
         await self.session.commit()
         return await self._get(job_id, user_id)
 
-    async def reconcile_completed_visible_response_jobs(self) -> list[AgentJob]:
-        """Settle expired worker acknowledgements after an atomic visible response commit."""
+    async def reconcile_completed_handoff_jobs(self) -> list[AgentJob]:
+        """Settle expired worker acknowledgements after durable terminal handoffs.
+
+        A worker can persist a downstream handoff and then die before acknowledging
+        its current Job.  A terminal Run must not leave that predecessor permanently
+        ``running``.  Every branch below requires durable, Run-local proof before it
+        marks a Job successful; it never infers success merely from a terminal phase.
+        """
         now = _now()
-        candidates = list((await self.session.execute(
+        settled: list[AgentJob] = []
+
+        visible_candidates = list((await self.session.execute(
             select(AgentJob, AgentRun)
             .join(AgentRun, AgentRun.id == AgentJob.run_id)
             .where(
@@ -393,8 +403,7 @@ class AgentJobService:
                 AgentRun.status == "completed",
             )
         )).all())
-        settled: list[AgentJob] = []
-        for job, run in candidates:
+        for job, run in visible_candidates:
             marker = str((run.context_json or {}).get("visible_response_final_message_id") or "").strip()
             if not marker:
                 continue
@@ -405,10 +414,13 @@ class AgentJobService:
                     AgentJob.status == "running",
                     AgentJob.lease_expires_at.is_not(None),
                     AgentJob.lease_expires_at <= now,
+                    AgentJob.cancel_requested_at.is_(None),
                 )
                 .values(
                     status="succeeded",
                     result_json={"visible_response_job_id": job.id},
+                    error_type=None,
+                    error_detail=None,
                     finished_at=now,
                     lease_owner=None,
                     lease_expires_at=None,
@@ -416,11 +428,72 @@ class AgentJobService:
             )
             if changed.rowcount == 1:
                 settled.append(job)
+
+        execution_candidates = list((await self.session.execute(
+            select(AgentJob, AgentRun)
+            .join(AgentRun, AgentRun.id == AgentJob.run_id)
+            .where(
+                AgentJob.kind == "agent_execution",
+                AgentJob.status == "running",
+                AgentJob.lease_expires_at.is_not(None),
+                AgentJob.lease_expires_at <= now,
+                AgentJob.cancel_requested_at.is_(None),
+                AgentRun.status == "completed",
+            )
+        )).all())
+        for job, run in execution_candidates:
+            context = dict(run.context_json or {})
+            execution_job_id = str(context.get("execution_job_id") or "").strip()
+            visible_response_job_id = str(context.get("visible_response_job_id") or "").strip()
+            if execution_job_id != job.id or not visible_response_job_id:
+                continue
+            visible_response_succeeded = (await self.session.execute(
+                select(AgentJob.id).where(
+                    AgentJob.id == visible_response_job_id,
+                    AgentJob.run_id == run.id,
+                    AgentJob.user_id == job.user_id,
+                    AgentJob.kind == "visible_response",
+                    AgentJob.status == "succeeded",
+                )
+            )).scalar_one_or_none()
+            if visible_response_succeeded is None:
+                continue
+            changed = await self.session.execute(
+                update(AgentJob)
+                .where(
+                    AgentJob.id == job.id,
+                    AgentJob.status == "running",
+                    AgentJob.lease_expires_at.is_not(None),
+                    AgentJob.lease_expires_at <= now,
+                    AgentJob.cancel_requested_at.is_(None),
+                )
+                .values(
+                    status="succeeded",
+                    result_json={
+                        "status": "assistant_queued",
+                        "visible_response_job_id": visible_response_job_id,
+                        "reconciled_after_handoff": True,
+                    },
+                    error_type=None,
+                    error_detail=None,
+                    finished_at=now,
+                    lease_owner=None,
+                    lease_expires_at=None,
+                )
+            )
+            if changed.rowcount == 1:
+                settled.append(job)
+
         if settled:
             await self.session.commit()
             for job in settled:
                 await self.session.refresh(job)
         return settled
+
+    async def reconcile_completed_visible_response_jobs(self) -> list[AgentJob]:
+        """Backward-compatible name for terminal Job handoff reconciliation."""
+        return await self.reconcile_completed_handoff_jobs()
+
     async def list_dead_letters(self, *, limit: int = 100) -> list[AgentJob]:
         stmt = (
             select(AgentJob)

@@ -145,6 +145,50 @@ async def test_job_retry_then_dead_letter_and_non_retryable_failure(task_session
 
 
 @pytest.mark.asyncio
+async def test_successful_retry_clears_prior_provider_failure_details(task_session):
+    user = await _user(task_session, 1407, 'job-retry-success')
+    runtime = AgentRuntimeService(task_session)
+    agent_session = await runtime.create_session(user_id=user.id)
+    run = await runtime.create_run(session_id=agent_session.id, user_id=user.id)
+    service = AgentJobService(task_session)
+    job = await service.create_job(
+        run_id=run.id,
+        user_id=user.id,
+        project_id=None,
+        kind='visible_response',
+        idempotency_key='retry-success-key',
+        max_attempts=2,
+    )
+
+    await service.claim_job(job_id=job.id, user_id=user.id, lease_owner='worker-a')
+    retry = await service.fail(
+        job_id=job.id,
+        user_id=user.id,
+        lease_owner='worker-a',
+        error_type='ProviderTimeout',
+        detail='first provider response timed out',
+    )
+    assert retry.status == 'queued'
+    assert retry.error_type == 'ProviderTimeout'
+    retry.available_at = service._now() - timedelta(seconds=1)
+    await task_session.commit()
+
+    claimed = await service.claim_job(job_id=job.id, user_id=user.id, lease_owner='worker-b')
+    completed = await service.complete(
+        job_id=job.id,
+        user_id=user.id,
+        lease_owner='worker-b',
+        lease_generation=claimed.lease_generation,
+        result={'provider': 'recovered'},
+    )
+
+    assert completed.status == 'succeeded'
+    assert completed.result_json == {'provider': 'recovered'}
+    assert completed.error_type is None
+    assert completed.error_detail is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status, phase", [
     ("paused", "paused"),
     ("awaiting_approval", "approval"),

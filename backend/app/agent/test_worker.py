@@ -831,6 +831,11 @@ async def test_worker_settles_expired_visible_response_ack_after_atomic_completi
                 content="原子完成后等待 Job 确认。",
                 completion_data={"phase": "summary", "length": 12, "provider_called": True, "response_provider_called": True, "response_provider_fallback_reason": None},
             )
+            # A prior retry can leave diagnostic failure fields on the durable Job.
+            # Atomic completion recovery must not surface that stale Provider failure as
+            # the final state of an acknowledged success.
+            job.error_type = "ProviderTimeout"
+            job.error_detail = "first provider attempt timed out"
             job.lease_expires_at = AgentJobService._now() - timedelta(seconds=1)
             await session.commit()
 
@@ -846,6 +851,92 @@ async def test_worker_settles_expired_visible_response_ack_after_atomic_completi
             events = await runtime.list_events(run_id=run_id, user_id=1512)
             assert job.status == "succeeded"
             assert job.result_json == {"visible_response_job_id": job_id}
+            assert job.error_type is None
+            assert job.error_detail is None
+            assert run.status == "completed"
+            assert len(messages) == 1
+            assert [event.event_type for event in events].count("assistant_completed") == 1
+            assert [event.event_type for event in events].count("run_completed") == 1
+    finally:
+        await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_worker_settles_expired_execution_ack_after_completed_visible_response_handoff(tmp_path):
+    engine, factory = await _factory(tmp_path)
+    try:
+        run_id, execution_job_id = await _run(factory, 1513, kind="agent_execution")
+        async with factory() as session:
+            runtime = AgentRuntimeService(session)
+            jobs = AgentJobService(session)
+            run = await runtime.update_run(
+                run_id=run_id, user_id=1513, status="running", phase="assistant_response"
+            )
+            execution_job = await jobs.claim_job(
+                job_id=execution_job_id, user_id=1513, lease_owner="crashed-after-handoff", lease_seconds=60
+            )
+            visible_job = await jobs.create_job(
+                run_id=run_id,
+                user_id=1513,
+                project_id=run.project_id,
+                kind="visible_response",
+                idempotency_key=f"{run_id}:visible_response",
+                payload={"goal": "交接确认", "tool_results": []},
+            )
+            visible_claim = await jobs.claim_job(
+                job_id=visible_job.id, user_id=1513, lease_owner="visible-response-worker", lease_seconds=60
+            )
+            await jobs.complete(
+                job_id=visible_job.id,
+                user_id=1513,
+                lease_owner="visible-response-worker",
+                lease_generation=visible_claim.lease_generation,
+                result={"visible_response_job_id": visible_job.id},
+            )
+            await runtime.set_run_context(
+                run_id=run_id,
+                user_id=1513,
+                context={
+                    **dict(run.context_json or {}),
+                    "execution_job_id": execution_job_id,
+                    "visible_response_job_id": visible_job.id,
+                    "job_id": visible_job.id,
+                },
+            )
+            await runtime.finalize_visible_response(
+                run_id=run_id,
+                user_id=1513,
+                session_id=run.session_id,
+                content="可见回复已经完成，等待执行阶段确认收敛。",
+                completion_data={"phase": "summary", "length": 18, "provider_called": True},
+            )
+            execution_job.error_type = "ProviderTimeout"
+            execution_job.error_detail = "stale retry diagnostic"
+            execution_job.lease_expires_at = AgentJobService._now() - timedelta(seconds=1)
+            await session.commit()
+
+        worker = AgentWorker(factory, worker_id="execution-ack-reconciler", handlers={})
+        assert await worker.poll_once() is True
+        assert await worker.poll_once() is False
+
+        async with factory() as session:
+            runtime = AgentRuntimeService(session)
+            jobs = AgentJobService(session)
+            execution_job = await jobs.get_job(job_id=execution_job_id, user_id=1513)
+            saved_visible_job = await jobs.get_job(job_id=visible_job.id, user_id=1513)
+            run = await runtime.get_run(run_id, 1513)
+            messages = await runtime.list_messages(session_id=run.session_id, user_id=1513)
+            events = await runtime.list_events(run_id=run_id, user_id=1513)
+            assert execution_job.status == "succeeded"
+            assert execution_job.lease_owner is None
+            assert execution_job.lease_expires_at is None
+            assert execution_job.error_type is None
+            assert execution_job.error_detail is None
+            assert execution_job.result_json == {
+                "status": "assistant_queued",
+                "visible_response_job_id": saved_visible_job.id,
+                "reconciled_after_handoff": True,
+            }
+            assert saved_visible_job.status == "succeeded"
             assert run.status == "completed"
             assert len(messages) == 1
             assert [event.event_type for event in events].count("assistant_completed") == 1
