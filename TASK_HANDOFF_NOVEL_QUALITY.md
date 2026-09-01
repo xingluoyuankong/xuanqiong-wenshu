@@ -75723,3 +75723,215 @@ Artifact facts：CARD-041 reset 隔离、CARD-042 重复请求隔离、CARD-043 
 5. 先写旧实现失败测试，再完成实现、反向验证和全量前端门禁；
 6. 代码和任务文档继续独立提交、独立推送并记录回退点。
 ```
+
+# CARD-047：Artifact facts map 的 Run + Artifact 级存储归一化
+
+## 本批目标
+
+修复质量 facts、lineage facts 及其 loading/error map 只使用 `artifact_id` 作为键的问题。同一个 Artifact ID 在不同 Run 中复用时，后一次读取会覆盖前一次事实；切回旧 Run 后，工作台可能显示另一个 Run 的质量和谱系结果。
+
+## 失败驱动验证
+
+新增测试：
+
+```text
+keeps facts for two Runs when their Artifact IDs are reused
+```
+
+测试构造两个不同 Run：
+
+```text
+Run-A / Artifact-X
+Run-B / Artifact-X
+```
+
+两次读取后要求同时保留：
+
+```text
+run-a:artifact-x → Run-A facts
+run-b:artifact-x → Run-B facts
+```
+
+旧实现使用 `artifact.id` 单键，结果：
+
+```text
+1 failed
+旧实现没有生成 Run 级事实键；
+```
+
+## 实际代码变更
+
+### 1. Runtime 使用组合键写入事实状态
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.ts
+```
+
+新增统一键函数：
+
+```ts
+const artifactStateKey = (artifact: AgentArtifact) => `${artifact.run_id}:${artifact.id}`
+```
+
+以下状态均改为使用组合键：
+
+```text
+artifactQualityFacts
+artifactQualityFactsLoading
+artifactQualityFactsErrors
+artifactLineageFacts
+artifactLineageFactsLoading
+artifactLineageFactsErrors
+```
+
+请求 generation 也继续使用相同的 Run + Artifact 组合范围，避免不同 Run 之间互相淘汰请求。
+
+### 2. Workbench 读取组合键并保留旧数据兼容
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\artifacts\AgentArtifactWorkbench.vue
+```
+
+Workbench 增加统一读取函数：
+
+```text
+优先读取 run_id:artifact_id；
+如果外部旧调用仍传 artifact_id，则回退读取旧键；
+```
+
+兼容回退只用于读取旧调用方数据，Runtime 新写入全部使用组合键。
+
+因此：
+
+```text
+新 Runtime 数据不会互相覆盖；
+旧测试夹具和旧集成调用仍可显示；
+不同 Run 的同名 Artifact 可以同时渲染各自事实。
+```
+
+### 3. 回归测试迁移
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\artifacts\AgentArtifactWorkbench.spec.ts
+```
+
+增加 Runtime 双 Run 冲突测试和 Workbench 组合键读取测试，同时将既有 Runtime facts 断言迁移到 `artifactStateKey()`。
+
+## 修复后验证
+
+定向测试：
+
+```text
+Runtime 双 Run 冲突测试：1 passed
+Workbench 组合键测试：1 passed
+```
+
+Runtime composable 全集合：
+
+```text
+21 passed
+```
+
+Workbench 全集合：
+
+```text
+8 passed
+```
+
+反向验证：
+
+```text
+临时将 Runtime 的 [stateKey] 写回改成 [artifact.id]；
+重新运行双 Run 同名 Artifact 测试；
+```
+
+结果：
+
+```text
+1 failed
+REVERSE_EXIT=1
+```
+
+恢复真实实现后：
+
+```text
+2 passed
+RESTORED_EXIT=0
+```
+
+## 全量前端门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+```
+
+```text
+通过
+```
+
+```powershell
+npm run test:run
+```
+
+```text
+74 files passed
+453 tests passed
+```
+
+```powershell
+npm run build-only
+```
+
+```text
+4905 modules transformed
+built successfully
+```
+
+## 提交、推送与回退
+
+```text
+上一回退点：fd337e1 docs: record card 046 stale batch isolation
+本批代码提交：ffac4fc fix: isolate artifact facts by run and artifact
+代码已推送：origin/codex/bohrium-integration-20260831
+本批文档提交：待本次文档提交生成
+```
+
+回退方式：
+
+```text
+git revert ffac4fc
+```
+
+该回退只移除 facts map 的组合键归一化，保留 CARD-040 至 CARD-046 的布局、action 状态和批次隔离修复。
+
+## 当前累计状态
+
+```text
+后端：CARD-038/039，最近全量 1438 passed；
+工作台布局：CARD-040，聊天主区优先、左栏紧凑、日志右侧独立滚动；
+Artifact 生命周期：CARD-041 至 CARD-046 已覆盖 reset、重复请求、lineage、blocker、rewrite/diff/preview 和旧 Run 批次；
+facts 存储：CARD-047 已归一到 run_id + artifact_id；
+前端最近全量：74 files / 453 tests passed；
+前端与后端服务仍为 HTTP 200。
+```
+
+## 下一任务：CARD-048（Artifact 操作状态按 Run + Artifact + Action 统一）
+
+继续将 facts map 之外的 action 状态也完全归一：
+
+```text
+1. blocker、rewrite、diff、preview 的 loading/error/归属键统一使用 run_id + artifact_id + action；
+2. 同一个 Artifact ID 在不同 Run 中操作时互不覆盖；
+3. Workbench 不再依赖全局单值 action 结果；
+4. 切回旧 Run 时恢复该 Run 对应的操作结果；
+5. 继续保留旧调用方读取兼容，但新写入全部使用组合键；
+6. 完成失败驱动、反向验证、完整前端门禁、代码推送和文档推送。
+```
