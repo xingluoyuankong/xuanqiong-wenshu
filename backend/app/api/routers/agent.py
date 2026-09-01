@@ -470,7 +470,7 @@ async def list_agent_events(session_id: str, run_id: str, after_sequence: Annota
         if run.session_id != item.id:
             raise AgentScopeViolation("run does not belong to session")
         return await service.list_events(run_id=run_id, user_id=current_user.id, after_sequence=after_sequence, limit=limit)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -883,7 +883,7 @@ async def list_agent_run_activity(
             after_sequence=after_sequence,
             limit=limit,
         )
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 

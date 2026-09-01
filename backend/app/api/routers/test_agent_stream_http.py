@@ -4,11 +4,13 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from fastapi import FastAPI, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api.routers import agent as agent_router
 from app.core.dependencies import get_current_user
+from app.db.session import get_session
 from app.main import app
 from app.models import User
 from app.services.agent_runtime import AgentRuntimeService
@@ -245,3 +247,63 @@ async def test_agent_stream_emits_redacted_retryable_error_when_ledger_fails_dur
     assert '"retryable": true' in body
     assert '"cursor": 7' in body
     assert "raw database driver details" not in body
+
+
+@pytest.mark.asyncio
+async def test_agent_event_ledger_http_routes_map_database_failures_to_redacted_503(task_session, monkeypatch):
+    user = await _user(task_session, 1315, "event-ledger-http-owner")
+    runtime = AgentRuntimeService(task_session)
+    agent_session = await runtime.create_session(user_id=user.id)
+    run = await runtime.create_run(session_id=agent_session.id, user_id=user.id)
+
+    async def override_session():
+        yield task_session
+
+    async def override_current_user():
+        return SimpleNamespace(id=user.id)
+
+    async def broken_list_events(self, *, run_id, user_id, after_sequence=0, limit=500):
+        raise SQLAlchemyError("raw database password=should-not-leak")
+
+    monkeypatch.setattr(AgentRuntimeService, "list_events", broken_list_events)
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_current_user] = override_current_user
+    try:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=True)
+        async with httpx.AsyncClient(transport=transport, base_url="http://agent-http") as client:
+            events_response = await client.get(
+                f"/api/agent/sessions/{agent_session.id}/runs/{run.id}/events"
+            )
+            activity_response = await client.get(f"/api/agent/runs/{run.id}/activity")
+
+        for response in (events_response, activity_response):
+            assert response.status_code == 503
+            detail = response.json()["detail"]
+            assert detail["code"] == "AGENT_EVENT_LEDGER_UNAVAILABLE"
+            assert detail["message"] == "Agent 事件账本暂时不可用，请稍后重连。"
+            assert isinstance(detail.get("request_id"), str) and detail["request_id"]
+            assert "password=should-not-leak" not in response.text
+            assert response.headers.get("content-type", "").startswith("application/json")
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
+async def test_agent_event_ledger_endpoints_require_current_user_before_accessing_storage():
+    local_app = FastAPI()
+    local_app.include_router(agent_router.router)
+
+    async def reject_user():
+        raise HTTPException(status_code=401, detail={"code": "AUTH_REQUIRED"})
+
+    local_app.dependency_overrides[get_current_user] = reject_user
+    transport = httpx.ASGITransport(app=local_app, raise_app_exceptions=True)
+    async with httpx.AsyncClient(transport=transport, base_url="http://agent-auth") as client:
+        events_response = await client.get("/api/agent/sessions/session-1/runs/run-1/events")
+        activity_response = await client.get("/api/agent/runs/run-1/activity")
+        stream_response = await client.get("/api/agent/sessions/session-1/runs/run-1/stream")
+
+    for response in (events_response, activity_response, stream_response):
+        assert response.status_code == 401
+        assert response.json()["detail"] == {"code": "AUTH_REQUIRED"}
