@@ -79,6 +79,53 @@ describe('connectSSE', () => {
     controller.close()
   })
 
+  it('routes stream_error outside the durable Agent event callback and keeps the last durable cursor', async () => {
+    vi.useFakeTimers()
+    const encoder = new TextEncoder()
+    const readers = [
+      {
+        read: vi.fn()
+          .mockResolvedValueOnce({
+            done: false,
+            value: encoder.encode(
+              'id: 7\nevent: assistant_delta\ndata: {"id":"event-7","run_id":"run-1","sequence":7,"event_type":"assistant_delta","summary":"正文增量","data":{"content":"第一段"}}\n\nevent: stream_error\ndata: {"run_id":"run-1","error_code":"AGENT_EVENT_LEDGER_UNAVAILABLE","retryable":true,"cursor":7}\n\n',
+            ),
+          })
+          .mockResolvedValueOnce({ done: true, value: undefined }),
+      },
+      { read: vi.fn().mockResolvedValueOnce({ done: true, value: undefined }), cancel: vi.fn() },
+    ]
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      body: { getReader: () => readers[Math.min(fetchMock.mock.calls.length - 1, 1)] },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const raw = vi.fn()
+    const streamError = vi.fn()
+
+    const controller = connectSSE('/api/agent/sessions/session-1/runs/run-1/stream?after_sequence=0', {
+      onRawEvent: raw,
+      onStreamError: streamError,
+    }, 3, { cursorParam: 'after_sequence' })
+
+    await vi.waitFor(() => expect(streamError).toHaveBeenCalledTimes(1))
+    expect(raw).toHaveBeenCalledTimes(1)
+    expect(raw).toHaveBeenCalledWith('assistant_delta', expect.objectContaining({ sequence: 7 }))
+    expect(streamError).toHaveBeenCalledWith({
+      run_id: 'run-1',
+      error_code: 'AGENT_EVENT_LEDGER_UNAVAILABLE',
+      retryable: true,
+      cursor: 7,
+    })
+
+    await vi.advanceTimersByTimeAsync(2000)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    const [url, init] = fetchMock.mock.calls[1] as unknown as [string, RequestInit]
+    expect(url).toContain('after_sequence=7')
+    expect((init.headers as Record<string, string>)['Last-Event-ID']).toBe('7')
+    controller.close()
+  })
+
   it('honors maxRetries when the server repeatedly closes an empty stream', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.fn(async () => ({

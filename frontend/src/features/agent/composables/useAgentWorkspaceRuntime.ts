@@ -22,7 +22,7 @@ import {
 import { toSafeAgentEvent } from '@/utils/agentEventSafety'
 import type { AgentRunProjectionStore } from '@/features/agent/stores/agentRunProjection'
 import type { AgentRunStream } from '@/features/agent/composables/useAgentRunStream'
-import type { SSEConnectionState } from '@/utils/sseStream'
+import type { SSEConnectionState, StreamErrorData } from '@/utils/sseStream'
 
 export interface AgentWorkspaceRuntimeOptions {
   runProjection: AgentRunProjectionStore
@@ -386,6 +386,19 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
           options.runProjection.clearAssistantText(run.id)
           options.onTerminalRefresh()
         }
+      },
+      onStreamError: (data: StreamErrorData) => {
+        if (!isCurrentFeed()) return
+        const cursor = Number.isSafeInteger(data.cursor) && (data.cursor as number) >= 0
+          ? `；将从游标 ${data.cursor} 重连`
+          : ''
+        options.addActivity(
+          '事件账本暂时不可用',
+          `${data.error_code}${data.retryable ? '；连接将从最近确认位置重试' : '；请重新打开本次运行'}${cursor}`,
+          `stream-error:${run.id}:${data.error_code}:${data.cursor ?? 'unknown'}`,
+          0,
+          'stream_error',
+        )
       },
       onError: (error) => {
         if (isCurrentFeed()) options.addActivity('运行流暂时中断', error)

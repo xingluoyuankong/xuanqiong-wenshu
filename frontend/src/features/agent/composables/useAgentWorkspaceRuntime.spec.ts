@@ -80,6 +80,7 @@ describe('useAgentWorkspaceRuntime', () => {
     const streaming = ref(false)
     const stream = { close: vi.fn(), start: vi.fn().mockResolvedValue(undefined) }
     const onTerminalRefresh = vi.fn()
+    const addActivity = vi.fn()
     const tools = ref([])
     const runtime = useAgentWorkspaceRuntime({
       runProjection: projection,
@@ -93,10 +94,10 @@ describe('useAgentWorkspaceRuntime', () => {
       streaming,
       stream: stream as never,
       tools,
-      addActivity: vi.fn(),
+      addActivity,
       onTerminalRefresh,
     })
-    return { runtime, session, streaming, stream, onTerminalRefresh }
+    return { runtime, session, streaming, stream, addActivity, onTerminalRefresh }
   }
 
   it('loads stage-separated provenance into the selected Run without event-stream inference', async () => {
@@ -199,6 +200,32 @@ describe('useAgentWorkspaceRuntime', () => {
 
     await vi.waitFor(() => expect(runtime.gapRepairStateByRunId.value[run.id]).toBe('repaired'))
     expect(listRunActivityMock).toHaveBeenCalledWith(run.id, 0, 500)
+  })
+
+  it('projects a stream_error only into the right-side activity log without mutating AgentEvent state', async () => {
+    const { runtime, session, stream, addActivity } = createRuntime()
+    session.value = { id: 'session' }
+    await runtime.loadEventsAndStream(session.value as never, run)
+
+    const streamOptions = stream.start.mock.calls[0][0]
+    streamOptions.onStreamError({
+      run_id: run.id,
+      error_code: 'AGENT_EVENT_LEDGER_UNAVAILABLE',
+      retryable: true,
+      cursor: 7,
+    })
+
+    expect(addActivity).toHaveBeenCalledWith(
+      '事件账本暂时不可用',
+      'AGENT_EVENT_LEDGER_UNAVAILABLE；连接将从最近确认位置重试；将从游标 7 重连',
+      'stream-error:runtime-run:AGENT_EVENT_LEDGER_UNAVAILABLE:7',
+      0,
+      'stream_error',
+    )
+    expect(runtime.applyEvent({
+      id: 'event-1', run_id: run.id, sequence: 1, event_type: 'assistant_delta', summary: '正文',
+      data: { content: '正文内容' }, created_at: run.created_at,
+    })).not.toBeNull()
   })
 
   it('fences one Run stream lifecycle and refreshes the session only after the selected Run reaches terminal state', async () => {

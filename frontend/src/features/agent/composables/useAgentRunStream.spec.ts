@@ -106,6 +106,42 @@ describe('useAgentRunStream', () => {
     expect(stream.connectionState.value).toBe('terminal')
   })
 
+  it('forwards stream_error through its dedicated callback without reducing it as a live AgentEvent', async () => {
+    const stream = useAgentRunStream()
+    let callbacks: {
+      onRawEvent?: (eventType: string, payload: unknown) => void
+      onStreamError?: (data: { error_code: string; retryable: boolean; cursor?: number }) => void
+    } = {}
+    const events = vi.fn()
+    const streamError = vi.fn()
+    connectMock.mockReset().mockImplementation((_url: string, nextCallbacks: typeof callbacks) => {
+      callbacks = nextCallbacks
+      return { close: vi.fn() }
+    })
+
+    await stream.start({
+      sessionId: 'session-1',
+      runId: 'run-1',
+      loadHistory: async () => [],
+      streamUrl: () => '/stream',
+      onEvent: events,
+      onStreamError: streamError,
+    })
+
+    callbacks.onStreamError?.({
+      error_code: 'AGENT_EVENT_LEDGER_UNAVAILABLE',
+      retryable: true,
+      cursor: 9,
+    })
+
+    expect(streamError).toHaveBeenCalledWith({
+      error_code: 'AGENT_EVENT_LEDGER_UNAVAILABLE',
+      retryable: true,
+      cursor: 9,
+    })
+    expect(events).not.toHaveBeenCalled()
+  })
+
   it('fences a late history response when a newer Run starts', async () => {
     const stream = useAgentRunStream()
     let resolveFirstHistory: (value: AgentEvent[]) => void = () => undefined

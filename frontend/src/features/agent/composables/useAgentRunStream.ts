@@ -4,6 +4,7 @@ import {
   connectSSE,
   type SSEConnectionState,
   type SSEController,
+  type StreamErrorData,
 } from '@/utils/sseStream'
 
 export interface AgentRunStreamStartOptions {
@@ -16,6 +17,8 @@ export interface AgentRunStreamStartOptions {
   onEvent: (event: AgentEvent, source: 'history' | 'live') => void
   onConnectionState?: (state: SSEConnectionState) => void
   onTerminal?: (eventType: string, payload: unknown) => void
+  /** Non-durable transport control event; never feed it into AgentEvent reducers. */
+  onStreamError?: (data: StreamErrorData) => void
   onError?: (message: string) => void
 }
 
@@ -91,6 +94,9 @@ export function useAgentRunStream() {
               options.onConnectionState?.('terminal')
               options.onTerminal?.(eventType, payload)
             }
+          },
+          onStreamError: (data) => {
+            if (isCurrent()) options.onStreamError?.(data)
           },
           onError: (message) => {
             if (isCurrent()) options.onError?.(message)

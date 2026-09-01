@@ -9,6 +9,11 @@ export interface SSECallback {
   onConnectionState?: (state: SSEConnectionState, retryCount: number) => void
   onStatusUpdate?: (data: StreamStatusData) => void
   onComplete?: (data: StreamCompleteData) => void
+  /**
+   * Agent event-ledger failures are transport-control events, not durable
+   * AgentEvent records. Keep them out of user-visible chat/event reducers.
+   */
+  onStreamError?: (data: StreamErrorData) => void
   onError?: (error: string) => void
   onRawEvent?: (event: string, data: unknown) => void
 }
@@ -26,6 +31,13 @@ export interface StreamCompleteData {
   status: string
   word_count: number
   updated_at: string | null
+}
+
+export interface StreamErrorData {
+  run_id?: string
+  error_code: string
+  retryable: boolean
+  cursor?: number
 }
 
 export interface SSEController {
@@ -114,13 +126,30 @@ export function connectSSE(url: string, callbacks: SSECallback, maxRetries = 3, 
         }
         try {
           const parsed = JSON.parse(dataBuffer)
-          if (pendingEventId !== null) lastEventId = Math.max(lastEventId, pendingEventId)
-          // 只有真正收到可解析事件才算连接有效，避免空流断开时无限重连。
-          retryCount = 0
-          callbacks.onRawEvent?.(eventType, parsed)
-          if (eventType === 'status_update') callbacks.onStatusUpdate?.(parsed as StreamStatusData)
-          else if (eventType === 'complete') callbacks.onComplete?.(parsed as StreamCompleteData)
-          if (callbacks.isTerminalEvent?.(eventType, parsed)) {
+          // stream_error 是 Agent SSE 的非持久化控制事件：后端不会为它
+          // 写 SSE id，客户端也绝不能借它推进 durable replay cursor。
+          if (eventType === 'stream_error') {
+            const source = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+              ? parsed as Record<string, unknown>
+              : {}
+            const cursor = Number(source.cursor)
+            callbacks.onStreamError?.({
+              ...(typeof source.run_id === 'string' && source.run_id ? { run_id: source.run_id } : {}),
+              error_code: typeof source.error_code === 'string' && source.error_code
+                ? source.error_code
+                : 'AGENT_STREAM_UNAVAILABLE',
+              retryable: source.retryable === true,
+              ...(Number.isSafeInteger(cursor) && cursor >= 0 ? { cursor } : {}),
+            })
+          } else {
+            if (pendingEventId !== null) lastEventId = Math.max(lastEventId, pendingEventId)
+            // 只有真正收到可解析事件才算连接有效，避免空流断开时无限重连。
+            retryCount = 0
+            callbacks.onRawEvent?.(eventType, parsed)
+            if (eventType === 'status_update') callbacks.onStatusUpdate?.(parsed as StreamStatusData)
+            else if (eventType === 'complete') callbacks.onComplete?.(parsed as StreamCompleteData)
+          }
+          if (eventType !== 'stream_error' && callbacks.isTerminalEvent?.(eventType, parsed)) {
             terminalSeen = true
             aborted = true
             callbacks.onConnectionState?.('terminal', retryCount)
