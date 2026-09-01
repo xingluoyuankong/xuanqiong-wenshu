@@ -10,6 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.agent.context_refs import ResolvedAgentContext
 from app.agent.schemas import AgentMessageCreateRequest, AgentSessionCreateRequest
+from app.agent.jobs import AgentJobService
 from app.api.routers import agent as agent_router
 from app.core.dependencies import get_current_user
 from app.db.session import get_session
@@ -118,3 +119,36 @@ async def test_agent_database_failure_http_response_has_request_id_and_redacts_d
     finally:
         app.dependency_overrides.pop(get_session, None)
         app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
+async def test_agent_job_routes_map_database_failures_to_ledger_503(task_session, monkeypatch):
+    async def broken(*args, **kwargs):
+        raise SQLAlchemyError("job database driver secret=must-not-leak")
+
+    monkeypatch.setattr(AgentJobService, "list_jobs", broken)
+    with pytest.raises(HTTPException) as list_error:
+        await agent_router.list_agent_jobs(session=task_session, current_user=CURRENT_USER)
+    _assert_ledger_503(list_error)
+
+    monkeypatch.setattr(AgentJobService, "request_cancel", broken)
+    with pytest.raises(HTTPException) as cancel_error:
+        await agent_router.cancel_agent_job("job-db-failure", session=task_session, current_user=CURRENT_USER)
+    _assert_ledger_503(cancel_error)
+
+    monkeypatch.setattr(AgentJobService, "list_dead_letters", broken)
+    with pytest.raises(HTTPException) as dead_letter_error:
+        await agent_router.list_agent_dead_letters(
+            session=task_session,
+            _=SimpleNamespace(id=9001, is_admin=True),
+        )
+    _assert_ledger_503(dead_letter_error)
+
+    monkeypatch.setattr(AgentJobService, "replay_dead_letter", broken)
+    with pytest.raises(HTTPException) as replay_error:
+        await agent_router.replay_agent_dead_letter(
+            "job-db-failure",
+            session=task_session,
+            current_admin=SimpleNamespace(id=9001, is_admin=True),
+        )
+    _assert_ledger_503(replay_error)

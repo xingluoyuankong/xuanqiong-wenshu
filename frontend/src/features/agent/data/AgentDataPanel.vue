@@ -54,12 +54,12 @@
       </ol>
     </XqPanel>
 
-    <XqPanel title="持久化 Agent Job" subtitle="当前为可恢复 Job 契约；独立 worker 仍在建设中。" data-testid="agent-job-panel">
+    <XqPanel title="持久化 Agent Job" subtitle="已接入独立 Worker；未启动时 Job 会保留在队列，重启后可继续领取。" data-testid="agent-job-panel">
       <p v-if="jobsLoading" class="muted">正在读取 Job…</p>
       <ol v-else class="timeline-list">
         <li v-for="job in jobs.slice(0, 12)" :key="job.id">
-          <strong>{{ job.kind }} · {{ job.status }}</strong>
-          <span>attempt {{ job.attempt_count }}/{{ job.max_attempts }} · {{ job.id.slice(0, 8) }}</span>
+          <strong>{{ job.kind }} · {{ jobStatusLabel(job.status) }}</strong>
+          <span>状态码 {{ job.status }} · attempt {{ job.attempt_count }}/{{ job.max_attempts }} · {{ job.id.slice(0, 8) }}</span>
           <small v-if="job.error_type">{{ job.error_type }}</small>
           <XqButton
             v-if="canCancelJob(job)"
@@ -156,5 +156,14 @@ const emit = defineEmits<{
 }>()
 
 const selectValue = (event: Event) => (event.target as HTMLSelectElement | null)?.value || ''
+const jobStatusLabel = (status: string) => ({
+  queued: '等待 Worker',
+  running: '执行中',
+  succeeded: '已完成',
+  failed: '执行失败',
+  dead_letter: '死信待处理',
+  cancel_requested: '取消中',
+  cancelled: '已取消',
+}[status] || status)
 const canCancelJob = (job: AgentJob) => !['succeeded', 'failed', 'cancelled', 'dead_letter'].includes(job.status)
 </script>

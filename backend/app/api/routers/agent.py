@@ -384,7 +384,7 @@ async def list_agent_jobs(
     try:
         rows = await AgentJobService(session).list_jobs(user_id=current_user.id, project_id=project_id, status=status)
         return [AgentJobRead.model_validate(item) for item in rows]
-    except AgentJobError as exc:
+    except (AgentJobError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -397,7 +397,7 @@ async def cancel_agent_job(
     try:
         row = await AgentJobService(session).request_cancel(job_id=job_id, user_id=current_user.id)
         return AgentJobRead.model_validate(row)
-    except AgentJobError as exc:
+    except (AgentJobError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -407,8 +407,11 @@ async def list_agent_dead_letters(
     session: AsyncSession = Depends(get_session),
     _: UserInDB = Depends(get_current_admin),
 ) -> list[AgentJobRead]:
-    rows = await AgentJobService(session).list_dead_letters(limit=limit)
-    return [AgentJobRead.model_validate(item) for item in rows]
+    try:
+        rows = await AgentJobService(session).list_dead_letters(limit=limit)
+        return [AgentJobRead.model_validate(item) for item in rows]
+    except (AgentJobError, SQLAlchemyError) as exc:
+        raise _error(exc) from exc
 
 
 @router.post("/dead-letters/{job_id}/replay", response_model=AgentJobRead)
@@ -425,7 +428,7 @@ async def replay_agent_dead_letter(
             reason=reason,
         )
         return AgentJobRead.model_validate(row)
-    except AgentJobError as exc:
+    except (AgentJobError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 @router.get("/audit", response_model=list[AgentAuditRecordRead])
