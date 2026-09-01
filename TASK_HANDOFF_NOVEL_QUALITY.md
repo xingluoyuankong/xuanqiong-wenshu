@@ -73880,3 +73880,247 @@ CARD-038：
    - Run 切换后 Artifact 结果不串线。
 3. 如果视觉通道仍不可复核，则继续审查 Artifact 状态按 Run/Artifact 双键隔离的剩余边界。
 ```
+
+# CARD-038：历史 Run 计划身份稳定化与旧 Run 兼容
+
+## 本批目标
+
+修复 Agent 历史 Run 的 `/api/agent/runs/{run_id}/plan` 接口在重复读取时生成随机 `plan_id` 的问题，并为没有关系型 `PlanRevision` 的旧 Run 建立明确的兼容语义。该批只处理后端计划身份，不改变前端布局，不覆盖既有审计文件和未跟踪成果。
+
+## 现状与根因
+
+原来的 `AgentPlan.plan_id` 使用 `Field(default_factory=uuid4)`。历史 Run 的计划接口从 `run.context_json.plan_steps` 重建临时 `AgentPlan`，没有传入持久化计划修订身份，因此同一个 Run 的两次读取会得到不同的业务 ID：
+
+```text
+第一次 GET /runs/RUN_ID/plan：P1
+第二次 GET /runs/RUN_ID/plan：P2
+P1 != P2
+```
+
+这会破坏前端缓存、计划详情关联、SSE 事件关联和后续 `/plan-revision` 投影的一致性。系统已经存在按 Run、Session、User 隔离的 `PlanRevision.revision_id`，但原 `/plan` 路由没有使用它。
+
+## 实际代码变更
+
+### 1. 计划 schema 明确支持旧 Run
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\schemas.py
+```
+
+变更：
+
+```python
+plan_id: UUID | None = None
+```
+
+含义：
+
+```text
+有持久化 PlanRevision：返回稳定 revision_id
+没有 PlanRevision 的旧 Run：返回 null
+不再伪造随机业务身份
+```
+
+### 2. `/plan` 路由读取最新受限修订
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+```
+
+读取顺序：
+
+```text
+1. AgentRuntimeService 按当前用户读取 Run
+2. 从 Run.context_json 读取公开计划步骤
+3. AgentPlanService.get_latest_revision_for_run() 按 run_id + session_id + user_id 查询
+4. 有修订时将 PlanRevision.revision_id 转为 UUID
+5. 无修订时 plan_id=null
+6. 返回 AgentPlan
+```
+
+查询边界：
+
+```text
+PlanRevision.run_id == 当前 Run
+PlanRevision.session_id == 当前 Session
+PlanRevision.user_id == 当前用户
+```
+
+因此不会跨用户、跨 Session 借用其他计划修订身份。
+
+### 3. 回归测试
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_runtime_route.py
+```
+
+新增测试：
+
+```text
+test_agent_run_plan_route_returns_stable_persisted_revision_id
+test_legacy_agent_run_plan_route_returns_null_plan_id
+```
+
+覆盖：
+
+```text
+同一持久化 Run 两次读取 plan_id 相同
+返回值等于 PlanRevision.revision_id
+旧 Run 两次读取均为 null
+旧 Run 的公开步骤仍正常返回
+```
+
+## 失败驱动验证
+
+在原实现上先运行新增测试：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/api/routers/test_agent_runtime_route.py -k "stable_persisted_revision_id or legacy_agent_run_plan_route_returns_null_plan_id"
+```
+
+结果：
+
+```text
+2 failed, 19 deselected
+```
+
+失败原因分别为：
+
+```text
+持久化修订 Run 的两次 plan_id 不相等
+旧 Run 仍被 schema default_factory 伪造出随机 UUID
+```
+
+实现后专项验证：
+
+```text
+2 passed, 19 deselected
+```
+
+相关回归集合：
+
+```text
+25 passed in 18.53s
+```
+
+## 反向验证
+
+临时将路由计划 ID 写回改为：
+
+```python
+plan_id = uuid4()
+```
+
+并恢复 schema 的随机默认值，随后重新运行稳定身份和旧 Run 兼容测试：
+
+```text
+2 failed, 19 deselected
+REVERSE_EXIT=1
+```
+
+恢复真实实现后再次运行：
+
+```text
+2 passed, 19 deselected
+RESTORED_EXIT=0
+```
+
+该验证证明回归测试确实锁定了本批行为，而不是仅验证接口可返回。
+
+## 全量门禁
+
+后端全量测试：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+结果：
+
+```text
+1436 passed in 463.02s (0:07:43)
+```
+
+前端本批未改动，沿用 CARD-037 已验证结果：
+
+```text
+npm run type-check：通过
+npm run test:run：74 files / 435 tests passed
+npm run build-only：通过
+```
+
+## 提交、推送与回退
+
+```text
+上一回退点：1ebc293 docs: record card 037 stale artifact isolation
+本批代码提交：b75f287 fix: stabilize historical agent plan identity
+代码已推送：origin/codex/bohrium-integration-20260831
+本批文档提交：待本次文档提交生成
+```
+
+回退方式：
+
+```text
+git revert b75f287
+```
+
+文档回退时只回退本批文档提交，不触碰既有 CARD-001 至 CARD-037 记录和未跟踪审计成果。
+
+## 当前实际状态
+
+```text
+工作分支：codex/bohrium-integration-20260831
+后端：127.0.0.1:8013，GET /health = 200
+前端：127.0.0.1:5174，GET /agent = 200
+```
+
+当前仍保留大量既有未跟踪审计文件、临时脚本、备份和 `node_modules`；本批没有将它们加入提交，也没有删除它们。
+
+## 下一任务：CARD-039
+
+### 优先级 A：后端计划投影一致性
+
+继续把 `/plan` 的公开步骤投影与持久化 `PlanRevision.plan_json` 对齐：
+
+```text
+1. 有最新 PlanRevision 时，优先以该 revision 的 plan_json 作为计划内容来源；
+2. 仅在没有 PlanRevision 的旧 Run 上回退到 context_json.plan_steps；
+3. 保留 run/session/user 三重隔离；
+4. 对缺失、畸形、未知工具和 revision 内容漂移增加明确回归测试；
+5. 通过失败驱动、反向验证、后端全量门禁后独立提交并推送；
+6. 再以独立文档提交记录代码提交、测试结果和回退点。
+```
+
+### 优先级 B：前端 Agent 工作台第二阶段
+
+后端 CARD-039 完成后，进入前端状态与布局批次，严格保持聊天主区优先：
+
+```text
+1. 左侧项目/会话/工具/数据标签改为紧凑分组，默认折叠非当前分组；
+2. 中间聊天区使用剩余宽度，禁止被左栏和日志栏挤压；
+3. 右侧运行日志保持独立滚动，不插入聊天消息流；
+4. 高频 SSE 日志更新只更新日志 store，不触发聊天正文重排；
+5. Artifact facts 按 run_id + artifact_id + action 维护请求代次、loading、error，避免重复请求竞态；
+6. 为 1280、1024、960、900、768、390 视口补充 DOM 回归和可复核的浏览器证据；
+7. 每个视觉/状态批次都必须有真实代码、回归测试、失败驱动、反向验证、完整门禁、代码提交、文档提交和推送记录。
+```
+
+### 当前前端待处理缺陷清单
+
+```text
+P1：同一 Artifact 重复 facts 请求的旧响应覆盖新响应；
+P1：全局 Artifact 代次导致旧请求 finally 跳过 loading 清理；
+P1：reset 后 selectedRunId 为空时旧响应重新写回 facts；
+P1：质量阻断结果没有 Artifact 归属，失败后残留上一个 Artifact 的列表；
+P2：lineage facts 缺少独立 loading/error 状态；
+P2：旧 Run 批量 facts 请求污染全局 loading/error map；
+P2：Workbench 操作按钮缺少按 Artifact 的去重和状态显示。
+```
