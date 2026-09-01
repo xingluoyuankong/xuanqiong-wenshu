@@ -74857,3 +74857,235 @@ origin/codex/bohrium-integration-20260831
 6. 先对旧实现写失败驱动测试，再实现、反向破坏验证，最后执行前端三项全量门禁并分开推送代码和文档；
 7. 保持 CARD-040 的聊天主区优先布局和右侧独立日志滚动不回退。
 ```
+
+# CARD-043：Artifact facts 的 lineage 独立状态与可选失败隔离
+
+## 本批目标
+
+继续完善 Artifact 工作台的事实状态可观测性。此前质量 facts 有 loading/error map，lineage facts 只有结果 map，导致“尚未请求、正在请求、请求失败”全部表现成没有谱系摘要；同时 `Promise.all()` 把可选 lineage 失败升级成整个 `loadArtifactFacts()` 失败，质量阻断定位也会被无关的 lineage 错误拦截。
+
+## 失败驱动验证
+
+先新增以下测试，在旧实现上运行：
+
+```text
+exposes lineage loading and errors independently from quality facts
+still loads quality blockers when optional lineage facts fail
+区分谱系事实读取中与读取失败状态
+```
+
+旧实现结果：
+
+```text
+2 个 runtime 测试失败；
+1 个 Workbench 测试失败；
+并出现 lineage rejection 未被隔离的 unhandled error。
+```
+
+具体表现：
+
+```text
+runtime.artifactLineageFactsLoading 不存在；
+lineage 失败直接中断 quality/blocker 读取；
+Workbench 无法显示谱系 loading/error 状态。
+```
+
+## 实际代码变更
+
+### 1. Runtime 新增谱系状态 map
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.ts
+```
+
+新增：
+
+```ts
+const artifactLineageFactsLoading = ref<Record<string, boolean>>({})
+const artifactLineageFactsErrors = ref<Record<string, string>>({})
+```
+
+lineage 请求现在独立维护：
+
+```text
+请求开始：loading=true，清空旧 error；
+成功：写入 lineage facts，并清空 error；
+失败：写入 lineage error，不抛出为 quality 请求错误；
+结束：仅收敛当前请求的 loading 状态；
+reset：同时清空 lineage facts、loading 和 error map。
+```
+
+两个 map 通过 composable return 暴露给页面层。
+
+### 2. quality 与 lineage 改为部分成功模型
+
+`loadArtifactFacts()` 改为：
+
+```text
+1. quality task 和 lineage task 分别创建；
+2. 使用 Promise.allSettled 等待两者；
+3. quality 失败仍向调用者抛出，保持质量门禁 fail-closed；
+4. lineage 失败只记录 lineage error，不阻断质量事实和质量阻断定位；
+5. quality 任务的错误语义不被可选 lineage 任务改写。
+```
+
+因此：
+
+```text
+质量失败：候选仍然不可接受；
+谱系失败：用户能看到谱系失败，但质量 facts/阻断仍可继续使用。
+```
+
+### 3. Workbench 区分谱系状态
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\artifacts\AgentArtifactWorkbench.vue
+```
+
+增加 props：
+
+```text
+lineageFactsLoading
+lineageFactsErrors
+```
+
+谱系展示顺序改为：
+
+```text
+正在读取谱系事实
+谱系事实读取失败：具体错误
+谱系事实尚未载入
+谱系摘要：上游/下游边数
+```
+
+每种状态都有独立测试钩子：
+
+```text
+agent-artifact-lineage-loading
+agent-artifact-lineage-error
+agent-artifact-lineage-pending
+agent-artifact-lineage-summary
+```
+
+### 4. 页面完成状态传递
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+页面现在将 runtime 的两个 lineage map 传入 `AgentArtifactWorkbench`，没有复制状态，也没有把日志写入聊天消息。
+
+## 修复后验证
+
+lineage 和 blocker 定向集合：
+
+```text
+4 passed
+```
+
+Runtime composable 全集合：
+
+```text
+15 passed
+```
+
+反向验证：
+
+```text
+临时移除 lineage 独立 catch/loading/error 状态；
+临时将 Promise.allSettled 恢复为 Promise.all；
+执行 lineage 测试；
+```
+
+结果：
+
+```text
+2 failed
+并捕获 lineage rejection 未隔离；
+REVERSE_EXIT=1
+```
+
+恢复真实实现后：
+
+```text
+4 passed
+RESTORED_GATE_EXIT=0
+```
+
+## 全量前端门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+```
+
+```text
+通过
+```
+
+```powershell
+npm run test:run
+```
+
+```text
+74 files passed
+443 tests passed
+```
+
+```powershell
+npm run build-only
+```
+
+```text
+4905 modules transformed
+built successfully
+```
+
+## 提交、推送与回退
+
+```text
+上一回退点：b223aaf docs: record card 042 duplicate artifact facts
+本批代码提交：4ec8d61 fix: expose independent artifact lineage states
+代码已推送：origin/codex/bohrium-integration-20260831
+本批文档提交：待本次文档提交生成
+```
+
+回退方式：
+
+```text
+git revert 4ec8d61
+```
+
+该回退只移除 CARD-043 的 lineage 状态改动，保留 CARD-040、CARD-041、CARD-042 的布局和请求代次修复。
+
+## 当前累计验证
+
+```text
+后端最近全量：1438 passed；
+前端最近全量：74 files / 443 tests passed；
+前端生产构建：4905 modules transformed；
+前端 type-check：通过；
+前端页面：127.0.0.1:5174/agent → HTTP 200；
+后端健康：127.0.0.1:8013/health → HTTP 200。
+```
+
+## 下一任务：CARD-044（Artifact action 状态和旧请求清理）
+
+继续处理审查中剩余的操作级状态边界：
+
+```text
+1. blocker 结果增加当前 artifact_id 归属和独立错误状态；
+2. blocker/rewrite/diff/preview 的 loading 按 action + artifact 维护；
+3. 新操作淘汰旧操作时，旧请求 finally 仍要正确减少自己的 pending 计数；
+4. 失败后清空上一个 Artifact 的结果，禁止新 Artifact 显示旧列表；
+5. Workbench 按 Artifact 禁用重复按钮并显示当前操作对象；
+6. 先写旧实现失败测试，再做实现和反向破坏验证；
+7. 完成 type-check、全量 test、build，代码和接续文档分别提交并推送；
+8. 保持中央聊天主区最大、日志独立滚动、左侧分组紧凑的 CARD-040 结果。
+```
