@@ -72097,3 +72097,186 @@ npm run build-only：通过，18.04s
 1. 在可用真实浏览器会话中补 /agent 的 1280/1024/768/390 截图和 Inspector/运行详情展开证据。
 2. 继续检查右栏运行日志、选择器与折叠详情在真实页面中的可读性。
 ```
+---
+
+# CARD-026 — Agent 项目内容树有界滚动，保留章节预览（2026-09-01）
+
+## 任务目标
+
+大型小说项目的卷、章节和版本目录可能持续增长。此前目录和选中章节预览处于同一自然文档流中，左栏会因长目录无限增高，直接挤压 Agent 中间聊天主读区；这与“左栏按需提供项目上下文、聊天是唯一主阅读区”的工作台目标冲突。
+
+本批目标：
+
+```text
+1. 章节目录拥有独立滚动容器和明确高度上限。
+2. 选中章节的预览、版本选择和写作台跳转保持在目录滚动容器之外。
+3. 不删除、截断或重排项目章节数据。
+4. 不改变章节选择、版本选择、懒加载预览和 WritingDesk 跳转既有行为。
+```
+
+## 实际发现
+
+`ProjectContentTree.vue` 的卷目录此前直接渲染为 `content-volume-list`。长项目下，这个列表会和左栏其他区块一起持续扩张；即便工作台外层具备布局限制，目录本身没有滚动边界，用户需要在左栏中长距离滚动才能回到选中章节的预览信息。
+
+问题不是内容数量，也不是用前端截断章节列表来掩盖数据；根因是目录与预览缺少职责分层。目录应有自己的滚动视口，而已选章节的上下文应保持稳定可见。
+
+## 修改文件
+
+```text
+frontend/src/features/agent/content-tree/ProjectContentTree.vue
+frontend/src/features/agent/content-tree/ProjectContentTree.spec.ts
+```
+
+## 具体实现
+
+目录渲染结构调整为：
+
+```text
+content-tree-scroll（仅卷/章节目录，独立滚动）
+└── content-volume-list
+    └── content-chapter-list
+
+content-preview（滚动容器外）
+├── 当前章节摘要
+├── 写作台跳转
+├── 版本选择
+└── 章节预览文本
+```
+
+新增滚动容器和稳定的测试定位点：
+
+```html
+<div class="content-tree-scroll" data-testid="agent-content-tree-scroll">
+  <ol class="content-volume-list">...</ol>
+</div>
+```
+
+新增的 CSS 边界：
+
+```css
+.content-tree-scroll {
+  max-height: min(34rem, 42vh);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: .2rem;
+  scrollbar-gutter: stable;
+}
+```
+
+含义如下：
+
+```text
+max-height: min(34rem, 42vh)
+- 大屏：目录最高不超过 34rem，避免左栏目录独占整屏。
+- 较矮视口：目录最高不超过视口高度的 42%，为项目摘要、工具/数据折叠区和聊天阅读留出空间。
+
+overflow-y: auto
+- 章节很多时只滚动目录，不推动聊天主区和选中章节预览。
+
+overflow-x: hidden
+- 不允许意外横向滚动破坏左栏窄列布局。
+
+scrollbar-gutter: stable
+- 滚动条出现或消失时为其预留槽位，减少章节行宽度跳动。
+```
+
+预览仍在 `.content-tree-scroll` 外：选中章节后，用户可以滚动长目录继续定位其他章节，同时保留当前版本和预览控制，不会让预览随目录滚出视野。
+
+## 回归测试
+
+`ProjectContentTree.spec.ts` 在已有选择、版本、预览测试的基础上增加结构与 CSS 契约：
+
+```text
+1. 渲染后存在 [data-testid="agent-content-tree-scroll"]。
+2. 原始 SFC 源码包含 max-height:min(34rem,42vh)。
+3. 原始 SFC 源码包含 overflow-y:auto。
+```
+
+这些断言同时覆盖运行时 DOM 结构和构建前 CSS 契约，防止后续重构把长目录重新放回无限自然流，或只保留容器名字而移除滚动高度限制。
+
+## 测试与反向验证
+
+定向测试：
+
+```text
+ProjectContentTree：2 passed
+```
+
+反向验证已执行：
+
+```text
+临时移除 max-height:min(34rem,42vh)
+→ 新增 CSS contract 失败，命令退出码为 1。
+恢复最终实现
+→ ProjectContentTree 定向测试重新通过。
+```
+
+最终版本完整前端门禁：
+
+```text
+npm run type-check
+→ 通过
+
+npm run test:run
+→ 74 files passed / 432 tests passed / 90.99s
+
+npm run build-only
+→ 通过，Vite production build 完成，15.68s
+```
+
+门禁期间出现的既有测试环境信息未改变结论：
+
+```text
+AgentWorkspace.spec.ts 中 Pinia injection 警告来自既有 mount 配置；相关 15 项测试均通过。
+Browserslist / baseline-browser-mapping 版本提示未造成构建失败。
+```
+
+## 真实运行状态与边界
+
+当前本地服务实测：
+
+```text
+GET http://127.0.0.1:5174/agent → HTTP 200
+GET http://127.0.0.1:8013/health → HTTP 200
+后端响应：{"status":"healthy","app":"玄穹文枢 API","version":"1.0.0"}
+```
+
+真实浏览器多视口截图、computed layout 和长目录手势滚动验证仍为 pending。此前浏览器自动化内核存在本机资产路径错误，尚未把单元测试或 HTTP 200 伪装成视觉证据。待浏览器通道恢复后需补：
+
+```text
+1280 × 900：左栏长目录内部滚动，预览稳定留在目录外。
+1024 × 800：聊天主区仍优先，目录最大高度符合预期。
+768 × 900：单列顺序为聊天 → 项目与内容 → 运行活动区，目录可内部滚动。
+390 × 844：章节、版本按钮和写作台入口可触达，没有横向滚动。
+```
+
+## 当前状态
+
+```text
+CARD-026：completed and pushed
+功能：已完成并由结构、样式、定向测试、反向验证、全量测试和生产构建共同验证
+数据完整性：未截断章节数据；API、章节选择、版本选择和 WritingDesk 跳转逻辑未改动
+视觉实测：待浏览器控制通道可复核时补充，不将其记为已完成
+```
+
+## 回退
+
+```text
+上一回退点：66f0895 docs: record card 025 collapse runtime details
+本批代码提交：c5b5ef0 fix: bound agent project content tree（已推送）
+本批文档提交：待本次文档提交生成
+回退方式：git revert c5b5ef0
+```
+
+## 下一任务目标
+
+优先转回后端，执行 `CARD-027`：审查 Agent Runtime 的 Provider 调用、Job lease、Run 状态投影和事件账本之间是否仍存在“状态已经完成但可恢复任务未安全收敛”或“Provider 异常被错误投影为完成”的边界。工作方法和交付边界：
+
+```text
+1. 从当前运行时服务、Worker、Job/Run 模型和现有测试获得真实行为，不采信旧报告。
+2. 选定一个可复现的状态一致性或失败恢复缺陷；修改生产代码，并补最小回归测试。
+3. 做故意破坏实现的反向验证，证明新增断言能捕获回归。
+4. 执行 backend; .\.venv\Scripts\python.exe -m pytest -q 全量门禁。
+5. 代码独立提交并推送，随后在本文件记录实现、证据、测试、回退点和下一任务，再独立提交并推送文档。
+6. 后端批次完成后继续前端：检查右侧运行日志在高频 SSE 更新下的滚动锚定、自动滚动与“查看历史时不被强制拉回底部”行为。
+```
