@@ -32,6 +32,7 @@ async def test_publish_progress_is_persisted_visible_and_monotonic(task_session)
         user_id=user.id,
         status="planning",
         phase="planning",
+        action_id="plan:build",
         progress=20,
         progress_message="正在构建计划。",
     )
@@ -40,6 +41,7 @@ async def test_publish_progress_is_persisted_visible_and_monotonic(task_session)
         user_id=user.id,
         status="running",
         phase="tool_execution",
+        action_id="tool:chapter.inspect",
         step=1,
         tool_name="chapter.inspect",
         progress=10,
@@ -55,6 +57,7 @@ async def test_publish_progress_is_persisted_visible_and_monotonic(task_session)
     assert progress_events[-1].data_json == {
         "progress": 20.0,
         "phase": "tool_execution",
+        "action_id": "tool:chapter.inspect",
         "progress_message": "正在执行章节检查。",
         "step": 1,
         "tool_name": "chapter.inspect",

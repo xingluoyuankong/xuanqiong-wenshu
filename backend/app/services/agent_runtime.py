@@ -67,7 +67,7 @@ _VISIBLE_EVENT_KEYS: dict[str, set[str]] = {
     "approval_rejected": {"approval_id", "tool_name", "status"},
     "tool_call_started": {"tool_name", "step", "phase"},
     "tool_call_progress": {"tool_name", "step", "progress", "phase", "progress_message"},
-    "progress_update": {"tool_name", "step", "progress", "phase", "progress_message"},
+    "progress_update": {"tool_name", "step", "progress", "phase", "action_id", "progress_message"},
     "tool_call_completed": {"tool_name", "step", "result_keys", "phase"},
     "tool_call_result": {"tool_name", "step", "result_keys", "phase"},
     "tool_call_failed": {"tool_name", "step", "error_type", "phase"},
@@ -1311,6 +1311,7 @@ class AgentRuntimeService:
         phase: str,
         step: int | None = None,
         tool_name: str | None = None,
+        action_id: str | None = None,
         progress_message: str,
         status: str | None = None,
         commit: bool = True,
@@ -1350,9 +1351,11 @@ class AgentRuntimeService:
                 run.started_at = self._now()
             if previous_status != target_status:
                 run.state_version = max(0, int(run.state_version or 0)) + 1
+            resolved_action_id = str(action_id or f"{run.current_phase}:{run.current_step if step is not None else 'run'}").strip()[:160]
             data: dict[str, Any] = {
                 "progress": round(target_progress, 2),
                 "phase": run.current_phase,
+                "action_id": resolved_action_id or "run:unknown",
                 "progress_message": progress_message[:500],
             }
             if step is not None:
