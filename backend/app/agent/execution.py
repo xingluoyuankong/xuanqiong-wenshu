@@ -826,6 +826,7 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                     project_id=run.project_id,
                     context_summary=replan_context_summary,
                     requested_tools=None,
+                    attempt_ledger=planner_attempts,
                 )
                 known_tool_names = {str(item.get("tool_name") or "") for item in plan_steps}
                 candidate_steps = list(replan_decision.plan.steps)
@@ -916,6 +917,7 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                             "replan_fallback_reason": replan_decision.fallback_reason,
                             "planner_visible_summary": replan_decision.visible_summary,
                             "replan_visible_summary": replan_decision.visible_summary,
+                            "planner_provider_attempts": planner_attempts.snapshot(),
                         }
                     )
                     # Record the replan at the moment its durable job is

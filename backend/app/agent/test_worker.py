@@ -530,6 +530,15 @@ async def test_worker_queues_and_executes_one_digest_driven_replan_after_read_fa
         class FakePlanner:
             async def plan(self, **kwargs):
                 planner_contexts.append(kwargs)
+                ledger = kwargs.get("attempt_ledger")
+                if ledger is not None:
+                    attempt = ledger.begin(
+                        role="planner",
+                        provider_ref="replan-fixture",
+                        model_ref="replan-model",
+                        retry_index=len(planner_contexts) - 1,
+                    )
+                    ledger.finish(attempt.attempt_id, output=f"planner-call-{len(planner_contexts)}")
                 if kwargs.get("requested_tools"):
                     return SimpleNamespace(
                         plan=build_agent_plan(
@@ -599,6 +608,9 @@ async def test_worker_queues_and_executes_one_digest_driven_replan_after_read_fa
             assert [item["tool_name"] for item in pending.context_json["plan_steps"]] == [
                 "chapter.version.list", "research.inspect", "statistics.project"
             ]
+            planner_attempts = pending.context_json["planner_provider_attempts"]["provider_attempts"]
+            assert [item["status"] for item in planner_attempts] == ["succeeded", "succeeded"]
+            assert [item["retry_index"] for item in planner_attempts] == [0, 1]
 
         assert await worker.poll_once() is True
         async with factory() as session:
