@@ -426,22 +426,45 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
                         user_id=user_id,
                         updates=provenance_updates,
                     )
-                    await runtime.update_run(run_id=run_id, user_id=user_id, status="failed", phase="error")
-                    await runtime.append_event(
-                        run_id=run_id, user_id=user_id, event_type="run_failed", summary="Agent Provider 回复失败",
-                        data={"error_type": type(exc).__name__, "reason": str(exc)[:200], "phase": "error", "response_provider_called": response_called, "response_provider_fallback_reason": type(exc).__name__},
-                    )
-                    await _publish_response_activity(
-                        runtime,
-                        run_id=run_id,
-                        user_id=user_id,
-                        context=run.context_json,
-                        action_id="response:failed",
-                        current_action="可见回复未成功完成。",
-                        completed_action="失败已被记录为可恢复的运行证据。",
-                        next_action="检查运行状态并决定是否恢复或重新发起任务。",
-                        expected_output="明确失败原因与下一步操作。",
-                    )
+                    if manage_job:
+                        await runtime.update_run(run_id=run_id, user_id=user_id, status="failed", phase="error")
+                        await runtime.append_event(
+                            run_id=run_id, user_id=user_id, event_type="run_failed", summary="Agent Provider 回复失败",
+                            data={"error_type": type(exc).__name__, "reason": str(exc)[:200], "phase": "error", "response_provider_called": response_called, "response_provider_fallback_reason": type(exc).__name__},
+                        )
+                        await _publish_response_activity(
+                            runtime,
+                            run_id=run_id,
+                            user_id=user_id,
+                            context=run.context_json,
+                            action_id="response:failed",
+                            current_action="可见回复未成功完成。",
+                            completed_action="失败已被记录为可恢复的运行证据。",
+                            next_action="检查运行状态并决定是否恢复或重新发起任务。",
+                            expected_output="明确失败原因与下一步操作。",
+                        )
+                    else:
+                        # The outer durable worker owns retry/dead-letter state.
+                        # Keep the Run claimable so the persisted Job can retry or replay.
+                        await runtime.update_run(
+                            run_id=run_id,
+                            user_id=user_id,
+                            status="running",
+                            phase="assistant_response_retry",
+                        )
+                        await runtime.append_event(
+                            run_id=run_id,
+                            user_id=user_id,
+                            event_type="visible_response_retry_pending",
+                            summary="Agent 可见回复失败，Worker 将按重试策略处理",
+                            data={
+                                "error_type": type(exc).__name__,
+                                "reason": str(exc)[:200],
+                                "phase": "assistant_response_retry",
+                                "response_provider_called": response_called,
+                                "response_provider_fallback_reason": type(exc).__name__,
+                            },
+                        )
             except Exception:
                 pass
             if manage_job and job_id is not None:
@@ -456,6 +479,8 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
                     )
                 except Exception:
                     pass
+            if not manage_job:
+                raise
     finally:
         if heartbeat_task is not None:
             heartbeat_task.cancel()

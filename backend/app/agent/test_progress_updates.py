@@ -140,6 +140,7 @@ async def test_visible_response_emits_progress_for_start_delta_and_save(monkeypa
 
         async def append_message(self, **kwargs):
             messages.append(kwargs["content"])
+            return SimpleNamespace(sequence=1)
 
         async def update_run(self, **kwargs):
             return SimpleNamespace(progress=kwargs.get("progress"), status=kwargs["status"])
@@ -186,7 +187,7 @@ async def test_visible_response_emits_progress_for_start_delta_and_save(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_visible_response_timeout_records_response_provenance_and_terminal_failure(monkeypatch):
+async def test_worker_visible_response_timeout_records_retry_provenance_and_reraises(monkeypatch):
     events: list[dict] = []
     provenance: list[dict] = []
 
@@ -239,14 +240,15 @@ async def test_visible_response_timeout_records_response_provenance_and_terminal
     monkeypatch.setattr("app.agent.runner._wait_until_runnable", always_runnable)
     monkeypatch.setattr("app.agent.runner._lease_heartbeat", heartbeat)
 
-    await _run_visible_response(
-        run_id="response-timeout-run",
-        session_id="response-timeout-session",
-        user_id=1,
-        goal="触发可见回复超时",
-        tool_results=[],
-        manage_job=False,
-    )
+    with pytest.raises(TimeoutError, match="response timeout fixture"):
+        await _run_visible_response(
+            run_id="response-timeout-run",
+            session_id="response-timeout-session",
+            user_id=1,
+            goal="触发可见回复超时",
+            tool_results=[],
+            manage_job=False,
+        )
 
     assert provenance[0] == {
         "response_provider_called": False,
@@ -256,7 +258,9 @@ async def test_visible_response_timeout_records_response_provenance_and_terminal
         "response_provider_called": False,
         "response_provider_fallback_reason": "TimeoutError",
     }
-    failed = next(item for item in events if item.get("event_type") == "run_failed")
-    assert failed["data"]["response_provider_called"] is False
-    assert failed["data"]["response_provider_fallback_reason"] == "TimeoutError"
+    retry_pending = next(item for item in events if item.get("event_type") == "visible_response_retry_pending")
+    assert retry_pending["data"]["response_provider_called"] is False
+    assert retry_pending["data"]["response_provider_fallback_reason"] == "TimeoutError"
+    assert retry_pending["data"]["phase"] == "assistant_response_retry"
+    assert not any(item.get("event_type") == "run_failed" for item in events)
     release_cancel_event("response-timeout-run")

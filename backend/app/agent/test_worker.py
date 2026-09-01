@@ -627,3 +627,187 @@ async def test_worker_queues_and_executes_one_digest_driven_replan_after_read_fa
             assert revisions_events[0].summary == "研究读取失败，改用项目统计补充结论。"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_visible_response_dead_letter_replay_completes_once(tmp_path, monkeypatch):
+    """Retry exhaustion stays replayable and a later success writes one final reply."""
+    engine, factory = await _factory(tmp_path)
+    try:
+        run_id, job_id = await _run(factory, 1510, kind="visible_response", max_attempts=2)
+        async with factory() as session:
+            runtime = AgentRuntimeService(session)
+            await runtime.update_run(
+                run_id=run_id,
+                user_id=1510,
+                status="running",
+                phase="assistant_response",
+                progress=85,
+            )
+
+        calls: list[str] = []
+
+        async def fake_visible_runner(**_kwargs):
+            calls.append("visible_response")
+            if len(calls) <= 2:
+                raise ProviderTimeout(f"fixture-timeout-{len(calls)}")
+            async with factory() as completion_session:
+                runtime = AgentRuntimeService(completion_session)
+                await runtime.append_message(
+                    session_id=(await runtime.get_run(run_id, 1510)).session_id,
+                    user_id=1510,
+                    role="assistant",
+                    content="重放后仅保存这一条最终可见回复。",
+                )
+                await runtime.update_run(
+                    run_id=run_id,
+                    user_id=1510,
+                    status="completed",
+                    phase="summary",
+                    progress=100,
+                )
+                await runtime.append_event(
+                    run_id=run_id,
+                    user_id=1510,
+                    event_type="assistant_completed",
+                    summary="fixture visible response completed",
+                    data={},
+                )
+                await runtime.append_event(
+                    run_id=run_id,
+                    user_id=1510,
+                    event_type="run_completed",
+                    summary="fixture run completed",
+                    data={},
+                )
+
+        monkeypatch.setattr("app.agent.worker._run_visible_response", fake_visible_runner)
+        worker = AgentWorker(
+            factory,
+            worker_id="visible-response-retry-worker",
+            handlers={"visible_response": handle_visible_response_job},
+        )
+
+        assert await worker.poll_once() is True
+        async with factory() as session:
+            runtime = AgentRuntimeService(session)
+            job = await AgentJobService(session).get_job(job_id=job_id, user_id=1510)
+            run = await runtime.get_run(run_id, 1510)
+            assert (job.status, job.attempt_count, job.error_type) == ("queued", 1, "ProviderTimeout")
+            assert run.status == "running"
+            job.available_at = AgentJobService._now()
+            await session.commit()
+
+        assert await worker.poll_once() is True
+        async with factory() as session:
+            runtime = AgentRuntimeService(session)
+            job = await AgentJobService(session).get_job(job_id=job_id, user_id=1510)
+            run = await runtime.get_run(run_id, 1510)
+            assert (job.status, job.attempt_count, job.error_type) == ("dead_letter", 2, "ProviderTimeout")
+            assert run.status == "running"
+            replayed = await AgentJobService(session).replay_dead_letter(
+                job_id=job_id,
+                operator_id=9001,
+                reason="fixture provider recovered",
+            )
+            assert (replayed.status, replayed.attempt_count) == ("queued", 2)
+
+        assert await worker.poll_once() is True
+        assert await worker.poll_once() is False
+
+        async with factory() as session:
+            runtime = AgentRuntimeService(session)
+            job = await AgentJobService(session).get_job(job_id=job_id, user_id=1510)
+            run = await runtime.get_run(run_id, 1510)
+            messages = await runtime.list_messages(session_id=run.session_id, user_id=1510)
+            events = await runtime.list_events(run_id=run_id, user_id=1510)
+            event_types = [event.event_type for event in events]
+            assert (job.status, job.attempt_count) == ("succeeded", 3)
+            assert run.status == "completed"
+            assert [(message.role, message.content) for message in messages] == [
+                ("assistant", "重放后仅保存这一条最终可见回复。"),
+            ]
+            assert event_types.count("job_replayed") == 1
+            assert event_types.count("assistant_completed") == 1
+            assert event_types.count("run_completed") == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_visible_response_provider_retry_uses_real_runner_and_completes_once(tmp_path, monkeypatch):
+    """A retryable provider failure must leave the Run claimable for the next Worker."""
+    engine, factory = await _factory(tmp_path)
+    try:
+        run_id, job_id = await _run(factory, 1511, kind="visible_response", max_attempts=2)
+        async with factory() as session:
+            runtime = AgentRuntimeService(session)
+            run = await runtime.update_run(
+                run_id=run_id,
+                user_id=1511,
+                status="running",
+                phase="assistant_response",
+                progress=85,
+            )
+
+        attempts = 0
+
+        class RetryVisibleLLM:
+            def __init__(self, _session):
+                pass
+
+            async def stream_visible_response(self, **_kwargs):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    if False:
+                        yield ""
+                    raise ProviderTimeout("fixture-provider-timeout")
+                yield "重试后只生成这一条最终可见回复。"
+
+        monkeypatch.setattr("app.agent.runner.AsyncSessionLocal", factory)
+        monkeypatch.setattr("app.agent.runner.LLMService", RetryVisibleLLM)
+        worker = AgentWorker(
+            factory,
+            worker_id="visible-response-real-retry-worker",
+            handlers={"visible_response": handle_visible_response_job},
+        )
+
+        assert await worker.poll_once() is True
+        async with factory() as session:
+            runtime = AgentRuntimeService(session)
+            job = await AgentJobService(session).get_job(job_id=job_id, user_id=1511)
+            retry_run = await runtime.get_run(run_id, 1511)
+            messages = await runtime.list_messages(session_id=run.session_id, user_id=1511)
+            events = await runtime.list_events(run_id=run_id, user_id=1511)
+            event_types = [event.event_type for event in events]
+            assert (job.status, job.attempt_count, job.error_type) == ("queued", 1, "ProviderTimeout")
+            assert (retry_run.status, retry_run.current_phase) == ("running", "assistant_response_retry")
+            assert messages == []
+            assert event_types.count("visible_response_retry_pending") == 1
+            assert event_types.count("assistant_completed") == 0
+            assert event_types.count("run_completed") == 0
+            job.available_at = AgentJobService._now()
+            await session.commit()
+
+        assert await worker.poll_once() is True
+        assert await worker.poll_once() is False
+
+        async with factory() as session:
+            runtime = AgentRuntimeService(session)
+            job = await AgentJobService(session).get_job(job_id=job_id, user_id=1511)
+            completed_run = await runtime.get_run(run_id, 1511)
+            messages = await runtime.list_messages(session_id=run.session_id, user_id=1511)
+            events = await runtime.list_events(run_id=run_id, user_id=1511)
+            event_types = [event.event_type for event in events]
+            assert attempts == 2
+            assert (job.status, job.attempt_count) == ("succeeded", 2)
+            assert completed_run.status == "completed"
+            assert [(message.role, message.content) for message in messages] == [
+                ("assistant", "重试后只生成这一条最终可见回复。"),
+            ]
+            assert event_types.count("visible_response_retry_pending") == 1
+            assert event_types.count("assistant_completed") == 1
+            assert event_types.count("run_completed") == 1
+    finally:
+        await engine.dispose()

@@ -179,3 +179,58 @@ async def test_runner_archives_summary_after_persisting_final_visible_message(ta
     assert summary is not None
     assert (summary.start_message_sequence, summary.end_message_sequence) == (1, messages[-1].sequence)
     assert len([event for event in events if event.event_type == "conversation_summary_created"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_mode_visible_response_provider_failure_keeps_run_retryable(task_session, monkeypatch):
+    """A durable worker must rethrow provider failures without terminalizing its Run."""
+    runtime, session, run = await _create_runtime_run(task_session, user_id=2863)
+    await runtime.update_run(
+        run_id=run.id,
+        user_id=run.user_id,
+        status="running",
+        phase="assistant_response",
+        progress=85,
+    )
+
+    @asynccontextmanager
+    async def same_test_session():
+        yield task_session
+
+    class ProviderTimeout(Exception):
+        pass
+
+    class FailingVisibleLLM:
+        def __init__(self, _session):
+            pass
+
+        async def stream_visible_response(self, **_kwargs):
+            if False:
+                yield ""
+            raise ProviderTimeout("fixture-visible-provider-timeout")
+
+    monkeypatch.setattr("app.agent.runner.AsyncSessionLocal", lambda: same_test_session())
+    monkeypatch.setattr("app.agent.runner.LLMService", FailingVisibleLLM)
+
+    with pytest.raises(ProviderTimeout, match="fixture-visible-provider-timeout"):
+        await _run_visible_response(
+            run_id=run.id,
+            session_id=session.id,
+            user_id=run.user_id,
+            goal="验证失败重试",
+            tool_results=[],
+            manage_job=False,
+            worker_id="worker-retry-contract-test",
+        )
+
+    stored_run = await runtime.get_run(run.id, run.user_id)
+    messages = await runtime.list_messages(session_id=session.id, user_id=run.user_id)
+    events = await runtime.list_events(run_id=run.id, user_id=run.user_id)
+    event_types = [event.event_type for event in events]
+
+    assert (stored_run.status, stored_run.current_phase) == ("running", "assistant_response_retry")
+    assert messages == []
+    assert "visible_response_retry_pending" in event_types
+    assert "run_failed" not in event_types
+    assert event_types.count("assistant_completed") == 0
+    assert event_types.count("run_completed") == 0
