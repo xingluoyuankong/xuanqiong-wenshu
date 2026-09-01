@@ -757,7 +757,7 @@ const selectRunAction = async (runId: string) => {
   const run = activeRun.value
   if (!run) return
   artifactPreview.value = ''
-  resetArtifactFacts()
+  resetArtifactFacts({ preserveScopedState: true })
   const loads: Promise<unknown>[] = [loadRunSteps(run.id), loadRunState(run.id), loadRunFacts(run.id)]
   if (typeof AgentAPI.listApprovals === 'function') {
     loads.push(AgentAPI.listApprovals(run.id).then((items) => runProjection.setRunApprovals(run.id, items)))

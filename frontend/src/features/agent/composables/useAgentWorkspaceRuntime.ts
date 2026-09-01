@@ -66,6 +66,11 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
   const artifactPreviewArtifactId = ref<string | null>(null)
   const artifactPreviewError = ref('')
   const artifactPreviewByKey = ref<Record<string, string>>({})
+  const qualityBlockersErrorByKey = ref<Record<string, string>>({})
+  const artifactDiffErrorByKey = ref<Record<string, string>>({})
+  const artifactPreviewErrorByKey = ref<Record<string, string>>({})
+  type ArtifactProjectionAction = 'quality-blockers' | 'rewrite' | 'diff' | 'preview'
+  const lastArtifactActionKeyByRun = ref<Record<string, Partial<Record<ArtifactProjectionAction, string>>>>({})
   const artifactQualityFacts = ref<Record<string, AgentArtifactQuality>>({})
   const artifactQualityFactsLoading = ref<Record<string, boolean>>({})
   const artifactQualityFactsErrors = ref<Record<string, string>>({})
@@ -97,6 +102,12 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
   type ArtifactAction = 'rewrite' | 'diff' | 'preview'
   const artifactActionGeneration = new Map<string, number>()
   const artifactActionKey = (action: ArtifactAction, artifact: AgentArtifact) => `${action}:${artifact.run_id}:${artifact.id}`
+  const rememberArtifactAction = (runId: string, action: ArtifactProjectionAction, key: string) => {
+    lastArtifactActionKeyByRun.value = {
+      ...lastArtifactActionKeyByRun.value,
+      [runId]: { ...lastArtifactActionKeyByRun.value[runId], [action]: key },
+    }
+  }
   const beginArtifactActionRequest = (action: ArtifactAction, artifact: AgentArtifact) => {
     const request = beginArtifactViewRequest(artifact)
     const key = artifactActionKey(action, artifact)
@@ -326,6 +337,41 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     }
   }
 
+  const restoreArtifactProjection = (runId: string, artifacts: AgentArtifact[]) => {
+    const remembered = lastArtifactActionKeyByRun.value[runId]
+    if (!remembered) return
+    const artifactsByStateKey = new Map(artifacts.map((artifact) => [artifactStateKey(artifact), artifact]))
+    const restoreKey = (action: ArtifactProjectionAction) => {
+      const key = remembered[action]
+      return key && artifactsByStateKey.has(key) ? key : null
+    }
+
+    const blockerKey = restoreKey('quality-blockers')
+    if (blockerKey) {
+      const blockerArtifact = artifactsByStateKey.get(blockerKey)!
+      qualityBlockersArtifactId.value = blockerArtifact.id
+      qualityBlockersArtifactKey.value = blockerKey
+      qualityBlockers.value = qualityBlockersByKey.value[blockerKey] || []
+      qualityBlockersError.value = qualityBlockersErrorByKey.value[blockerKey] || ''
+    }
+
+    const diffKey = restoreKey('diff')
+    if (diffKey) {
+      const diffArtifact = artifactsByStateKey.get(diffKey)!
+      artifactDiffArtifactId.value = diffArtifact.id
+      artifactDiff.value = artifactDiffByKey.value[diffKey] || null
+      artifactDiffError.value = artifactDiffErrorByKey.value[diffKey] || ''
+    }
+
+    const previewKey = restoreKey('preview')
+    if (previewKey) {
+      const previewArtifact = artifactsByStateKey.get(previewKey)!
+      artifactPreviewArtifactId.value = previewArtifact.id
+      artifactPreview.value = artifactPreviewByKey.value[previewKey] || ''
+      artifactPreviewError.value = artifactPreviewErrorByKey.value[previewKey] || ''
+    }
+  }
+
   const loadArtifactsWithFacts = async (runId: string) => {
     if (typeof AgentAPI.listArtifacts !== 'function') return []
     const batchGeneration = artifactViewGeneration
@@ -341,6 +387,7 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     await Promise.all(
       artifacts.map((artifact) => loadArtifactFacts(artifact, batchGeneration).catch(() => undefined)),
     )
+    restoreArtifactProjection(runId, artifacts)
     return artifacts
   }
 
@@ -351,12 +398,14 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     const requestKey = qualityBlockerRequestKey(artifact)
     const requestGeneration = (qualityBlockerRequestGeneration.get(requestKey) || 0) + 1
     qualityBlockerRequestGeneration.set(requestKey, requestGeneration)
+    rememberArtifactAction(artifact.run_id, 'quality-blockers', stateKey)
     const isCurrentBlockerRequest = () =>
       isCurrentArtifactRequest(request) &&
       qualityBlockerRequestGeneration.get(requestKey) === requestGeneration
     qualityBlockersArtifactId.value = artifact.id
     qualityBlockersArtifactKey.value = stateKey
     qualityBlockersError.value = ''
+    qualityBlockersErrorByKey.value = { ...qualityBlockersErrorByKey.value, [stateKey]: '' }
     qualityBlockers.value = []
     qualityBlockersByKey.value = { ...qualityBlockersByKey.value, [stateKey]: [] }
     qualityBlockersLoading.value = true
@@ -367,12 +416,14 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
       if (!isCurrentBlockerRequest()) return
       qualityBlockers.value = blockers
       qualityBlockersByKey.value = { ...qualityBlockersByKey.value, [stateKey]: blockers }
+      qualityBlockersErrorByKey.value = { ...qualityBlockersErrorByKey.value, [stateKey]: '' }
       options.addActivity('质量阻断定位已载入', `${blockers.length} 项阻断`)
     } catch (error) {
       if (isCurrentBlockerRequest()) {
         qualityBlockers.value = []
         qualityBlockersByKey.value = { ...qualityBlockersByKey.value, [stateKey]: [] }
         qualityBlockersError.value = error instanceof Error ? error.message : '无法读取质量阻断'
+        qualityBlockersErrorByKey.value = { ...qualityBlockersErrorByKey.value, [stateKey]: qualityBlockersError.value }
         options.addActivity('质量阻断读取失败', qualityBlockersError.value)
       }
     } finally {
@@ -387,6 +438,7 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     if (typeof AgentAPI.listArtifactRewriteInstructions !== 'function') return
     const stateKey = artifactStateKey(artifact)
     const actionRequest = beginArtifactActionRequest('rewrite', artifact)
+    rememberArtifactAction(artifact.run_id, 'rewrite', stateKey)
     rewriteInstructions.value = { ...rewriteInstructions.value, [stateKey]: [] }
     rewriteErrors.value = { ...rewriteErrors.value, [stateKey]: '' }
     rewriteLoading.value = { ...rewriteLoading.value, [stateKey]: true }
@@ -414,9 +466,11 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     if (!against || typeof AgentAPI.getArtifactDiff !== 'function') return
     const actionRequest = beginArtifactActionRequest('diff', artifact)
     const stateKey = artifactStateKey(artifact)
+    rememberArtifactAction(artifact.run_id, 'diff', stateKey)
     artifactDiffArtifactId.value = artifact.id
     artifactDiffByKey.value = { ...artifactDiffByKey.value, [stateKey]: null }
     artifactDiffError.value = ''
+    artifactDiffErrorByKey.value = { ...artifactDiffErrorByKey.value, [stateKey]: '' }
     artifactDiff.value = null
     artifactDiffLoading.value = true
     try {
@@ -424,12 +478,14 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
       if (!isCurrentArtifactAction(actionRequest)) return
       artifactDiff.value = diff
       artifactDiffByKey.value = { ...artifactDiffByKey.value, [stateKey]: diff }
+      artifactDiffErrorByKey.value = { ...artifactDiffErrorByKey.value, [stateKey]: '' }
       options.addActivity('候选差异已载入', `${artifact.id.slice(0, 8)} 与 ${against.id.slice(0, 8)} 已完成比较`)
     } catch (error) {
       if (isCurrentArtifactAction(actionRequest)) {
         artifactDiff.value = null
         artifactDiffByKey.value = { ...artifactDiffByKey.value, [stateKey]: null }
         artifactDiffError.value = error instanceof Error ? error.message : '无法读取候选差异'
+        artifactDiffErrorByKey.value = { ...artifactDiffErrorByKey.value, [stateKey]: artifactDiffError.value }
         options.addActivity('候选差异读取失败', artifactDiffError.value)
       }
     } finally {
@@ -448,9 +504,11 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     }
     const actionRequest = beginArtifactActionRequest('diff', artifact)
     const stateKey = artifactStateKey(artifact)
+    rememberArtifactAction(artifact.run_id, 'diff', stateKey)
     artifactDiffArtifactId.value = artifact.id
     artifactDiffByKey.value = { ...artifactDiffByKey.value, [stateKey]: null }
     artifactDiffError.value = ''
+    artifactDiffErrorByKey.value = { ...artifactDiffErrorByKey.value, [stateKey]: '' }
     artifactDiff.value = null
     artifactDiffLoading.value = true
     try {
@@ -460,12 +518,14 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
       if (!isCurrentArtifactAction(actionRequest)) return
       artifactDiff.value = diff
       artifactDiffByKey.value = { ...artifactDiffByKey.value, [stateKey]: diff }
+      artifactDiffErrorByKey.value = { ...artifactDiffErrorByKey.value, [stateKey]: '' }
       options.addActivity('正式版本差异已载入', `${artifact.id.slice(0, 8)} 与第 ${chapterNumber} 章版本 ${versionId} 已完成比较`)
     } catch (error) {
       if (isCurrentArtifactAction(actionRequest)) {
         artifactDiff.value = null
         artifactDiffByKey.value = { ...artifactDiffByKey.value, [stateKey]: null }
         artifactDiffError.value = error instanceof Error ? error.message : '无法读取正式版本差异'
+        artifactDiffErrorByKey.value = { ...artifactDiffErrorByKey.value, [stateKey]: artifactDiffError.value }
         options.addActivity('正式版本差异读取失败', artifactDiffError.value)
       }
     } finally {
@@ -477,9 +537,11 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     if (typeof AgentAPI.getArtifactContent !== 'function') return
     const actionRequest = beginArtifactActionRequest('preview', artifact)
     const stateKey = artifactStateKey(artifact)
+    rememberArtifactAction(artifact.run_id, 'preview', stateKey)
     artifactPreviewArtifactId.value = artifact.id
     artifactPreviewByKey.value = { ...artifactPreviewByKey.value, [stateKey]: '' }
     artifactPreviewError.value = ''
+    artifactPreviewErrorByKey.value = { ...artifactPreviewErrorByKey.value, [stateKey]: '' }
     artifactPreview.value = ''
     artifactPreviewLoading.value = true
     try {
@@ -487,12 +549,14 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
       if (isCurrentArtifactAction(actionRequest)) {
         artifactPreview.value = content
         artifactPreviewByKey.value = { ...artifactPreviewByKey.value, [stateKey]: content }
+        artifactPreviewErrorByKey.value = { ...artifactPreviewErrorByKey.value, [stateKey]: '' }
       }
     } catch (error) {
       if (isCurrentArtifactAction(actionRequest)) {
         artifactPreview.value = ''
         artifactPreviewByKey.value = { ...artifactPreviewByKey.value, [stateKey]: '' }
         artifactPreviewError.value = error instanceof Error ? error.message : '无法读取候选正文'
+        artifactPreviewErrorByKey.value = { ...artifactPreviewErrorByKey.value, [stateKey]: artifactPreviewError.value }
         options.addActivity('候选预览失败', artifactPreviewError.value)
       }
     } finally {
@@ -604,28 +668,26 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     }
   }
 
-  const resetArtifactFacts = () => {
+  type ResetArtifactFactsOptions = { preserveScopedState?: boolean }
+  const resetArtifactFacts = ({ preserveScopedState = false }: ResetArtifactFactsOptions = {}) => {
     artifactViewGeneration += 1
     qualityBlockers.value = []
     qualityBlockersArtifactId.value = null
     qualityBlockersArtifactKey.value = null
-    qualityBlockersByKey.value = {}
     qualityBlockersError.value = ''
     qualityBlockersLoadingByArtifact.value = {}
     qualityBlockersLoading.value = false
-    rewriteInstructions.value = {}
+    rewriteInstructions.value = preserveScopedState ? rewriteInstructions.value : {}
     rewriteLoading.value = {}
-    rewriteErrors.value = {}
+    rewriteErrors.value = preserveScopedState ? rewriteErrors.value : {}
     artifactDiff.value = null
     artifactDiffLoading.value = false
     artifactDiffArtifactId.value = null
     artifactDiffError.value = ''
-    artifactDiffByKey.value = {}
     artifactPreview.value = ''
     artifactPreviewLoading.value = false
     artifactPreviewArtifactId.value = null
     artifactPreviewError.value = ''
-    artifactPreviewByKey.value = {}
     artifactActionGeneration.clear()
     artifactFactsRequestGeneration.clear()
     qualityBlockerRequestGeneration.clear()
@@ -637,6 +699,15 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     artifactLineageFactsErrors.value = {}
     providerProvenanceByRunId.value = {}
     gapRepairStateByRunId.value = {}
+    if (!preserveScopedState) {
+      qualityBlockersByKey.value = {}
+      qualityBlockersErrorByKey.value = {}
+      artifactDiffByKey.value = {}
+      artifactDiffErrorByKey.value = {}
+      artifactPreviewByKey.value = {}
+      artifactPreviewErrorByKey.value = {}
+      lastArtifactActionKeyByRun.value = {}
+    }
   }
 
   return {
@@ -660,6 +731,10 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     artifactPreviewArtifactId,
     artifactPreviewByKey,
     artifactPreviewError,
+    qualityBlockersErrorByKey,
+    artifactDiffErrorByKey,
+    artifactPreviewErrorByKey,
+    lastArtifactActionKeyByRun,
     artifactQualityFacts,
     artifactQualityFactsLoading,
     artifactQualityFactsErrors,

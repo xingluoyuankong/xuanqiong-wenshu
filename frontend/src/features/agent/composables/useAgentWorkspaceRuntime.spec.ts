@@ -211,6 +211,14 @@ describe('useAgentWorkspaceRuntime', () => {
     expect(runtime.artifactDiffByKey.value[artifactStateKey(artifactB)]).toBeDefined()
     expect(runtime.artifactPreviewByKey.value[artifactStateKey(artifact)]).toBe('Run-A 正文')
     expect(runtime.artifactPreviewByKey.value[artifactStateKey(artifactB)]).toBe('Run-B 正文')
+
+    listArtifactsMock.mockResolvedValueOnce([artifactB])
+    runtime.resetArtifactFacts({ preserveScopedState: true })
+    await runtime.loadArtifactsWithFacts(runB.id)
+
+    expect(runtime.qualityBlockers.value).toEqual([blockerB])
+    expect(runtime.artifactDiff.value).toBeDefined()
+    expect(runtime.artifactPreview.value).toBe('Run-B 正文')
   })
 
   it('loads stage-separated provenance into the selected Run without event-stream inference', async () => {
