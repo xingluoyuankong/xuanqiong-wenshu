@@ -71894,3 +71894,50 @@ npm run build-only：通过，15.33s
 ```text
 继续补可用浏览器会话下的 /agent 多视口截图与 Inspector 展开交互；自动化控制内核当前仍有本机路径错误，未把视觉验收伪造为完成。
 ```
+---
+
+# CARD-022 — 右栏运行日志有界渲染（2026-09-01）
+
+## 问题与实现
+
+右栏日志高度虽已限制，但此前直接渲染完整 `events` 数组。长运行的账本事件会持续增加 DOM、滚动和重绘负担。
+
+`AgentWorkspace.vue` 现在保留完整 events 数据，同时仅渲染最近 `120` 条：
+
+```text
+visibleLogEvents = events.slice(-120)
+hiddenLogEventCount = total - visible
+```
+
+超过窗口时右栏显示折叠数量；聊天区不再承载运行日志，完整历史仍由 API 和 Run 投影保存。
+
+## 修改
+
+```text
+frontend/src/views/AgentWorkspace.vue
+frontend/src/features/agent/AgentWorkspaceShell.spec.ts
+```
+
+## 验证
+
+```text
+定向 Shell contract：6 passed
+反向：LOG_RENDER_LIMIT 120 → 240 后 contract 失败（exit 1）；恢复后通过
+npm run type-check：通过
+npm run test:run：74 files / 431 tests passed，91.00s
+npm run build-only：通过，17.48s
+```
+
+## 回退
+
+```text
+上一回退点：5983c24 docs: record card 021 chat log deduplication
+代码回退点：5656c18 fix: bound agent runtime log rendering（已推送）
+本批文档提交：docs: record card 022 bounded log rendering
+```
+
+## 下一任务
+
+```text
+继续补真实浏览器会话下的 Agent 多视口截图和 Inspector 展开交互；浏览器控制内核的本机路径错误仍未伪造为视觉验收完成。
+```
