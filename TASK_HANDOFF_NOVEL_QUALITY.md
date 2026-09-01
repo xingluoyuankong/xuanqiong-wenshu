@@ -68944,3 +68944,115 @@ CARD-007：in_progress
 ```
 
 下一批继续后端：真实 subprocess/ASGI Worker replay、数据库异常恢复矩阵和认证失败矩阵；完成后再把 `stream_error` 接入前端连接状态和运行日志投影。
+
+---
+
+# 2026-09-01｜CARD-007 后端修复批次｜Command Worker 一次性进程生命周期
+
+## 1. 发现的问题
+
+后端全量回归首次执行时出现：
+
+```text
+app/agent/test_command_worker_cli.py::test_command_worker_cli_once_exits_cleanly_on_empty_database
+subprocess.TimeoutExpired：30 秒超时
+当时结果：1417 passed, 1 failed
+```
+
+单独定向复现存在生命周期竞态：`agent_command_worker.py --once` 完成 `poll_once()` 后，进程没有显式释放全局 SQLAlchemy async engine；Windows 下 aiosqlite 后台线程可能继续持有连接，使一次性子进程迟迟不退出。
+
+## 2. 实际修改文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\scripts\agent_command_worker.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_command_worker_cli.py
+```
+
+## 3. 修复方案
+
+`agent_command_worker.py` 现在：
+
+```text
+从 app.db.session 导入全局 engine
+将 once/forever 执行放入 try/finally
+无论一次性执行、停止信号还是异常退出，finally 都执行 await engine.dispose()
+在 engine dispose 后记录 worker stopped 日志
+```
+
+该修复只处理资源生命周期，不放宽测试超时，也不改变 Worker 的 command claim/apply 语义。
+
+## 4. 验证结果
+
+CLI 定向测试：
+
+```text
+python -m pytest -q app/agent/test_command_worker_cli.py
+结果：3 passed in 7.25s
+```
+
+真实独立 subprocess replay：
+
+```text
+python -m pytest -q app/agent/test_subprocess_event_replay.py
+结果：1 passed in 46.06s
+```
+
+后端事件与 SSE 专项：
+
+```text
+结果：83 passed
+```
+
+修复后后端全量回归：
+
+```text
+python -m pytest -q
+结果：1418 passed in 286.01s（4分46秒）
+```
+
+修复前对照结果：
+
+```text
+1417 passed, 1 failed
+```
+
+失败项已消失，未删除测试、未跳过测试、未增加超时掩盖问题。
+
+## 5. 当前状态变化
+
+```text
+Command Worker --once 空数据库退出：completed
+全局 async engine 显式释放：completed
+Windows aiosqlite 线程收尾：tested
+独立 Python subprocess replay：completed
+独立 Session replay：completed
+HTTP SSE / 游标 / 终态分页：completed
+运行中 stream_error：completed
+真实跨节点部署 replay：pending
+CARD-007：in_progress
+```
+
+## 6. 反向验证记录
+
+本批次使用全量回归作为反向约束：在修复前，Worker CLI 一次性子进程超时会被全量测试捕获；修复后同一测试恢复为通过，且完整后端回归从 `1417 passed, 1 failed` 恢复为 `1418 passed`。
+
+后续如移除：
+
+```python
+await engine.dispose()
+```
+
+`test_command_worker_cli_once_exits_cleanly_on_empty_database` 应重新暴露子进程退出问题；该断言已写入 CLI 源码结构测试。
+
+## 7. 提交与回退
+
+```text
+上一回退点：a5003a3
+本批生产代码提交：待提交后回填
+文档记录提交：待提交后回填
+推送目标：origin/codex/bohrium-integration-20260831
+数据库：未修改
+小说正文：未修改
+```
+
+下一步继续后端：认证失败矩阵、数据库连接失败矩阵、真实 ASGI 多 Worker replay；前端 `stream_error` 投影放在这些后端事实源验收之后。

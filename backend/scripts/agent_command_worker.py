@@ -15,7 +15,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.agent.command_worker import CommandWorker
 from app.core.config import settings
-from app.db.session import AsyncSessionLocal
+from app.db.session import AsyncSessionLocal, engine
 
 
 def _parse_args() -> argparse.Namespace:
@@ -49,13 +49,19 @@ async def _run() -> None:
         poll_interval=args.poll_interval,
     )
     log.info("Agent command worker started: worker_id=%s", worker.worker_id)
-    if args.once:
-        worked = await worker.poll_once()
-        log.info("Agent command worker once completed: worked=%s", worked)
-    else:
-        await worker.run_forever(stop_event)
-    log.info("Agent command worker stopped: worker_id=%s", worker.worker_id)
+    try:
+        if args.once:
+            worked = await worker.poll_once()
+            log.info("Agent command worker once completed: worked=%s", worked)
+        else:
+            await worker.run_forever(stop_event)
+    finally:
+        # Dispose the global async engine so a one-shot subprocess does not
+        # remain alive because aiosqlite worker threads still own connections.
+        await engine.dispose()
+        log.info("Agent command worker stopped: worker_id=%s", worker.worker_id)
 
 
 if __name__ == "__main__":
     asyncio.run(_run())
+
