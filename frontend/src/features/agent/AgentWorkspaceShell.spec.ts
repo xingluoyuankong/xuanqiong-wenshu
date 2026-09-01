@@ -85,4 +85,15 @@ describe('AgentWorkspaceShell', () => {
     expect(workspaceSource).toContain('v-if="hiddenLogEventCount" class="workspace-log-window"')
     expect(workspaceSource).toContain('v-for="event in visibleLogEvents"')
   })
+
+  it('仅在用户停留日志底部时跟随高频运行事件', () => {
+    expect(workspaceSource).toContain('const LOG_TAIL_THRESHOLD = 24')
+    expect(workspaceSource).toContain('ref="logListEl"')
+    expect(workspaceSource).toContain('@scroll="onLogScroll"')
+    expect(workspaceSource).toContain('const logFollowTail = ref(true)')
+    expect(workspaceSource).toContain('element.scrollHeight - element.scrollTop - element.clientHeight <= LOG_TAIL_THRESHOLD')
+    expect(workspaceSource).toContain('if (element && logFollowTail.value) element.scrollTop = element.scrollHeight')
+    expect(workspaceSource).toContain("() => visibleLogEvents.value.map((event) => event.id).join('|')")
+    expect(workspaceSource).toContain("() => selectedRunId.value")
+  })
 })

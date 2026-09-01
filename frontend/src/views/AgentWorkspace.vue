@@ -210,7 +210,7 @@
 
         <XqPanel class="workspace-log-panel" title="运行日志" subtitle="实时事件摘要；独立滚动，不占用聊天阅读区。" data-testid="agent-log-panel">
           <small v-if="hiddenLogEventCount" class="workspace-log-window" data-testid="agent-log-window">已折叠更早的 {{ hiddenLogEventCount }} 条日志</small>
-          <div class="events workspace-log-list" data-testid="agent-process-stream">
+          <div ref="logListEl" class="events workspace-log-list" data-testid="agent-process-stream" @scroll="onLogScroll">
             <article v-for="event in visibleLogEvents" :key="event.id">
               <strong>{{ event.label }}</strong>
               <p>{{ event.detail }}</p>
@@ -345,7 +345,7 @@
   </AgentWorkspaceShell>
 </template>
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getActivePinia } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -453,8 +453,38 @@ const events = computed<AgentDisplayEvent[]>(() =>
     : workspaceEvents.value,
 )
 const LOG_RENDER_LIMIT = 120
+const LOG_TAIL_THRESHOLD = 24
+const logListEl = ref<HTMLElement | null>(null)
+const logFollowTail = ref(true)
 const visibleLogEvents = computed(() => events.value.slice(-LOG_RENDER_LIMIT))
 const hiddenLogEventCount = computed(() => Math.max(0, events.value.length - visibleLogEvents.value.length))
+const isLogNearTail = (element: HTMLElement) =>
+  element.scrollHeight - element.scrollTop - element.clientHeight <= LOG_TAIL_THRESHOLD
+const onLogScroll = (event: Event) => {
+  const element = event.currentTarget as HTMLElement | null
+  if (element) logFollowTail.value = isLogNearTail(element)
+}
+const keepLogTailVisible = () => {
+  const element = logListEl.value
+  if (element && logFollowTail.value) element.scrollTop = element.scrollHeight
+}
+watch(
+  () => visibleLogEvents.value.map((event) => event.id).join('|'),
+  async () => {
+    await nextTick()
+    keepLogTailVisible()
+  },
+  { flush: 'post' },
+)
+watch(
+  () => selectedRunId.value,
+  async () => {
+    logFollowTail.value = true
+    await nextTick()
+    keepLogTailVisible()
+  },
+  { flush: 'post' },
+)
 const streamingAssistant = computed(() => runProjection.activeEventProjection.value.assistantText)
 const latestProgressMessage = computed(() => runProjection.activeEventProjection.value.latestProgressMessage)
 const publicWorkSummary = computed(() => runState.value?.latest_public_summary || null)
