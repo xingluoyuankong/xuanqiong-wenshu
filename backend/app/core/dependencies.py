@@ -1,7 +1,7 @@
 # AIMETA P=依赖注入_FastAPI依赖项定义|R=数据库会话_当前用户获取|NR=不含业务逻辑|E=get_db_get_current_user|X=internal|A=依赖函数|D=fastapi,sqlalchemy|S=db|RD=./README.ai
 import logging
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -92,9 +92,31 @@ def _to_user_schema(user: User) -> UserInDB:
 async def get_current_user(
     session: AsyncSession = Depends(get_session),
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    authorization: str | None = Header(default=None),
 ) -> UserInDB:
     """解析 Bearer JWT；开发模式仅在未携带令牌时保留单用户兼容回退。"""
+    if isinstance(authorization, str) and authorization.strip() and credentials is None:
+        scheme = authorization.split(None, 1)[0] if authorization.strip() else ""
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "INVALID_AUTH_SCHEME",
+                "message": "Authorization 必须使用 Bearer 方案",
+                "scheme": scheme[:32] or None,
+            },
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     if credentials is not None:
+        if credentials.scheme.strip().lower() != "bearer":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "INVALID_AUTH_SCHEME",
+                    "message": "Authorization 必须使用 Bearer 方案",
+                    "scheme": credentials.scheme[:32] or None,
+                },
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         try:
             payload = decode_access_token(credentials.credentials)
             user_id = int(str(payload.get("sub")))
