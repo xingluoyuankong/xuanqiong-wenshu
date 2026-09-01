@@ -69456,3 +69456,301 @@ CARD-009：completed
 4. 固化启动/清理流程，避免 Windows aiosqlite 资源泄漏。
 5. 再回到前端，做真实浏览器尺寸审查：压缩左栏、维持中间聊天宽度、右侧日志保持可折叠与独立滚动。
 ```
+
+
+---
+
+# 2026-09-01｜CARD-010 后端子批次｜真实双 ASGI Worker Durable Replay 与 Windows 迁移锁修复
+
+## 1. 本批任务目标
+
+验证 Agent durable event replay 不依赖单进程内存，且真实跨进程 HTTP/SSE 路径可用：
+
+```text
+两个独立 Uvicorn 进程
+同一份临时 SQLite 文件
+Writer Worker A：生产模式 JWT 登录、创建 Agent Session、通过 HTTP 提交消息并形成 durable Run/events
+Reader Worker B：使用 Worker A 签发的同一 JWT，通过 HTTP SSE + Last-Event-ID 回放
+```
+
+同时处理真实启动测试首次暴露的 Windows SQLite/Alembic 跨进程锁问题，并为该修复增加确定性回归。
+
+## 2. 本批实际发现
+
+### 2.1 真实并发启动首次暴露 Windows 锁错误
+
+第一次同时启动两个 Uvicorn 时，第二个进程在 `backend/app/db/init_db.py` 的 Windows 文件锁处出现：
+
+```text
+OSError: [Errno 36] Resource deadlock avoided
+```
+
+原实现使用 `msvcrt.LK_LOCK`。在该 Windows 运行态下，第二个进程没有等待第一个迁移进程释放锁，而是直接退出，导致双 Worker 启动不稳定。
+
+### 2.2 候选测试存在两个证据缺口
+
+此前候选实现：
+
+```text
+测试主进程直接写 AgentEventRecord
+两个 Uvicorn 只负责读取
+开发环境使用本机默认管理员回退
+```
+
+这不足以证明完整的生产认证与 HTTP 写入链路。本批将其改为：
+
+```text
+pytest 主进程只运行临时数据库的正式 Alembic upgrade head
+Worker A 通过真实 HTTP 写入 Session/Run/events
+Worker B 通过同一个 JWT 的真实 SSE 读取
+ENVIRONMENT=production，显式测试管理员和 SECRET_KEY
+```
+
+## 3. 实际修改文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\db\init_db.py
+D:\小说写作\xuanqiong-wenshu\backend\app\db\test_init_db_idempotency.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_asgi_worker_event_replay.py
+```
+
+本批没有修改小说正文、运行数据库或前端代码。
+
+## 4. 实现细节
+
+### 4.1 Windows 迁移锁：显式非阻塞重试
+
+`backend/app/db/init_db.py` 新增：
+
+```python
+_MIGRATION_LOCK_WAIT_SECONDS = 60.0
+_MIGRATION_LOCK_RETRY_SECONDS = 0.1
+```
+
+Windows 分支由一次 `LK_LOCK` 改为：
+
+```text
+使用 LK_NBLCK 尝试取得 1 字节锁
+遇到 Windows 共享/死锁类 Errno 13、32、33、36 时短暂等待后重试
+超过 60 秒或遇到非预期错误时原样抛出
+进入 critical section 后保持原有 finally 解锁
+```
+
+该变更解决的是“第二个应用进程启动时直接退出”的生命周期问题，不改变 Alembic 迁移内容和顺序。
+
+### 4.2 确定性锁回归
+
+`backend/app/db/test_init_db_idempotency.py` 新增测试：
+
+```text
+test_windows_migration_lock_retries_edeadlk_before_entering_critical_section
+```
+
+通过替换 `msvcrt.locking` 构造：
+
+```text
+第一次 LK_NBLCK -> OSError(36)
+第二次 LK_NBLCK -> 成功
+退出临界区 -> LK_UNLCK
+```
+
+断言第一次错误不会离开上下文，而是完成第二次尝试并最终解锁。
+
+### 4.3 真实双 ASGI Worker 测试
+
+`backend/app/agent/test_asgi_worker_event_replay.py` 现在：
+
+```text
+创建临时 SQLite 文件
+对该文件执行正式 Alembic command.upgrade(..., "head")
+启动 Writer Uvicorn 子进程
+等待 Writer /health 返回 200
+启动 Reader Uvicorn 子进程
+等待 Reader /health 返回 200
+两进程使用不同 loopback 端口且 PID 不同
+```
+
+两个子进程环境明确固定为：
+
+```text
+ENVIRONMENT=production
+DEBUG=false
+DATABASE_URL=同一个绝对临时 SQLite URL
+SECRET_KEY=同一个显式测试密钥
+ADMIN_DEFAULT_USERNAME=card010-asgi-admin
+ADMIN_DEFAULT_PASSWORD=Card010-Unique-Password-For-Worker-Replay
+AGENT_TOOL_PROVIDERS_ENABLED=false
+AGENT_TOOL_PROVIDER_STARTUP_POLICY=fail_closed
+AGENT_INLINE_EXECUTION=false
+AGENT_INLINE_VISIBLE_RESPONSE=false
+FILE_LOGGING_ENABLED=false
+```
+
+### 4.4 Worker A 的真实 HTTP 写入
+
+pytest 主进程不再调用 `AgentRuntimeService.append_event()`、`create_run()` 或 `append_work_trace_delta()`。
+
+Writer Worker A 依次执行：
+
+```text
+POST /api/auth/login
+POST /api/agent/sessions
+POST /api/agent/sessions/{session_id}/messages
+GET  /api/agent/sessions/{session_id}/runs/{run_id}/events?after_sequence=0
+```
+
+`/messages` 生产路由负责提交 user message、Run、`run_started`、初始 progress 和 durable execution job，事件事实来自 Writer 的正式 API 事务。
+
+### 4.5 Worker B 的真实 SSE 回放
+
+Reader Worker B 使用 Writer 返回的同一个 JWT：
+
+```text
+GET /api/agent/sessions/{session_id}/runs/{run_id}/stream?after_sequence=0
+Last-Event-ID: first_sequence
+```
+
+测试通过真正的 `httpx.AsyncClient.stream()` 逐行解析：
+
+```text
+id:
+event:
+data:
+```
+
+收到预期数量后主动结束 stream context，避免等待非终态长连接自然关闭。
+
+## 5. 核心断言
+
+```text
+Writer /health = 200
+Reader /health = 200
+Writer PID != Reader PID
+login = 200，获得 access_token
+create session = 201
+create message/run = 201
+Writer /events = 200
+事件 sequence 严格升序、无重复、均大于 0
+首个事件为 run_started
+Reader SSE = 200，content-type 为 text/event-stream
+Reader emitted sequence 等于 Writer durable events 去除首事件后的 sequence
+Last-Event-ID 优先于 query after_sequence=0
+首 sequence 不在 Reader 回放中
+每个 SSE payload 的 sequence/run_id/event_type 与 id/event/run 一致
+```
+
+## 6. 实际验证结果
+
+CARD-010 单测试：
+
+```text
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_asgi_worker_event_replay.py
+结果：1 passed in 8.57s
+```
+
+迁移锁 + ASGI 专项：
+
+```text
+.\.venv\Scripts\python.exe -m pytest -q app/db/test_init_db_idempotency.py app/agent/test_asgi_worker_event_replay.py
+结果：6 passed in 12.84s
+```
+
+Durable replay、迁移与 SSE 联合回归：
+
+```text
+.\.venv\Scripts\python.exe -m pytest -q app/db/test_init_db_idempotency.py app/services/test_alembic_migrations.py app/agent/test_durable_event_replay.py app/agent/test_subprocess_event_replay.py app/agent/test_asgi_worker_event_replay.py app/api/routers/test_agent_stream_http.py app/api/routers/test_agent_stream_resume.py app/api/routers/test_agent_stream_pagination.py
+结果：48 passed in 61.44s
+```
+
+后端全量回归：
+
+```text
+.\.venv\Scripts\python.exe -m pytest -q
+结果：1421 passed in 438.22s（7分18秒）
+```
+
+## 7. 受控反向验证
+
+### 7.1 迁移锁反向验证
+
+临时将：
+
+```python
+retryable = exc.errno in {13, 36} or getattr(exc, "winerror", None) in {32, 33, 36}
+```
+
+变为不包含 Errno 36 的集合，再运行：
+
+```text
+.\.venv\Scripts\python.exe -m pytest -q app/db/test_init_db_idempotency.py -k edeadlk
+```
+
+实际结果：
+
+```text
+退出码 1
+新增 test_windows_migration_lock_retries_edeadlk_before_entering_critical_section 失败
+```
+
+随后脚本 finally 自动恢复 `init_db.py`。
+
+反向验证日志：
+
+```text
+D:\小说写作\xuanqiong-wenshu\logs\live\migration-lock-reverse-validation.log
+```
+
+该结果证明删除关键重试条件会被回归测试捕获。
+
+### 7.2 首次真实启动失败已作为修复证据
+
+第一次同时启动两个真实 Uvicorn 时，实际观察到：
+
+```text
+OSError: [Errno 36] Resource deadlock avoided
+```
+
+修复后改用真实正式 Alembic 数据库和生产配置，Writer/Reader 双进程健康启动并完成端到端 HTTP/SSE 回放。
+
+## 8. 当前状态
+
+```text
+Windows Alembic 迁移锁遇 Errno 36 自动等待：completed
+锁超时边界：implemented and tested
+双独立 Uvicorn 进程：completed
+同一 SQLite durable ledger：completed
+生产模式显式 JWT 登录：completed
+Worker A HTTP 写入：completed
+Worker B HTTP SSE replay：completed
+Last-Event-ID 跨进程续接：completed
+SSE sequence/payload 一致性：completed
+pytest 主进程伪造事件：removed from CARD-010
+真实 MySQL/容器/反向代理部署：pending
+多节点数据库故障恢复：pending
+CARD-010：completed
+```
+
+## 9. 提交、推送与回退
+
+```text
+上一回退点：d4aafad
+本批代码与测试提交：f7fcfcc（test: verify durable replay across asgi workers，已推送）
+本批文档记录提交：本次提交后回填
+推送分支：origin/codex/bohrium-integration-20260831
+数据库：仅使用 pytest 临时数据库，项目本地数据库未修改
+小说正文：未修改
+运行日志：未纳入 Git
+```
+
+## 10. 下一任务目标
+
+继续后端优先：认证失败矩阵与真实数据库异常闭环。
+
+```text
+1. 使用真实 JWT 覆盖过期 token、签名错误、sub 不存在、停用用户、Bearer 格式错误。
+2. 对 events/activity/stream/session/message 等 Agent 路由验证 401 code、WWW-Authenticate 和响应脱敏一致性。
+3. 验证跨用户 session/run/artifact/context 组合在 HTTP 层的 404/403 边界。
+4. 补充 SQLite 连接中断、事务回滚后重试和 SSE stream_error 的真实 HTTP 复测。
+5. 认证矩阵完成后再继续前端真实浏览器布局验收：左侧标签密度、中央聊天宽度、右侧日志独立滚动。
+```
