@@ -209,22 +209,6 @@
           </p>
         </XqPanel>
 
-        <AgentRunInspector
-          :run="activeRun"
-          :state="runState"
-          :steps="runSteps"
-          :tool-results="toolResults"
-          :provenance="providerProvenance"
-          :has-sequence-gap="runProjection.activeEventProjection.value.hasSequenceGap"
-          :gap-repair-state="gapRepairState"
-          :connection-state="streamConnectionState"
-          :control-pending="Boolean(activeRun && runControlLoading[activeRun.id])"
-          :progress-message="latestProgressMessage"
-          @command="runControlAction"
-          @recover="activeRun && recoverRunAction(activeRun)"
-          @reconnect="reconnectActiveRun"
-        />
-
         <XqPanel class="workspace-log-panel" title="运行日志" subtitle="实时事件摘要；独立滚动，不占用聊天阅读区。" data-testid="agent-log-panel">
           <div class="events workspace-log-list" data-testid="agent-process-stream">
             <article v-for="event in events" :key="event.id">
@@ -233,6 +217,30 @@
             </article>
           </div>
         </XqPanel>
+
+        <details class="workspace-section workspace-inspector-section" data-testid="agent-inspector-section">
+          <summary>
+            <span>当前运行</span>
+            <small>{{ activeRun ? `${runStatus(activeRun.status)} · ${Math.round(activeRun.progress)}%` : '暂无运行' }}</small>
+          </summary>
+          <div class="workspace-section-body">
+            <AgentRunInspector
+              :run="activeRun"
+              :state="runState"
+              :steps="runSteps"
+              :tool-results="toolResults"
+              :provenance="providerProvenance"
+              :has-sequence-gap="runProjection.activeEventProjection.value.hasSequenceGap"
+              :gap-repair-state="gapRepairState"
+              :connection-state="streamConnectionState"
+              :control-pending="Boolean(activeRun && runControlLoading[activeRun.id])"
+              :progress-message="latestProgressMessage"
+              @command="runControlAction"
+              @recover="activeRun && recoverRunAction(activeRun)"
+              @reconnect="reconnectActiveRun"
+            />
+          </div>
+        </details>
 
         <details class="workspace-section workspace-activity-section" open data-testid="agent-run-details-section">
           <summary><span>运行详情</span><small>计划、审批、候选</small></summary>
@@ -1150,18 +1158,6 @@ onBeforeUnmount(() => {
 .status-dot.busy {
   background: #d97706;
 }
-.agent-layout {
-  display: grid;
-  grid-template-columns: minmax(210px, 0.85fr) minmax(0, 1.8fr) minmax(210px, 0.75fr);
-  gap: 1rem;
-  align-items: start;
-}
-.agent-sidebar,
-.agent-main,
-.agent-activity {
-  display: grid;
-  gap: 1rem;
-}
 .agent-sidebar label {
   display: block;
   margin-bottom: 0.4rem;
@@ -1449,23 +1445,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
 }
-@media (max-width: 1050px) {
-  .agent-layout {
-    grid-template-columns: 1fr 1fr;
-  }
-  .agent-main {
-    grid-column: span 2;
-    grid-row: 1;
-  }
-}
 @media (max-width: 650px) {
-  .agent-layout {
-    grid-template-columns: 1fr;
-  }
-  .agent-main {
-    grid-column: auto;
-    grid-row: auto;
-  }
   .agent-hero {
     flex-direction: column;
   }
@@ -1593,6 +1573,7 @@ onBeforeUnmount(() => {
 .workspace-activity-stack {
   align-content: start;
 }
+.workspace-inspector-section > .workspace-section-body,
 .workspace-activity-section > .workspace-section-body {
   gap: 0.65rem;
 }
@@ -1604,7 +1585,7 @@ onBeforeUnmount(() => {
 }
 .workspace-log-list {
   min-height: 3rem;
-  max-height: min(15rem, 24vh);
+  max-height: min(11rem, 18vh);
   overflow-y: auto;
   padding-right: 0.2rem;
   scrollbar-gutter: stable;
