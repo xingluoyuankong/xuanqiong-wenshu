@@ -75089,3 +75089,211 @@ git revert 4ec8d61
 7. 完成 type-check、全量 test、build，代码和接续文档分别提交并推送；
 8. 保持中央聊天主区最大、日志独立滚动、左侧分组紧凑的 CARD-040 结果。
 ```
+
+# CARD-044：质量阻断操作的 Artifact 归属、错误态与局部 loading
+
+## 本批目标
+
+修复质量阻断定位面板的结果残留和操作归属问题。此前 `qualityBlockers` 是全局列表与全局布尔 loading，用户先读取 Artifact-A，再读取 Artifact-B 失败时，A 的阻断列表仍可能留在界面上；用户也无法确认面板内容属于哪个候选 Artifact，重复点击同一候选还会产生重叠请求。
+
+## 失败驱动验证
+
+先增加两组回归：
+
+```text
+clears the previous blocker result and attributes failures to the current Artifact
+显示当前 Artifact 的阻断错误，并禁用其重复读取按钮
+```
+
+在旧实现上：
+
+```text
+runtime：1 failed
+Workbench：1 failed
+```
+
+旧实现的具体表现：
+
+```text
+Artifact-A 成功结果没有在 Artifact-B 失败时清空；
+没有当前 Artifact ID 和错误状态；
+定位质量阻断按钮没有按 Artifact 进入 disabled。
+```
+
+## 实际代码变更
+
+### 1. Runtime 增加 blocker 操作状态
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.ts
+```
+
+新增：
+
+```ts
+qualityBlockersArtifactId
+qualityBlockersError
+qualityBlockersLoadingByArtifact
+qualityBlockerRequestGeneration
+```
+
+每次 blocker 请求：
+
+```text
+1. 记录当前 Artifact 归属；
+2. 清空上一个 Artifact 的 blocker 列表和旧错误；
+3. 设置全局面板 loading 与当前 Artifact 的局部 loading；
+4. 用 quality-blockers:run_id:artifact_id 请求代次隔离同一候选的重复请求；
+5. 成功只写当前请求的列表；
+6. 失败清空列表，并把错误绑定到当前 Artifact；
+7. finally 只清理当前 action generation 的局部 loading；
+8. reset 同时清空 blocker 状态和请求代次。
+```
+
+这样旧请求结束时不会把新请求的 loading 提前关闭，也不会重新写入旧 Artifact 的结果。
+
+### 2. Workbench 显示当前归属和错误态
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\artifacts\AgentArtifactWorkbench.vue
+```
+
+新增 props：
+
+```text
+qualityBlockersArtifactId
+qualityBlockersError
+qualityBlockersLoadingByArtifact
+```
+
+界面行为：
+
+```text
+面板显示当前 Artifact 的短 ID；
+错误时显示结构化错误文本；
+错误状态下不渲染旧 blocker 列表；
+当前 Artifact 的“定位质量阻断”按钮在请求中禁用；
+```
+
+### 3. 页面完成状态传递
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+页面将 runtime 的 blocker 归属、错误和局部 loading map 原样传入 Workbench，聊天区仍只负责对话，日志仍保持右侧独立区域。
+
+## 修复后验证
+
+定向 blocker 集合：
+
+```text
+4 passed
+```
+
+其中包含：
+
+```text
+旧结果清空与错误归属
+当前候选按钮禁用
+旧 Run blocker 隔离
+质量 facts 加载失败时的既有 fail-closed 行为
+```
+
+反向验证：
+
+```text
+临时将当前 blocker 错误写回改为空字符串；
+重新运行归属/错误回归；
+```
+
+结果：
+
+```text
+1 failed
+REVERSE_EXIT=1
+```
+
+恢复真实实现后：
+
+```text
+1 passed
+RESTORED_EXIT=0
+```
+
+## 全量前端门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+```
+
+```text
+通过
+```
+
+```powershell
+npm run test:run
+```
+
+```text
+74 files passed
+445 tests passed
+```
+
+```powershell
+npm run build-only
+```
+
+```text
+4905 modules transformed
+built successfully
+```
+
+## 提交、推送与回退
+
+```text
+上一回退点：90609a0 docs: record card 043 lineage state isolation
+本批代码提交：389f845 fix: isolate artifact blocker action state
+代码已推送：origin/codex/bohrium-integration-20260831
+本批文档提交：待本次文档提交生成
+```
+
+回退方式：
+
+```text
+git revert 389f845
+```
+
+该回退保留 CARD-040 的聊天主区布局、CARD-041 的 reset 隔离、CARD-042 的重复 facts 隔离和 CARD-043 的 lineage 独立状态。
+
+## 当前累计状态
+
+```text
+后端：CARD-038、CARD-039 已完成并推送，最近全量 1438 passed；
+前端布局：CARD-040 已压缩左/右 rail、扩大聊天区、保持日志独立滚动；
+Artifact facts：CARD-041/042/043/044 已完成状态隔离和错误可观测性；
+前端最近全量：74 files / 445 tests passed；
+当前服务：127.0.0.1:5174/agent 与 127.0.0.1:8013/health 均为 HTTP 200。
+```
+
+## 下一任务：CARD-045（rewrite/diff/preview action 状态统一）
+
+继续把剩余 Artifact 操作统一到同一状态模型：
+
+```text
+1. rewrite instructions 增加按 Artifact 的错误状态；
+2. diff 与正式版本 diff 增加当前 Artifact/对照版本归属；
+3. preview 增加 loading/error，失败时清空旧正文；
+4. 所有 action 的 finally 使用 action generation 或 pending 计数收敛；
+5. 新 Artifact 操作失败时不保留上一个 Artifact 的 rewrite/diff/preview；
+6. Workbench 的每个按钮显示局部请求状态并禁用重复点击；
+7. 保持左侧紧凑、中间聊天最大、右侧日志独立滚动；
+8. 按相同流程完成失败驱动、反向验证、完整门禁、代码提交推送和文档提交推送。
+```
