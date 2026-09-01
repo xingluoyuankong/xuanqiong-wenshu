@@ -194,6 +194,67 @@ def _clean_data(value: Any) -> Any:
     return value
 
 
+def _provider_attempt_text(value: Any, limit: int) -> str | None:
+    text = str(value or "").strip()
+    return text[:limit] or None
+
+
+def _provider_attempt_int(value: Any, *, default: int | None = None, minimum: int = 0, maximum: int = 2_147_483_647) -> int | None:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return number if minimum <= number <= maximum else default
+
+
+def clean_provider_attempt_snapshot(value: Any) -> dict[str, Any]:
+    """Return the bounded, redacted ProviderAttemptLedger wire contract.
+
+    Context can outlive implementation versions, so the API applies this cleaner
+    again instead of trusting historical JSON merely because it is Run-owned.
+    """
+    raw = value if isinstance(value, dict) else {}
+    records = raw.get("provider_attempts") if isinstance(raw.get("provider_attempts"), list) else []
+    cleaned: list[dict[str, Any]] = []
+    categories = {"AUTHENTICATION", "RATE_LIMIT", "TRANSIENT_5XX", "NETWORK_DISCONNECT", "TIMEOUT", "EMPTY_STREAM", "INVALID_RESPONSE", "CANCELLED", "BUDGET_EXHAUSTED", "POLICY_REJECTED", "UNKNOWN"}
+    statuses = {"running", "succeeded", "failed"}
+    for index, raw_record in enumerate(records[:16], start=1):
+        if not isinstance(raw_record, dict):
+            continue
+        attempt = _provider_attempt_int(raw_record.get("attempt"), default=index, minimum=1, maximum=64) or index
+        record: dict[str, Any] = {
+            "attempt": attempt,
+            "role": _provider_attempt_text(raw_record.get("role"), 80) or "unknown",
+            "status": str(raw_record.get("status") or "unknown").strip().lower(),
+        }
+        if record["status"] not in statuses:
+            record["status"] = "unknown"
+        for key, limit in (("provider_ref", 200), ("model_ref", 200), ("started_at", 64), ("first_token_at", 64), ("finished_at", 64), ("output_digest", 128)):
+            item = _provider_attempt_text(raw_record.get(key), limit)
+            if item is not None:
+                record[key] = item
+        category = _provider_attempt_text(raw_record.get("error_category"), 40)
+        if category in categories:
+            record["error_category"] = category
+        http_status = _provider_attempt_int(raw_record.get("http_status"), minimum=100, maximum=599)
+        if http_status is not None:
+            record["http_status"] = http_status
+        retry_index = _provider_attempt_int(raw_record.get("retry_index"), default=0, minimum=0, maximum=64)
+        record["retry_index"] = retry_index if retry_index is not None else 0
+        fallback_from = _provider_attempt_int(raw_record.get("fallback_from_attempt"), minimum=1, maximum=64)
+        if fallback_from is not None:
+            record["fallback_from_attempt"] = fallback_from
+        record["cancel_observed"] = bool(raw_record.get("cancel_observed"))
+        cleaned.append(record)
+    valid_attempts = {item["attempt"] for item in cleaned}
+    selected = _provider_attempt_int(raw.get("selected_provider_attempt"), minimum=1, maximum=64)
+    return {
+        "provider_attempts": cleaned,
+        "selected_provider_attempt": selected if selected in valid_attempts else None,
+        "fallback_used": bool(raw.get("fallback_used")),
+    }
+
+
 def _visible_event_data(event_type: str, value: Any) -> dict[str, Any]:
     """Return only flat, explicitly allowed, user-visible event fields."""
     if not isinstance(value, dict):
@@ -655,9 +716,8 @@ class AgentRuntimeService:
                 context[key] = str(value)[:160] if value else None
             elif key == "candidate_writer_model_ref":
                 context[key] = str(value)[:200] if value else None
-            elif key == "candidate_writer_provider_attempts":
-                attempts = value if isinstance(value, dict) else {}
-                context[key] = _clean_data(attempts)
+            elif key.endswith("_provider_attempts"):
+                context[key] = clean_provider_attempt_snapshot(value)
         return await self.set_run_context(run_id=run_id, user_id=user_id, context=context)
 
     async def ensure_step(

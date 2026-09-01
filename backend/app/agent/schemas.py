@@ -326,6 +326,8 @@ class AgentProviderProvenanceRead(BaseModel):
     planner_provider_fallback_reason: str | None = Field(default=None, max_length=160)
     response_provider_called: bool | None = None
     response_provider_fallback_reason: str | None = Field(default=None, max_length=160)
+    planner_provider_attempts: dict[str, Any] | None = None
+    response_provider_attempts: dict[str, Any] | None = None
     candidate_writer_provider_called: bool | None = None
     candidate_writer_provider_fallback_reason: str | None = Field(default=None, max_length=160)
     candidate_writer_model_ref: str | None = Field(default=None, max_length=200)

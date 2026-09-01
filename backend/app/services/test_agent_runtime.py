@@ -721,6 +721,24 @@ async def test_provider_provenance_is_stage_scoped_and_public_events_are_allowli
             "candidate_writer_provider_called": True,
             "candidate_writer_provider_fallback_reason": None,
             "candidate_writer_model_ref": "fixture-model",
+            "planner_provider_attempts": {
+                "provider_attempts": [{
+                    "attempt": 1, "role": "planner", "provider_ref": "planner-fixture",
+                    "model_ref": "planner-model", "status": "failed", "started_at": "2026-09-01T00:00:00Z",
+                    "finished_at": "2026-09-01T00:00:01Z", "error_category": "TIMEOUT",
+                    "headers": {"authorization": "secret"}, "prompt": "private planner prompt",
+                }],
+                "selected_provider_attempt": None, "fallback_used": False,
+            },
+            "response_provider_attempts": {
+                "provider_attempts": [{
+                    "attempt": 1, "role": "response", "provider_ref": "response-fixture",
+                    "model_ref": "response-model", "status": "failed", "started_at": "2026-09-01T00:00:00Z",
+                    "finished_at": "2026-09-01T00:00:01Z", "error_category": "TIMEOUT",
+                    "api_key": "secret", "reasoning_content": "private reasoning",
+                }],
+                "selected_provider_attempt": None, "fallback_used": False,
+            },
         },
     )
     assert saved.context_json["planner_provider_called"] is True
@@ -728,6 +746,16 @@ async def test_provider_provenance_is_stage_scoped_and_public_events_are_allowli
     assert saved.context_json["response_provider_fallback_reason"] == "empty_response"
     assert saved.context_json["candidate_writer_provider_called"] is True
     assert saved.context_json["candidate_writer_model_ref"] == "fixture-model"
+    planner_attempt = saved.context_json["planner_provider_attempts"]["provider_attempts"][0]
+    response_attempt = saved.context_json["response_provider_attempts"]["provider_attempts"][0]
+    assert planner_attempt["role"] == "planner"
+    assert planner_attempt["error_category"] == "TIMEOUT"
+    assert response_attempt["role"] == "response"
+    assert response_attempt["error_category"] == "TIMEOUT"
+    assert "headers" not in planner_attempt
+    assert "prompt" not in planner_attempt
+    assert "api_key" not in response_attempt
+    assert "reasoning_content" not in response_attempt
 
     planner_event = await service.append_event(
         run_id=run.id,

@@ -670,6 +670,20 @@ async def test_agent_run_provider_provenance_route_is_scoped_and_stage_specific(
             "candidate_writer_provider_called": False,
             "candidate_writer_provider_fallback_reason": "empty_response",
             "candidate_writer_model_ref": "fixture-model",
+            "planner_provider_attempts": {
+                "provider_attempts": [{
+                    "attempt": 1, "role": "planner", "provider_ref": "planner-fixture",
+                    "status": "failed", "error_category": "TIMEOUT", "headers": {"x-api-key": "secret"},
+                }],
+                "selected_provider_attempt": None, "fallback_used": False,
+            },
+            "response_provider_attempts": {
+                "provider_attempts": [{
+                    "attempt": 1, "role": "response", "provider_ref": "response-fixture",
+                    "status": "failed", "error_category": "TIMEOUT", "prompt": "private",
+                }],
+                "selected_provider_attempt": None, "fallback_used": False,
+            },
             "reasoning": "private",
         },
     )
@@ -683,7 +697,12 @@ async def test_agent_run_provider_provenance_route_is_scoped_and_stage_specific(
     assert provenance.candidate_writer_provider_called is False
     assert provenance.candidate_writer_provider_fallback_reason == "empty_response"
     assert provenance.candidate_writer_model_ref == "fixture-model"
-    assert "reasoning" not in provenance.model_dump()
+    assert provenance.planner_provider_attempts["provider_attempts"][0]["role"] == "planner"
+    assert provenance.response_provider_attempts["provider_attempts"][0]["role"] == "response"
+    dumped = provenance.model_dump()
+    assert "reasoning" not in dumped
+    assert "headers" not in dumped["planner_provider_attempts"]["provider_attempts"][0]
+    assert "prompt" not in dumped["response_provider_attempts"]["provider_attempts"][0]
     with pytest.raises(HTTPException) as error:
         await get_agent_run_provider_provenance(
             run.id, session=task_session, current_user=SimpleNamespace(id=other.id)

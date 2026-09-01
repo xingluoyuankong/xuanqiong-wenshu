@@ -44,6 +44,7 @@ from ...services.agent_quality_query_service import AgentQualityQueryService
 from ...services.agent_entity_context_service import AgentEntityContextService
 from ...services.agent_runtime import (
     AgentConflict, AgentNotFound, AgentRuntimeError, AgentRuntimeService, AgentScopeViolation,
+    clean_provider_attempt_snapshot,
 )
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
@@ -785,10 +786,12 @@ async def get_agent_run_provider_provenance(
             planner_provider_fallback_reason=(str(context.get("planner_provider_fallback_reason") or context.get("planner_fallback_reason") or "")[:160] or None),
             response_provider_called=(bool(context["response_provider_called"]) if context.get("response_provider_called") is not None else None),
             response_provider_fallback_reason=(str(context.get("response_provider_fallback_reason") or "")[:160] or None),
+            planner_provider_attempts=clean_provider_attempt_snapshot(context.get("planner_provider_attempts")) if isinstance(context.get("planner_provider_attempts"), dict) else None,
+            response_provider_attempts=clean_provider_attempt_snapshot(context.get("response_provider_attempts")) if isinstance(context.get("response_provider_attempts"), dict) else None,
             candidate_writer_provider_called=(bool(context["candidate_writer_provider_called"]) if context.get("candidate_writer_provider_called") is not None else None),
             candidate_writer_provider_fallback_reason=(str(context.get("candidate_writer_provider_fallback_reason") or "")[:160] or None),
             candidate_writer_model_ref=(str(context.get("candidate_writer_model_ref") or "")[:200] or None),
-            candidate_writer_provider_attempts=(context.get("candidate_writer_provider_attempts") if isinstance(context.get("candidate_writer_provider_attempts"), dict) else None),
+            candidate_writer_provider_attempts=clean_provider_attempt_snapshot(context.get("candidate_writer_provider_attempts")) if isinstance(context.get("candidate_writer_provider_attempts"), dict) else None,
         )
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
