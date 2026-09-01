@@ -18,6 +18,8 @@ from app.models.knowledge_graph import CharacterNode
 from app.models.novel import BlueprintCharacter
 from app.models.research import ResearchArtifact
 from app.services.agent_runtime import AgentRuntimeService
+from app.services.agent_context_service import AgentContextService
+from app.services.agent_plan_service import AgentPlanService
 
 
 async def _route_user(session, user_id: int, name: str) -> User:
@@ -565,6 +567,68 @@ async def test_agent_run_plan_route_returns_persisted_public_plan_draft(task_ses
     assert [(step.tool_name, step.intent, step.expected_result, step.planner_arguments) for step in plan.steps] == [
         ("chapter.version.list", "读取最近三个版本", "版本元数据", {"limit": 3})
     ]
+
+
+@pytest.mark.asyncio
+async def test_agent_run_plan_route_returns_stable_persisted_revision_id(task_session):
+    owner = await _route_user(task_session, 1025, "plan-stable-id-owner")
+    created = await create_agent_session(
+        AgentSessionCreateRequest(), session=task_session, current_user=SimpleNamespace(id=owner.id)
+    )
+    runtime = AgentRuntimeService(task_session)
+    session = await runtime.get_session(created.id, owner.id)
+    run = await runtime.create_run(
+        session_id=session.id,
+        user_id=owner.id,
+        context={
+            "goal": "稳定计划身份",
+            "plan_mode": "explore",
+            "plan_steps": [
+                {"order": 1, "tool_name": "chapter.inspect", "intent": "读取章节"}
+            ],
+        },
+    )
+    snapshot = await AgentContextService(task_session).create_snapshot(
+        run=run,
+        session=session,
+        context_json={"goal": "稳定计划身份"},
+    )
+    revision = await AgentPlanService(task_session).create_revision(
+        run=run,
+        session=session,
+        context_snapshot=snapshot,
+        plan_json={"steps": [{"order": 1, "tool_name": "chapter.inspect"}]},
+    )
+
+    first = await get_agent_run_plan(run.id, session=task_session, current_user=SimpleNamespace(id=owner.id))
+    second = await get_agent_run_plan(run.id, session=task_session, current_user=SimpleNamespace(id=owner.id))
+
+    assert first.plan_id == second.plan_id
+    assert str(first.plan_id) == revision.revision_id
+
+
+@pytest.mark.asyncio
+async def test_legacy_agent_run_plan_route_returns_null_plan_id(task_session):
+    owner = await _route_user(task_session, 1026, "plan-legacy-id-owner")
+    created = await create_agent_session(
+        AgentSessionCreateRequest(), session=task_session, current_user=SimpleNamespace(id=owner.id)
+    )
+    run = await AgentRuntimeService(task_session).create_run(
+        session_id=created.id,
+        user_id=owner.id,
+        context={
+            "goal": "兼容旧计划",
+            "plan_steps": [
+                {"order": 1, "tool_name": "chapter.inspect", "intent": "读取章节"}
+            ],
+        },
+    )
+
+    first = await get_agent_run_plan(run.id, session=task_session, current_user=SimpleNamespace(id=owner.id))
+    second = await get_agent_run_plan(run.id, session=task_session, current_user=SimpleNamespace(id=owner.id))
+
+    assert first.plan_id is None
+    assert second.plan_id is None
 
 @pytest.mark.asyncio
 async def test_agent_run_activity_route_replays_ordered_cursor_pages(task_session):

@@ -6,7 +6,7 @@ import os
 import socket
 import time
 from typing import Annotated
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
@@ -757,7 +757,14 @@ async def get_agent_run_plan(
         mode = str(context.get("plan_mode") or "explore")
         if mode not in {"explore", "strict"}:
             mode = "explore"
+        revision = await AgentPlanService(session).get_latest_revision_for_run(
+            run_id=run.id,
+            session_id=run.session_id,
+            user_id=current_user.id,
+        )
+        plan_id = UUID(revision.revision_id) if revision is not None else None
         return AgentPlan(
+            plan_id=plan_id,
             goal=str(context.get("goal") or ""),
             project_id=run.project_id,
             mode=mode,

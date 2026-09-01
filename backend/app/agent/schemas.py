@@ -196,7 +196,8 @@ class AgentEvent(BaseModel):
 
 
 class AgentPlan(BaseModel):
-    plan_id: UUID = Field(default_factory=uuid4)
+    # Legacy Runs may predate relational PlanRevision persistence.
+    plan_id: UUID | None = None
     goal: str
     project_id: str | None = None
     mode: Literal["explore", "strict"]
