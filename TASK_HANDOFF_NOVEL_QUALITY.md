@@ -71804,3 +71804,51 @@ Worker 组：15 passed，58.11s
 1. 转回前端真实浏览器验收：/agent 浮卡遮挡、Inspector 展开、1280/1024/768/390 截图矩阵。
 2. 继续检查 Agent 页面右栏日志、活动区和全局导航的真实可读性。
 ```
+---
+
+# CARD-020 — Agent 三栏响应式聊天优先布局回归保护（2026-09-01）
+
+## 实际状态
+
+AgentWorkspaceShell 已实现：桌面紧凑三栏、880px 活动栏移至聊天下方、650px 单列、中央聊天最小高度、右栏独立滚动。此前缺少对 880/650 规则的源码级回归约束。
+
+## 修改
+
+```text
+frontend/src/features/agent/AgentWorkspaceShell.spec.ts
+```
+
+新增 CSS contract，固定：
+
+```text
+880px：160px 侧栏 + 聊天主栏，活动栏 static 且跨两列
+650px：单列，三栏不再 sticky/固定高度
+聊天主栏：min-height min(72vh, 56rem)
+```
+
+## 验证
+
+```text
+定向：5 passed
+反向：临时移除 650px 单列规则后 contract 失败（exit 1）；恢复后通过
+npm run type-check：通过
+npm run test:run：74 files / 430 tests passed，129.88s
+npm run build-only：通过，34.92s
+```
+
+真实浏览器持久截图仍待补齐：现有自动化环境未能保存可复核的浏览器会话证据，未标记为 completed。
+
+## 回退
+
+```text
+上一回退点：201fbcb docs: record card 019 stale job settlement
+代码回退点：41691f2 test: guard responsive agent chat layout（已推送）
+本批文档提交：docs: record card 020 responsive layout contracts
+```
+
+## 下一任务
+
+```text
+1. 可用浏览器会话下补 /agent 真实 1280/1024/768/390 截图和 Inspector 展开交互。
+2. 保持当前左栏紧凑、聊天主读区、右栏日志独立滚动的布局边界。
+```
