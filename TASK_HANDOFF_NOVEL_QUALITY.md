@@ -71403,3 +71403,292 @@ docs: record card 016 agent workspace completion
 3. 后端继续验证 visible_response 失败/死信/重试的 idempotency：失败重试不得重复 assistant_message 或 run_completed。
 4. 每批继续遵循：代码→定向测试→反向验证→全量门禁→独立代码提交/推送→独立文档提交/推送→记录回退点。
 ```
+---
+
+# CARD-017 — 可见回复失败可重试、可死信回放，并保持最终产物单例（2026-09-01）
+
+## 1. 本批任务目标
+
+继续后端优先优化 Agent durable Worker：
+
+```text
+visible_response Provider 失败
+→ Job retry
+→ retry 耗尽 dead_letter
+→ 管理员 replay
+→ Worker 成功
+```
+
+必须保证：
+
+```text
+1. retry Job 的父 Run 仍可领取。
+2. dead_letter Job 的父 Run 仍可人工 replay。
+3. Provider 异常类型保持到 Worker retry policy。
+4. 失败阶段不写 assistant 最终消息、assistant_completed、run_completed。
+5. 重放成功后最终 assistant 消息、assistant_completed、run_completed 都只出现一次。
+```
+
+## 2. 实际根因
+
+开始前的真实路径：
+
+```text
+handle_visible_response_job(... manage_job=False)
+→ _run_visible_response() 捕获 Provider 异常
+→ Run 被更新为 failed/error 并追加 run_failed
+→ runner 返回
+→ handler 发现 Run != completed，抛出异常
+→ AgentWorker.fail() 可能把 Job 回写 queued
+```
+
+这产生了状态机冲突：
+
+```text
+Job=queued，但 Run=failed
+```
+
+`AgentJobService.claim_job()` 与 `claim_next_job()` 都要求父 Run 处于 created/planning/running 或 recovery_ready；`failed` 是终态，因此 queued Job 实际永远无法被后续 Worker 领取。
+
+死信同样无法恢复：
+
+```text
+replay_dead_letter() 会拒绝 completed / failed / cancelled 父 Run。
+```
+
+原始 Provider 异常类名在外层 Worker 中可以保留，但旧 Runner 在 Worker 模式下吞掉异常、提前终态化 Run，造成 retry/dead-letter/replay 语义失效。
+
+## 3. 修改文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\runner.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_worker.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_progress_updates.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\test_agent_conversation_runtime.py
+```
+
+## 4. 生产修复
+
+### 4.1 inline 与独立 Worker 的失败语义分离
+
+`_run_visible_response()` 的异常处理现在按 `manage_job` 分支：
+
+```text
+manage_job=True：保留既有 inline 行为。
+- Run → failed/error
+- run_failed 事件
+- runner 自行处理 Job failure
+
+manage_job=False：独立 durable Worker 行为。
+- Run 保持 running
+- phase → assistant_response_retry
+- 追加 visible_response_retry_pending
+- 保存 Provider provenance / error_type / 限长 reason
+- 不追加 run_failed
+- 清理租约后重抛原始异常
+```
+
+重抛是关键：外层 `AgentWorker.poll_once()` 因此获得真实 `ProviderTimeout` / `TimeoutError` 类型，再由 `AgentJobService.fail()` 的 retry policy 决定 queued 或 dead_letter，而不是得到被吞掉后的假成功或不可分类终态。
+
+### 4.2 可重试与可回放状态
+
+修复后的失败状态：
+
+```text
+第 1 次 ProviderTimeout：
+Job=queued, attempt_count=1, error_type=ProviderTimeout
+Run=running, phase=assistant_response_retry
+
+第 2 次失败且 max_attempts=2：
+Job=dead_letter, attempt_count=2
+Run 仍为 running，可执行管理员 replay_dead_letter()
+
+replay 后成功：
+Job=succeeded, attempt_count=3
+Run=completed
+```
+
+保持 Run 非终态使现有 Job claim fence、dead-letter replay 和租约围栏能够按设计继续工作；没有放宽 completed/failed/cancelled Run 的 replay 禁止规则。
+
+## 5. 新增回归测试
+
+### 5.1 Runner Worker 模式失败契约
+
+`test_worker_mode_visible_response_provider_failure_keeps_run_retryable` 使用真实 Runner 与会话数据库、失败的可见 Provider：
+
+```text
+manage_job=False 时抛 ProviderTimeout
+→ 测试必须接收到原始 ProviderTimeout
+→ Run=running / assistant_response_retry
+→ messages=[]
+→ visible_response_retry_pending 存在
+→ 无 run_failed / assistant_completed / run_completed
+```
+
+旧实现实际失败：`DID NOT RAISE ProviderTimeout`，精确揭示 Worker 模式吞异常问题。
+
+### 5.2 真实 Runner retry 后成功且单例终态
+
+`test_visible_response_provider_retry_uses_real_runner_and_completes_once`：
+
+```text
+真实 AgentWorker + handle_visible_response_job + _run_visible_response
+第 1 次 Fake LLM → ProviderTimeout
+第 2 次 Fake LLM → 固定可见文本
+```
+
+断言：
+
+```text
+第一次：queued / attempt_count=1 / ProviderTimeout / running retry phase / 0 final message / 0 completion events
+第二次：succeeded / attempt_count=2 / completed / 1 assistant message / 1 assistant_completed / 1 run_completed
+第三次空轮询：False，不重复产生终态产物
+```
+
+### 5.3 dead-letter replay 成功单例产物
+
+`test_visible_response_dead_letter_replay_completes_once`：
+
+```text
+两次 retryable ProviderTimeout
+→ dead_letter
+→ replay_dead_letter(operator_id=9001)
+→ 成功执行
+→ 一次空轮询
+```
+
+断言：
+
+```text
+job_replayed=1
+assistant message=1
+assistant_completed=1
+run_completed=1
+```
+
+### 5.4 既有 progress 测试契约修订
+
+`test_progress_updates.py` 的两项 mock 测试此前被 Runner 吞异常行为掩盖：
+
+```text
+- append_message mock 未返回 sequence，真实运行时必须返回持久化消息对象。
+- Worker 模式 Timeout 测试仍期待吞异常与 run_failed。
+```
+
+修订后：
+
+```text
+append_message mock 返回 SimpleNamespace(sequence=1)
+Timeout 用例期待 TimeoutError 重抛、visible_response_retry_pending、无 run_failed
+```
+
+这不是降低测试标准，而是让 mock 与真实 `AgentRuntimeService.append_message()` 和新的 durable Worker 契约一致。
+
+## 6. 验证过程与结果
+
+### 6.1 新增用例的初始失败证据
+
+```text
+Runner failure contract：1 failed
+原因：DID NOT RAISE ProviderTimeout
+```
+
+这在修复前确认了问题真实存在。
+
+### 6.2 定向与组测试
+
+```text
+Runner failure contract：1 passed，3 deselected，3.34s
+Dead-letter replay 单例：1 passed，12 deselected，6.56s
+真实 Runner retry 单例：1 passed，13 deselected，6.85s
+Worker + CLI + ASGI + conversation runtime 组：23 passed，104.98s
+progress 契约修订定向：2 passed，2 deselected，2.18s
+```
+
+### 6.3 受控反向验证
+
+临时移除：
+
+```python
+if not manage_job:
+    raise
+```
+
+Runner failure contract 按预期失败：
+
+```text
+退出码 1
+DID NOT RAISE ProviderTimeout
+```
+
+finally 恢复 `runner.py` 后重跑：
+
+```text
+1 passed，3 deselected，3.35s
+```
+
+证明新增测试能捕获“Worker 模式重新吞掉 Provider 异常”的回归。
+
+### 6.4 后端全量门禁
+
+第一次全量运行发现两项既有 mock 契约冲突，均已按真实 durable Worker 语义修订：
+
+```text
+- progress 成功 mock 缺少 final_message.sequence
+- Worker Timeout 测试仍断言 terminal run_failed
+```
+
+修订并定向验证后，最终全量结果：
+
+```text
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+结果：1430 passed，1079.00s（17m58s）
+```
+
+## 7. 当前状态
+
+```text
+visible_response retry 父 Run 可领取：completed
+visible_response dead-letter 父 Run 可 replay：completed
+Worker 模式原始 Provider 异常重抛：completed
+失败期最终消息 / completion events 不产生：completed and tested
+retry 成功最终消息 / completion events 单例：completed and tested
+死信 replay 成功最终产物单例：completed and tested
+inline failure 旧行为：preserved by manage_job=True branch
+后端全量 pytest：1430 passed
+数据库、小说正文：未修改
+```
+
+已知后续风险（未伪装为已完成）：
+
+```text
+若进程恰在 append_message 成功后、Run completed 之前被强制终止，
+当前尚未有 run-scoped 最终回复唯一键/恢复测试来证明绝不会重复写最终消息。
+该“最后消息已写入后的崩溃窗口”是 CARD-018 的首要后端任务。
+```
+
+## 8. 提交、推送与回退
+
+```text
+上一完整远程回退点：
+6097471f（docs: record card 016 agent workspace completion）
+
+CARD-017 代码与测试回退点：
+abb1a21a7f5a67547eba532b1d264d1a23a8ff69
+fix: keep visible response retries replayable
+已推送：origin/codex/bohrium-integration-20260831
+
+本批文档提交：紧随本记录创建独立 docs 提交并推送；提交消息：
+docs: record card 017 retry recovery
+
+未纳入 Git：历史 audit、未跟踪临时脚本、数据库备份、node_modules、测试运行目录、浏览器工件。
+```
+
+## 9. 下一任务目标
+
+```text
+1. CARD-018：模拟 append_message 成功后、Run completed 前的进程崩溃；实现/验证 run-scoped final response 幂等恢复，保证最终消息、assistant_completed、run_completed 永不重复。
+2. 补真实浏览器会话下 /agent 页面浮卡遮挡、Inspector 展开、1280/1024/768/390 多视口截图证据。
+3. 每批保持：代码→定向测试→反向验证→全量门禁→独立代码提交/推送→独立文档提交/推送→回退点。
+```
