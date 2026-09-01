@@ -101,8 +101,10 @@ const statusText = computed(() => {
   .agent-page { padding-inline: 0.65rem; }
 }
 @media (max-width: 880px) {
-  .agent-layout { grid-template-columns: minmax(160px, 11rem) minmax(0, 1fr); }
-  .agent-activity { position: static; grid-column: 1 / -1; max-height: none; overflow: visible; }
+  .agent-layout { grid-template-columns: minmax(0, 1fr); }
+  .agent-main { grid-row: 1; }
+  .agent-sidebar { position: static; grid-row: 2; max-height: none; overflow: visible; }
+  .agent-activity { position: static; grid-row: 3; max-height: none; overflow: visible; }
 }
 @media (max-width: 650px) {
   .agent-layout { grid-template-columns: 1fr; }

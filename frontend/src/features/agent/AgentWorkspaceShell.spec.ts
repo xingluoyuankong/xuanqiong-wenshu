@@ -69,12 +69,14 @@ describe('AgentWorkspaceShell', () => {
 
   it('把中窄与手机断点的聊天优先规则固定为 CSS contract', () => {
     expect(shellSource).toContain('@media (max-width: 880px)')
-    expect(shellSource).toContain('grid-template-columns: minmax(160px, 11rem) minmax(0, 1fr);')
-    expect(shellSource).toContain('.agent-activity { position: static; grid-column: 1 / -1; max-height: none; overflow: visible; }')
+    expect(shellSource).toContain('grid-template-columns: minmax(0, 1fr);')
+    expect(shellSource).toContain('.agent-main { grid-row: 1; }')
+    expect(shellSource).toContain('.agent-sidebar { position: static; grid-row: 2; max-height: none; overflow: visible; }')
+    expect(shellSource).toContain('.agent-activity { position: static; grid-row: 3; max-height: none; overflow: visible; }')
     expect(shellSource).toContain('@media (max-width: 650px)')
     expect(shellSource).toContain('.agent-layout { grid-template-columns: 1fr; }')
     expect(shellSource).toContain('.agent-sidebar, .agent-main, .agent-activity { grid-column: auto; position: static; max-height: none; overflow: visible; }')
-    expect(shellSource).toContain(`.agent-main {\n  min-height: min(72vh, 56rem);\n}`)
+    expect(shellSource).toMatch(/\.agent-main\s*\{\s*min-height: min\(72vh, 56rem\);\s*\}/)
   })
   it('把右栏运行日志限制为有界渲染窗口', () => {
     expect(workspaceSource).toContain('const LOG_RENDER_LIMIT = 120')
