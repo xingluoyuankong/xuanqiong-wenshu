@@ -70004,3 +70004,277 @@ CARD-011：completed
 4. 补充 JWT token 过期窗口、服务重启后的 secret 一致性和未来撤销机制设计。
 5. 后端异常矩阵完成后，继续前端真实浏览器尺寸验收：左侧标签页压缩、中央聊天区域扩大、右侧日志独立滚动与可折叠。
 ```
+
+
+---
+
+# 2026-09-01｜CARD-012 后端子批次｜Agent 数据库异常映射与 Message 事务回滚
+
+## 1. 本批任务目标
+
+继续后端优先的数据库异常恢复闭环，解决 Agent Session/Message/Run 相关路由在 SQLAlchemy 数据库异常时落入通用 500 的问题。
+
+本批验收范围：
+
+```text
+Session 创建
+Session 列表
+Session 详情读取
+Agent Message 创建
+Agent Run/Job/事件相关路由的统一异常映射
+事务已经开始后数据库异常的 rollback
+主应用 HTTP 响应的 request_id 与驱动错误脱敏
+```
+
+## 2. 实际发现
+
+`backend/app/api/routers/agent.py` 的 `_error()` 已经定义了：
+
+```text
+SQLAlchemyError -> HTTP 503
+code = AGENT_EVENT_LEDGER_UNAVAILABLE
+```
+
+但大量路由只捕获：
+
+```python
+except AgentRuntimeError as exc:
+```
+
+因此数据库连接、查询或提交异常会直接逃逸到全局异常处理器，无法由 Agent 路由明确表达“事件账本/运行状态暂时不可用”的可重试语义。
+
+`post_agent_message()` 还有一个更关键的事务边界：
+
+```text
+user message、Run、run_started、progress、execution job 在一次事务中构建
+transaction_started 标记用于失败时 rollback
+```
+
+原异常元组没有包含 SQLAlchemyError，数据库异常发生在事务已经开始后时，既有 rollback 分支不会被触发。
+
+## 3. 实际修改文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_database_errors.py
+```
+
+本批未修改数据库 schema、小说正文或前端代码。
+
+## 4. 实现内容
+
+### 4.1 Agent 路由统一捕获 SQLAlchemyError
+
+将 `agent.py` 中 AgentRuntimeError 路由异常捕获统一扩展为：
+
+```python
+except (AgentRuntimeError, SQLAlchemyError) as exc:
+```
+
+覆盖范围包括：
+
+```text
+Session create/list/archive/detail
+Project entity summary
+Run claim/release/commands/pause/resume/cancel/plan/state/activity
+Artifact、quality、lineage、rewrite、diff 读取
+Approval 与 dead-letter 读取/处理
+其它 AgentRuntimeError 路由
+```
+
+这样所有这些路径都会经过既有 `_error(SQLAlchemyError)`，公开：
+
+```text
+HTTP 503
+AGENT_EVENT_LEDGER_UNAVAILABLE
+Agent 事件账本暂时不可用，请稍后重连。
+```
+
+全局主应用中间件继续追加非空 `request_id` 和 `X-Request-ID` 响应头，底层数据库驱动文本不会进入 body。
+
+### 4.2 Message 事务 rollback 修复
+
+`post_agent_message()` 的异常元组从：
+
+```python
+(AgentRuntimeError, UnknownAgentTool, ProjectScopeViolation, ContextRefValidationError)
+```
+
+扩展为：
+
+```python
+(AgentRuntimeError, UnknownAgentTool, ProjectScopeViolation, ContextRefValidationError, SQLAlchemyError)
+```
+
+因此当 `transaction_started=True` 后任意 SQLAlchemyError 发生：
+
+```text
+await session.rollback()
+再通过 _error 返回 503
+finally 仍执行 cancel event 清理
+```
+
+## 5. 新增测试与覆盖
+
+新增文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_database_errors.py
+```
+
+### 5.1 Session/Message 直接路由异常矩阵
+
+通过异常注入覆盖：
+
+```text
+create_agent_session -> SQLAlchemyError -> 503
+list_agent_sessions -> SQLAlchemyError -> 503
+get_agent_session -> SQLAlchemyError -> 503
+post_agent_message -> SQLAlchemyError -> 503
+```
+
+每个断言：
+
+```text
+status_code == 503
+code == AGENT_EVENT_LEDGER_UNAVAILABLE
+驱动错误文本不出现在 detail
+```
+
+### 5.2 Message rollback 证据
+
+构造一个已经通过 Session 与 ContextRef 阶段的调用，再令 `append_message()` 抛出：
+
+```text
+SQLAlchemyError("database driver password=must-not-leak")
+```
+
+断言：
+
+```text
+HTTPException.status_code == 503
+code == AGENT_EVENT_LEDGER_UNAVAILABLE
+session.rollback 被 await 一次
+数据库敏感文本不出现在公开 detail
+```
+
+### 5.3 主应用 HTTP 脱敏与 request_id
+
+通过真实 `app.main:app` 发起：
+
+```text
+POST /api/agent/sessions
+```
+
+注入数据库异常后断言：
+
+```text
+HTTP 503
+detail.code = AGENT_EVENT_LEDGER_UNAVAILABLE
+detail.request_id 为非空字符串
+X-Request-ID == detail.request_id
+password=must-not-leak 不出现在响应
+```
+
+## 6. 实际验证结果
+
+数据库异常专项及代表性 Agent 路由：
+
+```text
+.\.venv\Scripts\python.exe -m pytest -q app/api/routers/test_agent_database_errors.py app/api/routers/test_agent_runtime_route.py app/api/routers/test_agent_stream_http.py
+结果：36 passed in 17.46s
+```
+
+认证、事件账本、SSE 与数据库异常联合回归：
+
+```text
+此前 CARD-011 认证联合回归：71 passed in 43.97s
+本批代表性路由回归：36 passed in 17.46s
+```
+
+后端全量回归：
+
+```text
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+结果：1425 passed in 295.90s（4分55秒）
+```
+
+## 7. 受控反向验证
+
+临时将 `post_agent_message()` 的异常元组移除 `SQLAlchemyError`：
+
+```python
+except (AgentRuntimeError, UnknownAgentTool, ProjectScopeViolation, ContextRefValidationError) as exc:
+```
+
+运行：
+
+```text
+.\.venv\Scripts\python.exe -m pytest -q app/api/routers/test_agent_database_errors.py -k rolls_back_started_transaction
+```
+
+实际结果：
+
+```text
+退出码 1
+test_agent_message_database_failure_rolls_back_started_transaction 失败
+```
+
+随后 finally 自动恢复源码。
+
+反向验证日志：
+
+```text
+D:\小说写作\xuanqiong-wenshu\logs\live\agent-message-rollback-reverse-validation.log
+```
+
+恢复后专项：
+
+```text
+36 passed in 17.46s
+```
+
+该结果证明事务 rollback 分支是由测试实际约束的，而不是仅写入文档。
+
+## 8. 当前状态
+
+```text
+Agent Session 创建数据库异常 -> 503：completed
+Agent Session 列表数据库异常 -> 503：completed
+Agent Session 详情数据库异常 -> 503：completed
+Agent Message 创建数据库异常 -> 503：completed
+Agent 全路由 SQLAlchemyError 统一映射：completed
+Message transaction_started 后 rollback：completed
+request_id / X-Request-ID：tested
+数据库驱动敏感文本脱敏：tested
+SSE preflight/stream_error 普通列表语义：已有 CARD-006/CARD-009
+真实 MySQL 网络断开：pending
+数据库连接池耗尽/恢复：pending
+Job Worker 未启动时的用户可见状态投影：pending
+CARD-012：completed
+```
+
+## 9. 提交、推送与回退
+
+```text
+上一回退点：9b94bf0
+本批代码与测试提交：d54c5a4（fix: normalize agent database failures，已推送）
+本批文档记录提交：本次提交后回填
+推送分支：origin/codex/bohrium-integration-20260831
+数据库：未修改
+小说正文：未修改
+反向验证日志：未纳入 Git
+```
+
+## 10. 下一任务目标
+
+继续后端优先，进入 Agent Job/Worker 未启动与执行状态恢复矩阵：
+
+```text
+1. 真实 HTTP 创建 Message 后，在 inline=false 且 Worker 不运行时验证 Run/Job 状态、事件和前端可见提示。
+2. 验证 Job queued/running/stale/dead_letter 的列表接口与状态投影一致性。
+3. 验证 Worker 重新启动后 queued/stale Job 的 claim/recovery、事件顺序和终态回放。
+4. 固定 Job 数据库异常、租约过期和重复 claim 的公开错误语义。
+5. 后端 Worker 状态闭环完成后继续前端真实浏览器验收：左栏折叠/压缩、中央聊天宽度、右侧日志独立滚动。
+```
