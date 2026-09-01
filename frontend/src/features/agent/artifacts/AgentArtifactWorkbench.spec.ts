@@ -36,8 +36,12 @@ const mountWorkbench = (overrides: Record<string, unknown> = {}) =>
       qualityBlockersLoadingByArtifact: {},
       qualityBlockersLoading: false,
       rewriteInstructions: {},
+      rewriteLoading: {},
+      rewriteErrors: {},
       artifactDiff: null,
       artifactDiffLoading: false,
+      artifactDiffArtifactId: null,
+      artifactDiffError: '',
       hasSelectedProject: true,
       canPreview: true,
       canDiff: true,
@@ -149,6 +153,14 @@ describe('AgentArtifactWorkbench', () => {
     const loading = mountWorkbench({ qualityBlockersLoadingByArtifact: { [artifact.id]: true } })
     const button = loading.findAll('button').find((node) => node.text() === '定位质量阻断')
     expect(button?.attributes('disabled')).toBeDefined()
+  })
+  it('显示 rewrite 错误态并在 diff 请求中显示当前 Artifact 归属', () => {
+    const rewrite = mountWorkbench({ rewriteErrors: { [artifact.id]: 'rewrite failed' } })
+    expect(rewrite.get('[data-testid="agent-rewrite-error"]').text()).toContain('rewrite failed')
+
+    const diff = mountWorkbench({ artifactDiffArtifactId: artifact.id, artifactDiffError: 'diff failed' })
+    expect(diff.get('[data-testid="agent-artifact-diff-error"]').text()).toContain('diff failed')
+    expect(diff.get('[data-testid="agent-artifact-diff-artifact"]').text()).toContain('artifact')
   })
   it('旧 Artifact 没有关系化事实时保留 metadata fallback', () => {
     const legacy = {

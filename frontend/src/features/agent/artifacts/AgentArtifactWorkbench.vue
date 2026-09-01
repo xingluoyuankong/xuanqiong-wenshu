@@ -17,6 +17,8 @@
         {{ retestSide(artifact, 'after')?.blocker_count ?? '?' }}；阻断变化
         {{ retestDelta(artifact)?.blocker_count ?? '?' }}
       </small>
+      <small v-if="rewriteLoading[artifact.id]" class="muted" data-testid="agent-rewrite-loading">正在读取结构化修复指令…</small>
+      <small v-else-if="rewriteErrors[artifact.id]" class="error" data-testid="agent-rewrite-error">修复指令读取失败：{{ rewriteErrors[artifact.id] }}</small>
       <div
         v-if="rewriteInstructions[artifact.id]?.length"
         class="rewrite-instruction-list"
@@ -60,7 +62,7 @@
       <XqButton v-if="canPreview" variant="secondary" size="sm" @click="emit('preview', artifact)">查看候选正文</XqButton>
       <XqButton v-if="artifacts.length > 1 && canDiff" variant="secondary" size="sm" @click="emit('compare', artifact)">查看与其他候选差异</XqButton>
       <XqButton v-if="canLocateBlockers" variant="secondary" size="sm" :disabled="qualityBlockersLoadingByArtifact[artifact.id]" @click="emit('locate-blockers', artifact)">定位质量阻断</XqButton>
-      <XqButton v-if="canLoadRewriteInstructions" variant="secondary" size="sm" data-testid="agent-load-rewrite-instructions-button" @click="emit('load-rewrite-instructions', artifact)">读取修复指令</XqButton>
+      <XqButton v-if="canLoadRewriteInstructions" variant="secondary" size="sm" data-testid="agent-load-rewrite-instructions-button" :disabled="rewriteLoading[artifact.id]" @click="emit('load-rewrite-instructions', artifact)">读取修复指令</XqButton>
       <XqButton v-if="canCompareWithVersion && hasVersionTarget(artifact)" variant="secondary" size="sm" data-testid="agent-compare-version-button" @click="emit('compare-with-version', artifact)">与正式版本比较</XqButton>
       <XqButton
         v-if="hasSelectedProject"
@@ -79,8 +81,10 @@
       </div>
     </article>
 
-    <XqPanel v-if="artifactDiffLoading || artifactDiff" title="候选差异" data-testid="agent-artifact-diff">
+    <XqPanel v-if="artifactDiffLoading || artifactDiffError || artifactDiff" title="候选差异" data-testid="agent-artifact-diff">
+      <small v-if="artifactDiffArtifactId" class="muted" data-testid="agent-artifact-diff-artifact">当前 Artifact：{{ artifactDiffArtifactId.slice(0, 8) }}</small>
       <p v-if="artifactDiffLoading" class="muted">正在计算差异…</p>
+      <p v-else-if="artifactDiffError" class="error" data-testid="agent-artifact-diff-error">候选差异读取失败：{{ artifactDiffError }}</p>
       <template v-else-if="artifactDiff">
         <small v-if="isVersionDiff(artifactDiff)" data-testid="agent-artifact-version-diff-summary">对照第 {{ artifactDiff.chapter_number }} 章正式版本 {{ artifactDiff.version_id }}</small>
         <small>
@@ -143,8 +147,12 @@ const props = withDefaults(defineProps<{
   qualityBlockersLoadingByArtifact: Record<string, boolean>
   qualityBlockersLoading: boolean
   rewriteInstructions: Record<string, AgentRewriteInstruction[]>
+  rewriteLoading: Record<string, boolean>
+  rewriteErrors: Record<string, string>
   artifactDiff: AgentArtifactDiff | null
   artifactDiffLoading: boolean
+  artifactDiffArtifactId: string | null
+  artifactDiffError: string
   hasSelectedProject: boolean
   canPreview: boolean
   canDiff: boolean
@@ -167,8 +175,12 @@ const props = withDefaults(defineProps<{
   qualityBlockersLoadingByArtifact: () => ({}),
   qualityBlockersLoading: false,
   rewriteInstructions: () => ({}),
+  rewriteLoading: () => ({}),
+  rewriteErrors: () => ({}),
   artifactDiff: null,
   artifactDiffLoading: false,
+  artifactDiffArtifactId: null,
+  artifactDiffError: '',
   hasSelectedProject: false,
   canPreview: false,
   canDiff: false,

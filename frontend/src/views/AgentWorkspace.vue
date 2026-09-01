@@ -170,6 +170,9 @@
           :planning="planning"
           :streaming-assistant="streamingAssistant"
           :artifact-preview="artifactPreview"
+          :artifact-preview-loading="artifactPreviewLoading"
+          :artifact-preview-artifact-id="artifactPreviewArtifactId"
+          :artifact-preview-error="artifactPreviewError"
           :public-work-summary="publicWorkSummary"
           :work-trace-deltas="runProjection.activeWorkTraceDeltas.value"
           :latest-work-trace="runProjection.latestWorkTrace.value"
@@ -302,7 +305,11 @@
               :quality-blockers-loading-by-artifact="qualityBlockersLoadingByArtifact"
               :quality-blockers-loading="qualityBlockersLoading"
               :rewrite-instructions="rewriteInstructions"
+              :rewrite-loading="rewriteLoading"
+              :rewrite-errors="rewriteErrors"
               :artifact-diff="artifactDiff"
+              :artifact-diff-artifact-id="artifactDiffArtifactId"
+              :artifact-diff-error="artifactDiffError"
               :artifact-diff-loading="artifactDiffLoading"
               :selected-quality-finding-ids="manualQualityFindingContextRefs.map((item) => item.findingId).filter((findingId): findingId is string => Boolean(findingId))"
               :has-selected-project="Boolean(selectedProject)"
@@ -641,10 +648,16 @@ const {
   qualityBlockersLoadingByArtifact,
   qualityBlockersLoading,
   rewriteInstructions,
+  rewriteErrors,
   rewriteLoading,
   artifactDiff,
   artifactDiffLoading,
+  artifactDiffArtifactId,
+  artifactDiffError,
   artifactPreview,
+  artifactPreviewLoading,
+  artifactPreviewArtifactId,
+  artifactPreviewError,
   artifactQualityFacts,
   artifactQualityFactsLoading,
   artifactQualityFactsErrors,

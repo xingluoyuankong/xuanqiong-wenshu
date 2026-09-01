@@ -18,9 +18,14 @@
     <article v-if="streamingAssistant" class="message message-assistant message-streaming" data-testid="agent-streaming-message">
       <b>Agent</b><p>{{ streamingAssistant }}</p>
     </article>
-    <XqPanel v-if="artifactPreview" title="候选正文预览" data-testid="agent-artifact-preview">
-      <pre class="artifact-preview">{{ artifactPreview }}</pre>
-      <XqButton variant="secondary" size="sm" @click="emit('close-artifact-preview')">关闭预览</XqButton>
+    <XqPanel v-if="artifactPreviewLoading || artifactPreviewError || artifactPreview" title="候选正文预览" data-testid="agent-artifact-preview">
+      <small v-if="artifactPreviewArtifactId" class="muted" data-testid="agent-artifact-preview-artifact">当前 Artifact：{{ artifactPreviewArtifactId.slice(0, 8) }}</small>
+      <p v-if="artifactPreviewLoading" class="muted" data-testid="agent-artifact-preview-loading">正在读取候选正文…</p>
+      <p v-else-if="artifactPreviewError" class="error" data-testid="agent-artifact-preview-error">候选正文读取失败：{{ artifactPreviewError }}</p>
+      <template v-else>
+        <pre class="artifact-preview">{{ artifactPreview }}</pre>
+        <XqButton variant="secondary" size="sm" @click="emit('close-artifact-preview')">关闭预览</XqButton>
+      </template>
     </XqPanel>
     <AgentPublicWorkSummary
       v-if="publicWorkSummary"
@@ -64,6 +69,9 @@ const props = withDefaults(
     planning?: boolean
     streamingAssistant?: string
     artifactPreview?: string
+    artifactPreviewLoading?: boolean
+    artifactPreviewArtifactId?: string | null
+    artifactPreviewError?: string
     publicWorkSummary?: AgentPublicWorkSummaryType | null
     workTraceDeltas?: AgentWorkTraceDelta[]
     latestWorkTrace?: AgentWorkTraceDelta | null
@@ -85,6 +93,9 @@ const props = withDefaults(
     planning: false,
     streamingAssistant: '',
     artifactPreview: '',
+    artifactPreviewLoading: false,
+    artifactPreviewArtifactId: null,
+    artifactPreviewError: '',
     publicWorkSummary: null,
     workTraceDeltas: () => [],
     latestWorkTrace: null,

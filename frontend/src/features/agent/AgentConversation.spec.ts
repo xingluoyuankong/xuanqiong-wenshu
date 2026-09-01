@@ -80,4 +80,17 @@ describe('AgentConversation', () => {
     await wrapper.get('[data-testid="agent-artifact-preview"] button').trigger('click')
     expect(wrapper.emitted('close-artifact-preview')).toHaveLength(1)
   })
+
+  it('显示候选预览的读取中与失败状态', () => {
+    const loading = mount(AgentConversation, {
+      props: { messages: [], goal: '', artifactPreviewLoading: true },
+    })
+    expect(loading.get('[data-testid="agent-artifact-preview-loading"]').text()).toContain('正在读取候选正文')
+
+    const failed = mount(AgentConversation, {
+      props: { messages: [], goal: '', artifactPreviewError: 'preview failed' },
+    })
+    expect(failed.get('[data-testid="agent-artifact-preview-error"]').text()).toContain('preview failed')
+  })
+
 })

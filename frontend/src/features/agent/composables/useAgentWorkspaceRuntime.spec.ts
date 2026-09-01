@@ -278,6 +278,51 @@ describe('useAgentWorkspaceRuntime', () => {
     expect(runtime.qualityBlockersLoading.value).toBe(false)
     expect(runtime.qualityBlockersLoadingByArtifact.value[artifactB.id]).toBe(false)
   })
+  it('clears previous rewrite instructions and attributes failure to the current Artifact', async () => {
+    const { runtime } = createRuntime()
+    const artifactB = { ...artifact, id: 'artifact-runtime-b' }
+    const oldInstruction = { artifact_id: artifact.id, code: 'REWRITE-001', instruction: '旧修复指令' }
+    listArtifactRewriteInstructionsMock.mockResolvedValueOnce([oldInstruction]).mockRejectedValueOnce(new Error('rewrite failed'))
+
+    await runtime.loadRewriteInstructions(artifact)
+    await runtime.loadRewriteInstructions(artifactB)
+
+    expect(runtime.rewriteInstructions.value[artifact.id]).toEqual([oldInstruction])
+    expect(runtime.rewriteInstructions.value[artifactB.id]).toEqual([])
+    expect(runtime.rewriteErrors.value[artifactB.id]).toBe('rewrite failed')
+    expect(runtime.rewriteLoading.value[artifactB.id]).toBe(false)
+  })
+
+  it('clears previous diff and attributes failure to the current Artifact', async () => {
+    const { runtime, projection } = createRuntime()
+    const artifactB = { ...artifact, id: 'artifact-runtime-b' }
+    projection.setRunArtifacts(run.id, [artifact, artifactB] as never)
+    const oldDiff = { artifact_id: artifact.id, against_artifact_id: artifactB.id, summary: {}, diff_lines: [] }
+    const currentDiff = { artifact_id: artifactB.id, against_artifact_id: artifact.id, summary: {}, diff_lines: [] }
+    getArtifactDiffMock.mockResolvedValueOnce(oldDiff).mockRejectedValueOnce(new Error('diff failed'))
+
+    await runtime.compareArtifact(artifact)
+    await runtime.compareArtifact(artifactB)
+
+    expect(runtime.artifactDiff.value).toBeNull()
+    expect(runtime.artifactDiffArtifactId.value).toBe(artifactB.id)
+    expect(runtime.artifactDiffError.value).toBe('diff failed')
+    expect(runtime.artifactDiffLoading.value).toBe(false)
+    expect(currentDiff).toBeDefined()
+  })
+
+  it('clears previous preview and exposes preview failure state', async () => {
+    const { runtime } = createRuntime()
+    getArtifactContentMock.mockResolvedValueOnce('旧候选正文').mockRejectedValueOnce(new Error('preview failed'))
+
+    await runtime.previewArtifact(artifact)
+    await runtime.previewArtifact({ ...artifact, id: 'artifact-runtime-b' })
+
+    expect(runtime.artifactPreview.value).toBe('')
+    expect(runtime.artifactPreviewArtifactId.value).toBe('artifact-runtime-b')
+    expect(runtime.artifactPreviewError.value).toBe('preview failed')
+    expect(runtime.artifactPreviewLoading.value).toBe(false)
+  })
   it('keeps an Artifact fail-closed while authority facts are loading or unavailable', async () => {
     const { runtime } = createRuntime()
     const promise = runtime.loadArtifactFacts(artifact)
