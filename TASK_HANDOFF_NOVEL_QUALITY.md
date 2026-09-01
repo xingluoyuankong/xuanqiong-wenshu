@@ -75297,3 +75297,252 @@ Artifact facts：CARD-041/042/043/044 已完成状态隔离和错误可观测性
 7. 保持左侧紧凑、中间聊天最大、右侧日志独立滚动；
 8. 按相同流程完成失败驱动、反向验证、完整门禁、代码提交推送和文档提交推送。
 ```
+
+# CARD-045：rewrite / diff / preview Artifact action 状态统一
+
+## 本批目标
+
+将质量阻断之外的三个 Artifact 操作纳入同一套可观测状态：结构化 rewrite 指令、候选差异/正式版本差异、候选正文预览。修复旧操作结果残留、错误不可见、重复点击和旧请求 finally 不能正确收敛的问题。
+
+## 失败驱动验证
+
+先增加以下测试，在旧实现上运行：
+
+```text
+clears previous rewrite instructions and attributes failure to the current Artifact
+clears previous diff and attributes failure to the current Artifact
+clears previous preview and exposes preview failure state
+显示 rewrite 错误态并在 diff 请求中显示当前 Artifact 归属
+显示候选预览的读取中与失败状态
+```
+
+旧实现结果：
+
+```text
+3 个 runtime action 测试失败；
+1 个 Workbench action 测试失败；
+1 个 AgentConversation preview 状态测试失败。
+```
+
+旧实现问题：
+
+```text
+rewrite 失败没有 error map，旧指令没有被清空；
+diff 失败仍保留上一个 Artifact 的差异对象；
+preview 失败仍保留上一个候选正文；
+三个操作都没有统一的 loading/error/归属状态。
+```
+
+## 实际代码变更
+
+### 1. Runtime 统一 action 请求代次
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.ts
+```
+
+新增：
+
+```text
+ArtifactAction = rewrite | diff | preview
+artifactActionGeneration
+artifactActionKey(action, run_id, artifact_id)
+```
+
+所有 action 请求都先建立：
+
+```text
+Artifact view generation
+Action generation
+```
+
+结果写回必须同时匹配两者；请求结束时只清理自己的 action generation，不提前关闭后来请求的 loading。
+
+### 2. rewrite 指令状态
+
+新增：
+
+```text
+rewriteErrors: Record<string, string>
+```
+
+行为：
+
+```text
+请求开始：清空当前 Artifact 的旧指令和旧错误，设置 loading；
+成功：写入当前 Artifact 指令并清空 error；
+失败：清空旧指令，写入当前 Artifact error；
+结束：按当前 Artifact action generation 关闭 loading；
+```
+
+### 3. diff 状态
+
+新增：
+
+```text
+artifactDiffArtifactId
+artifactDiffError
+```
+
+候选差异和正式版本差异都采用相同规则：
+
+```text
+开始新比较时清空旧 diff；
+面板显示当前 Artifact 短 ID；
+失败时显示错误并保持 diff=null；
+旧比较结束不会覆盖新比较结果或 loading。
+```
+
+### 4. preview 状态
+
+新增：
+
+```text
+artifactPreviewLoading
+artifactPreviewArtifactId
+artifactPreviewError
+```
+
+候选正文预览现在区分：
+
+```text
+读取中
+读取失败
+已载入正文
+```
+
+读取新候选前先清空旧正文，失败时不再显示上一个候选内容。
+
+### 5. Workbench 与聊天界面状态传递
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\artifacts\AgentArtifactWorkbench.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+新增界面行为：
+
+```text
+rewrite 错误单独显示；
+diff 面板显示当前 Artifact 和错误；
+preview 面板显示当前 Artifact、读取中和失败状态；
+rewrite 按钮读取中禁用；
+已有质量阻断按钮继续按 Artifact 局部禁用；
+聊天正文仍不混入运行日志。
+```
+
+## 回归验证
+
+定向 action 集合：
+
+```text
+5 passed
+```
+
+Runtime composable 全集合：
+
+```text
+19 passed
+```
+
+AgentConversation 全集合：
+
+```text
+3 passed
+```
+
+反向验证：
+
+```text
+临时将 preview 错误写回改为空字符串；
+重新执行 preview 失败测试；
+```
+
+结果：
+
+```text
+1 failed
+REVERSE_EXIT=1
+```
+
+恢复真实实现后：
+
+```text
+1 passed
+RESTORED_EXIT=0
+```
+
+## 全量前端门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+```
+
+```text
+通过
+```
+
+```powershell
+npm run test:run
+```
+
+```text
+74 files passed
+450 tests passed
+```
+
+```powershell
+npm run build-only
+```
+
+```text
+4905 modules transformed
+built successfully
+```
+
+## 提交、推送与回退
+
+```text
+上一回退点：ad9ad28 docs: record card 044 blocker action state
+本批代码提交：beca5fe fix: unify artifact action state
+代码已推送：origin/codex/bohrium-integration-20260831
+本批文档提交：待本次文档提交生成
+```
+
+回退方式：
+
+```text
+git revert beca5fe
+```
+
+该回退保留 CARD-044 的质量阻断状态改进，不影响 CARD-040 的聊天主区布局和 CARD-041 至 CARD-043 的 facts 隔离。
+
+## 当前累计状态
+
+```text
+后端：CARD-038、CARD-039 已完成，最近后端全量 1438 passed；
+前端布局：CARD-040 已缩小左右 rail、扩大中央聊天、保持右侧日志独立滚动；
+Artifact 状态：CARD-041 reset 隔离、CARD-042 重复 facts 隔离、CARD-043 lineage 隔离、CARD-044 blocker action、CARD-045 rewrite/diff/preview 已完成；
+前端最近全量：74 files / 450 tests passed；
+服务：127.0.0.1:5174/agent 和 127.0.0.1:8013/health 均为 HTTP 200。
+```
+
+## 下一任务：CARD-046（旧 Run 批量 Artifact facts 生命周期隔离）
+
+继续处理已确认的剩余边界：
+
+```text
+1. loadArtifactsWithFacts() 记录批次级 run_id 和 selectedRunId 上下文；
+2. Run-A 返回晚于 Run-B 时，不启动 Run-A 的全局 facts loading/error 写回；
+3. 旧 Run 批量请求不得在切换后留下 loading=true 或无效 error map；
+4. facts map 按 run_id + artifact_id 维护生命周期，避免 Artifact ID 复用错挂；
+5. 先写旧实现失败测试，再实现、反向验证并执行前端全量门禁；
+6. 完成代码独立提交推送，再完成文档独立提交推送；
+7. 保持聊天主区优先、左侧分组紧凑和右侧日志独立滚动。
+```
