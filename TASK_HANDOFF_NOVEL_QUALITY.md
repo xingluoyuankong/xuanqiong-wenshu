@@ -71979,3 +71979,77 @@ npm run build-only：通过，13.84s
 ```text
 继续补真实浏览器会话下的多视口截图与 Inspector 展开交互；自动浏览器控制运行时的本机路径问题仍不作为视觉完成证据。
 ```
+---
+
+# CARD-024 — 880px 以下 Agent 聊天整行优先（2026-09-01）
+
+## 实际问题
+
+此前 `880px` 以下虽然把活动区移出三栏，但仍保留固定宽度侧栏列，导致平板宽度的中央聊天仍被侧栏挤压。对 Agent 工作台而言，聊天是唯一主阅读面，平板应先保证聊天宽度，再把项目侧栏和运行活动区顺序放到下方。
+
+## 修改
+
+```text
+frontend/src/features/agent/AgentWorkspaceShell.vue
+frontend/src/features/agent/AgentWorkspaceShell.spec.ts
+```
+
+`max-width: 880px` 现在采用单列垂直顺序：
+
+```text
+第 1 行：agent-main 聊天主区
+第 2 行：agent-sidebar 项目与内容
+第 3 行：agent-activity 运行日志与检查器
+```
+
+具体规则：
+
+```css
+.agent-layout { grid-template-columns: minmax(0, 1fr); }
+.agent-main { grid-row: 1; }
+.agent-sidebar { position: static; grid-row: 2; max-height: none; overflow: visible; }
+.agent-activity { position: static; grid-row: 3; max-height: none; overflow: visible; }
+```
+
+`650px` 手机单列规则继续保留，三栏不使用 sticky 和固定高度。
+
+## 验证
+
+```text
+AgentWorkspaceShell 定向：6 passed
+反向：临时恢复 880px 双列布局后聊天优先 contract 失败（exit 1）；恢复后通过
+npm run type-check：通过
+npm run test:run：74 files / 431 tests passed，85.54s
+npm run build-only：通过，18.03s
+```
+
+反向验证具体捕获：
+
+```text
+移除 880px 的 grid-template-columns: minmax(0, 1fr) 后，contract 找不到聊天优先规则并失败。
+```
+
+## 状态边界
+
+```text
+880px 以下聊天整行优先：completed and contract-tested
+650px 手机单列：completed and contract-tested
+左栏/活动区在平板取消 sticky：completed and contract-tested
+真实浏览器截图：仍 pending；浏览器控制内核未提供可复核会话，不伪造视觉证据
+```
+
+## 回退
+
+```text
+上一回退点：07e28b5 docs: record card 023 collapse session sidebar
+代码回退点：eeaf13e fix: prioritize agent chat on tablet widths（已推送）
+本批文档提交：docs: record card 024 tablet chat priority
+```
+
+## 下一任务
+
+```text
+1. 在可用真实浏览器会话中补 1280/1024/768/390 截图和 computed layout。
+2. 点击展开 Inspector，验证右栏日志、运行控制、Provider 信息和步骤内容仍可操作。
+3. 检查平板单列顺序在真实页面中是否符合聊天→项目→活动区预期。
+```
