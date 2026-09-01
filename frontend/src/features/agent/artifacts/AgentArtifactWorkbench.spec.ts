@@ -162,6 +162,22 @@ describe('AgentArtifactWorkbench', () => {
     expect(diff.get('[data-testid="agent-artifact-diff-error"]').text()).toContain('diff failed')
     expect(diff.get('[data-testid="agent-artifact-diff-artifact"]').text()).toContain('artifact')
   })
+
+  it('按 Run 和 Artifact 组合键读取同名 Artifact 的质量事实', () => {
+    const artifactB = { ...artifact, run_id: 'run-2' }
+    const wrapper = mountWorkbench({
+      artifacts: [artifact, artifactB],
+      qualityFacts: {
+        [`${artifact.run_id}:${artifact.id}`]: { artifact_id: artifact.id, quality_result: null, gate: { decision: 'passed' }, findings: [] } as any,
+        [`${artifactB.run_id}:${artifactB.id}`]: { artifact_id: artifactB.id, quality_result: null, gate: { decision: 'blocked' }, findings: [{ severity: 'blocker', code: 'B-001' }] } as any,
+      },
+    })
+    const cards = wrapper.findAll('.approval-card')
+    expect(cards[0].text()).toContain('质量：passed')
+    expect(cards[1].text()).toContain('质量：blocked')
+    expect(cards[1].text()).toContain('阻断项 1')
+  })
+
   it('旧 Artifact 没有关系化事实时保留 metadata fallback', () => {
     const legacy = {
       ...artifact,

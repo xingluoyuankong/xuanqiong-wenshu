@@ -65,6 +65,8 @@ const run = {
   project_id: 'project', status: 'running', current_phase: 'planning', current_step: 0,
   progress: 10, created_at: '2026-08-30T00:00:00Z',
 }
+const artifactStateKey = (item: { run_id: string; id: string }) => `${item.run_id}:${item.id}`
+
 const artifact = {
   id: 'artifact-runtime', run_id: run.id, correlation_id: 'corr', user_id: 1,
   project_id: 'project', kind: 'chapter_candidate', uri: 'agent-artifact://runtime',
@@ -140,8 +142,25 @@ describe('useAgentWorkspaceRuntime', () => {
 
     expect(getArtifactQualityMock).not.toHaveBeenCalledWith(artifact.id)
     expect(getArtifactLineageMock).not.toHaveBeenCalledWith(artifact.id)
-    expect(runtime.artifactQualityFactsLoading.value).not.toHaveProperty(artifact.id)
-    expect(runtime.artifactQualityFactsErrors.value).not.toHaveProperty(artifact.id)
+    expect(runtime.artifactQualityFactsLoading.value).not.toHaveProperty(artifactStateKey(artifact))
+    expect(runtime.artifactQualityFactsErrors.value).not.toHaveProperty(artifactStateKey(artifact))
+  })
+
+
+  it('keeps facts for two Runs when their Artifact IDs are reused', async () => {
+    const { runtime, projection } = createRuntime()
+    const runB = { ...run, id: 'runtime-run-b' }
+    const artifactB = { ...artifact, run_id: runB.id }
+    const factsA = { artifact_id: artifact.id, quality_result: null, findings: [], gate: { decision: 'passed', blocker_count: 0 } } as any
+    const factsB = { artifact_id: artifactB.id, quality_result: null, findings: [], gate: { decision: 'waived', blocker_count: 0 } } as any
+    getArtifactQualityMock.mockResolvedValueOnce(factsA).mockResolvedValueOnce(factsB)
+
+    await runtime.loadArtifactFacts(artifact)
+    projection.upsertRun(runB, { select: true })
+    await runtime.loadArtifactFacts(artifactB)
+
+    expect(runtime.artifactQualityFacts.value[artifactStateKey(artifact)]).toEqual(factsA)
+    expect(runtime.artifactQualityFacts.value[artifactStateKey(artifactB)]).toEqual(factsB)
   })
 
   it('loads stage-separated provenance into the selected Run without event-stream inference', async () => {
@@ -194,7 +213,7 @@ describe('useAgentWorkspaceRuntime', () => {
     getArtifactLineageMock.mockReturnValueOnce(lineagePromise)
 
     const request = runtime.loadArtifactFacts(artifact)
-    expect(runtime.artifactQualityFactsLoading.value[artifact.id]).toBe(true)
+    expect(runtime.artifactQualityFactsLoading.value[artifactStateKey(artifact)]).toBe(true)
 
     projection.reset()
     runtime.resetArtifactFacts()
@@ -240,9 +259,9 @@ describe('useAgentWorkspaceRuntime', () => {
     resolveFirst(firstFacts)
     await firstRequest
 
-    expect(runtime.artifactQualityFacts.value[artifact.id]).toEqual(secondFacts)
-    expect(runtime.artifactQualityFactsErrors.value[artifact.id]).toBe('')
-    expect(runtime.artifactQualityFactsLoading.value[artifact.id]).toBe(false)
+    expect(runtime.artifactQualityFacts.value[artifactStateKey(artifact)]).toEqual(secondFacts)
+    expect(runtime.artifactQualityFactsErrors.value[artifactStateKey(artifact)]).toBe('')
+    expect(runtime.artifactQualityFactsLoading.value[artifactStateKey(artifact)]).toBe(false)
   })
 
   it('does not let an older failed quality request poison a newer success', async () => {
@@ -258,21 +277,21 @@ describe('useAgentWorkspaceRuntime', () => {
     rejectFirst(new Error('older quality request failed'))
     await expect(firstRequest).rejects.toThrow('older quality request failed')
 
-    expect(runtime.artifactQualityFacts.value[artifact.id]).toEqual(secondFacts)
-    expect(runtime.artifactQualityFactsErrors.value[artifact.id]).toBe('')
-    expect(runtime.artifactQualityFactsLoading.value[artifact.id]).toBe(false)
+    expect(runtime.artifactQualityFacts.value[artifactStateKey(artifact)]).toEqual(secondFacts)
+    expect(runtime.artifactQualityFactsErrors.value[artifactStateKey(artifact)]).toBe('')
+    expect(runtime.artifactQualityFactsLoading.value[artifactStateKey(artifact)]).toBe(false)
   })
   it('exposes lineage loading and errors independently from quality facts', async () => {
     const { runtime } = createRuntime()
     getArtifactLineageMock.mockRejectedValueOnce(new Error('lineage transport failed'))
 
     const request = runtime.loadArtifactFacts(artifact)
-    expect(runtime.artifactLineageFactsLoading.value[artifact.id]).toBe(true)
+    expect(runtime.artifactLineageFactsLoading.value[artifactStateKey(artifact)]).toBe(true)
     await expect(request).resolves.toBeUndefined()
 
-    expect(runtime.artifactQualityFacts.value[artifact.id]).toBeDefined()
-    expect(runtime.artifactLineageFactsLoading.value[artifact.id]).toBe(false)
-    expect(runtime.artifactLineageFactsErrors.value[artifact.id]).toBe('lineage transport failed')
+    expect(runtime.artifactQualityFacts.value[artifactStateKey(artifact)]).toBeDefined()
+    expect(runtime.artifactLineageFactsLoading.value[artifactStateKey(artifact)]).toBe(false)
+    expect(runtime.artifactLineageFactsErrors.value[artifactStateKey(artifact)]).toBe('lineage transport failed')
   })
 
   it('still loads quality blockers when optional lineage facts fail', async () => {
@@ -349,14 +368,14 @@ describe('useAgentWorkspaceRuntime', () => {
   it('keeps an Artifact fail-closed while authority facts are loading or unavailable', async () => {
     const { runtime } = createRuntime()
     const promise = runtime.loadArtifactFacts(artifact)
-    expect(runtime.artifactQualityFactsLoading.value[artifact.id]).toBe(true)
+    expect(runtime.artifactQualityFactsLoading.value[artifactStateKey(artifact)]).toBe(true)
     await promise
-    expect(runtime.artifactQualityFactsLoading.value[artifact.id]).toBe(false)
-    expect(runtime.artifactQualityFacts.value[artifact.id].gate?.decision).toBe('passed')
+    expect(runtime.artifactQualityFactsLoading.value[artifactStateKey(artifact)]).toBe(false)
+    expect(runtime.artifactQualityFacts.value[artifactStateKey(artifact)].gate?.decision).toBe('passed')
 
     getArtifactQualityMock.mockRejectedValueOnce(new Error('quality transport failed'))
     await expect(runtime.loadArtifactFacts(artifact)).rejects.toThrow('quality transport failed')
-    expect(runtime.artifactQualityFactsErrors.value[artifact.id]).toBe('quality transport failed')
+    expect(runtime.artifactQualityFactsErrors.value[artifactStateKey(artifact)]).toBe('quality transport failed')
   })
 
   it('repairs an observed sequence gap from durable after_sequence activity without changing the selected Run', async () => {

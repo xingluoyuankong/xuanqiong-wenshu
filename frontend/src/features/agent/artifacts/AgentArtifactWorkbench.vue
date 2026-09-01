@@ -9,8 +9,8 @@
       <b>{{ artifact.kind }}</b>
       <span>{{ String(artifact.metadata_json.status || 'candidate') }}</span>
       <small>质量：{{ qualityStatus(artifact) }} · 阻断项 {{ qualityBlockerCount(artifact) }}</small>
-      <small v-if="qualityFactsLoading[artifact.id]" class="muted" data-testid="agent-artifact-quality-loading">正在读取权威质量门禁…</small>
-      <small v-else-if="qualityFactsErrors[artifact.id]" class="error" data-testid="agent-artifact-quality-error">质量门禁读取失败：{{ qualityFactsErrors[artifact.id] }}</small>
+      <small v-if="artifactQualityFactsLoading(artifact)" class="muted" data-testid="agent-artifact-quality-loading">正在读取权威质量门禁…</small>
+      <small v-else-if="artifactQualityFactsError(artifact)" class="error" data-testid="agent-artifact-quality-error">质量门禁读取失败：{{ artifactQualityFactsError(artifact) }}</small>
       <small v-else-if="!artifactQuality(artifact)" class="muted" data-testid="agent-artifact-quality-pending">尚未取得权威质量门禁，暂不能接受候选。</small>
       <small v-if="retestSide(artifact, 'before') && retestSide(artifact, 'after')">
         复测：before {{ retestSide(artifact, 'before')?.blocker_count ?? '?' }} → after
@@ -52,8 +52,8 @@
         </article>
       </div>
       <small v-if="qualityCodes(artifact).length">问题码：{{ qualityCodes(artifact).join('、') }}</small>
-      <small v-if="lineageFactsLoading[artifact.id]" class="muted" data-testid="agent-artifact-lineage-loading">正在读取谱系事实…</small>
-      <small v-else-if="lineageFactsErrors[artifact.id]" class="error" data-testid="agent-artifact-lineage-error">谱系事实读取失败：{{ lineageFactsErrors[artifact.id] }}</small>
+      <small v-if="artifactLineageFactsLoading(artifact)" class="muted" data-testid="agent-artifact-lineage-loading">正在读取谱系事实…</small>
+      <small v-else-if="artifactLineageFactsError(artifact)" class="error" data-testid="agent-artifact-lineage-error">谱系事实读取失败：{{ artifactLineageFactsError(artifact) }}</small>
       <small v-else-if="!artifactLineage(artifact)" class="muted" data-testid="agent-artifact-lineage-pending">谱系事实尚未载入。</small>
       <small v-else data-testid="agent-artifact-lineage-summary">
         谱系边：{{ lineageEdgeCount(artifact) }}（上游 {{ artifactLineage(artifact)?.upstream_edges.length || 0 }} / 下游 {{ artifactLineage(artifact)?.downstream_edges.length || 0 }}）
@@ -202,8 +202,19 @@ const emit = defineEmits<{
   'toggle-quality-finding': [finding: AgentQualityFinding]
 }>()
 
-const artifactQuality = (artifact: AgentArtifact) => props.qualityFacts[artifact.id] || null
-const artifactLineage = (artifact: AgentArtifact) => props.lineageFacts[artifact.id] || null
+const artifactStateKey = (artifact: AgentArtifact) => `${artifact.run_id}:${artifact.id}`
+const artifactQuality = (artifact: AgentArtifact) =>
+  props.qualityFacts[artifactStateKey(artifact)] || props.qualityFacts[artifact.id] || null
+const artifactQualityFactsLoading = (artifact: AgentArtifact) =>
+  props.qualityFactsLoading[artifactStateKey(artifact)] ?? props.qualityFactsLoading[artifact.id] ?? false
+const artifactQualityFactsError = (artifact: AgentArtifact) =>
+  props.qualityFactsErrors[artifactStateKey(artifact)] || props.qualityFactsErrors[artifact.id] || ''
+const artifactLineage = (artifact: AgentArtifact) =>
+  props.lineageFacts[artifactStateKey(artifact)] || props.lineageFacts[artifact.id] || null
+const artifactLineageFactsLoading = (artifact: AgentArtifact) =>
+  props.lineageFactsLoading[artifactStateKey(artifact)] ?? props.lineageFactsLoading[artifact.id] ?? false
+const artifactLineageFactsError = (artifact: AgentArtifact) =>
+  props.lineageFactsErrors[artifactStateKey(artifact)] || props.lineageFactsErrors[artifact.id] || ''
 const qualityGateDecision = (artifact: AgentArtifact) => artifactQuality(artifact)?.gate?.decision || null
 const hasVersionTarget = (artifact: AgentArtifact) => {
   const metadata = artifact.metadata_json || {}
@@ -212,13 +223,13 @@ const hasVersionTarget = (artifact: AgentArtifact) => {
   return Number.isInteger(chapter) && chapter >= 1 && Number.isInteger(versionId) && versionId >= 1
 }
 const canAcceptArtifact = (artifact: AgentArtifact) => {
-  if (props.qualityFactsLoading[artifact.id] || props.qualityFactsErrors[artifact.id]) return false
+  if (artifactQualityFactsLoading(artifact) || artifactQualityFactsError(artifact)) return false
   const decision = qualityGateDecision(artifact)
   return decision === 'passed' || decision === 'waived'
 }
 const acceptDisabledReason = (artifact: AgentArtifact) => {
-  if (props.qualityFactsLoading[artifact.id]) return '正在读取权威质量门禁'
-  if (props.qualityFactsErrors[artifact.id]) return '质量门禁读取失败，暂不能接受候选'
+  if (artifactQualityFactsLoading(artifact)) return '正在读取权威质量门禁'
+  if (artifactQualityFactsError(artifact)) return '质量门禁读取失败，暂不能接受候选'
   const decision = qualityGateDecision(artifact)
   if (!decision) return '尚未取得权威质量门禁，暂不能接受候选'
   return decision === 'blocked' ? '质量门禁存在阻断项' : ''

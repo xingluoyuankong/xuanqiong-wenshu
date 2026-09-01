@@ -75,7 +75,8 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
   let lifecycleGeneration = 0
   let artifactViewGeneration = 0
   const artifactFactsRequestGeneration = new Map<string, number>()
-  const artifactFactsRequestKey = (artifact: AgentArtifact) => `${artifact.run_id}:${artifact.id}`
+  const artifactStateKey = (artifact: AgentArtifact) => `${artifact.run_id}:${artifact.id}`
+  const artifactFactsRequestKey = artifactStateKey
   const qualityBlockerRequestGeneration = new Map<string, number>()
   const qualityBlockerRequestKey = (artifact: AgentArtifact) => `quality-blockers:${artifact.run_id}:${artifact.id}`
   type ArtifactViewRequest = { generation: number; runId: string; artifactId: string }
@@ -265,6 +266,7 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
   }
 
   const loadArtifactFacts = async (artifact: AgentArtifact, generation = artifactViewGeneration) => {
+    const stateKey = artifactStateKey(artifact)
     const requestKey = artifactFactsRequestKey(artifact)
     const requestGeneration = (artifactFactsRequestGeneration.get(requestKey) || 0) + 1
     artifactFactsRequestGeneration.set(requestKey, requestGeneration)
@@ -275,42 +277,42 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     let qualityTaskIndex: number | null = null
     if (typeof AgentAPI.getArtifactQuality === 'function') {
       qualityTaskIndex = tasks.length
-      artifactQualityFactsLoading.value = { ...artifactQualityFactsLoading.value, [artifact.id]: true }
-      artifactQualityFactsErrors.value = { ...artifactQualityFactsErrors.value, [artifact.id]: '' }
+      artifactQualityFactsLoading.value = { ...artifactQualityFactsLoading.value, [stateKey]: true }
+      artifactQualityFactsErrors.value = { ...artifactQualityFactsErrors.value, [stateKey]: '' }
       tasks.push(AgentAPI.getArtifactQuality(artifact.id).then((value) => {
         if (isCurrent()) {
-          artifactQualityFacts.value = { ...artifactQualityFacts.value, [artifact.id]: value }
-          artifactQualityFactsErrors.value = { ...artifactQualityFactsErrors.value, [artifact.id]: '' }
+          artifactQualityFacts.value = { ...artifactQualityFacts.value, [stateKey]: value }
+          artifactQualityFactsErrors.value = { ...artifactQualityFactsErrors.value, [stateKey]: '' }
         }
       }).catch((error) => {
         if (isCurrent()) {
           artifactQualityFactsErrors.value = {
             ...artifactQualityFactsErrors.value,
-            [artifact.id]: error instanceof Error ? error.message : '请求失败',
+            [stateKey]: error instanceof Error ? error.message : '请求失败',
           }
         }
         throw error
       }).finally(() => {
-        if (isCurrent()) artifactQualityFactsLoading.value = { ...artifactQualityFactsLoading.value, [artifact.id]: false }
+        if (isCurrent()) artifactQualityFactsLoading.value = { ...artifactQualityFactsLoading.value, [stateKey]: false }
       }))
     }
     if (typeof AgentAPI.getArtifactLineage === 'function') {
-      artifactLineageFactsLoading.value = { ...artifactLineageFactsLoading.value, [artifact.id]: true }
-      artifactLineageFactsErrors.value = { ...artifactLineageFactsErrors.value, [artifact.id]: '' }
+      artifactLineageFactsLoading.value = { ...artifactLineageFactsLoading.value, [stateKey]: true }
+      artifactLineageFactsErrors.value = { ...artifactLineageFactsErrors.value, [stateKey]: '' }
       tasks.push(AgentAPI.getArtifactLineage(artifact.id).then((value) => {
         if (isCurrent()) {
-          artifactLineageFacts.value = { ...artifactLineageFacts.value, [artifact.id]: value }
-          artifactLineageFactsErrors.value = { ...artifactLineageFactsErrors.value, [artifact.id]: '' }
+          artifactLineageFacts.value = { ...artifactLineageFacts.value, [stateKey]: value }
+          artifactLineageFactsErrors.value = { ...artifactLineageFactsErrors.value, [stateKey]: '' }
         }
       }).catch((error) => {
         if (isCurrent()) {
           artifactLineageFactsErrors.value = {
             ...artifactLineageFactsErrors.value,
-            [artifact.id]: error instanceof Error ? error.message : '请求失败',
+            [stateKey]: error instanceof Error ? error.message : '请求失败',
           }
         }
       }).finally(() => {
-        if (isCurrent()) artifactLineageFactsLoading.value = { ...artifactLineageFactsLoading.value, [artifact.id]: false }
+        if (isCurrent()) artifactLineageFactsLoading.value = { ...artifactLineageFactsLoading.value, [stateKey]: false }
       }))
     }
     const results = await Promise.allSettled(tasks)
