@@ -263,6 +263,21 @@ describe('useAgentWorkspaceRuntime', () => {
     expect(listArtifactQualityBlockersMock).toHaveBeenCalledWith(artifact.id)
     expect(runtime.qualityBlockers.value).toEqual([blocker])
   })
+  it('clears the previous blocker result and attributes failures to the current Artifact', async () => {
+    const { runtime } = createRuntime()
+    const artifactB = { ...artifact, id: 'artifact-runtime-b' }
+    const oldBlocker = { artifact_id: artifact.id, code: 'A-QUALITY-001', message: '旧阻断' } as AgentQualityBlocker
+    listArtifactQualityBlockersMock.mockResolvedValueOnce([oldBlocker]).mockRejectedValueOnce(new Error('current blocker failed'))
+
+    await runtime.loadQualityBlockers(artifact)
+    await runtime.loadQualityBlockers(artifactB)
+
+    expect(runtime.qualityBlockers.value).toEqual([])
+    expect(runtime.qualityBlockersArtifactId.value).toBe(artifactB.id)
+    expect(runtime.qualityBlockersError.value).toBe('current blocker failed')
+    expect(runtime.qualityBlockersLoading.value).toBe(false)
+    expect(runtime.qualityBlockersLoadingByArtifact.value[artifactB.id]).toBe(false)
+  })
   it('keeps an Artifact fail-closed while authority facts are loading or unavailable', async () => {
     const { runtime } = createRuntime()
     const promise = runtime.loadArtifactFacts(artifact)

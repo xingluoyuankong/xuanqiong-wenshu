@@ -59,7 +59,7 @@
       <small>{{ artifact.uri }}</small>
       <XqButton v-if="canPreview" variant="secondary" size="sm" @click="emit('preview', artifact)">查看候选正文</XqButton>
       <XqButton v-if="artifacts.length > 1 && canDiff" variant="secondary" size="sm" @click="emit('compare', artifact)">查看与其他候选差异</XqButton>
-      <XqButton v-if="canLocateBlockers" variant="secondary" size="sm" @click="emit('locate-blockers', artifact)">定位质量阻断</XqButton>
+      <XqButton v-if="canLocateBlockers" variant="secondary" size="sm" :disabled="qualityBlockersLoadingByArtifact[artifact.id]" @click="emit('locate-blockers', artifact)">定位质量阻断</XqButton>
       <XqButton v-if="canLoadRewriteInstructions" variant="secondary" size="sm" data-testid="agent-load-rewrite-instructions-button" @click="emit('load-rewrite-instructions', artifact)">读取修复指令</XqButton>
       <XqButton v-if="canCompareWithVersion && hasVersionTarget(artifact)" variant="secondary" size="sm" data-testid="agent-compare-version-button" @click="emit('compare-with-version', artifact)">与正式版本比较</XqButton>
       <XqButton
@@ -97,8 +97,10 @@
       </template>
     </XqPanel>
 
-    <XqPanel v-if="qualityBlockersLoading || qualityBlockers.length" title="质量阻断定位" data-testid="agent-quality-blockers">
+    <XqPanel v-if="qualityBlockersLoading || qualityBlockersError || qualityBlockers.length" title="质量阻断定位" data-testid="agent-quality-blockers">
+      <small v-if="qualityBlockersArtifactId" class="muted" data-testid="agent-quality-blockers-artifact">当前 Artifact：{{ qualityBlockersArtifactId.slice(0, 8) }}</small>
       <p v-if="qualityBlockersLoading" class="muted">正在读取质量阻断…</p>
+      <p v-else-if="qualityBlockersError" class="error" data-testid="agent-quality-blockers-error">质量阻断读取失败：{{ qualityBlockersError }}</p>
       <ol v-else class="blocker-list">
         <li v-for="item in qualityBlockers" :key="item.artifact_id + item.code + String(item.start_char)">
           <strong>{{ item.code }}</strong>
@@ -136,6 +138,9 @@ const props = withDefaults(defineProps<{
   lineageFactsLoading: Record<string, boolean>
   lineageFactsErrors: Record<string, string>
   qualityBlockers: AgentQualityBlocker[]
+  qualityBlockersArtifactId: string | null
+  qualityBlockersError: string
+  qualityBlockersLoadingByArtifact: Record<string, boolean>
   qualityBlockersLoading: boolean
   rewriteInstructions: Record<string, AgentRewriteInstruction[]>
   artifactDiff: AgentArtifactDiff | null
@@ -157,6 +162,9 @@ const props = withDefaults(defineProps<{
   lineageFactsLoading: () => ({}),
   lineageFactsErrors: () => ({}),
   qualityBlockers: () => [],
+  qualityBlockersArtifactId: null,
+  qualityBlockersError: '',
+  qualityBlockersLoadingByArtifact: () => ({}),
   qualityBlockersLoading: false,
   rewriteInstructions: () => ({}),
   artifactDiff: null,

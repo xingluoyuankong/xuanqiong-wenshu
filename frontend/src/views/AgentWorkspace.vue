@@ -297,6 +297,9 @@
               :lineage-facts-loading="artifactLineageFactsLoading"
               :lineage-facts-errors="artifactLineageFactsErrors"
               :quality-blockers="qualityBlockers"
+              :quality-blockers-artifact-id="qualityBlockersArtifactId"
+              :quality-blockers-error="qualityBlockersError"
+              :quality-blockers-loading-by-artifact="qualityBlockersLoadingByArtifact"
               :quality-blockers-loading="qualityBlockersLoading"
               :rewrite-instructions="rewriteInstructions"
               :artifact-diff="artifactDiff"
@@ -633,6 +636,9 @@ const workspaceRuntime = useAgentWorkspaceRuntime({
 })
 const {
   qualityBlockers,
+  qualityBlockersArtifactId,
+  qualityBlockersError,
+  qualityBlockersLoadingByArtifact,
   qualityBlockersLoading,
   rewriteInstructions,
   rewriteLoading,

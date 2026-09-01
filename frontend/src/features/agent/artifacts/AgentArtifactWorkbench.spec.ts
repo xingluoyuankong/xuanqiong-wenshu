@@ -31,6 +31,9 @@ const mountWorkbench = (overrides: Record<string, unknown> = {}) =>
       lineageFactsLoading: {},
       lineageFactsErrors: {},
       qualityBlockers: [],
+      qualityBlockersArtifactId: null,
+      qualityBlockersError: '',
+      qualityBlockersLoadingByArtifact: {},
       qualityBlockersLoading: false,
       rewriteInstructions: {},
       artifactDiff: null,
@@ -135,6 +138,17 @@ describe('AgentArtifactWorkbench', () => {
 
     const failed = mountWorkbench({ lineageFactsErrors: { [artifact.id]: 'lineage failed' } })
     expect(failed.get('[data-testid="agent-artifact-lineage-error"]').text()).toContain('lineage failed')
+  })
+  it('显示当前 Artifact 的阻断错误，并禁用其重复读取按钮', () => {
+    const failed = mountWorkbench({
+      qualityBlockersArtifactId: artifact.id,
+      qualityBlockersError: '当前 Artifact 读取失败',
+    })
+    expect(failed.get('[data-testid="agent-quality-blockers"]').text()).toContain('当前 Artifact 读取失败')
+
+    const loading = mountWorkbench({ qualityBlockersLoadingByArtifact: { [artifact.id]: true } })
+    const button = loading.findAll('button').find((node) => node.text() === '定位质量阻断')
+    expect(button?.attributes('disabled')).toBeDefined()
   })
   it('旧 Artifact 没有关系化事实时保留 metadata fallback', () => {
     const legacy = {

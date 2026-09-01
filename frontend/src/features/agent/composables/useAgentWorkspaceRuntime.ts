@@ -48,6 +48,9 @@ export interface AgentWorkspaceRuntimeOptions {
 export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) {
   const qualityBlockers = ref<AgentQualityBlocker[]>([])
   const qualityBlockersLoading = ref(false)
+  const qualityBlockersArtifactId = ref<string | null>(null)
+  const qualityBlockersError = ref('')
+  const qualityBlockersLoadingByArtifact = ref<Record<string, boolean>>({})
   const rewriteInstructions = ref<Record<string, AgentRewriteInstruction[]>>({})
   const rewriteLoading = ref<Record<string, boolean>>({})
   const artifactDiff = ref<AgentArtifactDiff | null>(null)
@@ -67,6 +70,8 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
   let artifactViewGeneration = 0
   const artifactFactsRequestGeneration = new Map<string, number>()
   const artifactFactsRequestKey = (artifact: AgentArtifact) => `${artifact.run_id}:${artifact.id}`
+  const qualityBlockerRequestGeneration = new Map<string, number>()
+  const qualityBlockerRequestKey = (artifact: AgentArtifact) => `quality-blockers:${artifact.run_id}:${artifact.id}`
   type ArtifactViewRequest = { generation: number; runId: string; artifactId: string }
   const beginArtifactViewRequest = (artifact: AgentArtifact): ArtifactViewRequest => ({
     generation: ++artifactViewGeneration,
@@ -308,17 +313,34 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
   const loadQualityBlockers = async (artifact: AgentArtifact) => {
     if (typeof AgentAPI.listArtifactQualityBlockers !== 'function') return
     const request = beginArtifactViewRequest(artifact)
+    const requestKey = qualityBlockerRequestKey(artifact)
+    const requestGeneration = (qualityBlockerRequestGeneration.get(requestKey) || 0) + 1
+    qualityBlockerRequestGeneration.set(requestKey, requestGeneration)
+    const isCurrentBlockerRequest = () =>
+      isCurrentArtifactRequest(request) &&
+      qualityBlockerRequestGeneration.get(requestKey) === requestGeneration
+    qualityBlockersArtifactId.value = artifact.id
+    qualityBlockersError.value = ''
+    qualityBlockers.value = []
     qualityBlockersLoading.value = true
+    qualityBlockersLoadingByArtifact.value = { ...qualityBlockersLoadingByArtifact.value, [artifact.id]: true }
     try {
       await loadArtifactFacts(artifact, request.generation)
       const blockers = await AgentAPI.listArtifactQualityBlockers(artifact.id)
-      if (!isCurrentArtifactRequest(request)) return
+      if (!isCurrentBlockerRequest()) return
       qualityBlockers.value = blockers
       options.addActivity('质量阻断定位已载入', `${blockers.length} 项阻断`)
     } catch (error) {
-      if (isCurrentArtifactRequest(request)) options.addActivity('质量阻断读取失败', error instanceof Error ? error.message : '无法读取质量阻断')
+      if (isCurrentBlockerRequest()) {
+        qualityBlockers.value = []
+        qualityBlockersError.value = error instanceof Error ? error.message : '无法读取质量阻断'
+        options.addActivity('质量阻断读取失败', qualityBlockersError.value)
+      }
     } finally {
-      if (isCurrentArtifactRequest(request)) qualityBlockersLoading.value = false
+      if (qualityBlockerRequestGeneration.get(requestKey) === requestGeneration) {
+        qualityBlockersLoadingByArtifact.value = { ...qualityBlockersLoadingByArtifact.value, [artifact.id]: false }
+      }
+      if (isCurrentBlockerRequest()) qualityBlockersLoading.value = false
     }
   }
 
@@ -498,6 +520,9 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
   const resetArtifactFacts = () => {
     artifactViewGeneration += 1
     qualityBlockers.value = []
+    qualityBlockersArtifactId.value = null
+    qualityBlockersError.value = ''
+    qualityBlockersLoadingByArtifact.value = {}
     qualityBlockersLoading.value = false
     rewriteInstructions.value = {}
     rewriteLoading.value = {}
@@ -505,6 +530,7 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     artifactDiffLoading.value = false
     artifactPreview.value = ''
     artifactFactsRequestGeneration.clear()
+    qualityBlockerRequestGeneration.clear()
     artifactQualityFacts.value = {}
     artifactQualityFactsLoading.value = {}
     artifactQualityFactsErrors.value = {}
@@ -517,6 +543,9 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
 
   return {
     qualityBlockers,
+    qualityBlockersArtifactId,
+    qualityBlockersError,
+    qualityBlockersLoadingByArtifact,
     qualityBlockersLoading,
     rewriteInstructions,
     rewriteLoading,
