@@ -69754,3 +69754,253 @@ CARD-010：completed
 4. 补充 SQLite 连接中断、事务回滚后重试和 SSE stream_error 的真实 HTTP 复测。
 5. 认证矩阵完成后再继续前端真实浏览器布局验收：左侧标签密度、中央聊天宽度、右侧日志独立滚动。
 ```
+
+
+---
+
+# 2026-09-01｜CARD-011 后端子批次｜Agent 真实 JWT 认证失败矩阵与 Bearer 方案硬化
+
+## 1. 本批任务目标
+
+把 Agent 相关接口的认证失败语义从“已有少量函数级断言”提升为真实 HTTP 路由矩阵，覆盖：
+
+```text
+无 Authorization
+非 Bearer scheme
+格式错误 token
+过期 token
+错误签名 token
+缺失 sub claim
+不存在的 sub 用户
+已停用用户
+有效 Bearer JWT
+```
+
+并在四类 Agent 入口上验证一致行为：
+
+```text
+GET /api/agent/tools
+GET /api/agent/sessions/{session_id}/runs/{run_id}/events
+GET /api/agent/runs/{run_id}/activity
+GET /api/agent/sessions/{session_id}/runs/{run_id}/stream
+```
+
+## 2. 本批实际发现
+
+原认证依赖已经校验 JWT 签名、`exp`、`sub` 和用户 active 状态，但存在一个边界缺口：
+
+```text
+get_current_user 接收到 HTTPBearer 没有解析出的凭据时，无法区分“完全缺失 Authorization”和“Authorization 使用了错误 scheme”。
+同时，直接传入 HTTPAuthorizationCredentials 时没有显式确认 credentials.scheme 是 Bearer。
+```
+
+对于 Agent 运行工作区，认证错误需要可诊断且稳定：前端、SSE 和普通 API 都应看到同一类 401 challenge，而不是让错误 scheme 混入默认用户回退或形成非结构化分支。
+
+## 3. 实际修改文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\core\dependencies.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_auth_http.py
+```
+
+本批未修改数据库 schema、小说正文、Agent 事件模型和前端代码。
+
+## 4. 实现内容
+
+### 4.1 Authorization scheme 显式硬化
+
+`get_current_user()` 新增 `Header` 注入：
+
+```python
+authorization: str | None = Header(default=None)
+```
+
+当请求携带 Authorization，但 HTTPBearer 没有得到 Bearer credentials 时：
+
+```text
+HTTP 401
+错误码：INVALID_AUTH_SCHEME
+提示：Authorization 必须使用 Bearer 方案
+WWW-Authenticate: Bearer
+```
+
+当依赖函数直接收到 credentials 对象时，也显式校验：
+
+```text
+credentials.scheme.strip().lower() == "bearer"
+```
+
+非 Bearer 对象同样返回 `INVALID_AUTH_SCHEME`。
+
+### 4.2 保留原有错误分类
+
+其余认证分类继续保持：
+
+```text
+缺少认证（生产模式）：AUTH_REQUIRED
+JWT 解析/签名/过期/sub 无效：INVALID_ACCESS_TOKEN
+sub 对应用户不存在或已停用：USER_NOT_ACTIVE
+```
+
+所有错误分支都返回：
+
+```text
+status_code = 401
+WWW-Authenticate = Bearer
+```
+
+### 4.3 直接调用兼容性修复
+
+现有函数级测试直接执行：
+
+```python
+await get_current_user(task_session, None)
+```
+
+FastAPI 参数默认值在这种调用方式下是 `Header(None)` 对象，而不是字符串。本批使用 `isinstance(authorization, str)` 后再读取 header，保留真实依赖注入和函数级测试两条路径。
+
+## 5. 新增真实 HTTP 矩阵
+
+新增文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_auth_http.py
+```
+
+测试在独立 FastAPI + Agent Router 上覆盖真实 HTTP 请求，并把环境切换为 production，避免开发模式默认用户回退掩盖认证问题。
+
+测试用户：
+
+```text
+active user：id=1951
+inactive user：id=1952
+```
+
+构造的 token：
+
+```text
+valid
+expired
+wrong signature
+missing subject
+nonexistent subject
+inactive subject
+```
+
+矩阵同时覆盖：
+
+```text
+无 header -> AUTH_REQUIRED
+Basic scheme -> INVALID_AUTH_SCHEME
+Bearer not-a-jwt -> INVALID_ACCESS_TOKEN
+过期 Bearer -> INVALID_ACCESS_TOKEN
+错误签名 -> INVALID_ACCESS_TOKEN
+缺失 sub -> INVALID_ACCESS_TOKEN
+不存在用户 -> USER_NOT_ACTIVE
+停用用户 -> USER_NOT_ACTIVE
+有效 Bearer -> 200
+```
+
+每个失败案例都在四个 Agent 入口重复验证：
+
+```text
+HTTP 401
+detail.code 正确
+WWW-Authenticate: Bearer
+```
+
+## 6. 实际验证结果
+
+认证矩阵、依赖函数和登录路由：
+
+```text
+.\.venv\Scripts\python.exe -m pytest -q app/api/routers/test_agent_auth_http.py app/core/test_dependencies_auth.py app/api/routers/test_auth_route.py
+结果：8 passed in 7.73s
+```
+
+认证与 Agent 可靠性联合回归：
+
+```text
+.\.venv\Scripts\python.exe -m pytest -q app/api/routers/test_agent_auth_http.py app/core/test_dependencies_auth.py app/api/routers/test_auth_route.py app/api/routers/test_agent_stream_http.py app/api/routers/test_agent_stream_resume.py app/api/routers/test_agent_stream_pagination.py app/agent/test_asgi_worker_event_replay.py app/services/test_agent_runtime.py
+结果：71 passed in 43.97s
+```
+
+后端全量回归：
+
+```text
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+结果：1422 passed in 316.75s（5分16秒）
+```
+
+## 7. 受控反向验证
+
+临时将非 Bearer header 的分流条件：
+
+```python
+if isinstance(authorization, str) and authorization.strip() and credentials is None:
+```
+
+替换为始终不进入该分支的条件，再运行：
+
+```text
+.\.venv\Scripts\python.exe -m pytest -q app/api/routers/test_agent_auth_http.py -k authentication_failure_matrix
+```
+
+实际结果：
+
+```text
+退出码 1
+新增 test_agent_http_authentication_failure_matrix_is_structured_and_consistent 失败
+```
+
+随后 finally 自动恢复源码。
+
+反向验证日志：
+
+```text
+D:\小说写作\xuanqiong-wenshu\logs\live\agent-auth-scheme-reverse-validation.log
+```
+
+该验证证明删除 scheme 分流会被四入口 HTTP 矩阵捕获。
+
+## 8. 当前状态
+
+```text
+生产模式缺少 token -> AUTH_REQUIRED：completed
+错误 scheme -> INVALID_AUTH_SCHEME：completed
+错误签名/过期/缺失 sub -> INVALID_ACCESS_TOKEN：completed
+不存在/停用用户 -> USER_NOT_ACTIVE：completed
+所有认证失败均带 WWW-Authenticate: Bearer：tested
+tools/events/activity/stream 四入口矩阵：completed
+函数级 get_current_user 兼容性：tested
+真实登录签发 JWT：已有 CARD-010 端到端覆盖
+跨用户 session/run 作用域：已有 CARD-009/CARD-010 覆盖
+多节点 JWT secret 一致性：已有 CARD-010 覆盖
+真实 JWT 黑名单/撤销机制：pending（当前系统暂无撤销表）
+CARD-011：completed
+```
+
+## 9. 提交、推送与回退
+
+```text
+上一回退点：12bcecf
+本批代码与测试提交：2d11243（fix: harden agent bearer authentication，已推送）
+本批文档记录提交：本次提交后回填
+推送分支：origin/codex/bohrium-integration-20260831
+数据库：未修改
+小说正文：未修改
+反向验证日志：未纳入 Git
+```
+
+## 10. 下一任务目标
+
+继续后端优先的数据异常与事务恢复矩阵：
+
+```text
+1. 对 events/activity/list session/message 的数据库连接失败、事务回滚后重试和错误码进行真实 HTTP 验证。
+2. 固定 SSE preflight 失败、运行中 stream_error、普通列表 503 三者的 request_id、retryable、cursor 语义。
+3. 验证 Agent message 在 inline=false、Worker 未启动、Job 重试和超时情况下的可恢复状态投影。
+4. 补充 JWT token 过期窗口、服务重启后的 secret 一致性和未来撤销机制设计。
+5. 后端异常矩阵完成后，继续前端真实浏览器尺寸验收：左侧标签页压缩、中央聊天区域扩大、右侧日志独立滚动与可折叠。
+```
