@@ -71941,3 +71941,41 @@ npm run build-only：通过，17.48s
 ```text
 继续补真实浏览器会话下的 Agent 多视口截图和 Inspector 展开交互；浏览器控制内核的本机路径错误仍未伪造为视觉验收完成。
 ```
+---
+
+# CARD-023 — Agent 左栏会话管理默认收纳（2026-09-01）
+
+## 优化
+
+左栏此前“项目与内容”和“会话”均默认展开。项目上下文保留展开；会话切换、新建、归档改为按需展开，工具和数据区继续默认折叠，使中央聊天成为更明确的首屏主阅读区。
+
+## 修改
+
+```text
+frontend/src/views/AgentWorkspace.vue
+frontend/src/views/AgentWorkspace.spec.ts
+```
+
+## 验证
+
+```text
+工作台定向：14 passed
+反向：临时恢复会话区 open 后默认折叠断言失败（exit 1）；恢复后通过
+npm run type-check：通过
+npm run test:run：74 files / 431 tests passed，74.51s
+npm run build-only：通过，13.84s
+```
+
+## 回退
+
+```text
+上一回退点：50e411b docs: record card 022 bounded log rendering
+代码回退点：182fb7f fix: collapse agent session sidebar by default（已推送）
+本批文档提交：docs: record card 023 collapse session sidebar
+```
+
+## 下一任务
+
+```text
+继续补真实浏览器会话下的多视口截图与 Inspector 展开交互；自动浏览器控制运行时的本机路径问题仍不作为视觉完成证据。
+```
