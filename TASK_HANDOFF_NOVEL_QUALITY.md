@@ -73321,3 +73321,84 @@ CARD-034：继续真实浏览器多视口验收；
 检查 Inspector 内 Attempt 摘要在长 Run 下的密度、折行和历史 Run 切换；
 同时审查 Provider Attempt snapshot 的前端空态和 API schema 漂移边界。
 ```
+
+---
+
+# CARD-034 — Inspector 长 Provider 摘要窄栏折行保护（2026-09-01）
+
+## 问题
+
+CARD-033 把三阶段 Provider Attempt 摘要接入右栏 Inspector，但 `run-summary` 的值列没有 `min-width: 0` 或任意位置折行保护。长模型引用、多个 Attempt 摘要或失败类别在窄活动区可能撑宽列，重新挤压右栏布局并间接压缩聊天主读区。
+
+## 修改
+
+```text
+frontend/src/features/agent/run/AgentRunInspector.vue
+frontend/src/features/agent/run/AgentRunInspector.spec.ts
+```
+
+实现：
+
+```text
+.run-summary dd
+- min-width: 0
+- overflow-wrap: anywhere
+
+.provider-model-ref
+.provider-attempt-summary
+- display: block
+- 小字号、次级颜色、短行高
+- 与主 Provider 状态分行显示
+```
+
+规划、回复、候选正文的 Attempt 摘要从同一行追加改为辅助块级信息；候选模型引用也单独换行。运行详情继续默认收纳，聊天区不接收日志或 Inspector 内容。
+
+## 回归与反向验证
+
+Inspector 测试增加 SFC 原始 CSS 契约：
+
+```text
+.run-summary dd { min-width: 0;
+.provider-model-ref, .provider-attempt-summary { display: block;
+```
+
+临时移除以上规则后测试失败：
+
+```text
+REVERSE_EXIT=1
+```
+
+恢复源码后：
+
+```text
+RESTORED_EXIT=0
+```
+
+## 验证
+
+```text
+npm run type-check：通过
+npm run test:run：74 files / 433 tests passed，139.77s
+npm run build-only：通过，19.60s
+```
+
+## 视觉边界
+
+此批由 DOM、CSS 契约和生产构建验证；Tabbit 通道此前无法产出可复核真实截图，因此 1280/1024/768/390 多视口的最终视觉验收仍 pending，不用单元测试代替。
+
+## 回退
+
+```text
+上一回退点：95e33d9 docs: record card 033 provider attempt inspector
+本批代码提交：f08cb1d fix: compact agent inspector attempt summaries（已推送）
+本批文档提交：待本次文档提交生成
+回退方式：git revert f08cb1d
+```
+
+## 下一任务
+
+```text
+CARD-035：继续恢复真实浏览器验收；
+检查 Provider Attempt snapshot 在空态、历史 Run 切换、API 缺字段时的前端降级；
+并继续审查 Agent 左栏和中间聊天的可读性边界。
+```
