@@ -69056,3 +69056,196 @@ await engine.dispose()
 ```
 
 下一步继续后端：认证失败矩阵、数据库连接失败矩阵、真实 ASGI 多 Worker replay；前端 `stream_error` 投影放在这些后端事实源验收之后。
+
+
+---
+
+# 2026-09-01｜CARD-008 前端子批次｜Agent stream_error 事件分流与运行日志投影
+
+## 1. 本批任务目标
+
+将后端 Agent SSE 已落地的 `event: stream_error` 契约接入前端，明确区分：
+
+```text
+持久化 AgentEvent：可以进入 Run projection、助手增量正文、WorkTrace 和 sequence gap repair
+stream_error：仅表示当前事件账本轮询/读取异常；不是 AgentEvent，不属于小说正文，也不属于可持久化 sequence
+```
+
+本批核心验收是：事件账本临时异常时，用户在右侧运行日志看到可理解的重连状态；事件不会被当作聊天正文、工具轨迹或普通 Run 事件处理，durable cursor 也不会被异常事件污染。
+
+## 2. 实际修改文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\utils\sseStream.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\utils\sseStream.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentRunStream.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentRunStream.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.spec.ts
+```
+
+## 3. 实现内容
+
+### 3.1 SSE 传输层：新增专用 `StreamErrorData` 与回调
+
+`frontend/src/utils/sseStream.ts` 新增：
+
+```ts
+export interface StreamErrorData {
+  run_id?: string
+  error_code: string
+  retryable: boolean
+  cursor?: number
+}
+
+SSECallback.onStreamError?: (data: StreamErrorData) => void
+```
+
+解析到 `event: stream_error` 时：
+
+```text
+读取公开 payload：run_id / error_code / retryable / cursor
+调用 onStreamError
+不调用 onRawEvent
+不调用 status_update / complete 回调
+不调用 terminal 判定
+不接受或推进 SSE Last-Event-ID
+不改变已有 durable sequence 游标
+```
+
+这与后端实现对应：后端 `stream_error` 不带 `id:`，并明确要求客户端从最后一个已确认事件续接。
+
+### 3.2 Agent Run 生命周期：控制事件与领域事件分离
+
+`useAgentRunStream.ts` 的 `AgentRunStreamStartOptions` 新增 `onStreamError`，由底层 SSE 专用回调直接转发。
+
+```text
+onEvent：只接收 durable AgentEvent
+onStreamError：只接收非持久化的账本读取异常控制事件
+```
+
+因此 `stream_error` 不会被强制转换为 `AgentEvent`，不会进入 `toSafeAgentEvent`、`reduceAgentRunEvent`、assistant delta 文本或 WorkTrace reducer。
+
+### 3.3 工作区投影：仅在右侧运行日志显示状态
+
+`useAgentWorkspaceRuntime.ts` 接到 `onStreamError` 后只写入活动日志：
+
+```text
+标题：事件账本暂时不可用
+详细信息：错误码；连接将从最近确认位置重试；将从游标 N 重连
+活动 key：stream-error:<runId>:<errorCode>:<cursor>
+eventType：stream_error
+```
+
+这会落入既有 Agent Workspace 右侧活动/运行日志面板；不会注入中间聊天阅读区，从而保持用户要求的“聊天居中、日志在侧边”的版式边界。
+
+## 4. 回归测试与反向验证
+
+新增/扩展三层测试：
+
+```text
+1. sseStream.spec.ts
+   - 与一个 id=7 的 assistant_delta 同帧发送 stream_error
+   - raw Event 回调只收到 assistant_delta
+   - stream_error 只进入 onStreamError
+   - 断流重连 URL 使用 after_sequence=7
+   - Last-Event-ID 仍是 7，证明 stream_error 不推进 cursor
+
+2. useAgentRunStream.spec.ts
+   - stream_error 只转发专用回调
+   - onEvent 不被调用，因而不参与 AgentEvent reducer
+
+3. useAgentWorkspaceRuntime.spec.ts
+   - stream_error 只调用 addActivity
+   - 文案包含错误码、可重试标记和最近确认 cursor
+   - 活动 eventType 固定为 stream_error
+```
+
+受控反向验证：
+
+```text
+临时把 callbacks.onStreamError?.(...) 替换为不触发回调的表达式
+运行：npm run test:run -- src/utils/sseStream.spec.ts
+结果：退出码 1，新增 “routes stream_error outside the durable Agent event callback ...” 用例失败
+随后 finally 自动恢复源码
+反向验证运行日志：D:\小说写作\xuanqiong-wenshu\logs\live\stream-error-reverse-validation.log
+```
+
+结论：删除专用分流回调会被新增测试直接捕获；并非只更新文档或只依赖人工检查。
+
+## 5. 实际验证结果
+
+定向前端回归：
+
+```text
+npm run test:run -- src/utils/sseStream.spec.ts src/features/agent/composables/useAgentRunStream.spec.ts src/features/agent/composables/useAgentWorkspaceRuntime.spec.ts
+结果：3 files passed，21 tests passed，2.91s
+```
+
+前端类型检查：
+
+```text
+npm run type-check
+结果：通过
+```
+
+前端全量测试：
+
+```text
+npm run test:run
+结果：74 files passed，427 tests passed，121.60s
+```
+
+前端生产构建：
+
+```text
+npm run build-only
+结果：通过，Vite build 27.09s
+```
+
+构建/测试过程中仍有既有的浏览器数据过期提示：
+
+```text
+baseline-browser-mapping data over two months old
+caniuse-lite/Browserslist data 11 months old
+```
+
+它们不是本批类型、测试或构建失败；后续应作为依赖维护任务单独评估、升级并提交，避免与事件契约改动混批。
+
+## 6. 当前完成状态
+
+```text
+后端 stream_error 契约：completed（CARD-006）
+前端 SSE stream_error 专用解析：completed
+stream_error 不进入 onRawEvent：completed
+stream_error 不进入 AgentEvent reducer：completed
+stream_error 不污染 assistantText / WorkTrace：completed
+stream_error 右侧运行日志提示：completed
+cursor 保持最后 durable event：tested
+断流后按既有策略重连：tested
+真实浏览器 + 人工模拟数据库故障：pending
+CARD-008：completed
+```
+
+## 7. 提交、推送与回退
+
+```text
+上一回退点：a414207
+本批代码与测试提交：868c097（feat: isolate agent stream ledger errors，已推送）
+本批文档记录提交：本次提交后回填
+推送分支：origin/codex/bohrium-integration-20260831
+数据库：未修改
+小说正文：未修改
+运行日志：未纳入 Git
+```
+
+## 8. 下一任务目标
+
+继续后端优先的可靠性闭环：
+
+```text
+1. Agent 事件 API 的认证失败矩阵：未认证、过期/伪造 token、跨用户 session/run 组合、stream 与 list endpoints 一致性。
+2. 数据库/连接异常矩阵：list endpoint、activity endpoint、SSE 预检和运行中异常的公开错误码与 HTTP/SSE 语义一致性。
+3. 真实 ASGI 多 Worker replay：在可控本地进程组合中验证 durable ledger 不依赖单进程内存。
+4. 再推进前端：结合已有三栏布局继续压缩左侧标签密度、保持聊天正文宽度，并针对日志面板进行真实浏览器尺寸验证。
+```
