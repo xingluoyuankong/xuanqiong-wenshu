@@ -378,6 +378,49 @@ class AgentJobService:
         await self.session.commit()
         return await self._get(job_id, user_id)
 
+    async def reconcile_completed_visible_response_jobs(self) -> list[AgentJob]:
+        """Settle expired worker acknowledgements after an atomic visible response commit."""
+        now = _now()
+        candidates = list((await self.session.execute(
+            select(AgentJob, AgentRun)
+            .join(AgentRun, AgentRun.id == AgentJob.run_id)
+            .where(
+                AgentJob.kind == "visible_response",
+                AgentJob.status == "running",
+                AgentJob.lease_expires_at.is_not(None),
+                AgentJob.lease_expires_at <= now,
+                AgentJob.cancel_requested_at.is_(None),
+                AgentRun.status == "completed",
+            )
+        )).all())
+        settled: list[AgentJob] = []
+        for job, run in candidates:
+            marker = str((run.context_json or {}).get("visible_response_final_message_id") or "").strip()
+            if not marker:
+                continue
+            changed = await self.session.execute(
+                update(AgentJob)
+                .where(
+                    AgentJob.id == job.id,
+                    AgentJob.status == "running",
+                    AgentJob.lease_expires_at.is_not(None),
+                    AgentJob.lease_expires_at <= now,
+                )
+                .values(
+                    status="succeeded",
+                    result_json={"visible_response_job_id": job.id},
+                    finished_at=now,
+                    lease_owner=None,
+                    lease_expires_at=None,
+                )
+            )
+            if changed.rowcount == 1:
+                settled.append(job)
+        if settled:
+            await self.session.commit()
+            for job in settled:
+                await self.session.refresh(job)
+        return settled
     async def list_dead_letters(self, *, limit: int = 100) -> list[AgentJob]:
         stmt = (
             select(AgentJob)

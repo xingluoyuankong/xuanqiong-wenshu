@@ -133,6 +133,8 @@ class AgentWorker:
         heartbeat_task: asyncio.Task[None] | None = None
         async with self.session_factory() as session:
             service = AgentJobService(session)
+            if await service.reconcile_completed_visible_response_jobs():
+                return True
             job = await service.claim_next_job(lease_owner=self.worker_id, lease_seconds=self.lease_seconds)
             if job is None:
                 return False

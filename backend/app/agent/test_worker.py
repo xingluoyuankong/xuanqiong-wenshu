@@ -811,3 +811,44 @@ async def test_visible_response_provider_retry_uses_real_runner_and_completes_on
             assert event_types.count("run_completed") == 1
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_worker_settles_expired_visible_response_ack_after_atomic_completion(tmp_path):
+    engine, factory = await _factory(tmp_path)
+    try:
+        run_id, job_id = await _run(factory, 1512, kind="visible_response")
+        async with factory() as session:
+            runtime = AgentRuntimeService(session)
+            run = await runtime.update_run(run_id=run_id, user_id=1512, status="running", phase="assistant_response")
+            job = await AgentJobService(session).claim_job(
+                job_id=job_id, user_id=1512, lease_owner="crashed-after-finalize", lease_seconds=60
+            )
+            await runtime.finalize_visible_response(
+                run_id=run_id,
+                user_id=1512,
+                session_id=run.session_id,
+                content="原子完成后等待 Job 确认。",
+                completion_data={"phase": "summary", "length": 12, "provider_called": True, "response_provider_called": True, "response_provider_fallback_reason": None},
+            )
+            job.lease_expires_at = AgentJobService._now() - timedelta(seconds=1)
+            await session.commit()
+
+        worker = AgentWorker(factory, worker_id="ack-reconciler", handlers={})
+        assert await worker.poll_once() is True
+        assert await worker.poll_once() is False
+
+        async with factory() as session:
+            runtime = AgentRuntimeService(session)
+            job = await AgentJobService(session).get_job(job_id=job_id, user_id=1512)
+            run = await runtime.get_run(run_id, 1512)
+            messages = await runtime.list_messages(session_id=run.session_id, user_id=1512)
+            events = await runtime.list_events(run_id=run_id, user_id=1512)
+            assert job.status == "succeeded"
+            assert job.result_json == {"visible_response_job_id": job_id}
+            assert run.status == "completed"
+            assert len(messages) == 1
+            assert [event.event_type for event in events].count("assistant_completed") == 1
+            assert [event.event_type for event in events].count("run_completed") == 1
+    finally:
+        await engine.dispose()
