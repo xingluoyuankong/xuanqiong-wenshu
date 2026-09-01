@@ -50,3 +50,27 @@ def test_error_categories_cover_timeout_cancel_and_network() -> None:
     assert classify_provider_error(TimeoutFixture()) == "TIMEOUT"
     assert classify_provider_error(CancelledFixture()) == "CANCELLED"
     assert classify_provider_error(HTTP429Error()) == "RATE_LIMIT"
+
+
+def test_rehydrate_closes_interrupted_running_attempt() -> None:
+    ledger = ProviderAttemptLedger.from_snapshot(
+        run_id="run-recovery",
+        snapshot={
+            "provider_attempts": [
+                {
+                    "attempt": 1,
+                    "role": "response",
+                    "provider_ref": "provider-a",
+                    "model_ref": "model-a",
+                    "status": "running",
+                    "started_at": "2026-09-01T10:00:00+00:00",
+                }
+            ]
+        },
+    )
+
+    record = ledger.snapshot()["provider_attempts"][0]
+    assert record["status"] == "failed"
+    assert record["error_category"] == "NETWORK_DISCONNECT"
+    assert record["finished_at"]
+    assert record["cancel_observed"] is False

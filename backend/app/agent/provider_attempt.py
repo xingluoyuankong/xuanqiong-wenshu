@@ -83,6 +83,12 @@ class ProviderAttemptLedger:
             status = str(item.get("status") or "unknown").strip().lower()
             if status not in valid_statuses:
                 status = "failed"
+            # A persisted running attempt belongs to the worker that was
+            # interrupted before this retry. Rehydrate it as a closed failure
+            # so the Provider timeline cannot retain a permanent running state.
+            interrupted = status == "running"
+            if interrupted:
+                status = "failed"
             key = f"{ledger.run_id}:restored:{attempt}:{index}"
             ledger._records[key] = ProviderAttemptRecord(
                 attempt_id=key,
@@ -93,8 +99,8 @@ class ProviderAttemptLedger:
                 status=status,
                 started_at=_ref(item.get("started_at"), 64) or _now(),
                 first_token_at=_ref(item.get("first_token_at"), 64),
-                finished_at=_ref(item.get("finished_at"), 64),
-                error_category=_ref(item.get("error_category"), 40),
+                finished_at=(_ref(item.get("finished_at"), 64) or (_now() if interrupted else None)),
+                error_category=("NETWORK_DISCONNECT" if interrupted else _ref(item.get("error_category"), 40)),
                 http_status=int(item["http_status"]) if isinstance(item.get("http_status"), int) else None,
                 retry_index=max(0, int(item.get("retry_index") or 0)),
                 fallback_from_attempt=int(item["fallback_from_attempt"]) if isinstance(item.get("fallback_from_attempt"), int) else None,
