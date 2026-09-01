@@ -75935,3 +75935,213 @@ facts 存储：CARD-047 已归一到 run_id + artifact_id；
 5. 继续保留旧调用方读取兼容，但新写入全部使用组合键；
 6. 完成失败驱动、反向验证、完整前端门禁、代码推送和文档推送。
 ```
+
+# CARD-048：Artifact 操作状态按 Run + Artifact + Action 统一
+
+## 本批目标
+
+在 CARD-047 将质量/谱系 facts 归一到 `run_id + artifact_id` 的基础上，继续将 blocker、rewrite、diff、preview 的操作结果和 action 状态纳入相同的 Run 级边界，避免不同 Run 复用 Artifact ID 时操作结果互相覆盖。
+
+## 失败驱动验证
+
+新增跨 Run 同名 Artifact 测试：
+
+```text
+keeps rewrite action state for reused Artifact IDs across Runs
+keeps blocker, diff and preview action results scoped to reused Artifact IDs
+```
+
+旧实现结果：
+
+```text
+使用 artifact.id 单键或全局单值状态；
+Run-A 的 action 结果无法在 run-a:artifact-x 键下保留；
+同名 Artifact 切换后，历史操作状态被覆盖。
+```
+
+新增测试在旧逻辑上出现失败，证明组合键约束锁定了真实行为。
+
+## 实际代码变更
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.ts
+```
+
+新增/统一：
+
+```text
+qualityBlockersByKey
+artifactDiffByKey
+artifactPreviewByKey
+artifactActionGeneration
+artifactActionKey(action, run_id, artifact_id)
+qualityBlockersArtifactKey
+```
+
+操作结果现在按以下键存储：
+
+```text
+quality-blockers:run_id:artifact_id
+rewrite:run_id:artifact_id
+ diff:run_id:artifact_id
+preview:run_id:artifact_id
+```
+
+实际存储结果：
+
+```text
+qualityBlockersByKey[run_id:artifact_id]
+rewriteInstructions[run_id:artifact_id]
+rewriteLoading[run_id:artifact_id]
+rewriteErrors[run_id:artifact_id]
+artifactDiffByKey[run_id:artifact_id]
+artifactPreviewByKey[run_id:artifact_id]
+```
+
+当前展示用的单值状态仍保留，作为当前操作面板的投影；历史 action 结果以组合键保存，不再因另一个 Run 的同名 Artifact 读取而覆盖。
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\artifacts\AgentArtifactWorkbench.vue
+```
+
+增加组合键读取与旧调用兼容：
+
+```text
+新 Runtime 组合键优先；
+旧 artifact_id 单键作为兼容回退；
+质量、谱系、rewrite、阻断按钮的局部 loading 都按当前 Artifact 计算；
+```
+
+## 测试覆盖
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\artifacts\AgentArtifactWorkbench.spec.ts
+```
+
+覆盖：
+
+```text
+不同 Run 复用同一 Artifact ID 时，质量阻断分别保存；
+不同 Run 复用同一 Artifact ID 时，diff 分别保存；
+不同 Run 复用同一 Artifact ID 时，preview 分别保存；
+rewrite instructions/loading/error 使用组合键；
+Workbench 对组合键 facts 和局部 loading 正确读取。
+```
+
+## 修复后验证
+
+定向跨 Run action 集合：
+
+```text
+2 passed
+```
+
+Runtime composable 全集合：
+
+```text
+23 passed
+```
+
+Workbench 全集合：
+
+```text
+8 passed
+```
+
+反向验证：
+
+```text
+临时将 action 结果的 [stateKey] 改回 [artifact.id]；
+重新运行跨 Run 同名 Artifact action 测试；
+```
+
+结果：
+
+```text
+1 failed
+REVERSE_EXIT=1
+```
+
+恢复真实实现后：
+
+```text
+1 passed
+RESTORED_EXIT=0
+```
+
+## 全量前端门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+```
+
+```text
+通过
+```
+
+```powershell
+npm run test:run
+```
+
+```text
+74 files passed
+455 tests passed
+```
+
+```powershell
+npm run build-only
+```
+
+```text
+4905 modules transformed
+built successfully
+```
+
+## 提交、推送与回退
+
+```text
+上一回退点：b13e483 docs: record card 047 run scoped facts
+本批代码提交：47ebd10 fix: scope artifact actions by run and artifact
+代码已推送：origin/codex/bohrium-integration-20260831
+本批文档提交：待本次文档提交生成
+```
+
+回退方式：
+
+```text
+git revert 47ebd10
+```
+
+该回退只移除操作结果的 Run 级组合键，不影响 CARD-047 的 facts map 归一、CARD-046 的批次 guard 和 CARD-040 的聊天主区布局。
+
+## 当前累计状态
+
+```text
+后端：CARD-038/039，最近后端全量 1438 passed；
+布局：CARD-040 已压缩左栏、扩大聊天主区、保持右栏日志独立滚动；
+Artifact 生命周期：CARD-041 至 CARD-047 已覆盖 reset、重复请求、lineage、blocker、rewrite/diff/preview、旧 Run 批次和 facts Run 级存储；
+Artifact action：CARD-048 已统一 Run + Artifact + Action 状态键；
+前端最近全量：74 files / 455 tests passed；
+当前服务：127.0.0.1:5174/agent 与 127.0.0.1:8013/health 均为 HTTP 200。
+```
+
+## 下一任务：CARD-049（当前操作投影恢复与 action loading 收敛）
+
+继续收尾操作状态层：
+
+```text
+1. 切换 Run 时从对应组合键恢复当前 blocker/diff/preview 投影；
+2. 旧 action finally 只清理自己的 action key，不能影响新 Run；
+3. action 请求失败后清空对应组合键旧结果；
+4. Workbench 当前面板只接收当前 Run 的 action 投影；
+5. 加入 Run 切换、同名 Artifact、并发请求和 reset 的组合回归；
+6. 完成失败驱动、反向验证、完整前端门禁、代码推送和文档推送。
+```
