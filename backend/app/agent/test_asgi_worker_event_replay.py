@@ -6,7 +6,9 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Iterable
 from urllib.error import URLError
@@ -31,6 +33,64 @@ def _free_local_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.bind(("127.0.0.1", 0))
         return int(listener.getsockname()[1])
+
+
+class _VisibleResponseFixtureHandler(BaseHTTPRequestHandler):
+    """Minimal local OpenAI-compatible SSE fixture for the second --once worker."""
+
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
+
+    def do_POST(self) -> None:
+        if self.path.rstrip("/") != "/v1/chat/completions":
+            self.send_error(404)
+            return
+        content_length = int(self.headers.get("Content-Length") or 0)
+        payload = json.loads(self.rfile.read(content_length) or b"{}")
+        if not payload.get("stream"):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            body = json.dumps(
+                {
+                    "id": "card016-nonstream",
+                    "object": "chat.completion",
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "{}"}, "finish_reason": "stop"}],
+                },
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        for content in ("独立 Worker 已完成", "可见回复。"):
+            event = json.dumps(
+                {
+                    "id": "card016-visible-response",
+                    "object": "chat.completion.chunk",
+                    "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
+                },
+                ensure_ascii=False,
+            )
+            self.wfile.write(f"data: {event}\n\n".encode("utf-8"))
+            self.wfile.flush()
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
+
+
+def _start_visible_response_fixture() -> tuple[ThreadingHTTPServer, threading.Thread]:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _VisibleResponseFixtureHandler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, name="card016-visible-response-fixture", daemon=True)
+    thread.start()
+    return server, thread
 
 
 async def _prepare_current_schema(database_url: str) -> None:
@@ -265,11 +325,12 @@ async def test_worker_b_replays_events_written_via_worker_a_http_to_shared_sqlit
 
 
 @pytest.mark.asyncio
-async def test_independent_worker_once_claims_agent_job_created_via_http(tmp_path: Path):
-    """A queued HTTP Agent job is claimed by the separate worker CLI exactly once.
+async def test_independent_worker_once_completes_execution_then_visible_response_via_http(tmp_path: Path):
+    """Two separate --once workers complete the persisted execution -> visible-response chain.
 
-    The explicit read-only project.list tool avoids any Provider call: this test
-    exercises the durable HTTP -> Job -> worker process -> HTTP ledger path.
+    The explicit read-only project.list tool keeps planning local. A loopback
+    OpenAI-compatible SSE fixture serves only the second worker's visible reply,
+    proving the durable HTTP -> Job -> CLI worker -> final Run/ledger path.
     """
     database_path = (tmp_path / "worker-once-http.sqlite").resolve()
     database_url = f"sqlite+aiosqlite:///{database_path.as_posix()}"
@@ -278,6 +339,16 @@ async def test_independent_worker_once_claims_agent_job_created_via_http(tmp_pat
     log_dir = tmp_path / "worker-once-logs"
     log_dir.mkdir()
     environment = _worker_environment(database_url, log_dir)
+    provider_server, provider_thread = _start_visible_response_fixture()
+    provider_port = int(provider_server.server_address[1])
+    environment.update(
+        {
+            "OPENAI_API_KEY": "card016-loopback-fixture-key",
+            "OPENAI_BASE_URL": f"http://127.0.0.1:{provider_port}/v1",
+            "OPENAI_API_BASE_URL": f"http://127.0.0.1:{provider_port}/v1",
+            "OPENAI_MODEL_NAME": "card016-visible-response-fixture",
+        }
+    )
     workers: list[subprocess.Popen[str]] = []
     writer_base_url = f"http://127.0.0.1:{writer_port}"
     try:
@@ -317,8 +388,8 @@ async def test_independent_worker_once_claims_agent_job_created_via_http(tmp_pat
             assert response_payload["execution_job"]["kind"] == "agent_execution"
             assert response_payload["execution_job"]["status"] == "queued"
 
-        worker_result = subprocess.run(
-            [sys.executable, "scripts/agent_worker.py", "--once", "--worker-id", "card014-worker-once"],
+        execution_worker_result = subprocess.run(
+            [sys.executable, "scripts/agent_worker.py", "--once", "--worker-id", "card016-execution-once"],
             cwd=str(BACKEND_ROOT),
             env=environment,
             stdout=subprocess.PIPE,
@@ -328,8 +399,7 @@ async def test_independent_worker_once_claims_agent_job_created_via_http(tmp_pat
             errors="replace",
             timeout=75,
         )
-        assert worker_result.returncode == 0, worker_result.stdout
-        assert worker_result.returncode == 0
+        assert execution_worker_result.returncode == 0, execution_worker_result.stdout
 
         async with httpx.AsyncClient(timeout=25) as client:
             jobs_response = await client.get(f"{writer_base_url}/api/agent/jobs", headers=headers)
@@ -356,5 +426,59 @@ async def test_independent_worker_once_claims_agent_job_created_via_http(tmp_pat
         state_jobs = {item["id"]: item for item in state_response.json()["jobs"]}
         assert state_jobs[execution_job_id]["status"] == "succeeded"
         assert state_jobs[visible_jobs[0]["id"]]["status"] == "queued"
+
+        visible_job_id = visible_jobs[0]["id"]
+        visible_worker_result = subprocess.run(
+            [sys.executable, "scripts/agent_worker.py", "--once", "--worker-id", "card016-visible-once"],
+            cwd=str(BACKEND_ROOT),
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=75,
+        )
+        assert visible_worker_result.returncode == 0, visible_worker_result.stdout
+
+        async with httpx.AsyncClient(timeout=25) as client:
+            final_jobs_response = await client.get(f"{writer_base_url}/api/agent/jobs", headers=headers)
+            final_events_response = await client.get(
+                f"{writer_base_url}/api/agent/sessions/{session_id}/runs/{run_id}/events?after_sequence=0",
+                headers=headers,
+            )
+            final_state_response = await client.get(f"{writer_base_url}/api/agent/runs/{run_id}/state", headers=headers)
+            final_messages_response = await client.get(f"{writer_base_url}/api/agent/sessions/{session_id}", headers=headers)
+
+        assert final_jobs_response.status_code == 200
+        final_jobs = {item["id"]: item for item in final_jobs_response.json()}
+        assert final_jobs[execution_job_id]["status"] == "succeeded"
+        assert final_jobs[visible_job_id]["status"] == "succeeded"
+        assert final_jobs[visible_job_id]["attempt_count"] == 1
+        assert final_jobs[visible_job_id]["result_json"] == {"visible_response_job_id": visible_job_id}
+
+        assert final_events_response.status_code == 200
+        final_event_types = [item["event_type"] for item in final_events_response.json()]
+        assert final_event_types.index("assistant_queued") < final_event_types.index("assistant_started")
+        assert "assistant_delta" in final_event_types
+        assistant_completed_index = final_event_types.index("assistant_completed")
+        run_completed_index = final_event_types.index("run_completed")
+        assert assistant_completed_index + 1 == run_completed_index
+        assert final_event_types.count("public_work_summary") >= 1
+
+        assert final_state_response.status_code == 200
+        final_state = final_state_response.json()
+        assert final_state["status"] == "completed"
+        assert {item["id"]: item["status"] for item in final_state["jobs"]} == {
+            execution_job_id: "succeeded",
+            visible_job_id: "succeeded",
+        }
+
+        assert final_messages_response.status_code == 200
+        assistant_messages = [item for item in final_messages_response.json()["messages"] if item["role"] == "assistant"]
+        assert assistant_messages[-1]["content"] == "独立 Worker 已完成可见回复。"
     finally:
         _stop_workers(workers)
+        provider_server.shutdown()
+        provider_server.server_close()
+        provider_thread.join(timeout=5)

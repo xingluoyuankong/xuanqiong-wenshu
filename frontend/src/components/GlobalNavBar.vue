@@ -158,6 +158,7 @@ let loadingTasksPromise: Promise<void> | null = null
 
 const canGoBack = computed(() => route.name !== 'workspace-entry')
 const isWritingDeskRoute = computed(() => route.name === 'writing-desk')
+const isAgentWorkspaceRoute = computed(() => route.name === 'agent-workspace')
 const currentProject = computed(() => novelStore.currentProject)
 const taskContext = computed(() => resolveProjectTaskContext(currentProject.value || null))
 const currentTaskChapter = computed(() => taskContext.value.chapter)
@@ -194,6 +195,7 @@ const currentTaskIsBusy = computed(() => isBusyTask(currentTaskChapter.value, cu
 const globalTaskVisible = computed(() =>
   Boolean(
     !isWritingDeskRoute.value &&
+    !isAgentWorkspaceRoute.value &&
     (durableTask.value || (
       currentProject.value?.id &&
       currentTaskChapter.value?.chapter_number &&

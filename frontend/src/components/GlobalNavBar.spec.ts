@@ -98,7 +98,32 @@ describe('GlobalNavBar', () => {
     expect(projectButton.attributes('aria-current')).toBe('page')
   })
 
+
+  it('Agent 工作台不显示覆盖式全局后台任务浮卡', async () => {
+    routeName.value = 'agent-workspace'
+    taskRuntimeMock.listTasks.mockResolvedValue([{
+      task_id: 'runtime-agent-1',
+      project_id: 'project-1',
+      task_type: 'research',
+      status: 'running',
+      stage: 'running',
+      progress: 65,
+      message: '正在收集资料',
+      retry_count: 0,
+      max_retries: 2,
+      event_cursor: 5,
+      created_at: '2026-08-14T10:00:00.000Z',
+      updated_at: '2026-08-14T10:00:01.000Z',
+    }])
+    novelStoreMock.currentProject = { id: 'project-1', title: '星河旧梦', chapters: [] }
+    const wrapper = mountTrackedComponent()
+    await flushPromises()
+
+    expect(wrapper.find('.global-task-mini').exists()).toBe(false)
+    expect(taskRuntimeMock.listTasks).toHaveBeenCalled()
+  })
   it('只有管理员看到运行监控入口', async () => {
+
     const normalWrapper = mountTrackedComponent()
     expect(normalWrapper.find('button[title="运行监控"]').exists()).toBe(false)
 
