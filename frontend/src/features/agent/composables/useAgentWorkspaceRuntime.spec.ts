@@ -54,7 +54,7 @@ vi.mock('@/api/agent', () => ({
 }))
 
 import { useAgentWorkspaceRuntime } from './useAgentWorkspaceRuntime'
-import type { AgentQualityBlocker } from '@/api/agent'
+import type { AgentArtifactLineage, AgentArtifactQuality, AgentQualityBlocker } from '@/api/agent'
 import { useAgentRunProjection } from '@/features/agent/stores/agentRunProjection'
 
 const run = {
@@ -161,6 +161,48 @@ describe('useAgentWorkspaceRuntime', () => {
     expect(addActivity).toHaveBeenCalledWith('质量阻断定位已载入', '1 项阻断')
   })
 
+  it('drops late Artifact facts after the selected Run is reset', async () => {
+    const { runtime, projection } = createRuntime()
+    let resolveQuality: (value: AgentArtifactQuality) => void = () => undefined
+    let resolveLineage: (value: AgentArtifactLineage) => void = () => undefined
+    const qualityPromise = new Promise<AgentArtifactQuality>((resolve) => { resolveQuality = resolve })
+    const lineagePromise = new Promise<AgentArtifactLineage>((resolve) => { resolveLineage = resolve })
+    getArtifactQualityMock.mockReturnValueOnce(qualityPromise)
+    getArtifactLineageMock.mockReturnValueOnce(lineagePromise)
+
+    const request = runtime.loadArtifactFacts(artifact)
+    expect(runtime.artifactQualityFactsLoading.value[artifact.id]).toBe(true)
+
+    projection.reset()
+    runtime.resetArtifactFacts()
+    resolveQuality({ artifact_id: artifact.id, quality_result: null, findings: [], gate: { decision: 'passed', blocker_count: 0 } } as unknown as AgentArtifactQuality)
+    resolveLineage({ artifact_id: artifact.id, upstream_edges: [], downstream_edges: [] })
+    await request
+
+    expect(runtime.artifactQualityFacts.value).toEqual({})
+    expect(runtime.artifactLineageFacts.value).toEqual({})
+    expect(runtime.artifactQualityFactsLoading.value).toEqual({})
+    expect(runtime.artifactQualityFactsErrors.value).toEqual({})
+  })
+  it('invalidates late Artifact facts when the facts state is explicitly reset', async () => {
+    const { runtime } = createRuntime()
+    let resolveQuality: (value: AgentArtifactQuality) => void = () => undefined
+    let resolveLineage: (value: AgentArtifactLineage) => void = () => undefined
+    const qualityPromise = new Promise<AgentArtifactQuality>((resolve) => { resolveQuality = resolve })
+    const lineagePromise = new Promise<AgentArtifactLineage>((resolve) => { resolveLineage = resolve })
+    getArtifactQualityMock.mockReturnValueOnce(qualityPromise)
+    getArtifactLineageMock.mockReturnValueOnce(lineagePromise)
+
+    const request = runtime.loadArtifactFacts(artifact)
+    runtime.resetArtifactFacts()
+    resolveQuality({ artifact_id: artifact.id, quality_result: null, findings: [], gate: { decision: 'passed', blocker_count: 0 } } as unknown as AgentArtifactQuality)
+    resolveLineage({ artifact_id: artifact.id, upstream_edges: [], downstream_edges: [] })
+    await request
+
+    expect(runtime.artifactQualityFacts.value).toEqual({})
+    expect(runtime.artifactLineageFacts.value).toEqual({})
+    expect(runtime.artifactQualityFactsLoading.value).toEqual({})
+  })
   it('keeps an Artifact fail-closed while authority facts are loading or unavailable', async () => {
     const { runtime } = createRuntime()
     const promise = runtime.loadArtifactFacts(artifact)

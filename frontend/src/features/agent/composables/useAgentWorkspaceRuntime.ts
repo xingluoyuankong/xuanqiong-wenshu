@@ -71,7 +71,7 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
   })
   const isCurrentArtifactContext = (generation: number, runId: string) =>
     generation === artifactViewGeneration &&
-    (!options.selectedRunId.value || options.selectedRunId.value === runId)
+    options.selectedRunId.value === runId
   const isCurrentArtifactRequest = (request: ArtifactViewRequest) =>
     isCurrentArtifactContext(request.generation, request.runId)
 
@@ -464,6 +464,7 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
   }
 
   const resetArtifactFacts = () => {
+    artifactViewGeneration += 1
     qualityBlockers.value = []
     qualityBlockersLoading.value = false
     rewriteInstructions.value = {}
