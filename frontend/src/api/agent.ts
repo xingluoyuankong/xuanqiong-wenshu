@@ -104,6 +104,50 @@ export interface AgentProviderAttemptSnapshot {
   fallback_used?: boolean
 }
 
+const normalizeProviderAttemptSnapshot = (value: unknown): AgentProviderAttemptSnapshot | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  if (!Array.isArray(raw.provider_attempts)) return null
+  const provider_attempts = raw.provider_attempts
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
+    .slice(0, 16)
+    .map((item) => {
+      const record: Record<string, unknown> = {}
+      if (typeof item.attempt === 'number' && Number.isInteger(item.attempt) && item.attempt > 0) record.attempt = item.attempt
+      if (typeof item.role === 'string') record.role = item.role.slice(0, 80)
+      if (typeof item.status === 'string' && ['running', 'succeeded', 'failed'].includes(item.status)) record.status = item.status
+      if (typeof item.error_category === 'string') record.error_category = item.error_category.slice(0, 40)
+      if (typeof item.retry_index === 'number' && Number.isInteger(item.retry_index) && item.retry_index >= 0) record.retry_index = item.retry_index
+      if (typeof item.fallback_from_attempt === 'number' && Number.isInteger(item.fallback_from_attempt) && item.fallback_from_attempt > 0) record.fallback_from_attempt = item.fallback_from_attempt
+      if (typeof item.cancel_observed === 'boolean') record.cancel_observed = item.cancel_observed
+      return record
+    })
+  const attempts = new Set(provider_attempts
+    .map((item, index) => typeof item.attempt === 'number' ? item.attempt : index + 1))
+  const selected = raw.selected_provider_attempt
+  return {
+    provider_attempts,
+    selected_provider_attempt: typeof selected === 'number' && Number.isInteger(selected) && attempts.has(selected) ? selected : null,
+    fallback_used: raw.fallback_used === true,
+  }
+}
+
+const normalizeAgentProviderProvenance = (value: unknown): AgentProviderProvenance => {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+  return {
+    planner_provider_called: typeof raw.planner_provider_called === 'boolean' ? raw.planner_provider_called : null,
+    planner_provider_fallback_reason: typeof raw.planner_provider_fallback_reason === 'string' ? raw.planner_provider_fallback_reason.slice(0, 160) || null : null,
+    planner_provider_attempts: normalizeProviderAttemptSnapshot(raw.planner_provider_attempts),
+    response_provider_called: typeof raw.response_provider_called === 'boolean' ? raw.response_provider_called : null,
+    response_provider_fallback_reason: typeof raw.response_provider_fallback_reason === 'string' ? raw.response_provider_fallback_reason.slice(0, 160) || null : null,
+    response_provider_attempts: normalizeProviderAttemptSnapshot(raw.response_provider_attempts),
+    candidate_writer_provider_called: typeof raw.candidate_writer_provider_called === 'boolean' ? raw.candidate_writer_provider_called : null,
+    candidate_writer_provider_fallback_reason: typeof raw.candidate_writer_provider_fallback_reason === 'string' ? raw.candidate_writer_provider_fallback_reason.slice(0, 160) || null : null,
+    candidate_writer_model_ref: typeof raw.candidate_writer_model_ref === 'string' ? raw.candidate_writer_model_ref.slice(0, 200) || null : null,
+    candidate_writer_provider_attempts: normalizeProviderAttemptSnapshot(raw.candidate_writer_provider_attempts),
+  }
+}
+
 export interface AgentProviderProvenance {
   planner_provider_called: boolean | null
   planner_provider_fallback_reason: string | null
@@ -800,8 +844,8 @@ export const AgentAPI = {
     request<AgentPlanResponse>(`/agent/runs/${encodeURIComponent(runId)}/plan`),
   getRunState: (runId: string) =>
     request<AgentStateProjection>(`/agent/runs/${encodeURIComponent(runId)}/state`),
-  getRunProviderProvenance: (runId: string) =>
-    request<AgentProviderProvenance>(`/agent/runs/${encodeURIComponent(runId)}/provider-provenance`),
+  getRunProviderProvenance: async (runId: string) =>
+    normalizeAgentProviderProvenance(await request<unknown>(`/agent/runs/${encodeURIComponent(runId)}/provider-provenance`)),
   getRunContextSnapshot: (runId: string) =>
     request<AgentContextSnapshot | null>(`/agent/runs/${encodeURIComponent(runId)}/context-snapshot`),
   getRunPlanRevision: (runId: string) =>

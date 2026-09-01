@@ -115,6 +115,37 @@ describe('AgentAPI timeline and artifact diff', () => {
       candidate_writer_provider_called: null,
       candidate_writer_provider_fallback_reason: null,
       candidate_writer_model_ref: null,
+      candidate_writer_provider_attempts: null,
+    })
+  })
+
+  it('将畸形 Provider Attempt snapshot 降级为空态且不透传未知字段', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        planner_provider_called: true,
+        planner_provider_fallback_reason: null,
+        planner_provider_attempts: { provider_attempts: 'invalid', api_key: 'secret' },
+        response_provider_called: false,
+        response_provider_fallback_reason: 'TimeoutError',
+        response_provider_attempts: {
+          provider_attempts: [{ status: 'failed', error_category: 'TIMEOUT', prompt: 'private', injected: true }],
+          selected_provider_attempt: 99,
+          fallback_used: true,
+        },
+        candidate_writer_provider_called: null,
+        candidate_writer_provider_fallback_reason: null,
+        candidate_writer_model_ref: null,
+      }),
+    })
+
+    const result = await AgentAPI.getRunProviderProvenance('run-malformed-provenance')
+
+    expect(result.planner_provider_attempts).toBeNull()
+    expect(result.response_provider_attempts).toEqual({
+      provider_attempts: [{ status: 'failed', error_category: 'TIMEOUT' }],
+      selected_provider_attempt: null,
+      fallback_used: true,
     })
   })
 
