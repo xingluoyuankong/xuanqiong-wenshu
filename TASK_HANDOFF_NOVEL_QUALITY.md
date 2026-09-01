@@ -73563,3 +73563,143 @@ CARD-036：继续真实浏览器多视口验收；
 若浏览器通道仍不可用，则继续前端 schema 漂移和历史 Run 切换的错误呈现审查，
 同时保持后端 Provider retry / Job / Run 一致性门禁。
 ```
+
+---
+
+# CARD-036 — 960px 以下提前切换聊天优先单列布局（2026-09-01）
+
+## 问题
+
+此前 Agent 壳层在 `880px` 以下才切换单列。于是 `881px～960px` 的中窄桌面/平板横屏仍保留三栏：
+
+```text
+左栏最小约 156px
+右栏最小约 208px
+间距约 19px
+```
+
+在 `900px` 视口下，左右固定区域合计约 383px，页面内边距扣除后，中央聊天主区被压缩到约 480px。左侧项目/会话/工具/数据和右侧运行日志/Inspector 继续横向挤占聊天阅读面，直接对应“中间对话框太小”的反馈。
+
+日志 DOM 本身已经在 activity slot，且高度独立限制；本批不改变日志位置和数据，只让聊天更早获得整行宽度。
+
+## 修改文件
+
+```text
+frontend/src/features/agent/AgentWorkspaceShell.vue
+frontend/src/features/agent/AgentWorkspaceShell.spec.ts
+```
+
+## 具体实现
+
+将聊天优先单列断点从：
+
+```text
+@media (max-width: 880px)
+```
+
+前移为：
+
+```text
+@media (max-width: 960px)
+```
+
+保持三行顺序：
+
+```text
+第 1 行：agent-main 中央聊天
+第 2 行：agent-sidebar 项目与内容
+第 3 行：agent-activity 运行日志与 Inspector
+```
+
+对应规则继续保留：
+
+```css
+.agent-layout { grid-template-columns: minmax(0, 1fr); }
+.agent-main { grid-row: 1; }
+.agent-sidebar { position: static; grid-row: 2; max-height: none; overflow: visible; }
+.agent-activity { position: static; grid-row: 3; max-height: none; overflow: visible; }
+```
+
+`650px` 手机端细化未改动；左栏功能、右栏日志、运行详情和数据均未删除。
+
+## 失败驱动与反向验证
+
+先把测试契约从 `880px` 改为 `960px`，旧 CSS 测试失败：
+
+```text
+expected @media (max-width: 960px)
+actual @media (max-width: 880px)
+```
+
+同步修改壳层后定向测试通过。
+
+反向验证临时把壳层断点改回 `880px`：
+
+```text
+AgentWorkspaceShell：1 failed / 6 passed
+失败点：缺少 max-width: 960px 聊天优先规则
+REVERSE_EXIT=1
+```
+
+恢复 `960px` 后：
+
+```text
+7 passed
+RESTORED_EXIT=0
+```
+
+## 验证
+
+```text
+npm run type-check：通过
+npm run test:run：74 files / 434 tests passed，208.61s
+npm run build-only：通过，84s
+```
+
+构建期间只有既有 Browserslist 数据提示，没有构建错误。
+
+## 运行状态
+
+本批前端页面继续保持：
+
+```text
+http://127.0.0.1:5174/agent → HTTP 200
+```
+
+后端已通过前台 Uvicorn 会话恢复：
+
+```text
+PID 40100
+监听：127.0.0.1:8013
+GET /health → HTTP 200
+响应：{"status":"healthy","app":"玄穹文枢 API","version":"1.0.0"}
+```
+
+## 回退
+
+```text
+上一回退点：a396b2a docs: record card 035 provenance normalization
+本批代码提交：03a1040 fix: prioritize chat below 960px（已推送）
+本批文档提交：待本次文档提交生成
+回退方式：git revert 03a1040
+```
+
+## 下一任务
+
+只读审查已定位下一项可复现缺陷，执行 `CARD-037`：
+
+```text
+Run-A 的 Artifact 质量阻断/预览/差异请求尚未返回时，用户切换到 Run-B，
+旧请求完成后会把 Run-A 结果写回全局 UI 状态，污染 Run-B 页面。
+```
+
+计划：
+
+```text
+1. 在 useAgentWorkspaceRuntime 中增加 Artifact 视图代次/请求失效令牌。
+2. 让 quality blockers、artifact diff、version diff、artifact preview 四条路径
+   在写回前验证 Run/Artifact 仍是当前上下文。
+3. 切换 Run 时使旧请求统一失效，保留当前 Run 正常结果。
+4. 增加延迟 Promise 回归、故意移除代次检查的反向验证。
+5. 前端门禁后代码与文档继续分别提交、分别推送。
+```
