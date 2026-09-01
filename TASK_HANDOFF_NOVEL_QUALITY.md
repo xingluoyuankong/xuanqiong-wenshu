@@ -76532,3 +76532,262 @@ CARD-050 当前状态：
 下一次执行必须先产出现状审查证据，再选定具体代码改动；
 完成一项后端优化后立即单独提交、推送并更新本文件。
 ```
+
+# CARD-050 完成记录：Provider 快照恢复时关闭中断 attempt
+
+## 本批目标
+
+在完成前端 Run/Artifact/action 投影收敛后，转入后端优先，先处理 Provider 通道的持久化恢复一致性。当前 Agent 使用 `ProviderAttemptLedger` 保存 planner、response、candidate writer 等 Provider 调用的去敏摘要。当 Worker 在 Provider 调用过程中退出或任务转移时，Run context 可能保留一条 `status=running` 的旧 attempt。旧实现从快照恢复时原样保留该状态，下一次 Job retry 再追加新 attempt，造成同一 Provider 链路出现永久悬挂的 running 记录。
+
+本批契约：
+
+```text
+1. 正常运行中的 attempt 仍保持 running；
+2. 从持久化快照恢复的 running attempt 一律视为原 Worker 已中断；
+3. 恢复后的旧 attempt 变为 failed；
+4. error_category 归一为 NETWORK_DISCONNECT；
+5. 写入 finished_at，保证历史记录闭合；
+6. 不改写原 attempt 顺序、角色、Provider/Model 引用、first_token 和 output_digest；
+7. 后续 retry 可以追加新 attempt，Provider provenance 不再有永久 running 悬挂项；
+8. 完成失败驱动、反向验证、后端全量门禁、代码推送和文档推送。
+```
+
+## 失败驱动证据
+
+新增测试：
+
+```text
+文件：D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_provider_attempt.py
+测试：test_rehydrate_closes_interrupted_running_attempt
+```
+
+旧实现真实结果：
+
+```text
+assert record["status"] == "failed"
+E AssertionError: assert "running" == "failed"
+```
+
+旧实现根因：
+
+```text
+ProviderAttemptLedger.from_snapshot() 只校验 running/succeeded/failed 是否为合法状态；
+恢复 running 记录后没有区分“当前调用中的 running”和“跨 Worker 快照中的 running”；
+快照恢复完成后，旧调用永远没有机会再执行 finish/fail；
+```
+
+## 实际代码变更
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\provider_attempt.py
+```
+
+`from_snapshot()` 新增恢复闭合逻辑：
+
+```python
+interrupted = status == "running"
+if interrupted:
+    status = "failed"
+```
+
+记录字段同步处理：
+
+```python
+finished_at = persisted_finished_at or (_now() if interrupted else None)
+error_category = "NETWORK_DISCONNECT" if interrupted else persisted_error_category
+```
+
+设计边界：
+
+```text
+该逻辑只位于 from_snapshot()，不会影响实时 Provider 调用刚 begin() 后的 running 状态；
+实时调用仍由 finish/fail/cancel 正常闭合；
+快照恢复只处理跨 Worker 生命周期已经断开的旧记录；
+已有 succeeded/failed 记录保留原有状态和错误分类；
+```
+
+新增回归文件变更：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_provider_attempt.py
+```
+
+覆盖断言：
+
+```text
+status == failed
+error_category == NETWORK_DISCONNECT
+finished_at 存在
+cancel_observed == False
+```
+
+## 运行时影响
+
+Provider attempt 快照仍然是 JSON 可序列化的去敏结构，不保存 prompt、header、credential 或原始 Provider 文本。本批只补齐生命周期闭合，不改变 Provider 选择、fallback 顺序、重试次数或模型配置。
+
+恢复后的 provenance 结构示意：
+
+```text
+attempt 1：failed / NETWORK_DISCONNECT / finished_at=恢复时刻
+attempt 2：新的 retry attempt，可为 running 或 succeeded
+```
+
+因此前端 Provider inspector、Run 状态投影和后续任务重试都能区分：
+
+```text
+已完成的历史调用；
+因 Worker 中断而关闭的旧调用；
+当前正在执行的新调用。
+```
+
+## 回归与反向验证
+
+### 定向失败与修复后结果
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_provider_attempt.py -k rehydrate_closes_interrupted_running_attempt
+```
+
+旧实现：
+
+```text
+1 failed
+```
+
+恢复实现后：
+
+```text
+1 passed, 3 deselected
+```
+
+### Provider attempt 全集合
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_provider_attempt.py
+```
+
+结果：
+
+```text
+4 passed
+```
+
+### Agent 全目录回归
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q app/agent
+```
+
+结果：
+
+```text
+224 passed
+```
+
+### 反向验证
+
+执行步骤：
+
+```text
+1. 备份 provider_attempt.py；
+2. 临时删除 interrupted 状态归一和恢复 finished_at/error_category 的代码；
+3. 执行 test_rehydrate_closes_interrupted_running_attempt；
+4. 确认测试失败；
+5. 恢复原实现；
+6. 再次执行 Provider attempt 全集合。
+```
+
+实际结果：
+
+```text
+移除恢复逻辑：1 failed，恢复断言重新得到 status=running；
+恢复原实现：4 passed；
+```
+
+### 后端全量门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+结果：
+
+```text
+1439 passed in 391.67s
+```
+
+## 提交、推送与回退点
+
+代码提交：
+
+```text
+4a84a07 fix: close interrupted provider attempts on recovery
+```
+
+代码推送：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+代码回退：
+
+```powershell
+git revert 4a84a07
+```
+
+上一回退点：
+
+```text
+bdbdaa0 docs: record card 049 projection recovery
+```
+
+本批文档提交：待本次文档提交生成。
+
+文档与代码保持分离回退：只回退文档时使用本批文档提交；完整回退 CARD-050 时先回退文档提交，再回退 `4a84a07`。不回退 CARD-049 及更早批次。
+
+## 当前实际状态（2026-09-02）
+
+```text
+分支：codex/bohrium-integration-20260831；
+代码 HEAD 已推送到 origin/codex/bohrium-integration-20260831；
+前端工作台：http://127.0.0.1:5174/agent；
+后端健康接口：http://127.0.0.1:8013/health；
+服务继续保持 HTTP 200；
+前端最近门禁：74 files / 455 tests，build-only 4905 modules transformed；
+后端最近门禁：1439 passed；
+CARD-049 的 Run action 投影恢复继续保留；
+CARD-050 的 Provider 快照恢复闭合继续保留；
+历史审计文件、临时脚本、备份目录和 node_modules 等未跟踪项继续原样保留，未被本批提交或删除。
+```
+
+## 下一任务目标：CARD-051（后端 Agent 可见进度事件与流式阶段契约审查）
+
+下一批继续后端优先，直接服务用户提出的 Agent 化工作台目标：聊天主区接收 Agent 可见输出，项目内工具调用产生可读进度，右侧日志保留独立事件细节。
+
+CARD-051 先审查再改动，禁止凭 UI 猜后端状态：
+
+```text
+1. 梳理 runner.py、execution.py、agent_runtime.py、llm_service.py 与 SSE router 的阶段状态；
+2. 列出 planning、tool_execution、awaiting_approval、assistant_response、summary、failed、cancelled 的事实来源；
+3. 找出“持久化事件、运行时 progress、聊天 assistant_delta、Provider provenance”之间的重复或缺口；
+4. 确定一个最小可验证契约：每个可见进度事件必须带 run_id、action_id、phase、progress、progress_message，且事件回放后顺序稳定；
+5. 先新增失败测试，再实现后端代码；
+6. 保持 Provider 原始 reasoning 不进入聊天正文和日志，改为公开的阶段进度/动作摘要；
+7. 如修改 SSE 或响应 schema，必须同步前端 API 类型与回归测试；
+8. 后端全量门禁仍为 `cd backend; .\.venv\Scripts\python.exe -m pytest -q`；
+9. 每个代码优化独立 commit + push；
+10. 每个批次完成后立即追加本文件、独立文档 commit + push，并记录回退点。
+```
+
+CARD-051 当前状态：
+
+```text
+已设置为下一任务目标；
+尚未实施；
+下一步先读取真实代码和测试，输出可复现缺口，再锁定具体文件和失败测试；
+```
