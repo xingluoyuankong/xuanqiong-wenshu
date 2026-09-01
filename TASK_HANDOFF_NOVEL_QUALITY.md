@@ -75546,3 +75546,180 @@ Artifact 状态：CARD-041 reset 隔离、CARD-042 重复 facts 隔离、CARD-04
 6. 完成代码独立提交推送，再完成文档独立提交推送；
 7. 保持聊天主区优先、左侧分组紧凑和右侧日志独立滚动。
 ```
+
+# CARD-046：旧 Run 批量 Artifact facts 生命周期隔离
+
+## 本批目标
+
+修复 `loadArtifactsWithFacts(runId)` 在 Run 切换期间的批次竞态。旧 Run 的 `listArtifacts()` 请求晚返回时，原实现只判断该 Run 是否仍存在于 Projection，不判断它是否仍是当前选中 Run，因而会继续启动旧 Artifact 的质量/谱系 facts 请求，污染全局 loading/error map。
+
+## 失败驱动验证
+
+新增测试：
+
+```text
+does not start stale Artifact fact loads after the selected Run changes during a batch
+```
+
+复现时序：
+
+```text
+1. 当前选择 Run-A；
+2. loadArtifactsWithFacts(Run-A) 发出 listArtifacts 请求；
+3. 用户切换到 Run-B 并 reset Artifact facts；
+4. Run-A 的 Artifact 列表晚返回；
+5. 旧实现仍对 Run-A Artifact 启动 getArtifactQuality/getArtifactLineage。
+```
+
+旧实现结果：
+
+```text
+测试失败：旧 Run-A 的质量 facts 请求被启动；
+```
+
+## 实际代码变更
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.ts
+```
+
+`loadArtifactsWithFacts()` 现在建立批次上下文：
+
+```text
+batchGeneration
+selectedRunAtStart
+run_id
+```
+
+只有以下条件全部成立才会写入 Artifact Projection 并继续加载 facts：
+
+```text
+1. batchGeneration 仍是当前 Artifact view generation；
+2. selectedRunAtStart 等于当前 runId；
+3. 当前 selectedRunId 仍等于当前 runId；
+4. Run 仍存在于 runProjection。
+```
+
+Facts 请求使用批次 generation 调用 `loadArtifactFacts()`，因此旧 Run 晚返回时：
+
+```text
+不写入旧 Run 的 artifacts；
+不启动旧 Artifact 的质量 facts；
+不启动旧 Artifact 的 lineage facts；
+不会产生旧 Run 的全局 loading/error 残留。
+```
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.spec.ts
+```
+
+新增 listArtifacts mock 和批次切换回归，验证旧 Run facts 请求完全没有启动。
+
+## 修复后验证
+
+定向测试：
+
+```text
+1 passed
+```
+
+Runtime composable 全集合：
+
+```text
+20 passed
+```
+
+反向验证：
+
+```text
+临时恢复旧的 loadArtifactsWithFacts() 实现；
+移除批次 generation 和 selectedRun 上下文判断；
+重新运行旧 Run 批次测试；
+```
+
+结果：
+
+```text
+1 failed
+REVERSE_EXIT=1
+```
+
+恢复真实实现后：
+
+```text
+1 passed
+RESTORED_EXIT=0
+```
+
+## 全量前端门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+```
+
+```text
+通过
+```
+
+```powershell
+npm run test:run
+```
+
+```text
+74 files passed
+451 tests passed
+```
+
+```powershell
+npm run build-only
+```
+
+```text
+4905 modules transformed
+built successfully
+```
+
+## 提交、推送与回退
+
+```text
+上一回退点：e0da3e1 docs: record card 045 action state
+本批代码提交：77bd2a0 fix: fence stale artifact batch loads
+代码已推送：origin/codex/bohrium-integration-20260831
+本批文档提交：待本次文档提交生成
+```
+
+回退方式：
+
+```text
+git revert 77bd2a0
+```
+
+该回退只移除旧 Run 批次 guard，保留 CARD-040 至 CARD-045 的布局、facts 和 action 状态修复。
+
+## 当前累计状态
+
+```text
+后端：CARD-038/039，最近后端全量 1438 passed；
+布局：CARD-040，中央聊天主区优先，左右 rail 收窄，右侧日志独立滚动；
+Artifact facts：CARD-041 reset 隔离、CARD-042 重复请求隔离、CARD-043 lineage 状态、CARD-044 blocker 状态、CARD-045 rewrite/diff/preview 状态、CARD-046 批次 Run 隔离；
+前端最近全量：74 files / 451 tests passed；
+当前服务：127.0.0.1:5174/agent 与 127.0.0.1:8013/health 均为 HTTP 200。
+```
+
+## 下一任务：CARD-047（Artifact facts map 的 Run 级存储归一化）
+
+继续消除全局 Artifact ID map 的生命周期风险：
+
+```text
+1. 将 quality/lineage facts、loading、error 从 Record<artifact_id, ...> 归一为按 run_id + artifact_id 的投影；
+2. 切换 Run 时只清理当前 Run 的状态，避免长期运行产生无效键；
+3. 同名 Artifact ID 在不同 Run 中不得互相覆盖；
+4. Workbench 只接收当前 Run 的投影，减少组件层判断；
+5. 先写旧实现失败测试，再完成实现、反向验证和全量前端门禁；
+6. 代码和任务文档继续独立提交、独立推送并记录回退点。
+```
