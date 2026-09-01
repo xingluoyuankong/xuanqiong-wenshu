@@ -147,7 +147,7 @@ async def create_agent_plan(payload: AgentPlanRequest, current_user: UserInDB = 
 async def create_agent_session(payload: AgentSessionCreateRequest, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> AgentSessionRead:
     try:
         return await AgentRuntimeService(session).create_session(user_id=current_user.id, project_id=payload.project_id, title=payload.title)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -173,7 +173,7 @@ async def list_agent_project_entity_summaries(
 async def list_agent_sessions(project_id: str | None = Query(default=None), limit: Annotated[int, Query(ge=1, le=100)] = 50, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> list[AgentSessionRead]:
     try:
         return await AgentRuntimeService(session).list_sessions(user_id=current_user.id, project_id=project_id, limit=limit)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -181,7 +181,7 @@ async def list_agent_sessions(project_id: str | None = Query(default=None), limi
 async def archive_agent_session(session_id: str, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> AgentSessionRead:
     try:
         return await AgentRuntimeService(session).archive_session(session_id=session_id, user_id=current_user.id)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -194,7 +194,7 @@ async def get_agent_session(session_id: str, session: AsyncSession = Depends(get
         runs = list((await session.execute(select(AgentRun).where(AgentRun.session_id == session_id, AgentRun.user_id == current_user.id).order_by(AgentRun.created_at.asc()))).scalars().all())
         payload = {"id": item.id, "user_id": item.user_id, "project_id": item.project_id, "title": item.title, "status": item.status, "created_at": item.created_at, "updated_at": item.updated_at, "messages": messages, "runs": runs}
         return AgentSessionDetail.model_validate(payload)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -323,7 +323,7 @@ async def post_agent_message(session_id: str, payload: AgentMessageCreateRequest
             "approvals": [],
             "execution_job": AgentJobRead.model_validate(execution_job),
         }
-    except (AgentRuntimeError, UnknownAgentTool, ProjectScopeViolation, ContextRefValidationError) as exc:
+    except (AgentRuntimeError, UnknownAgentTool, ProjectScopeViolation, ContextRefValidationError, SQLAlchemyError) as exc:
         if transaction_started:
             await session.rollback()
         raise _error(exc) from exc
@@ -568,7 +568,7 @@ async def stream_agent_events(session_id: str, run_id: str, request: Request, af
 async def claim_agent_run(run_id: str, worker_id: str = Query(min_length=1, max_length=128), lease_seconds: int = Query(default=120, ge=1, le=3600), session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> AgentRunRead:
     try:
         return await AgentRuntimeService(session).claim_run(run_id=run_id, user_id=current_user.id, lease_owner=worker_id, lease_seconds=lease_seconds)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -576,7 +576,7 @@ async def claim_agent_run(run_id: str, worker_id: str = Query(min_length=1, max_
 async def release_agent_run(run_id: str, worker_id: str = Query(min_length=1, max_length=128), session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> AgentRunRead:
     try:
         return await AgentRuntimeService(session).release_run(run_id=run_id, user_id=current_user.id, lease_owner=worker_id)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -588,7 +588,7 @@ async def recover_agent_run(run_id: str, session: AsyncSession = Depends(get_ses
             recovered = await recover_visible_response(run_id=run_id, user_id=current_user.id)
         run = await AgentRuntimeService(session).get_run(run_id, current_user.id)
         return AgentRunRead.model_validate(run)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -651,7 +651,7 @@ async def list_agent_run_commands(
             limit=limit,
         )
         return [AgentRunCommandRead.model_validate(item) for item in commands]
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -681,7 +681,7 @@ async def submit_agent_run_command(
                 user_id=current_user.id,
             )
         return AgentRunCommandRead.model_validate(command)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -689,7 +689,7 @@ async def submit_agent_run_command(
 async def pause_agent_run(run_id: str, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> AgentRunRead:
     try:
         return await AgentRuntimeService(session).pause_run(run_id=run_id, user_id=current_user.id)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -697,7 +697,7 @@ async def pause_agent_run(run_id: str, session: AsyncSession = Depends(get_sessi
 async def resume_agent_run(run_id: str, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> AgentRunRead:
     try:
         return await AgentRuntimeService(session).resume_run(run_id=run_id, user_id=current_user.id)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -708,7 +708,7 @@ async def cancel_agent_run(run_id: str, session: AsyncSession = Depends(get_sess
         run = await runtime.cancel_run(run_id=run_id, user_id=current_user.id)
         await _apply_cancel_side_effects(run, session=session, user_id=current_user.id)
         return run
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -763,7 +763,7 @@ async def get_agent_run_plan(
             provider_called=bool(context.get("planner_provider_called")),
             planner_fallback_reason=(str(context.get("planner_fallback_reason"))[:160] if context.get("planner_fallback_reason") else None),
         )
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -787,7 +787,7 @@ async def get_agent_run_provider_provenance(
             candidate_writer_model_ref=(str(context.get("candidate_writer_model_ref") or "")[:200] or None),
             candidate_writer_provider_attempts=(context.get("candidate_writer_provider_attempts") if isinstance(context.get("candidate_writer_provider_attempts"), dict) else None),
         )
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -813,7 +813,7 @@ async def get_agent_run_context_snapshot(
         if snapshot is not None and (snapshot.session_id != run.session_id or snapshot.user_id != current_user.id):
             snapshot = None
         return AgentContextSnapshotRead.model_validate(snapshot) if snapshot is not None else None
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -830,7 +830,7 @@ async def get_agent_run_latest_plan_revision(
             run_id=run.id, session_id=run.session_id, user_id=current_user.id
         )
         return AgentPlanRevisionRead.model_validate(revision) if revision is not None else None
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -848,7 +848,7 @@ async def list_agent_run_conversation_summaries(
             run_id=run.id, session_id=run.session_id, user_id=current_user.id, limit=limit
         )
         return [AgentConversationSummaryRead.model_validate(item) for item in summaries]
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -863,7 +863,7 @@ async def get_agent_run_state(
         return await AgentStateProjectionService(session).get_run_state(
             run_id=run_id, user_id=current_user.id
         )
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -891,7 +891,7 @@ async def list_agent_run_activity(
 async def list_agent_approvals(run_id: str, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> list[AgentApprovalRead]:
     try:
         return await AgentRuntimeService(session).list_approvals(run_id=run_id, user_id=current_user.id)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -899,7 +899,7 @@ async def list_agent_approvals(run_id: str, session: AsyncSession = Depends(get_
 async def list_agent_run_steps(run_id: str, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> list[AgentRunStepRead]:
     try:
         return await AgentRuntimeService(session).list_steps(run_id=run_id, user_id=current_user.id)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -908,7 +908,7 @@ async def execute_agent_approval(approval_id: str, session: AsyncSession = Depen
     try:
         artifact = await _execute_registered_approval(approval_id=approval_id, session=session, user_id=current_user.id)
         return AgentArtifactRead.model_validate(artifact)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -931,7 +931,7 @@ async def diff_agent_artifact_version(
             session=session,
         )
         return AgentArtifactVersionDiffRead.model_validate(result)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 @router.get('/artifacts/{artifact_id}/diff', response_model=AgentArtifactDiffRead)
@@ -944,7 +944,7 @@ async def diff_agent_artifact(
     try:
         result = await diff_artifacts(artifact_id=artifact_id, against_artifact_id=against_artifact_id, user_id=current_user.id, session=session)
         return AgentArtifactDiffRead.model_validate(result)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 @router.get('/artifacts/{artifact_id}/quality', response_model=AgentArtifactQualityRead)
@@ -964,7 +964,7 @@ async def get_agent_artifact_quality(
             findings=[AgentQualityFindingRead.model_validate(item) for item in facts.findings],
             gate=(AgentQualityGateRead.model_validate(facts.gate) if facts.gate is not None else None),
         )
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -984,7 +984,7 @@ async def get_agent_artifact_lineage(
             upstream_edges=[_lineage_edge_read(item) for item in facts.upstream],
             downstream_edges=[_lineage_edge_read(item) for item in facts.downstream],
         )
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -997,7 +997,7 @@ async def list_agent_artifact_quality_blockers(
     try:
         rows = await list_artifact_quality_blockers(artifact_id=artifact_id, user_id=current_user.id, session=session)
         return [AgentQualityBlockerRead.model_validate(item) for item in rows]
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 @router.get('/artifacts/{artifact_id}/rewrite-instructions', response_model=list[AgentRewriteInstructionRead])
@@ -1009,7 +1009,7 @@ async def list_agent_artifact_rewrite_instructions(
     try:
         rows = await list_artifact_rewrite_instructions(artifact_id=artifact_id, user_id=current_user.id, session=session)
         return [AgentRewriteInstructionRead.model_validate(item) for item in rows]
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -1018,7 +1018,7 @@ async def read_agent_artifact_content(artifact_id: str, session: AsyncSession = 
     try:
         _, content = await read_artifact_content(artifact_id=artifact_id, user_id=current_user.id, session=session)
         return PlainTextResponse(content)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -1062,7 +1062,7 @@ async def accept_agent_artifact(artifact_id: str, payload: AgentArtifactAcceptRe
         )
         accepted = await _execute_registered_approval(approval_id=approval.id, session=session, user_id=current_user.id)
         return AgentArtifactRead.model_validate(accepted)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -1070,7 +1070,7 @@ async def accept_agent_artifact(artifact_id: str, payload: AgentArtifactAcceptRe
 async def list_agent_artifacts(run_id: str, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> list[AgentArtifactRead]:
     try:
         return await AgentRuntimeService(session).list_artifacts(run_id=run_id, user_id=current_user.id)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
@@ -1079,7 +1079,7 @@ async def decide_agent_approval(approval_id: str, payload: AgentApprovalDecision
     try:
         approval = await AgentRuntimeService(session).decide_approval(approval_id=approval_id, user_id=current_user.id, approved=payload.approved, reason=payload.reason)
         return AgentApprovalRead.model_validate(approval)
-    except AgentRuntimeError as exc:
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
