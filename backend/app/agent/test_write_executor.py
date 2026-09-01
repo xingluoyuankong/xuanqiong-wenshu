@@ -36,6 +36,11 @@ async def test_approved_write_creates_candidate_and_accept_saves_version(task_se
     await runtime.decide_approval(approval_id=approval.id, user_id=user.id, approved=True)
 
     async def fake_stream(self, **kwargs):
+        ledger = kwargs["attempt_ledger"]
+        attempt = ledger.begin(
+            role=kwargs["attempt_role"], provider_ref="writer-fixture", model_ref="writer-model"
+        )
+        ledger.finish(attempt.attempt_id, output="candidate first.candidate second.")
         yield "candidate first."
         yield "candidate second."
 
@@ -48,6 +53,9 @@ async def test_approved_write_creates_candidate_and_accept_saves_version(task_se
     assert artifact.metadata_json["candidate_writer_model_ref"]
     refreshed_run = await runtime.get_run(run.id, user.id)
     assert refreshed_run.context_json["candidate_writer_provider_called"] is True
+    writer_attempts = refreshed_run.context_json["candidate_writer_provider_attempts"]["provider_attempts"]
+    assert [item["status"] for item in writer_attempts] == ["succeeded"]
+    assert writer_attempts[0]["role"] == "writer"
     candidate_path = Path(__file__).resolve().parents[2] / "output" / "agent-artifacts" / artifact.metadata_json["storage_key"]
     assert candidate_path.is_file()
     saved_step = (await runtime.list_steps(run_id=run.id, user_id=user.id))[0]
@@ -271,6 +279,11 @@ async def test_candidate_writer_timeout_records_writer_provenance_and_rejects_ca
     await runtime.decide_approval(approval_id=approval.id, user_id=user.id, approved=True)
 
     async def timeout_stream(self, **kwargs):
+        ledger = kwargs["attempt_ledger"]
+        attempt = ledger.begin(
+            role=kwargs["attempt_role"], provider_ref="writer-fixture", model_ref="writer-model"
+        )
+        ledger.fail(attempt.attempt_id, TimeoutError("candidate writer timeout fixture"))
         raise TimeoutError("candidate writer timeout fixture")
         yield "unreachable"
 
@@ -282,6 +295,9 @@ async def test_candidate_writer_timeout_records_writer_provenance_and_rejects_ca
     assert saved.status == "failed"
     assert saved.context_json["candidate_writer_provider_called"] is False
     assert saved.context_json["candidate_writer_provider_fallback_reason"] == "TimeoutError"
+    attempts = saved.context_json["candidate_writer_provider_attempts"]["provider_attempts"]
+    assert [item["status"] for item in attempts] == ["failed"]
+    assert attempts[0]["error_category"] == "TIMEOUT"
     assert (await runtime.get_approval(approval_id=approval.id, user_id=user.id)).status == "execution_failed"
     events = await runtime.list_events(run_id=run.id, user_id=user.id)
     failure = next(item for item in events if item.event_type == "write_execution_failed")

@@ -115,11 +115,6 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
 
     chunks: list[str] = []
     provider_attempts = ProviderAttemptLedger(run_id=approval.run_id)
-    provider_attempt = provider_attempts.begin(
-        role="candidate_writer",
-        provider_ref="openai-compatible",
-        model_ref=candidate_writer_model_ref,
-    )
     capability_execution = None
     execution_facts = AgentExecutionService(session)
     try:
@@ -145,7 +140,6 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
         ):
             if not candidate_writer_provider_called:
                 candidate_writer_provider_called = True
-                provider_attempts.mark_first_token(provider_attempt.attempt_id)
                 await runtime.update_run_provider_provenance(
                     run_id=approval.run_id,
                     user_id=user_id,
@@ -159,9 +153,7 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
                 )
         content = "".join(chunks).strip()
         if not content:
-            provider_attempts.fail(provider_attempt.attempt_id, category="EMPTY_STREAM")
             raise AgentConflict("provider returned an empty write candidate")
-        provider_attempts.finish(provider_attempt.attempt_id, output=content)
         await runtime.update_run_provider_provenance(
             run_id=approval.run_id,
             user_id=user_id,
@@ -258,7 +250,6 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
         )
         return artifact
     except asyncio.CancelledError:
-        provider_attempts.cancel(provider_attempt.attempt_id)
         await runtime.update_run_provider_provenance(
             run_id=approval.run_id,
             user_id=user_id,
@@ -266,8 +257,6 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
         )
         raise
     except Exception as exc:
-        if provider_attempt.status == "running":
-            provider_attempts.fail(provider_attempt.attempt_id, exc)
         if capability_execution is not None:
             try:
                 await execution_facts.fail_write_execution(
