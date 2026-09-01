@@ -68,7 +68,7 @@ describe('AgentWorkspaceShell', () => {
   })
 
   it('把中窄与手机断点的聊天优先规则固定为 CSS contract', () => {
-    expect(shellSource).toContain('@media (max-width: 880px)')
+    expect(shellSource).toContain('@media (max-width: 960px)')
     expect(shellSource).toContain('grid-template-columns: minmax(0, 1fr);')
     expect(shellSource).toContain('.agent-main { grid-row: 1; }')
     expect(shellSource).toContain('.agent-sidebar { position: static; grid-row: 2; max-height: none; overflow: visible; }')

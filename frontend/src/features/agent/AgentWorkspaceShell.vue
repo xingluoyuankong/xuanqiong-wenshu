@@ -100,7 +100,7 @@ const statusText = computed(() => {
   .agent-layout { grid-template-columns: minmax(156px, 10.5rem) minmax(0, 1fr) minmax(208px, 14rem); gap: 0.6rem; }
   .agent-page { padding-inline: 0.65rem; }
 }
-@media (max-width: 880px) {
+@media (max-width: 960px) {
   .agent-layout { grid-template-columns: minmax(0, 1fr); }
   .agent-main { grid-row: 1; }
   .agent-sidebar { position: static; grid-row: 2; max-height: none; overflow: visible; }
