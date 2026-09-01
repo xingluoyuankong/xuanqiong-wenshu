@@ -57,7 +57,7 @@
           </div>
         </details>
 
-        <details class="workspace-section" open data-testid="agent-session-section">
+        <details class="workspace-section" data-testid="agent-session-section">
           <summary>
             <span>会话</span>
             <small>{{ Array.isArray(sessions) ? sessions.length : 0 }} 个</small>

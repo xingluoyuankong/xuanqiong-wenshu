@@ -205,9 +205,11 @@ describe('AgentWorkspace', () => {
     expect(wrapper.find('[data-testid="agent-chat-column"] [data-testid="agent-process-stream"]').exists()).toBe(false)
 
     const projectSection = wrapper.get('[data-testid="agent-project-section"]').element as HTMLDetailsElement
+    const sessionSection = wrapper.get('[data-testid="agent-session-section"]').element as HTMLDetailsElement
     const toolsSection = wrapper.get('[data-testid="agent-tools-section"]').element as HTMLDetailsElement
     const dataSection = wrapper.get('[data-testid="agent-data-section"]').element as HTMLDetailsElement
     expect(projectSection.open).toBe(true)
+    expect(sessionSection.open).toBe(false)
     expect(toolsSection.open).toBe(false)
     expect(dataSection.open).toBe(false)
   })
