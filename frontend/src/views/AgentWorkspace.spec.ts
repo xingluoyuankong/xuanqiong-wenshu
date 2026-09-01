@@ -212,6 +212,8 @@ describe('AgentWorkspace', () => {
     expect(sessionSection.open).toBe(false)
     expect(toolsSection.open).toBe(false)
     expect(dataSection.open).toBe(false)
+    const runDetailsSection = wrapper.get('[data-testid="agent-run-details-section"]').element as HTMLDetailsElement
+    expect(runDetailsSection.open).toBe(false)
   })
 
   it('显示项目和后端工具注册表', async () => {
@@ -934,7 +936,6 @@ describe('AgentWorkspace', () => {
     expect(wrapper.get('[data-testid="agent-plan-queued"]').text()).toContain('正在由执行器生成真实计划')
     expect(wrapper.get('[data-testid="agent-process-stream"]').text()).toContain('Agent 已排队')
   })
-})
 
   it('通过 Chat Durable Command API 暂停并取消当前 selected Run，且控制权限来自服务端状态投影', async () => {
     Object.assign(routeQuery, { project_id: 'p1', session_id: 's-control', run_id: 'run-control' })
@@ -1071,4 +1072,16 @@ describe('AgentWorkspace', () => {
     expect(wrapper.get('[data-testid="agent-run-status"]').text()).toBe('cancelled')
     expect(wrapper.find('[data-testid="agent-run-control-bar"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="agent-run-command-history"]').text()).toContain('取消')
+
   })
+  it('运行详情默认收纳但可通过摘要展开', async () => {
+    const wrapper = mount(AgentWorkspace)
+    await flushPromises()
+    const section = wrapper.get('[data-testid="agent-run-details-section"]')
+    expect((section.element as HTMLDetailsElement).open).toBe(false)
+
+    await section.get('summary').trigger('click')
+    expect((section.element as HTMLDetailsElement).open).toBe(true)
+    expect(section.text()).toContain('运行详情')
+  })
+})

@@ -242,7 +242,7 @@
           </div>
         </details>
 
-        <details class="workspace-section workspace-activity-section" open data-testid="agent-run-details-section">
+        <details class="workspace-section workspace-activity-section" data-testid="agent-run-details-section">
           <summary><span>运行详情</span><small>计划、审批、候选</small></summary>
           <div class="workspace-section-body">
             <AgentRunFactPanel
