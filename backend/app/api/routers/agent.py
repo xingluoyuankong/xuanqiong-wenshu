@@ -47,6 +47,9 @@ from ...services.agent_runtime import (
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 _STEP_WORKER_ID = f"api:{socket.gethostname()}:{os.getpid()}"[:128]
+# AgentEventRecord.sequence is a signed SQL INTEGER; keep untrusted SSE
+# cursors inside that range before they reach the database driver.
+MAX_AGENT_STREAM_CURSOR = 2_147_483_647
 
 
 def _error(exc: Exception) -> HTTPException:
@@ -470,8 +473,8 @@ def resolve_agent_stream_cursor(last_event_id: str | None, after_sequence: int =
     fall back to the validated query cursor (or zero).
     """
     try:
-        fallback = max(0, int(after_sequence))
-    except (TypeError, ValueError):
+        fallback = min(max(0, int(after_sequence)), MAX_AGENT_STREAM_CURSOR)
+    except (TypeError, ValueError, OverflowError):
         fallback = 0
     if last_event_id is None:
         return fallback
@@ -482,9 +485,9 @@ def resolve_agent_stream_cursor(last_event_id: str | None, after_sequence: int =
         return fallback
     try:
         cursor = int(value, 10)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return fallback
-    return cursor if cursor >= 0 else fallback
+    return cursor if 0 <= cursor <= MAX_AGENT_STREAM_CURSOR else fallback
 
 
 async def _validate_agent_stream_scope(*, session_id: str, run_id: str, user_id: int) -> None:

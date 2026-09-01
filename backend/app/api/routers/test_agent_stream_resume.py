@@ -329,5 +329,3 @@ async def test_stream_scope_mismatch_is_rejected_before_sse_headers(task_session
 
     assert error.value.status_code == 403
     assert error.value.detail["code"] == "AGENT_SCOPE_VIOLATION"
-
-

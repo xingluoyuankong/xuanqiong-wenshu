@@ -68624,3 +68624,69 @@ CARD-007 总体状态：in_progress
 ```
 
 下一子批次继续优先后端：跨进程 Worker replay 与认证/作用域/数据库异常矩阵；完成后再进入前端布局细化和真实浏览器组合验证。
+
+---
+
+# 2026-09-01｜CARD-007 后端子批次｜SSE 游标整数边界硬化
+
+## 任务目标
+
+防止异常超大 `Last-Event-ID` 或 `after_sequence` 游标进入 SQL 驱动。`AgentEventRecord.sequence` 使用有符号 SQL INTEGER，本批次在路由游标解析处增加统一上限：
+
+```text
+MAX_AGENT_STREAM_CURSOR = 2_147_483_647
+```
+
+## 实际修改
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_stream_resume.py
+```
+
+实际行为：
+
+```text
+after_sequence：非负归一化并限制在 SQL INTEGER 最大值以内
+Last-Event-ID：只接受 ASCII 十进制数字
+Last-Event-ID：负数、带符号、非数字、超出上限时回退 after_sequence
+异常整数转换：回退到已归一化的 query 游标或 0
+```
+
+## 验证结果
+
+```text
+python -m pytest -q app/api/routers/test_agent_stream_resume.py
+结果：13 passed
+
+python -m pytest -q app/api/routers/test_agent_stream_resume.py app/api/routers/test_agent_stream_http.py app/api/routers/test_agent_stream_pagination.py app/agent/test_work_trace_contract.py app/services/test_agent_runtime.py app/api/routers/test_agent_runtime_route.py
+结果：72 passed in 36.48s
+
+python -m py_compile app/api/routers/agent.py
+结果：通过
+
+git diff --check
+结果：通过
+```
+
+新增边界断言：
+
+```text
+2_147_483_648 Header 不进入数据库游标
++10 Header 按非法格式回退 query
+```
+
+## 本批次状态
+
+```text
+SSE 游标整数边界：completed
+Last-Event-ID 非 ASCII/符号输入处理：completed
+现有 HTTP SSE 契约：passed
+终态分页边界：passed
+后端全量回归：上一批次 1406 passed；本批次改动后待完整回归
+CARD-007：in_progress
+回退点：bd92a0f
+GitHub 推送：待本批提交
+```
+
+本批次未修改小说正文，未生成小说内容。
