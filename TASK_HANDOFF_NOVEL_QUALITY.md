@@ -70539,3 +70539,242 @@ CARD-013：completed
 4. 明确 Worker 的长期运行部署入口与状态观测，不把 Worker 未运行伪装成正在生成。
 5. 完成后进入前端真实浏览器布局验收：压缩左栏标签密度、扩大中间对话阅读区、右侧日志保持独立滚动和可折叠。
 ```
+
+
+---
+
+# 2026-09-01｜CARD-014 后端子批次｜真实 HTTP Agent Job → 独立 Worker `--once` 领取闭环
+
+## 1. 本批任务目标
+
+把 CARD-013 已确认的“Job 可排队、可由独立 Worker 领取”从类级/路由级测试推进为完整跨进程证据链：
+
+```text
+真实 Uvicorn HTTP API
+-> production JWT 登录
+-> POST Agent Message（inline=false）
+-> durable agent_execution Job = queued
+-> 独立 scripts/agent_worker.py --once
+-> claim + execute + complete execution Job
+-> HTTP Job 列表、Run State 和 Event Ledger 验证
+```
+
+同时修复 Agent Worker CLI 与已修复的 Command Worker CLI 不一致的资源生命周期问题。
+
+## 2. 实际发现
+
+### 2.1 现有证据不足
+
+此前已有：
+
+```text
+AgentWorker.poll_once 类级测试
+agent_worker.py --once 空数据库退出测试
+CARD-010 的 ASGI durable replay
+```
+
+但没有一条测试同时证明：
+
+```text
+HTTP route 真正写入 queued execution Job
+独立 Worker 子进程领取这条 Job
+Worker 完成后 Job/Run/Event 经 HTTP 读取保持一致
+```
+
+### 2.2 Agent Worker 缺少显式 engine dispose
+
+`backend/scripts/agent_command_worker.py` 已在 CARD-007 修复：
+
+```python
+finally:
+    await engine.dispose()
+```
+
+但 `backend/scripts/agent_worker.py` 原先没有相同收尾。Windows + aiosqlite 下，一次性 Worker 进程可能因全局 engine 的后台连接线程延迟退出；与 Command Worker 的资源模型不一致。
+
+## 3. 实际修改文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_asgi_worker_event_replay.py
+D:\小说写作\xuanqiong-wenshu\backend\scripts\agent_worker.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_worker_cli.py
+```
+
+本批未修改数据库 schema、小说正文、前端代码。
+
+## 4. 真实端到端测试设计
+
+扩展 `test_asgi_worker_event_replay.py`：
+
+### 4.1 测试环境
+
+```text
+临时 SQLite 文件
+正式 Alembic upgrade head
+production 环境
+显式 ADMIN_DEFAULT_USERNAME/PASSWORD
+显式共享 SECRET_KEY
+AGENT_INLINE_EXECUTION=false
+AGENT_INLINE_VISIBLE_RESPONSE=false
+AGENT_TOOL_PROVIDERS_ENABLED=false
+```
+
+### 4.2 HTTP 写入阶段
+
+Writer Uvicorn 启动后，通过真实 API：
+
+```text
+POST /api/auth/login
+POST /api/agent/sessions
+POST /api/agent/sessions/{session_id}/messages
+```
+
+Message 请求显式使用：
+
+```json
+{"tools":["project.list"]}
+```
+
+`project.list` 是本地只读工具。显式选择工具使 Planner 走受控本地规划分支，不依赖 Provider 或外部模型请求。
+
+路由持久化：
+
+```text
+user message
+Agent Run
+run_started/progress durable events
+agent_execution Job（queued）
+```
+
+### 4.3 独立 Worker 执行阶段
+
+使用真实 CLI 子进程：
+
+```text
+python scripts/agent_worker.py --once --worker-id card014-worker-once
+```
+
+断言子进程退出码为 0；不把日志文本作为业务成功证据，因为应用日志初始化可能先于 CLI logging 配置并过滤 INFO。业务事实全部回读 HTTP durable 状态。
+
+### 4.4 HTTP 事实回读
+
+Worker 领取后通过 API 回读：
+
+```text
+GET /api/agent/jobs
+GET /api/agent/sessions/{session_id}/runs/{run_id}/events
+GET /api/agent/runs/{run_id}/state
+```
+
+断言：
+
+```text
+原 agent_execution Job：queued -> succeeded
+同一 Run 生成一个 visible_response Job：queued
+ledger 含 run_started、plan_created、assistant_queued
+state.jobs 中 execution Job 为 succeeded
+state.jobs 中 visible_response Job 为 queued
+```
+
+这表明 `--once` 恰好领取并完成 execution Job，后续可见回复 Job 仍可由下一次 Worker polling 继续处理；没有把未启动的下一步误报为完成。
+
+## 5. Worker 生命周期修复
+
+`backend/scripts/agent_worker.py` 现在：
+
+```python
+from app.db.session import AsyncSessionLocal, engine
+
+try:
+    if args.once:
+        worked = await worker.poll_once()
+    else:
+        await worker.run_forever(stop_event)
+finally:
+    await engine.dispose()
+    log.info("Agent worker stopped: worker_id=%s", worker.worker_id)
+```
+
+该实现与 Command Worker 一致：无论 `--once`、长期运行正常停止或执行异常，都会释放全局 SQLAlchemy async engine。
+
+## 6. 回归测试与反向验证
+
+定向 Worker CLI + ASGI HTTP Job：
+
+```text
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_worker_cli.py app/agent/test_asgi_worker_event_replay.py
+结果：5 passed in 35.60s
+```
+
+受控反向验证：
+
+```text
+临时移除 scripts/agent_worker.py 中的：
+await engine.dispose()
+
+运行：
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_worker_cli.py -k explicit_process_entrypoint
+
+结果：退出码 1；test_worker_cli_is_explicit_process_entrypoint 失败
+随后 finally 自动恢复 agent_worker.py
+```
+
+反向验证日志：
+
+```text
+D:\小说写作\xuanqiong-wenshu\logs\live\agent-worker-dispose-reverse-validation.log
+```
+
+恢复后再验：
+
+```text
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_worker_cli.py app/agent/test_asgi_worker_event_replay.py
+结果：5 passed in 34.46s
+```
+
+后端全量：
+
+```text
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+结果：1427 passed in 342.45s（5分42秒）
+```
+
+## 7. 当前状态
+
+```text
+HTTP Agent Message durable enqueue：completed
+inline=false execution Job queued：completed
+独立 agent_worker.py --once 领取真实 Job：completed
+Worker execution Job 成功状态：completed
+后续 visible_response Job durable queue：completed
+Job/Run State/Event Ledger HTTP 一致性：completed
+Worker global async engine dispose：completed
+Worker 常驻服务部署（Windows Task Scheduler/systemd/container）：pending
+可见回复 Job 的第二次 --once 真实完成回归：pending
+Worker lease 过期后的真实 HTTP recovery：pending
+CARD-014：completed
+```
+
+## 8. 提交、推送与回退
+
+```text
+上一回退点：12f7bb4
+本批代码与测试提交：1982fdf（fix: close agent worker engine on exit，已推送）
+本批文档记录提交：本次提交后回填
+推送分支：origin/codex/bohrium-integration-20260831
+数据库：仅使用 pytest 临时 SQLite，项目本地数据库未修改
+小说正文：未修改
+反向验证日志：未纳入 Git
+```
+
+## 9. 下一任务目标
+
+继续 Worker execution 闭环，再进入前端真实布局验收：
+
+```text
+1. 第二次 agent_worker.py --once 领取 visible_response Job，验证 assistant_message、run_completed、Job succeeded。
+2. 用 Worker handler 可控故障验证 failed/dead_letter 与 HTTP Job/Run/Event 投影。
+3. 验证 lease 过期 Worker 被恢复器重新领取的跨进程状态链。
+4. 完成 Worker 第二阶段后，进行真实浏览器布局验收和优化：左侧标签压缩、聊天区宽度、日志右侧独立滚动。
+```
