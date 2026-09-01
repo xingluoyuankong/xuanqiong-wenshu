@@ -239,6 +239,30 @@ describe('useAgentWorkspaceRuntime', () => {
     expect(runtime.artifactQualityFactsErrors.value[artifact.id]).toBe('')
     expect(runtime.artifactQualityFactsLoading.value[artifact.id]).toBe(false)
   })
+  it('exposes lineage loading and errors independently from quality facts', async () => {
+    const { runtime } = createRuntime()
+    getArtifactLineageMock.mockRejectedValueOnce(new Error('lineage transport failed'))
+
+    const request = runtime.loadArtifactFacts(artifact)
+    expect(runtime.artifactLineageFactsLoading.value[artifact.id]).toBe(true)
+    await expect(request).resolves.toBeUndefined()
+
+    expect(runtime.artifactQualityFacts.value[artifact.id]).toBeDefined()
+    expect(runtime.artifactLineageFactsLoading.value[artifact.id]).toBe(false)
+    expect(runtime.artifactLineageFactsErrors.value[artifact.id]).toBe('lineage transport failed')
+  })
+
+  it('still loads quality blockers when optional lineage facts fail', async () => {
+    const { runtime } = createRuntime()
+    const blocker = { artifact_id: artifact.id, code: 'QUALITY-001', message: '质量阻断' } as AgentQualityBlocker
+    getArtifactLineageMock.mockRejectedValueOnce(new Error('lineage unavailable'))
+    listArtifactQualityBlockersMock.mockResolvedValueOnce([blocker])
+
+    await runtime.loadQualityBlockers(artifact)
+
+    expect(listArtifactQualityBlockersMock).toHaveBeenCalledWith(artifact.id)
+    expect(runtime.qualityBlockers.value).toEqual([blocker])
+  })
   it('keeps an Artifact fail-closed while authority facts are loading or unavailable', async () => {
     const { runtime } = createRuntime()
     const promise = runtime.loadArtifactFacts(artifact)

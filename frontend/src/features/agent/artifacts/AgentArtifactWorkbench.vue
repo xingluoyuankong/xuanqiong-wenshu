@@ -50,7 +50,10 @@
         </article>
       </div>
       <small v-if="qualityCodes(artifact).length">问题码：{{ qualityCodes(artifact).join('、') }}</small>
-      <small v-if="artifactLineage(artifact)" data-testid="agent-artifact-lineage-summary">
+      <small v-if="lineageFactsLoading[artifact.id]" class="muted" data-testid="agent-artifact-lineage-loading">正在读取谱系事实…</small>
+      <small v-else-if="lineageFactsErrors[artifact.id]" class="error" data-testid="agent-artifact-lineage-error">谱系事实读取失败：{{ lineageFactsErrors[artifact.id] }}</small>
+      <small v-else-if="!artifactLineage(artifact)" class="muted" data-testid="agent-artifact-lineage-pending">谱系事实尚未载入。</small>
+      <small v-else data-testid="agent-artifact-lineage-summary">
         谱系边：{{ lineageEdgeCount(artifact) }}（上游 {{ artifactLineage(artifact)?.upstream_edges.length || 0 }} / 下游 {{ artifactLineage(artifact)?.downstream_edges.length || 0 }}）
       </small>
       <small>{{ artifact.uri }}</small>
@@ -130,6 +133,8 @@ const props = withDefaults(defineProps<{
   qualityFactsLoading: Record<string, boolean>
   qualityFactsErrors: Record<string, string>
   lineageFacts: Record<string, AgentArtifactLineage>
+  lineageFactsLoading: Record<string, boolean>
+  lineageFactsErrors: Record<string, string>
   qualityBlockers: AgentQualityBlocker[]
   qualityBlockersLoading: boolean
   rewriteInstructions: Record<string, AgentRewriteInstruction[]>
@@ -149,6 +154,8 @@ const props = withDefaults(defineProps<{
   qualityFactsLoading: () => ({}),
   qualityFactsErrors: () => ({}),
   lineageFacts: () => ({}),
+  lineageFactsLoading: () => ({}),
+  lineageFactsErrors: () => ({}),
   qualityBlockers: () => [],
   qualityBlockersLoading: false,
   rewriteInstructions: () => ({}),

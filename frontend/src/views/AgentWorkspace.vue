@@ -294,6 +294,8 @@
               :quality-facts-loading="artifactQualityFactsLoading"
               :quality-facts-errors="artifactQualityFactsErrors"
               :lineage-facts="artifactLineageFacts"
+              :lineage-facts-loading="artifactLineageFactsLoading"
+              :lineage-facts-errors="artifactLineageFactsErrors"
               :quality-blockers="qualityBlockers"
               :quality-blockers-loading="qualityBlockersLoading"
               :rewrite-instructions="rewriteInstructions"
@@ -641,6 +643,8 @@ const {
   artifactQualityFactsLoading,
   artifactQualityFactsErrors,
   artifactLineageFacts,
+  artifactLineageFactsLoading,
+  artifactLineageFactsErrors,
   providerProvenanceByRunId,
   gapRepairStateByRunId,
   loadRunSteps,

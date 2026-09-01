@@ -57,6 +57,8 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
   const artifactQualityFactsLoading = ref<Record<string, boolean>>({})
   const artifactQualityFactsErrors = ref<Record<string, string>>({})
   const artifactLineageFacts = ref<Record<string, AgentArtifactLineage>>({})
+  const artifactLineageFactsLoading = ref<Record<string, boolean>>({})
+  const artifactLineageFactsErrors = ref<Record<string, string>>({})
   const providerProvenanceByRunId = ref<Record<string, AgentProviderProvenance | null>>({})
   const gapRepairStateByRunId = ref<Record<string, 'idle' | 'repairing' | 'repaired' | 'failed'>>({})
   const GAP_REPAIR_PAGE_LIMIT = 500
@@ -246,7 +248,9 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
       isCurrentArtifactContext(generation, artifact.run_id) &&
       artifactFactsRequestGeneration.get(requestKey) === requestGeneration
     const tasks: Promise<void>[] = []
+    let qualityTaskIndex: number | null = null
     if (typeof AgentAPI.getArtifactQuality === 'function') {
+      qualityTaskIndex = tasks.length
       artifactQualityFactsLoading.value = { ...artifactQualityFactsLoading.value, [artifact.id]: true }
       artifactQualityFactsErrors.value = { ...artifactQualityFactsErrors.value, [artifact.id]: '' }
       tasks.push(AgentAPI.getArtifactQuality(artifact.id).then((value) => {
@@ -267,11 +271,29 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
       }))
     }
     if (typeof AgentAPI.getArtifactLineage === 'function') {
+      artifactLineageFactsLoading.value = { ...artifactLineageFactsLoading.value, [artifact.id]: true }
+      artifactLineageFactsErrors.value = { ...artifactLineageFactsErrors.value, [artifact.id]: '' }
       tasks.push(AgentAPI.getArtifactLineage(artifact.id).then((value) => {
-        if (isCurrent()) artifactLineageFacts.value = { ...artifactLineageFacts.value, [artifact.id]: value }
+        if (isCurrent()) {
+          artifactLineageFacts.value = { ...artifactLineageFacts.value, [artifact.id]: value }
+          artifactLineageFactsErrors.value = { ...artifactLineageFactsErrors.value, [artifact.id]: '' }
+        }
+      }).catch((error) => {
+        if (isCurrent()) {
+          artifactLineageFactsErrors.value = {
+            ...artifactLineageFactsErrors.value,
+            [artifact.id]: error instanceof Error ? error.message : '请求失败',
+          }
+        }
+      }).finally(() => {
+        if (isCurrent()) artifactLineageFactsLoading.value = { ...artifactLineageFactsLoading.value, [artifact.id]: false }
       }))
     }
-    await Promise.all(tasks)
+    const results = await Promise.allSettled(tasks)
+    const qualityResult = qualityTaskIndex === null ? null : results[qualityTaskIndex]
+    if (qualityResult?.status === 'rejected') {
+      throw qualityResult.reason
+    }
   }
 
   const loadArtifactsWithFacts = async (runId: string) => {
@@ -487,6 +509,8 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     artifactQualityFactsLoading.value = {}
     artifactQualityFactsErrors.value = {}
     artifactLineageFacts.value = {}
+    artifactLineageFactsLoading.value = {}
+    artifactLineageFactsErrors.value = {}
     providerProvenanceByRunId.value = {}
     gapRepairStateByRunId.value = {}
   }
@@ -503,6 +527,8 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     artifactQualityFactsLoading,
     artifactQualityFactsErrors,
     artifactLineageFacts,
+    artifactLineageFactsLoading,
+    artifactLineageFactsErrors,
     providerProvenanceByRunId,
     gapRepairStateByRunId,
     materializePlanSteps,

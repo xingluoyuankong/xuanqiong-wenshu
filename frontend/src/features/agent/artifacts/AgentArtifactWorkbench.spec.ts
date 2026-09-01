@@ -28,6 +28,8 @@ const mountWorkbench = (overrides: Record<string, unknown> = {}) =>
       qualityFactsLoading: {},
       qualityFactsErrors: {},
       lineageFacts: {},
+      lineageFactsLoading: {},
+      lineageFactsErrors: {},
       qualityBlockers: [],
       qualityBlockersLoading: false,
       rewriteInstructions: {},
@@ -127,6 +129,13 @@ describe('AgentArtifactWorkbench', () => {
     expect(wrapper.emitted('open-writing-desk')?.[0]).toEqual([{ artifact, focus: 'version' }])
   })
 
+  it('区分谱系事实读取中与读取失败状态', () => {
+    const loading = mountWorkbench({ lineageFactsLoading: { [artifact.id]: true } })
+    expect(loading.get('[data-testid="agent-artifact-lineage-loading"]').text()).toContain('正在读取谱系事实')
+
+    const failed = mountWorkbench({ lineageFactsErrors: { [artifact.id]: 'lineage failed' } })
+    expect(failed.get('[data-testid="agent-artifact-lineage-error"]').text()).toContain('lineage failed')
+  })
   it('旧 Artifact 没有关系化事实时保留 metadata fallback', () => {
     const legacy = {
       ...artifact,
