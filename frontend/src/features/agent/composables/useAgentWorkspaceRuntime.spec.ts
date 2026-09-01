@@ -163,6 +163,56 @@ describe('useAgentWorkspaceRuntime', () => {
     expect(runtime.artifactQualityFacts.value[artifactStateKey(artifactB)]).toEqual(factsB)
   })
 
+
+  it('keeps rewrite action state for reused Artifact IDs across Runs', async () => {
+    const { runtime, projection } = createRuntime()
+    const runB = { ...run, id: 'runtime-run-b' }
+    const artifactB = { ...artifact, run_id: runB.id }
+    const instructionsA = [{ artifact_id: artifact.id, code: 'A-REWRITE', instruction: 'Run-A 指令' }]
+    const instructionsB = [{ artifact_id: artifactB.id, code: 'B-REWRITE', instruction: 'Run-B 指令' }]
+    listArtifactRewriteInstructionsMock.mockResolvedValueOnce(instructionsA).mockResolvedValueOnce(instructionsB)
+
+    await runtime.loadRewriteInstructions(artifact)
+    projection.upsertRun(runB, { select: true })
+    await runtime.loadRewriteInstructions(artifactB)
+
+    expect(runtime.rewriteInstructions.value[artifactStateKey(artifact)]).toEqual(instructionsA)
+    expect(runtime.rewriteInstructions.value[artifactStateKey(artifactB)]).toEqual(instructionsB)
+  })
+
+
+  it('keeps blocker, diff and preview action results scoped to reused Artifact IDs', async () => {
+    const { runtime, projection } = createRuntime()
+    const runB = { ...run, id: 'runtime-run-b' }
+    const artifactB = { ...artifact, run_id: runB.id }
+    const otherArtifact = { ...artifact, id: 'other-artifact', run_id: run.id }
+    projection.setRunArtifacts(run.id, [artifact, artifactB, otherArtifact] as never)
+    projection.upsertRun(runB, { select: true })
+    projection.setRunArtifacts(runB.id, [artifactB, artifact, otherArtifact] as never)
+    const blockerA = { artifact_id: artifact.id, code: 'A-BLOCKER', message: 'Run-A 阻断' } as AgentQualityBlocker
+    const blockerB = { artifact_id: artifactB.id, code: 'B-BLOCKER', message: 'Run-B 阻断' } as AgentQualityBlocker
+    listArtifactQualityBlockersMock.mockResolvedValueOnce([blockerA]).mockResolvedValueOnce([blockerB])
+    getArtifactDiffMock.mockResolvedValueOnce({ artifact_id: artifact.id, against_artifact_id: artifactB.id, summary: {}, diff_lines: [] } as any)
+      .mockResolvedValueOnce({ artifact_id: artifactB.id, against_artifact_id: artifact.id, summary: {}, diff_lines: [] } as any)
+    getArtifactContentMock.mockResolvedValueOnce('Run-A 正文').mockResolvedValueOnce('Run-B 正文')
+
+    projection.selectRun(run.id)
+    await runtime.loadQualityBlockers(artifact)
+    await runtime.compareArtifact(artifact)
+    await runtime.previewArtifact(artifact)
+    projection.selectRun(runB.id)
+    await runtime.loadQualityBlockers(artifactB)
+    await runtime.compareArtifact(artifactB)
+    await runtime.previewArtifact(artifactB)
+
+    expect(runtime.qualityBlockersByKey.value[artifactStateKey(artifact)]).toEqual([blockerA])
+    expect(runtime.qualityBlockersByKey.value[artifactStateKey(artifactB)]).toEqual([blockerB])
+    expect(runtime.artifactDiffByKey.value[artifactStateKey(artifact)]).toBeDefined()
+    expect(runtime.artifactDiffByKey.value[artifactStateKey(artifactB)]).toBeDefined()
+    expect(runtime.artifactPreviewByKey.value[artifactStateKey(artifact)]).toBe('Run-A 正文')
+    expect(runtime.artifactPreviewByKey.value[artifactStateKey(artifactB)]).toBe('Run-B 正文')
+  })
+
   it('loads stage-separated provenance into the selected Run without event-stream inference', async () => {
     const { runtime } = createRuntime()
     await runtime.loadRunFacts(run.id)
@@ -318,7 +368,7 @@ describe('useAgentWorkspaceRuntime', () => {
     expect(runtime.qualityBlockersArtifactId.value).toBe(artifactB.id)
     expect(runtime.qualityBlockersError.value).toBe('current blocker failed')
     expect(runtime.qualityBlockersLoading.value).toBe(false)
-    expect(runtime.qualityBlockersLoadingByArtifact.value[artifactB.id]).toBe(false)
+    expect(runtime.qualityBlockersLoadingByArtifact.value[artifactStateKey(artifactB)]).toBe(false)
   })
   it('clears previous rewrite instructions and attributes failure to the current Artifact', async () => {
     const { runtime } = createRuntime()
@@ -329,10 +379,10 @@ describe('useAgentWorkspaceRuntime', () => {
     await runtime.loadRewriteInstructions(artifact)
     await runtime.loadRewriteInstructions(artifactB)
 
-    expect(runtime.rewriteInstructions.value[artifact.id]).toEqual([oldInstruction])
-    expect(runtime.rewriteInstructions.value[artifactB.id]).toEqual([])
-    expect(runtime.rewriteErrors.value[artifactB.id]).toBe('rewrite failed')
-    expect(runtime.rewriteLoading.value[artifactB.id]).toBe(false)
+    expect(runtime.rewriteInstructions.value[artifactStateKey(artifact)]).toEqual([oldInstruction])
+    expect(runtime.rewriteInstructions.value[artifactStateKey(artifactB)]).toEqual([])
+    expect(runtime.rewriteErrors.value[artifactStateKey(artifactB)]).toBe('rewrite failed')
+    expect(runtime.rewriteLoading.value[artifactStateKey(artifactB)]).toBe(false)
   })
 
   it('clears previous diff and attributes failure to the current Artifact', async () => {

@@ -17,16 +17,16 @@
         {{ retestSide(artifact, 'after')?.blocker_count ?? '?' }}；阻断变化
         {{ retestDelta(artifact)?.blocker_count ?? '?' }}
       </small>
-      <small v-if="rewriteLoading[artifact.id]" class="muted" data-testid="agent-rewrite-loading">正在读取结构化修复指令…</small>
-      <small v-else-if="rewriteErrors[artifact.id]" class="error" data-testid="agent-rewrite-error">修复指令读取失败：{{ rewriteErrors[artifact.id] }}</small>
+      <small v-if="rewriteLoadingFor(artifact)" class="muted" data-testid="agent-rewrite-loading">正在读取结构化修复指令…</small>
+      <small v-else-if="rewriteErrorFor(artifact)" class="error" data-testid="agent-rewrite-error">修复指令读取失败：{{ rewriteErrorFor(artifact) }}</small>
       <div
-        v-if="rewriteInstructions[artifact.id]?.length"
+        v-if="rewriteInstructionsFor(artifact)?.length"
         class="rewrite-instruction-list"
         data-testid="agent-rewrite-instructions"
       >
         <strong>结构化修复指令</strong>
         <article
-          v-for="instruction in rewriteInstructions[artifact.id]"
+          v-for="instruction in rewriteInstructionsFor(artifact)"
           :key="instruction.code + instruction.instruction"
           class="rewrite-instruction"
         >
@@ -61,8 +61,8 @@
       <small>{{ artifact.uri }}</small>
       <XqButton v-if="canPreview" variant="secondary" size="sm" @click="emit('preview', artifact)">查看候选正文</XqButton>
       <XqButton v-if="artifacts.length > 1 && canDiff" variant="secondary" size="sm" @click="emit('compare', artifact)">查看与其他候选差异</XqButton>
-      <XqButton v-if="canLocateBlockers" variant="secondary" size="sm" :disabled="qualityBlockersLoadingByArtifact[artifact.id]" @click="emit('locate-blockers', artifact)">定位质量阻断</XqButton>
-      <XqButton v-if="canLoadRewriteInstructions" variant="secondary" size="sm" data-testid="agent-load-rewrite-instructions-button" :disabled="rewriteLoading[artifact.id]" @click="emit('load-rewrite-instructions', artifact)">读取修复指令</XqButton>
+      <XqButton v-if="canLocateBlockers" variant="secondary" size="sm" :disabled="qualityBlockersLoadingFor(artifact)" @click="emit('locate-blockers', artifact)">定位质量阻断</XqButton>
+      <XqButton v-if="canLoadRewriteInstructions" variant="secondary" size="sm" data-testid="agent-load-rewrite-instructions-button" :disabled="rewriteLoadingFor(artifact)" @click="emit('load-rewrite-instructions', artifact)">读取修复指令</XqButton>
       <XqButton v-if="canCompareWithVersion && hasVersionTarget(artifact)" variant="secondary" size="sm" data-testid="agent-compare-version-button" @click="emit('compare-with-version', artifact)">与正式版本比较</XqButton>
       <XqButton
         v-if="hasSelectedProject"
@@ -215,6 +215,14 @@ const artifactLineageFactsLoading = (artifact: AgentArtifact) =>
   props.lineageFactsLoading[artifactStateKey(artifact)] ?? props.lineageFactsLoading[artifact.id] ?? false
 const artifactLineageFactsError = (artifact: AgentArtifact) =>
   props.lineageFactsErrors[artifactStateKey(artifact)] || props.lineageFactsErrors[artifact.id] || ''
+const qualityBlockersLoadingFor = (artifact: AgentArtifact) =>
+  props.qualityBlockersLoadingByArtifact[artifactStateKey(artifact)] ?? props.qualityBlockersLoadingByArtifact[artifact.id] ?? false
+const rewriteInstructionsFor = (artifact: AgentArtifact) =>
+  props.rewriteInstructions[artifactStateKey(artifact)] || props.rewriteInstructions[artifact.id] || []
+const rewriteLoadingFor = (artifact: AgentArtifact) =>
+  props.rewriteLoading[artifactStateKey(artifact)] ?? props.rewriteLoading[artifact.id] ?? false
+const rewriteErrorFor = (artifact: AgentArtifact) =>
+  props.rewriteErrors[artifactStateKey(artifact)] || props.rewriteErrors[artifact.id] || ''
 const qualityGateDecision = (artifact: AgentArtifact) => artifactQuality(artifact)?.gate?.decision || null
 const hasVersionTarget = (artifact: AgentArtifact) => {
   const metadata = artifact.metadata_json || {}
