@@ -74663,3 +74663,197 @@ git revert 47a3c1e
 6. 先写旧实现必失败的竞态测试，再实现和反向破坏验证；
 7. 完成 type-check、全量 test、build，代码独立提交推送，文档独立提交推送。
 ```
+
+# CARD-042：同一 Artifact 重复 facts 请求的最新结果隔离
+
+## 本批目标
+
+继续处理前端 Artifact 工作台的并发竞态：同一个 `run_id + artifact_id` 在自动刷新、审批完成刷新或重复点击期间可能同时发出多次质量事实请求。旧请求返回后不得覆盖新请求，也不得把旧失败写入新成功结果的错误状态。
+
+## 失败驱动验证
+
+先新增两个并发时序测试，在旧实现上运行：
+
+```text
+2 failed
+```
+
+失败一：
+
+```text
+Q1 先发出并保持 pending
+Q2 后发出并先成功
+Q1 最后返回旧事实
+旧实现最终显示 Q1 的旧结果，而不是 Q2 的最新结果
+```
+
+失败二：
+
+```text
+Q1 先发出并最后失败
+Q2 后发出并成功
+旧实现把 Q1 的错误写入共享 error map，污染 Q2 的成功结果
+```
+
+修正断言使用深度相等后，两个失败都准确指向状态竞态，而非 Vue reactive proxy 的对象身份差异。
+
+## 实际代码变更
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.ts
+```
+
+新增按 Run 和 Artifact 组合的请求代次：
+
+```ts
+const artifactFactsRequestGeneration = new Map<string, number>()
+const artifactFactsRequestKey = (artifact: AgentArtifact) => `${artifact.run_id}:${artifact.id}`
+```
+
+每次 `loadArtifactFacts()`：
+
+```text
+1. 对当前 run_id:artifact_id 递增 requestGeneration；
+2. 当前响应只有同时满足 Artifact view generation 和 facts request generation 才能写回；
+3. 旧成功结果被丢弃；
+4. 旧失败结果被丢弃；
+5. 最新成功结果清空同 Artifact 的旧 error；
+6. resetArtifactFacts() 清空请求代次 map，与 CARD-041 的全局代次一起使旧请求失效。
+```
+
+这一层不改变后端 API，也不把小说生成逻辑硬编码到界面；它只为 Agent 调用产生的事实读取建立可验证的状态边界。
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.spec.ts
+```
+
+新增测试：
+
+```text
+keeps the latest quality facts when duplicate requests resolve out of order
+does not let an older failed quality request poison a newer success
+```
+
+## 修复后验证
+
+定向并发测试：
+
+```text
+2 passed
+```
+
+Runtime composable 全集合：
+
+```text
+13 passed
+```
+
+反向验证：
+
+```text
+临时移除按 Artifact 的 requestGeneration 判断；
+临时恢复旧的共享结果写回路径；
+重新运行两个并发测试；
+```
+
+得到：
+
+```text
+2 failed
+REVERSE_EXIT=1
+```
+
+恢复真实实现后：
+
+```text
+2 passed
+RESTORED_EXIT=0
+```
+
+## 全量前端门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+```
+
+```text
+通过
+```
+
+```powershell
+npm run test:run
+```
+
+```text
+74 files passed
+440 tests passed
+```
+
+```powershell
+npm run build-only
+```
+
+```text
+4905 modules transformed
+built successfully
+```
+
+## 提交、推送与回退
+
+```text
+上一回退点：53c31d5 docs: record card 041 artifact reset isolation
+本批代码提交：ecf36d4 fix: isolate duplicate artifact fact requests
+代码已推送：origin/codex/bohrium-integration-20260831
+本批文档提交：待本次文档提交生成
+```
+
+回退方式：
+
+```text
+git revert ecf36d4
+```
+
+只回退 CARD-042 时保留 CARD-041 的 `47a3c1e` 和 `53c31d5`；任务文档按独立提交回退，不删除历史卡片记录。
+
+## 当前累计状态
+
+```text
+CARD-038：历史 Run plan_id 稳定身份；后端全量 1436 passed；
+CARD-039：/plan 使用同一持久化 revision 的内容；后端全量 1438 passed；
+CARD-040：聊天主区优先布局；前端全量 436 tests passed；
+CARD-041：Run reset 旧 Artifact facts 失效；前端全量 438 tests passed；
+CARD-042：重复 Artifact facts 最新请求隔离；前端全量 440 tests passed。
+```
+
+当前分支及远程仍为：
+
+```text
+codex/bohrium-integration-20260831
+origin/codex/bohrium-integration-20260831
+```
+
+服务状态保持：
+
+```text
+前端 127.0.0.1:5174/agent → HTTP 200
+后端 127.0.0.1:8013/health → HTTP 200
+```
+
+## 下一任务：CARD-043（Artifact facts loading/error 可观测性）
+
+继续处理当前审查中尚未覆盖的状态边界：
+
+```text
+1. 将质量 facts 与 lineage facts 的请求拆成独立状态，不让 Promise.all 把可选 lineage 失败伪装成质量失败；
+2. 新增 artifactLineageFactsLoading 和 artifactLineageFactsErrors；
+3. 旧请求的 finally 仍需完成自己的 pending 收敛，不能因为全局 view generation 过期而永久留下 loading=true；
+4. 为 blockers、rewrite、diff、preview 建立按 action + artifact 的 loading/error/归属状态；
+5. Workbench 显示“未请求、读取中、读取失败、空结果、已载入”五种可区分状态；
+6. 先对旧实现写失败驱动测试，再实现、反向破坏验证，最后执行前端三项全量门禁并分开推送代码和文档；
+7. 保持 CARD-040 的聊天主区优先布局和右侧独立日志滚动不回退。
+```
