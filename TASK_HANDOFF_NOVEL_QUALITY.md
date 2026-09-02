@@ -79079,3 +79079,339 @@ CARD-062 继续以事实源优先，但转入前端交互：
 5. 先写前端失败测试，再实现最小交互；必要时补后端只读查询接口，但不新增页面硬编码工具列表。
 6. 用浏览器真实点击和截图验证：日志仍独立滚动、中央聊天不被挤压、动作定位可追踪。
 7. 代码提交、文档提交、反向验证和门禁继续分离推送。
+
+
+---
+
+# 2026-09-02 CARD-062 实际完成记录：前端动作详情与结果定位交互
+
+> 本节是当前任务接续文档的最新事实源。它只记录 CARD-062 新增的实现、测试、运行验证和下一步计划，不把旧章节的测试数字重复计算为本轮新增成果。当前总目标仍为 `active`：继续把玄穹文枢推进为由 Agent 通过项目内能力注册表自主编排的小说创作工作台，中央聊天为主阅读区，侧栏和运行日志独立承载辅助信息。
+
+## 11.1 当前基线与提交状态
+
+项目目录：
+
+```text
+D:\小说写作\xuanqiong-wenshu
+```
+
+分支与远端：
+
+```text
+分支：codex/bohrium-integration-20260831
+远端：origin/codex/bohrium-integration-20260831
+```
+
+CARD-062 代码提交：
+
+```text
+d96654f feat: add agent log location navigation
+```
+
+提交已推送到远端。代码提交与本节文档提交保持分离，便于只回退代码或只回退接续记录。
+
+本轮没有使用批量暂存；历史未跟踪审计、恢复脚本、数据库备份、`node_modules` 和其他工作区成果均保持原样。当前工作树中 CARD-062 的跟踪文件已经提交，剩余未跟踪项仍按项目规则保留，不得通过 `git add -A`、批量删除或硬重置处理。
+
+## 11.2 CARD-062 目标与实际完成度
+
+目标是让右侧运行日志中的稳定引用真正成为可操作入口：
+
+```text
+日志 action_id/result_ref
+    ↓ 点击
+当前 active Run 的定位状态
+    ↓
+AgentRunInspector 中 step 高亮或 execution 结果高亮
+    ↓
+Run 切换时清理旧定位，失效引用显示可读状态
+```
+
+本轮实际已完成：
+
+- 日志中的 `action_id` 由纯文本改为可访问按钮；
+- 日志中的 `result_ref` 由纯文本改为可访问按钮；
+- 动作点击写入 `selectedActionRef`；
+- 结果点击写入 `selectedResultRef`；
+- 两种定位状态始终只作用于当前 active Run；
+- 切换 Run、重置运行态时清理旧动作和结果定位；
+- `step:<checkpoint.id>` 可定位持久化步骤；
+- `execution:<execution_id>` 可通过步骤 `output_json.execution_id` 找到对应步骤；
+- 工具结果卡显示稳定结果引用并提供选中高亮；
+- 缺失或过期引用显示“引用暂不可用，正在恢复执行事实”；
+- 日志仍只展示引用和摘要，不把工具结果正文复制进日志；
+- 中央聊天区结构没有增加日志节点，右侧日志继续独立滚动。
+
+## 11.3 真实修改文件与职责
+
+### A. 类型契约
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\api\agent.ts
+```
+
+变更：`AgentToolResult` 新增可选的 `result_ref?: string | null`。这是前端对后端关系化执行引用的最小类型表达，不改变旧响应的兼容性。
+
+### B. 结果摘要和高亮
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentToolResultPanel.vue
+```
+
+变更：
+
+- 增加 `selectedResultRef` 输入；
+- 每个安全结果视图保留 `resultRef` 和 `selected` 状态；
+- 结果卡展示 `结果：execution:<id>` 或 `结果：step:<id>`；
+- 选中卡使用 `tool-result-card--selected` 高亮；
+- 无匹配结果时显示恢复状态；
+- 保持原有工具白名单、字段数量、列表数量、文本长度和敏感字段过滤。
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentToolResultPanel.spec.ts
+```
+
+新增验证：结果引用可显示、选中结果卡高亮、结果正文仍不渲染。
+
+### C. 运行检查器定位
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\run\AgentRunInspector.vue
+```
+
+变更：
+
+- 增加 `selectedActionRef`、`selectedResultRef` 两个可选输入；
+- 解析 `step:` 和 `execution:` 引用；
+- 根据步骤 ID 或 `output_json.execution_id` 计算 `selectedStep`；
+- 显示统一的当前定位摘要；
+- 对过期引用显示可读恢复状态；
+- 执行检查点增加稳定 `data-testid` 和选中样式；
+- 将选中的结果引用传给 `AgentToolResultPanel`。
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\run\AgentRunInspector.spec.ts
+```
+
+新增验证：动作引用定位步骤、执行引用定位结果、过期引用不抛异常且显示恢复提示。
+
+### D. 工作台交互和 Run 隔离
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+变更：
+
+- 右侧日志引用使用 `button`，支持鼠标和键盘焦点；
+- 新增 `selectLogLocation()` 和 `clearRunLocation()`；
+- `selectRunAction()`、`selectedRunId` 变化、`resetRuntime()` 均清理定位；
+- response tool results 缺少引用时，按当前 Run 的完成步骤补齐 `execution:` 或 `step:` 引用；
+- 持久化步骤回退结果也会带稳定 `result_ref`；
+- 将定位状态传给 `AgentRunInspector`；
+- 新增焦点轮廓、悬停颜色和可换行样式，不改变日志容器的独立滚动。
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
+```
+
+新增验证：点击动作、点击结果、切换历史 Run 后清理高亮和定位状态。
+
+## 11.4 失败驱动、反向验证与门禁证据
+
+### 先失败再修复
+
+在实现前新增的断言真实暴露旧实现缺口：
+
+```text
+AgentToolResultPanel：没有选中结果卡和 result_ref 节点；
+AgentRunInspector：没有 selected location、步骤高亮和结果高亮；
+AgentWorkspace：日志引用不是按钮，也没有点击后写入定位状态。
+```
+
+### CARD-062 定向回归
+
+执行目录：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+```
+
+执行命令：
+
+```powershell
+npm run test:run -- src/features/agent/AgentToolResultPanel.spec.ts src/features/agent/run/AgentRunInspector.spec.ts src/views/AgentWorkspace.spec.ts -t "selected result|locates a step|stale location|点击日志动作"
+```
+
+结果：
+
+```text
+Test Files 3 passed
+Tests      4 passed
+```
+
+### 反向验证
+
+临时把 `AgentWorkspace.vue` 中动作按钮的真实绑定替换为无效绑定：
+
+```text
+@click="selectLogLocation('action', event.actionId)"
+→
+@click="undefined"
+```
+
+随后只运行 CARD-062 工作台测试，断言真实失败：
+
+```text
+expected '尚未定位动作或结果' to contain 'step:run-locate-old'
+EXPECTED_FAILURE_EXIT=1
+```
+
+验证完成后真实绑定已恢复，临时副本已清理。
+
+### 前端全量门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+npm run test:run
+npm run build-only
+```
+
+本轮实测结果：
+
+```text
+npm run type-check：退出码 0；
+npm run test:run：74 files passed，466 tests passed；
+npm run build-only：4905 modules transformed，built successfully。
+```
+
+### 真实浏览器检查
+
+使用本地 Playwright 浏览器访问：
+
+```text
+http://127.0.0.1:5174/agent
+```
+
+视口：
+
+```text
+1258×622
+```
+
+实测观察：
+
+```text
+运行日志面板存在；
+日志动作引用按钮数量：10；
+结果引用按钮数量：0（当前恢复的历史运行事件没有 result_ref）；
+点击一个历史动作引用后，检查器显示：
+“引用暂不可用：context:0（正在恢复执行事实）”；
+页面没有未处理异常。
+```
+
+截图证据：
+
+```text
+D:\小说写作\xuanqiong-wenshu\audit\card062-agent-browser.png
+D:\小说写作\xuanqiong-wenshu\audit\card062-agent-browser-click.png
+```
+
+截图属于未跟踪审计目录，保持原样，不纳入代码提交。
+
+## 11.5 当前服务状态与启动注意事项
+
+当前本地服务曾实测正常：
+
+```text
+前端：http://127.0.0.1:5174/agent → HTTP 200
+后端：http://127.0.0.1:8013/health → HTTP 200
+前端代理：http://127.0.0.1:5174/api/health → HTTP 200
+```
+
+项目统一启动脚本：
+
+```text
+D:\小说写作\xuanqiong-wenshu\start.ps1
+```
+
+本机执行时在启动本地 MySQL 阶段停止，原因是脚本默认查找：
+
+```text
+D:\download\MySQL\bin\mysqld.exe
+```
+
+该文件当前不存在。为了查看 Agent 工作台，本轮按 `D:\小说写作\xuanqiong-wenshu\backend\.env` 中已有的 `DB_PROVIDER=sqlite` 启动后端，再启动前端 Vite。后续若要求按统一脚本启动正式 MySQL 链路，应先补齐 `XUANQIONG_WENSHU_MYSQLD_PATH` 指向实际 `mysqld.exe`，不要把 SQLite 运行结果误报为 MySQL 验收结果。
+
+## 11.6 回退命令
+
+只回退 CARD-062 代码：
+
+```powershell
+git revert d96654f
+```
+
+只回退 CARD-062 文档记录：使用本节对应的文档提交哈希执行：
+
+```powershell
+git revert <CARD-062-文档提交哈希>
+```
+
+两个提交互相独立。回退代码后，文档仍保留审计记录；回退文档不会删除已经推送的代码。
+
+## 11.7 下一任务目标：CARD-063
+
+下一目标预登记为：
+
+```text
+CARD-063：运行定位自动展开、滚动到目标和执行事实补全
+```
+
+目标不是新增页面，而是继续强化当前聊天主界面和右侧活动栏之间的可追踪性：
+
+1. 日志点击动作或结果后，若“当前运行”检查器 `details` 尚未展开，自动展开；
+2. 等步骤列表或工具结果异步回读完成后，对目标节点执行 `scrollIntoView({ block: 'nearest' })`；
+3. 为动作定位、结果定位、过期引用分别保留明确状态，不用颜色作为唯一信息；
+4. 解决当前历史事件只有 `action_id`、没有 `result_ref` 时的可读降级，优先从 Run state、step output 和 capability execution fact 补齐，不读取正文；
+5. 结果引用对应的执行事实只展示 tool name、状态、时间、attempt 和安全字段摘要，不把原始 payload 注入日志；
+6. 按 active Run 隔离自动展开和滚动目标，切换 Run 时取消旧目标，防止旧请求回写新 Run；
+7. 继续保持左侧分组紧凑、中央聊天为主要阅读面、右侧日志独立滚动；
+8. 先补失败测试，再改真实代码，再做故意破坏验证；
+9. CARD-063 代码和文档继续采用两个独立提交，并分别推送到 `origin/codex/bohrium-integration-20260831`。
+
+建议 CARD-063 文件范围：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\run\AgentRunInspector.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\run\AgentRunInspector.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentToolResultPanel.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentToolResultPanel.spec.ts
+```
+
+CARD-063 开始前的验收基线：
+
+```text
+当前 HEAD：d96654f；
+前端 type-check：通过；
+前端全量测试：74 files / 466 tests 通过；
+前端 build-only：4905 modules transformed；
+CARD-062 反向验证：已确认缺失点击绑定会失败；
+中央聊天、左侧分组、右侧独立日志结构：保持现状；
+总任务：active，继续推进，不得把局部 CARD 完成写成全项目完成。
+```
