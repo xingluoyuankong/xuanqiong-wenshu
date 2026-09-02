@@ -85748,3 +85748,330 @@ CARD-076 文档：本节首版提交待生成
 CARD-077：pending / backend-first
 总目标：active
 ```
+---
+
+# 2026-09-03 追加记录：CARD-077 终态 Run 的公开流收敛
+
+> 本节记录 CARD-077 的完整实际过程。目标仍是持续优化项目，不代表整个项目完成；CARD-078 及后续阶段继续保留在总目标中。
+
+## A. 任务目标
+
+```text
+CARD-077｜验证并强化 Run 终态与公开摘要、工作轨迹、Assistant delta 之间的收敛契约。
+```
+
+要解决的产品事实：
+
+```text
+Run 进入 completed / failed / cancelled 后，迟到的流式公开内容不能再出现在历史回放、SSE 续传或聊天状态中；同时，最终回复收尾和审批审计这类明确的终态 receipt 仍然必须可持久化。
+```
+
+## B. 现状审查结果
+
+审查的真实写入路径：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\runner.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\test_agent_runtime.py
+```
+
+审查确认：
+
+```text
+publish_progress() 已经在 terminal Run 上短路；
+append_event() 的 terminal event 有既有幂等 fence；
+append_assistant_delta()、append_work_trace_delta() 和 append_public_work_summary() 原先仍可在 terminal Run 后追加公开活动；
+Runner 在最终消息完成后还需要写入 response:completed receipt；
+审批决定还需要写入终态可追踪的公开审计摘要。
+```
+
+因此不能用“终态后一律拒绝所有摘要”这种粗粒度方案；正确边界是：
+
+```text
+普通实时公开活动：终态后拒绝；
+明确的 terminal receipt：显式允许，但不得重新打开或改写 Run 的 lifecycle state。
+```
+
+## C. 失败测试先行
+
+新增测试文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\test_agent_runtime.py
+```
+
+新增 4 个回归：
+
+```text
+test_terminal_run_rejects_late_assistant_delta
+test_terminal_run_rejects_late_work_trace_delta
+test_terminal_run_rejects_late_public_work_summary
+test_terminal_run_allows_explicit_receipt_without_reopening_state
+```
+
+旧实现基线：
+
+```text
+Assistant delta：未抛出 AgentConflict，迟到内容被写入；
+Public work summary：未抛出 AgentConflict，迟到摘要被写入；
+Work trace 首次夹具使用了不属于 WorkTraceDelta 枚举的 tool_execution，先暴露为测试夹具错误，随后修正为合法 act；
+```
+
+旧实现执行结果：
+
+```text
+FFF                                                                      [100%]
+2 个业务失败 + 1 个测试夹具 ValidationError
+```
+
+夹具修正后，三项业务失败均稳定复现：
+
+```text
+3 failed, 32 deselected in 3.58s
+```
+
+失败核心事实：
+
+```text
+Failed: DID NOT RAISE <class 'app.services.agent_runtime.AgentConflict'>
+```
+
+这证明终态后的迟到公开写入是真实缺口。
+
+## D. 实际代码修复
+
+### D.1 统一实时公开事件集合
+
+在 `agent_runtime.py` 增加：
+
+```python
+_LIVE_PUBLIC_EVENT_TYPES = {
+    "assistant_delta",
+    "work_trace_delta",
+    "public_work_summary",
+}
+```
+
+`_append_event_uncommitted()` 在 Run 已终态时拒绝集合中的事件：
+
+```text
+terminal run cannot accept live public event
+```
+
+这样 `append_assistant_delta()` 与 `append_work_trace_delta()` 共享同一个底层边界，不需要每个调用方重复实现终态判断。
+
+### D.2 公开摘要的显式终态 receipt
+
+`append_public_work_summary()` 增加：
+
+```python
+allow_terminal: bool = False
+```
+
+默认值为 `False`，普通公开摘要在终态后继续拒绝。
+
+当且仅当调用方显式传入：
+
+```python
+allow_terminal=True
+```
+
+才允许写入终态 receipt。该路径保持以下不变量：
+
+```text
+1. status 保持 completed / failed / cancelled；
+2. 不重新打开 Run；
+3. 不改变 terminal Run 的 phase、current_step 或 progress；
+4. 仍更新 latest_public_summary_sequence，使 receipt 可回放；
+5. 不绕过公开字段校验、长度限制和脱敏。
+```
+
+### D.3 已接入显式 receipt 的调用点
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\runner.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+```
+
+调用点：
+
+```text
+1. Runner 的 response:completed 收尾摘要；
+2. Runner 的 response:failed 终态收尾摘要；
+3. decide_approval() 的审批决定审计摘要。
+```
+
+普通 `response:started`、执行过程中的 planning/tool 活动和其他实时摘要不传 `allow_terminal=True`，继续使用默认终态门禁。
+
+## E. 中间全量回归发现与修正
+
+第一次实现把所有 terminal public summary 都拒绝，随后执行全量后发现 4 个兼容性失败：
+
+```text
+1. 独立 Worker HTTP 完成链路；
+2. visible response Provider retry 完成链路；
+3. chapter.version.accept 审批幂等链路；
+4. Runner 最终可见回复后的对话摘要归档链路。
+```
+
+失败根因不是终态门禁方向错误，而是合法收尾摘要没有显式区分。由此增加 `allow_terminal` 参数并只开放已确认的 terminal receipt 调用点。
+
+修正后，以上四条既有路径全部通过，说明兼容边界已经收敛到真实业务语义，而不是靠放宽所有终态写入。
+
+## F. 定向验证
+
+命令：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/services/test_agent_runtime.py -k "terminal_run or public_summary or stale_run_reconcile or run_command_idempotency or run_command_rejects_stale" app/services/test_agent_conversation_runtime.py -k "runner_archives_summary or provider_retry" app/agent/test_write_executor.py -k "registry_version_accept_requires_approved_same_run_artifact_and_is_idempotent" app/agent/test_worker.py -k "visible_response_provider_retry_uses_real_runner_and_completes_once" app/agent/test_asgi_worker_event_replay.py -k "independent_worker_once_completes_execution_then_visible_response_via_http" app/api/routers/test_agent_stream_resume.py -k "append_work_trace_delta or assistant_delta or stream"
+```
+
+结果：
+
+```text
+14 passed, 65 deselected in 7.68s
+```
+
+覆盖：
+
+```text
+终态迟到 Assistant delta；
+终态迟到 work trace；
+终态迟到 public summary；
+显式终态 receipt；
+Runner 最终回复；
+Worker retry；
+HTTP 独立 Worker；
+审批/Artifact 幂等；
+SSE/工作轨迹/Assistant delta 回归。
+```
+
+## G. 反向破坏验证
+
+临时同时移除：
+
+```text
+1. _append_event_uncommitted() 的实时公开事件终态门禁；
+2. append_public_work_summary() 的默认终态门禁。
+```
+
+再运行 CARD-077 终态测试，结果：
+
+```text
+3 failed, 1 passed, 32 deselected in 5.39s
+EXPECTED_FAILURE_EXIT=1
+```
+
+失败的正是三项迟到公开写入测试；显式 receipt 测试保持通过。破坏版本已在脚本 finally 中恢复，未进入提交。
+
+## H. 后端全量门禁
+
+命令：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+最终结果：
+
+```text
+1462 passed in 444.11s (0:07:24)
+```
+
+这个结果是在显式 terminal receipt 修正后取得；中间第一次全量的 4 个失败路径已经重新定向验证并全部通过。
+
+## I. 提交、推送和精确回退
+
+代码提交：
+
+```text
+9766ff6 fix: fence late agent stream events
+```
+
+推送：
+
+```text
+ed8cb1c..9766ff6 codex/bohrium-integration-20260831 -> origin/codex/bohrium-integration-20260831
+```
+
+代码回退：
+
+```powershell
+git revert 9766ff6
+```
+
+该回退只撤销 CARD-077 的：
+
+```text
+backend/app/services/agent_runtime.py
+backend/app/agent/runner.py
+backend/app/services/test_agent_runtime.py
+```
+
+不撤销：
+
+```text
+CARD-075 中央聊天进度/活动卡；
+CARD-076 public summary 与顶层 run state 同步；
+CARD-074 的 SSE cursor、delta 分片和 terminal event fence。
+```
+
+## J. 当前状态
+
+```text
+CARD-072：completed
+CARD-073：completed
+CARD-074-A：completed
+CARD-074-B1：completed
+CARD-074-B2：completed
+CARD-075：completed
+CARD-076：completed
+CARD-077：completed（代码已推送，文档回写进行中）
+总目标：active
+前端：127.0.0.1:5174/agent
+后端：127.0.0.1:8013/health
+```
+
+## K. 下一任务目标：CARD-078 后端终态 receipt 的 API/SSE 顺序契约
+
+下一批仍按后端优先：
+
+```text
+CARD-078｜验证终态 receipt 写入后，state projection、历史事件和 SSE terminal close 的顺序与游标一致性。
+```
+
+重点检查：
+
+```text
+1. terminal event 是否始终是实时公开活动的最终边界；
+2. response:completed / response:failed receipt 与 run_completed / run_failed 的 sequence 顺序是否稳定；
+3. state endpoint 的 latest_public_summary_sequence 是否不会落后于可见终态 receipt；
+4. SSE 在 receipt 后是否仍能正确发送 terminal event 并关闭；
+5. 断线重连是否不会重新消费已完成 receipt；
+6. API payload、SSE payload、前端 reducer 三者是否使用同一公开 cursor 语义。
+```
+
+执行纪律保持不变：
+
+```text
+先审查真实现状 → 先写失败测试 → 修改真实生产代码 → 定向验证 → 反向破坏 → 后端全量门禁 → 代码独立提交推送 → 文档独立提交推送 → 写入精确回退命令。
+```
+
+## L. 回写索引
+
+```text
+CARD-075 代码：d15d35e
+CARD-075 文档：5093c41
+CARD-076 代码：935752c
+CARD-076 文档：ed8cb1c
+CARD-077 代码：9766ff6
+CARD-077 代码回退：git revert 9766ff6
+CARD-077 文档：本节首版提交待生成
+CARD-078：pending / backend-first
+总目标：active
+```
