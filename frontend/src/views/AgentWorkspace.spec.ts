@@ -395,6 +395,8 @@ describe('AgentWorkspace', () => {
         data: {
           progress: runId === oldRun.id ? 21 : 88,
           progress_message: runId === oldRun.id ? '历史步骤' : '最新步骤',
+          phase: runId === oldRun.id ? 'quality_check' : 'summary',
+          action_id: runId === oldRun.id ? 'quality:history' : 'summary:latest',
         },
       },
     ])
@@ -461,6 +463,7 @@ describe('AgentWorkspace', () => {
 
     expect(wrapper.get('[data-testid="agent-run-selector"]').element).toHaveProperty('value', 'run-old')
     expect(wrapper.get('[data-testid="agent-selected-run-id"]').text()).toContain('run-old')
+    expect(wrapper.get('[data-testid="agent-process-stream"]').text()).toContain('动作：quality:history')
     expect(wrapper.get('[data-testid="agent-run-progress"]').text()).toContain('21%')
     expect(wrapper.get('[data-testid="agent-step-panel"]').text()).toContain('chapter.version.list')
     expect(wrapper.get('[data-testid="agent-public-work-summary"]').text()).toContain('历史运行正在整理章节版本。')
