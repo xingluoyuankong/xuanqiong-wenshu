@@ -83738,3 +83738,519 @@ CARD-073 文档回退：先执行 `git revert e12a4a1`，再按需执行 `git re
 当前任务目标：CARD-074
 总目标状态：active
 ```
+
+---
+
+# 2026-09-03｜CARD-074-A 完成记录：终端 Agent 事件单例与数据库级回放 fence
+
+> 本节是 CARD-074 的阶段性代码优化记录。CARD-074 的完整目标还包含进度事件、Assistant delta、断线续接和前端流式消费；本次只完成并推送终端事件单例这一项基础能力，后续阶段继续保持 `active`，不把部分完成写成整批完成。
+
+## 1. 阶段目标
+
+阶段编号：`CARD-074-A`
+
+阶段名称：终端 Agent 事件单例与数据库级回放 fence。
+
+本阶段解决的实际问题：
+
+```text
+同一个 Run 在 Worker 重试、断线重连、恢复器重复收敛或重复轮询时，
+可能多次追加 run_completed/run_failed/run_cancelled/assistant_completed，
+造成事件序号继续增长、SSE 重放出现重复终态、前端重复收敛消息。
+```
+
+完成内容：
+
+1. 统一终端事件幂等类型集合；
+2. 在事件生成入口先读取同 Run、同用户、同终端事件类型的已有记录；
+3. 已存在时直接复用已有记录，不增加新的 Run event sequence；
+4. 新终端事件写入 `terminal_key = <run_id>:<event_type>`；
+5. 通过数据库唯一索引保证多 Worker 并发下只能存在一条同类终端事件；
+6. 将唯一键冲突识别纳入已有事件序号冲突重试机制，第二个并发写入者回滚后重新读取已存在记录；
+7. 新增 027 Alembic 迁移，兼容全新数据库和历史数据库；
+8. 修正现有迁移测试对新 head 的版本期望；
+9. 先失败测试、真实实现、反向破坏验证、完整后端门禁均已完成；
+10. 代码已单独提交、单独推送。
+
+阶段状态：`completed`
+
+CARD-074 总状态：`in_progress`
+
+总目标状态：`active`
+
+当前任务目标：
+
+```text
+CARD-074-B｜结构化进度事件、Assistant 增量事件和 after_sequence 流式回放补强
+```
+
+## 2. 真实代码变更
+
+### 2.1 ORM 模型增加终端键
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\models\agent.py
+```
+
+`AgentEventRecord` 变更：
+
+```python
+__table_args__ = (
+    UniqueConstraint("run_id", "sequence", name="uq_agent_event_sequence"),
+    Index("uq_agent_event_terminal_key", "terminal_key", unique=True),
+)
+```
+
+新增字段：
+
+```python
+terminal_key: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+```
+
+设计口径：
+
+```text
+普通事件 terminal_key = NULL
+终端事件 terminal_key = f"{run.id}:{event_type}"
+```
+
+SQLite 和 MySQL 的唯一索引均允许多个 NULL，因此普通事件仍可按原有 Run sequence 正常追加；只有相同 Run、相同终端事件类型会被 fence。
+
+### 2.2 统一终端事件集合
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+```
+
+新增内部常量：
+
+```python
+_IDEMPOTENT_EVENT_TYPES = {
+    "assistant_completed",
+    "run_completed",
+    "run_failed",
+    "run_cancelled",
+}
+```
+
+统一入口：
+
+```text
+AgentRuntimeService._append_event_uncommitted()
+```
+
+该入口现在按以下顺序工作：
+
+```text
+1. 按 run_id/user_id 读取带锁 Run；
+2. 如果 event_type 属于终端集合，读取同 Run 同类型已有事件；
+3. 已有事件直接返回；
+4. 没有已有事件时分配新的 sequence；
+5. 写入 terminal_key；
+6. 提交时继续使用现有 IntegrityError 重试；
+7. sequence 或 terminal_key 竞争冲突时 rollback 并重新执行读取。
+```
+
+这样所有调用方都共享同一保护，而不是在 `runner.py`、`execution.py`、路由或前端各自复制一套防重逻辑。
+
+### 2.3 数据库迁移
+
+新增文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\alembic\versions\027_agent_terminal_event_key.py
+```
+
+迁移编号：
+
+```text
+027_agent_terminal_event_key
+```
+
+上一个迁移：
+
+```text
+026_agent_quality_same_run_fence
+```
+
+迁移行为：
+
+```text
+- agent_events 不存在时安全跳过；
+- terminal_key 列不存在时增加 nullable String(120)；
+- uq_agent_event_terminal_key 不存在时增加 unique index；
+- 重复运行 upgrade head 不重复建列/建索引；
+- downgrade 先删除索引，再删除列。
+```
+
+该迁移没有重建或删除历史事件，也没有修改已有 sequence 和 data_json。
+
+## 3. 失败测试与实现证据
+
+### 3.1 终端单例失败基线
+
+先在：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_durable_event_replay.py
+```
+
+增加重复终态事件测试：
+
+```text
+同一个 Run 先追加 run_completed；
+第二个独立 Worker 再追加 run_completed；
+期望 sequence 不变且最终只存在一条 run_completed。
+```
+
+旧实现真实失败：
+
+```text
+duplicate_terminal.sequence == 4
+terminal.sequence == 3
+```
+
+即第二次调用继续分配了新的 sequence，证明缺陷真实存在。
+
+### 3.2 应用层修复后的回放测试
+
+修复后：
+
+```text
+app/agent/test_durable_event_replay.py
+app/agent/test_subprocess_event_replay.py
+```
+
+结果：
+
+```text
+3 passed
+```
+
+覆盖：
+
+- 两个独立 Session/Worker 读取同一 durable event ledger；
+- `after_sequence` 只返回新增事件；
+- `work_trace_delta` 不受终端 fence 影响；
+- `run_completed` 重复追加返回原事件；
+- 公开数据只保留白名单字段，`reasoning` 等字段不会被重放返回。
+
+### 3.3 迁移回归
+
+新增迁移回归测试：
+
+```text
+test_terminal_event_migration_creates_nullable_unique_fence
+```
+
+最终迁移相关测试：
+
+```text
+11 passed in 34.55s
+```
+
+实际验证过的数据库事实：
+
+```text
+MIGRATION_VERSION=027_agent_terminal_event_key
+TERMINAL_KEY_COLUMN=True
+TERMINAL_KEY_INDEX=1
+```
+
+其中 SQLite 反射器把 unique 标志返回为整数 `1`，最终测试按布尔语义验证索引唯一性。
+
+### 3.4 迁移兼容修复
+
+新增 027 后，现有迁移测试仍把 head 写死为：
+
+```text
+026_agent_quality_same_run_fence
+```
+
+这导致全量首次执行出现 5 个迁移断言失败。修复为当前 head：
+
+```text
+027_agent_terminal_event_key
+```
+
+修复后：
+
+```text
+app/agent/test_durable_event_replay.py
+app/services/test_alembic_migrations.py
+
+11 passed
+```
+
+该修复只是同步测试对真实迁移 head 的预期，并未降低迁移标准。
+
+### 3.5 有效反向验证
+
+临时从 `_IDEMPOTENT_EVENT_TYPES` 移除：
+
+```text
+run_completed
+```
+
+再执行终端回放测试，得到：
+
+```text
+EXPECTED_FAILURE_EXIT=1
+```
+
+验证结束后已自动恢复最终实现，并执行 `git diff --check`，工作区没有保留破坏版本。
+
+## 4. CARD-074-A 全量后端门禁
+
+命令：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+最终结果：
+
+```text
+1455 passed in 323.19s (0:05:23)
+```
+
+本次全量门禁包含：
+
+```text
+Agent durable event replay
+Agent subprocess event replay
+Agent progress updates
+Agent Worker
+Alembic fresh upgrade/repeat/downgrade
+历史 Agent API 与 Provider 测试
+历史小说生成、质量、章节、任务运行时测试
+```
+
+全量运行中曾出现一次迁移测试失败，根因是新增 027 后旧版本期望未同步；修复测试后完整重跑最终为绿色 `1455 passed`。
+
+## 5. 本阶段文件清单
+
+本阶段代码提交实际包含 5 个 tracked 文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\models\agent.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_durable_event_replay.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\test_alembic_migrations.py
+D:\小说写作\xuanqiong-wenshu\backend\alembic\versions\027_agent_terminal_event_key.py
+```
+
+未纳入本阶段提交的历史未跟踪工件仍全部保留：
+
+```text
+.audit-*.txt
+.claude/
+.zcode/
+audit/
+backend/_*.py / backend/_*.txt / backend/_*.tmp
+backend/app/agent/test_subprocess_event_replay.py
+backend/app/api/routers/.research.patch
+backend/app/services/task_runtime.py.orig
+backend/prompts/contracts/
+backend/storage/novel_imports/
+backend/storage/style_uploads/
+frontend/.audit-*.txt
+node_modules/
+```
+
+特别说明：`backend/app/agent/test_subprocess_event_replay.py` 是历史未跟踪文件，本阶段没有把它整体暂存或覆盖；本阶段只修改并提交了明确列出的 tracked 回放测试文件。
+
+## 6. 提交、推送和回退点
+
+代码提交：
+
+```text
+3c06898 feat: fence terminal agent events
+```
+
+代码推送：
+
+```text
+ea46ac1..3c06898 codex/bohrium-integration-20260831 -> origin/codex/bohrium-integration-20260831
+```
+
+代码精确回退：
+
+```powershell
+git revert 3c06898
+```
+
+该回退会同时撤销：
+
+```text
+AgentEventRecord.terminal_key
+uq_agent_event_terminal_key
+027_agent_terminal_event_key migration
+应用层终端事件幂等检查
+CARD-074-A 新增回归断言
+迁移测试 head 期望同步
+```
+
+不会触碰此前：
+
+```text
+CARD-072：375c6ba
+CARD-073：2175320
+```
+
+## 7. CARD-074 剩余阶段现状
+
+CARD-074-A 已完成，但以下目标仍处于待实现/待强化状态：
+
+```text
+1. 进度事件结构化字段的完整契约；
+2. Assistant delta 的严格按 sequence 拼接与去重；
+3. SSE after_sequence 断线重连的真实异常矩阵；
+4. terminal 事件与 assistant_completed 的完整生命周期顺序；
+5. Tool action_id/result_ref 与进度事件的统一关联；
+6. 长连接关闭、空事件、重连、重复 terminal 的组合验证；
+7. 前端在聊天主阅读区展示结构化进度，而不是把内部推理正文直接展示；
+8. 后端、前端和真实 Chromium 的跨层回归。
+```
+
+因此当前总目标不能标记为完成，任务继续保持：
+
+```text
+active
+```
+
+## 8. 当前任务目标：CARD-074-B
+
+```text
+CARD-074-B｜结构化进度事件、Assistant 增量事件和 after_sequence 流式回放补强
+```
+
+### 8.1 先审查的真实文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\runner.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\execution.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\provider_attempt.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\state_projection.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_durable_event_replay.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_asgi_worker_event_replay.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_worker.py
+```
+
+### 8.2 已确认的当前能力
+
+当前系统已经具备：
+
+```text
+_VISIBLE_EVENT_KEYS 白名单
+progress_update 事件
+work_trace_delta 事件
+assistant_started 事件
+assistant_delta 事件
+assistant_completed 事件
+run_completed/run_failed/run_cancelled 终态事件
+AgentRun.event_sequence
+agent_events(run_id, sequence) 唯一约束
+GET .../events?after_sequence=...
+GET .../stream?after_sequence=...
+SSE Last-Event-ID 到 after_sequence 的 cursor 解析
+前端 assistantDeltas 按 sequence 排序、去重投影基础
+```
+
+当前缺口不是从零搭建，而是把这些已有能力收束成一组经过失败测试锁定的跨层契约。
+
+### 8.3 CARD-074-B 失败测试顺序
+
+先新增并运行：
+
+```text
+1. progress_update 公开字段只允许 phase/action_id/progress/progress_message/
+   tool_name/step/result_ref，不允许 reasoning/prompt/provider 原文；
+2. assistant_delta 按 sequence 回放后只合并一次；
+3. 同一 delta 重复输入不会产生重复可见文本；
+4. Last-Event-ID 与 after_sequence 同时存在时 cursor 选择稳定；
+5. 断线后从 after_sequence 续接不会丢中间 delta；
+6. terminal event 后 stream 自动结束；
+7. terminal event 重复写入不会新增 sequence（CARD-074-A 已固定）；
+8. assistant_completed 必须先于 run_completed；
+9. Tool action_id/result_ref 在 progress/work-trace/tool event 间保持可定位。
+```
+
+首次执行必须先得到真实失败，再实现；禁止只写“预期通过”的测试。
+
+### 8.4 CARD-074-B 实现方案
+
+后端：
+
+```text
+- 继续复用 AgentRuntimeService.append_event；
+- 不新增第二套 SSE 协议；
+- 统一 payload 字段名称为 data 内安全公开字段；
+- 将长度、进度、阶段、action_id、result_ref 做边界归一化；
+- 不将 reasoning、system prompt、Provider 原文写入公开事件；
+- 将 runner 的 delta 缓冲、事件追加、最终完成收敛写成可断言顺序；
+- 将 stream generator 的 cursor、空轮询、terminal close 固定为回归契约。
+```
+
+前端：
+
+```text
+- CARD-074-B 先以后端为主，不提前大改主界面；
+- 只在既有 reducer/stream hook 中补按序去重断言；
+- CARD-075 再将结构化进度放入中央聊天主阅读区；
+- 不展示任意内部思考正文，不把固定小说生成流程硬编码到 UI。
+```
+
+### 8.5 CARD-074-B 完成标准
+
+```text
+- 公开进度字段可被前端直接消费；
+- Assistant delta 断线续接后文本只出现一次；
+- SSE cursor 选择、重连和 terminal close 有真实测试；
+- assistant_completed → run_completed 生命周期顺序稳定；
+- Tool action_id/result_ref 可定位；
+- 终端事件继续受数据库唯一 fence 保护；
+- 安全白名单继续过滤敏感字段；
+- 后端全量 pytest 通过；
+- 代码独立提交并推送；
+- 文档独立提交并推送；
+- 记录精确 `git revert` 命令；
+- 然后切换 CARD-075 前端流式主聊天展示。
+```
+
+## 9. 当前运行状态
+
+```text
+前端：http://127.0.0.1:5174/agent → HTTP 200
+后端：http://127.0.0.1:8013/health → HTTP 200 healthy
+DB_PROVIDER=sqlite
+分支：codex/bohrium-integration-20260831
+远端：origin/codex/bohrium-integration-20260831
+代码最新提交：3c06898
+当前阶段：CARD-074-A completed
+当前目标：CARD-074-B active
+总目标：active
+```
+
+## 10. 最终回写
+
+```text
+CARD-072 代码：375c6ba
+CARD-072 文档：e917ec6 → d17d865
+CARD-073 代码：2175320
+CARD-073 文档：210864e → e12a4a1 → ea46ac1
+CARD-074-A 代码：3c06898
+CARD-074-A 文档：待本次文档提交完成后填入
+CARD-074-A 代码推送：已完成
+CARD-074-A 文档推送：待本次文档提交完成后确认
+CARD-074-A 回退：git revert 3c06898
+当前任务目标：CARD-074-B
+总目标状态：active
+```
