@@ -74,6 +74,7 @@ async def _publish_response_activity(
     completed_action: str | None = None,
     next_action: str | None = None,
     expected_output: str | None = None,
+    allow_terminal: bool = False,
 ) -> None:
     await runtime.append_public_work_summary(
         run_id=run_id,
@@ -87,6 +88,7 @@ async def _publish_response_activity(
             "next_action": next_action,
             "expected_output": expected_output,
         },
+        allow_terminal=allow_terminal,
     )
 
 
@@ -422,6 +424,7 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
                 completed_action="已生成并保存作者可见回复。",
                 next_action="等待作者查看结果、继续提问或批准候选。",
                 expected_output="可追溯的对话与项目操作记录。",
+                allow_terminal=True,
             )
             if manage_job and job_id is not None:
                 await AgentJobService(session).complete(job_id=job_id, user_id=user_id, lease_owner=job_owner, lease_generation=job_generation, result={"visible_response_length": len(full_text)})
@@ -463,6 +466,7 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
                             completed_action="失败已被记录为可恢复的运行证据。",
                             next_action="检查运行状态并决定是否恢复或重新发起任务。",
                             expected_output="明确失败原因与下一步操作。",
+                            allow_terminal=True,
                         )
                     else:
                         # The outer durable worker owns retry/dead-letter state.

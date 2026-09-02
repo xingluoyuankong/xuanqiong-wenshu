@@ -872,3 +872,89 @@ async def test_project_run_initial_snapshot_contains_bounded_novel_selection(tas
     assert snapshot.context_json["novel_context_selection"]["estimated_text_units"] <= 100
     assert any(ref.ref_type == "chapter_version" for ref in snapshot.refs)
     await service.get_run(run.id, user.id)
+
+@pytest.mark.asyncio
+async def test_terminal_run_rejects_late_assistant_delta(task_session):
+    user = await _user(task_session, 1812, "terminal-late-assistant")
+    runtime = AgentRuntimeService(task_session)
+    agent_session = await runtime.create_session(user_id=user.id)
+    run = await runtime.create_run(session_id=agent_session.id, user_id=user.id)
+    await runtime.update_run(run_id=run.id, user_id=user.id, status="completed", phase="summary", progress=100)
+
+    with pytest.raises(AgentConflict, match="terminal run"):
+        await runtime.append_assistant_delta(run_id=run.id, user_id=user.id, content="迟到的回复")
+
+    assert await runtime.list_events(run_id=run.id, user_id=user.id, after_sequence=0) == []
+
+
+@pytest.mark.asyncio
+async def test_terminal_run_rejects_late_work_trace_delta(task_session):
+    user = await _user(task_session, 1813, "terminal-late-trace")
+    runtime = AgentRuntimeService(task_session)
+    agent_session = await runtime.create_session(user_id=user.id)
+    run = await runtime.create_run(session_id=agent_session.id, user_id=user.id)
+    await runtime.update_run(run_id=run.id, user_id=user.id, status="failed", phase="execution_error")
+
+    with pytest.raises(AgentConflict, match="terminal run"):
+        await runtime.append_work_trace_delta(
+            run_id=run.id,
+            user_id=user.id,
+            trace_id="late-trace",
+            phase="act",
+            kind="status",
+            message="迟到的工作轨迹",
+        )
+
+    assert await runtime.list_events(run_id=run.id, user_id=user.id, after_sequence=0) == []
+
+
+@pytest.mark.asyncio
+async def test_terminal_run_allows_explicit_receipt_without_reopening_state(task_session):
+    user = await _user(task_session, 1815, "terminal-receipt-summary")
+    runtime = AgentRuntimeService(task_session)
+    agent_session = await runtime.create_session(user_id=user.id)
+    run = await runtime.create_run(session_id=agent_session.id, user_id=user.id)
+    await runtime.update_run(run_id=run.id, user_id=user.id, status="completed", phase="summary", progress=100)
+    before = await runtime.get_run(run.id, user.id)
+    event = await runtime.append_public_work_summary(
+        run_id=run.id,
+        user_id=user.id,
+        allow_terminal=True,
+        summary={
+            "action_id": "receipt:completed",
+            "phase": "assistant_response",
+            "current_action": "已保存最终可见回复。",
+            "completed_action": "运行已完成。",
+        },
+    )
+    after = await runtime.get_run(run.id, user.id)
+
+    assert event.sequence == 1
+    assert after.status == "completed"
+    assert after.current_phase == before.current_phase == "summary"
+    assert after.current_step == before.current_step
+    assert after.progress == before.progress == 100
+    assert after.latest_public_summary_sequence == event.sequence
+
+
+@pytest.mark.asyncio
+async def test_terminal_run_rejects_late_public_work_summary(task_session):
+    user = await _user(task_session, 1814, "terminal-late-summary")
+    runtime = AgentRuntimeService(task_session)
+    agent_session = await runtime.create_session(user_id=user.id)
+    run = await runtime.create_run(session_id=agent_session.id, user_id=user.id)
+    await runtime.update_run(run_id=run.id, user_id=user.id, status="cancelled", phase="cancelled")
+
+    with pytest.raises(AgentConflict, match="terminal run"):
+        await runtime.append_public_work_summary(
+            run_id=run.id,
+            user_id=user.id,
+            summary={
+                "action_id": "late:summary",
+                "phase": "tool_execution",
+                "current_action": "迟到的公开摘要",
+                "input_scope": [{"kind": "project"}],
+            },
+        )
+
+    assert await runtime.list_events(run_id=run.id, user_id=user.id, after_sequence=0) == []

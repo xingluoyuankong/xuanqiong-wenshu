@@ -32,6 +32,8 @@ VALID_RUN_STATUSES = set(AGENT_RUN_STATUSES)
 CLAIMABLE_RUN_STATUSES = set(STATE_CLAIMABLE_RUN_STATUSES)
 VALID_RUN_COMMAND_TYPES = {"pause", "resume", "cancel"}
 _IDEMPOTENT_EVENT_TYPES = {"assistant_completed", "run_completed", "run_failed", "run_cancelled"}
+# In-flight public stream events stop at the terminal boundary. Lifecycle events above remain explicitly allowed and idempotent.
+_LIVE_PUBLIC_EVENT_TYPES = {"assistant_delta", "work_trace_delta", "public_work_summary"}
 _MAX_ASSISTANT_DELTA_CHARS = 4000
 _RUN_COMMAND_ORDER = ("pause", "resume", "cancel")
 _RUN_COMMAND_TERMINAL_STATUSES = {"applied", "rejected", "failed"}
@@ -953,6 +955,8 @@ class AgentRuntimeService:
     ) -> AgentEventRecord:
         """Build one event inside the caller's transaction without committing."""
         run = await self._locked_run(run_id, user_id)
+        if event_type in _LIVE_PUBLIC_EVENT_TYPES and run.status in TERMINAL_RUN_STATUSES:
+            raise AgentConflict("terminal run cannot accept live public event")
         if event_type in _IDEMPOTENT_EVENT_TYPES:
             existing = (await self.session.execute(
                 select(AgentEventRecord)
@@ -1095,9 +1099,14 @@ class AgentRuntimeService:
         run_id: str,
         user_id: int,
         summary: AgentPublicWorkSummary | dict[str, Any],
+        allow_terminal: bool = False,
         commit: bool = True,
     ) -> AgentEventRecord:
         """Persist one bounded public work summary and its Run-level checkpoint.
+
+        ``allow_terminal`` is reserved for explicit terminal receipts such as a
+        completed visible response or a user approval audit. It never reopens or
+        mutates a terminal Run's lifecycle state.
 
         The activity ledger remains append-only.  The checkpoint exists solely so
         state recovery does not need to read an unbounded event history to tell the
@@ -1111,6 +1120,8 @@ class AgentRuntimeService:
         last_conflict: IntegrityError | None = None
         for _attempt in range(5):
             run = await self._locked_run(run_id, user_id)
+            if run.status in TERMINAL_RUN_STATUSES and not allow_terminal:
+                raise AgentConflict("terminal run cannot accept live public event")
             event = self._new_visible_event(
                 run=run,
                 event_type="public_work_summary",
@@ -2041,6 +2052,7 @@ class AgentRuntimeService:
                 ),
                 "expected_output": "候选结果或保持当前版本。",
             },
+            allow_terminal=True,
         )
         # A retrying event/summary write may have rolled back the Session and
         # expired this ORM instance. Rehydrate it asynchronously before the
