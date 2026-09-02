@@ -4,6 +4,43 @@ import AgentRunInspector from './AgentRunInspector.vue'
 import source from './AgentRunInspector.vue?raw'
 
 describe('AgentRunInspector', () => {
+  it('locates a step and execution result from selected references', () => {
+    const wrapper = mount(AgentRunInspector, {
+      props: {
+        run: { id: 'run-1', correlation_id: 'c1', session_id: 's1', user_id: 1, status: 'completed', current_phase: 'summary', current_step: 1, progress: 100, created_at: 'now' },
+        state: null,
+        selectedActionRef: 'step:step-1',
+        selectedResultRef: 'execution:exec-1',
+        steps: [{
+          id: 'step-1', run_id: 'run-1', user_id: 1, step_order: 1, tool_name: 'quality.inspect',
+          idempotency_key: 'idem-1', status: 'completed', attempt_count: 1,
+          output_json: { execution_id: 'exec-1', summary: '安全摘要' },
+        }],
+        toolResults: [{ tool_name: 'quality.inspect', result_ref: 'execution:exec-1', result: { summary: '安全摘要' } }],
+        connectionState: 'terminal',
+      },
+      global: {
+        stubs: { XqPanel: { template: '<section><slot /></section>' }, XqButton: { template: '<button><slot /></button>' } },
+      },
+    })
+
+    expect(wrapper.get('[data-testid="agent-selected-location"]').text()).toContain('execution:exec-1')
+    expect(wrapper.get('[data-testid="agent-step-step-1"]').classes()).toContain('step-list__item--selected')
+    expect(wrapper.get('[data-testid="agent-tool-result-0"]').classes()).toContain('tool-result-card--selected')
+  })
+
+  it('shows a readable state for a stale location reference', () => {
+    const wrapper = mount(AgentRunInspector, {
+      props: {
+        run: { id: 'run-stale', correlation_id: 'c1', session_id: 's1', user_id: 1, status: 'completed', current_phase: 'summary', current_step: 0, progress: 100, created_at: 'now' },
+        state: null, steps: [], toolResults: [], selectedResultRef: 'execution:gone', connectionState: 'terminal',
+      },
+      global: { stubs: { XqPanel: { template: '<section><slot /></section>' }, XqButton: { template: '<button><slot /></button>' } } },
+    })
+    expect(wrapper.get('[data-testid="agent-selected-location"]').text()).toContain('引用暂不可用')
+    expect(wrapper.get('[data-testid="agent-selected-location"]').text()).toContain('execution:gone')
+  })
+
   it('renders Planner, visible response, and candidate writer provenance as separate facts', () => {
     const wrapper = mount(AgentRunInspector, {
       props: {
@@ -43,3 +80,4 @@ describe('AgentRunInspector', () => {
     expect(source).toContain('.provider-model-ref, .provider-attempt-summary { display: block;')
   })
 })
+

@@ -651,6 +651,8 @@ export interface AgentStateProjection {
 export interface AgentToolResult {
   tool_name: string
   result: Record<string, unknown>
+  /** Stable execution/step reference used to locate the result in a Run. */
+  result_ref?: string | null
 }
 export interface AgentMessageResponse {
   message: AgentMessage

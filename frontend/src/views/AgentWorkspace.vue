@@ -222,8 +222,8 @@
               <strong>{{ event.label }}</strong>
               <small v-if="event.actionId || event.phase || event.resultRef" class="workspace-log-meta">
                 <span v-if="event.phase">阶段：{{ event.phase }}</span>
-                <span v-if="event.actionId">动作：{{ event.actionId }}</span>
-                <span v-if="event.resultRef">结果：{{ event.resultRef }}</span>
+                <button v-if="event.actionId" type="button" class="workspace-log-ref" data-testid="agent-log-action-ref" @click="selectLogLocation('action', event.actionId)">动作：{{ event.actionId }}</button>
+                <button v-if="event.resultRef" type="button" class="workspace-log-ref" data-testid="agent-log-result-ref" @click="selectLogLocation('result', event.resultRef)">结果：{{ event.resultRef }}</button>
                 <span v-if="event.progress !== undefined">{{ Math.round(event.progress) }}%</span>
               </small>
               <p>{{ event.detail }}</p>
@@ -248,6 +248,8 @@
               :connection-state="streamConnectionState"
               :control-pending="Boolean(activeRun && runControlLoading[activeRun.id])"
               :progress-message="latestProgressMessage"
+              :selected-action-ref="selectedActionRef"
+              :selected-result-ref="selectedResultRef"
               @command="runControlAction"
               @recover="activeRun && recoverRunAction(activeRun)"
               @reconnect="reconnectActiveRun"
@@ -457,6 +459,8 @@ const selectedSessionId = ref('')
 const messages = ref<AgentMessage[]>([])
 const runs = runProjection.runs
 const selectedRunId = runProjection.selectedRunId
+const selectedActionRef = ref<string | null>(null)
+const selectedResultRef = ref<string | null>(null)
 const activeRun = runProjection.activeRun
 const runState = runProjection.activeRunState
 const runSteps = runProjection.activeRunSteps
@@ -501,6 +505,7 @@ watch(
 watch(
   () => selectedRunId.value,
   async () => {
+    clearRunLocation()
     logFollowTail.value = true
     await nextTick()
     keepLogTailVisible()
@@ -550,10 +555,26 @@ const activeContextRefs = computed(() =>
 const toolResults = computed<AgentToolResult[]>(() => {
   const runId = activeRun.value?.id
   if (!runId) return []
-  if (responseToolResults.value.length) return responseToolResults.value
-  return runSteps.value
-    .filter((step) => step.run_id === runId && step.status === 'completed')
-    .map((step) => ({ tool_name: step.tool_name, result: recordOf(step.output_json) }))
+  const completedSteps = runSteps.value.filter((step) => step.run_id === runId && step.status === 'completed')
+  if (responseToolResults.value.length) {
+    return responseToolResults.value.map((item, index) => {
+      const step = completedSteps[index] || completedSteps.find((candidate) => candidate.tool_name === item.tool_name)
+      const executionId = step && typeof step.output_json.execution_id === 'string' ? step.output_json.execution_id : ''
+      return {
+        ...item,
+        result_ref: item.result_ref || (step ? (executionId ? `execution:${executionId}` : `step:${step.id}`) : undefined),
+      }
+    })
+  }
+  return completedSteps
+    .map((step) => {
+      const executionId = typeof step.output_json.execution_id === 'string' ? step.output_json.execution_id : ''
+      return {
+        tool_name: step.tool_name,
+        result: recordOf(step.output_json),
+        result_ref: executionId ? `execution:${executionId}` : `step:${step.id}`,
+      }
+    })
     .filter((item) => Boolean(item.tool_name) && Object.keys(item.result).length > 0)
 })
 const runtimeSupported = computed(
@@ -592,6 +613,7 @@ const add = (
 }
 const resetRuntime = () => {
   closeRunLifecycle()
+  clearRunLocation()
   runProjection.reset()
   localPlan.value = null
   resetArtifactFacts()
@@ -762,7 +784,24 @@ const refreshSessionMessages = async () => {
     /* terminal refresh is best effort */
   }
 }
+const clearRunLocation = () => {
+  selectedActionRef.value = null
+  selectedResultRef.value = null
+}
+const selectLogLocation = (kind: 'action' | 'result', reference: string | null | undefined) => {
+  const normalized = typeof reference === 'string' ? reference.trim() : ''
+  if (!activeRun.value || !normalized) return
+  if (kind === 'action') {
+    selectedActionRef.value = normalized
+    selectedResultRef.value = null
+  } else {
+    selectedResultRef.value = normalized
+    selectedActionRef.value = null
+  }
+}
+
 const selectRunAction = async (runId: string) => {
+  clearRunLocation()
   if (!session.value || !runProjection.selectRun(runId)) return
   const run = activeRun.value
   if (!run) return
@@ -1674,6 +1713,27 @@ onBeforeUnmount(() => {
 }
 .workspace-log-meta span {
   overflow-wrap: anywhere;
+}
+.workspace-log-ref {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline dotted;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.workspace-log-ref:hover,
+.workspace-log-ref:focus-visible {
+  color: var(--xq-gold-deep);
+}
+.workspace-log-ref:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--xq-gold-deep) 60%, transparent);
+  outline-offset: 2px;
 }
 .workspace-log-list p {
   overflow-wrap: anywhere;

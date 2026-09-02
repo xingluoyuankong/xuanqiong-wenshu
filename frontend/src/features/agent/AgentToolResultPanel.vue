@@ -13,13 +13,16 @@
         v-for="view in views"
         :key="view.key"
         class="tool-result-card"
+        :class="{ 'tool-result-card--selected': view.selected }"
         :data-testid="`agent-tool-result-${view.index}`"
       >
         <header class="tool-result-card__header">
           <strong>{{ view.toolName }}</strong>
           <span v-if="view.known" class="tool-result-card__badge">安全摘要</span>
           <span v-else class="tool-result-card__badge tool-result-card__badge--muted">未支持</span>
+          <small v-if="view.resultRef" class="tool-result-card__ref" data-testid="agent-tool-result-ref">结果：{{ view.resultRef }}</small>
         </header>
+        <p v-if="view.selected" class="tool-result-card__selection" data-testid="agent-tool-result-selection">已定位到当前结果</p>
 
         <p v-if="!view.known" class="tool-result-card__notice">
           此工具结果未纳入安全展示白名单，原始数据不会在界面中回显。
@@ -40,6 +43,7 @@
       <p v-if="hiddenResultCount" class="tool-result-card__notice" data-testid="agent-tool-result-truncated">
         还有 {{ hiddenResultCount }} 个工具结果未展示；为避免无界渲染，已按结果数量限制。
       </p>
+      <p v-if="selectedResultRef && !views.some((view) => view.resultRef === selectedResultRef)" class="tool-result-card__notice" data-testid="agent-tool-result-selection">当前结果引用已失效，正在恢复执行事实。</p>
     </div>
   </XqPanel>
 </template>
@@ -64,6 +68,8 @@ export interface AgentToolResultPanelProps {
   title?: string
   subtitle?: string
   emptyText?: string
+  /** Stable execution/step reference to highlight in the current Run. */
+  selectedResultRef?: string | null
 }
 
 interface SafeField {
@@ -78,6 +84,8 @@ interface SafeToolResultView {
   toolName: string
   known: boolean
   fields: SafeField[]
+  resultRef?: string
+  selected: boolean
   notice?: string
 }
 
@@ -89,6 +97,7 @@ const props = withDefaults(defineProps<AgentToolResultPanelProps>(), {
   title: '工具结果',
   subtitle: '仅展示按工具契约投影后的安全摘要，不回显原始 payload。',
   emptyText: '当前运行没有可展示的工具结果。',
+  selectedResultRef: null,
 })
 
 const KNOWN_TOOLS = new Set([
@@ -397,6 +406,8 @@ const views = computed<SafeToolResultView[]>(() => props.results
       toolName,
       known,
       fields: projection.fields,
+      resultRef: typeof item?.result_ref === 'string' ? item.result_ref : undefined,
+      selected: typeof item?.result_ref === 'string' && item.result_ref === props.selectedResultRef,
       notice: projection.notice,
     }
   }))
@@ -412,10 +423,17 @@ const hiddenResultCount = computed(() => Math.max(0, props.results.length - Math
 
 .tool-result-card {
   min-width: 0;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
   padding: 0.75rem;
   border: 1px solid var(--xq-border);
   border-radius: 0.65rem;
   background: rgba(255, 255, 255, 0.68);
+}
+
+.tool-result-card--selected {
+  border-color: var(--xq-gold-deep);
+  background: rgba(214, 169, 74, 0.12);
+  box-shadow: 0 0 0 2px rgba(214, 169, 74, 0.2);
 }
 
 .tool-result-card__header {
@@ -438,6 +456,19 @@ const hiddenResultCount = computed(() => Math.max(0, props.results.length - Math
 .tool-result-card__badge--muted {
   color: var(--xq-ink-muted);
   background: rgba(100, 116, 139, 0.12);
+}
+
+.tool-result-card__ref,
+.tool-result-card__selection {
+  color: var(--xq-ink-muted);
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
+.tool-result-card__selection {
+  margin: 0.45rem 0 0;
+  color: var(--xq-gold-deep);
+  font-weight: 800;
 }
 
 .tool-result-fields {

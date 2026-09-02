@@ -4,6 +4,24 @@ import { describe, expect, it } from 'vitest'
 import AgentToolResultPanel from './AgentToolResultPanel.vue'
 
 describe('AgentToolResultPanel', () => {
+  it('marks the selected result reference without rendering result正文', () => {
+    const wrapper = mount(AgentToolResultPanel, {
+      props: {
+        selectedResultRef: 'execution:exec-1',
+        results: [{
+          tool_name: 'quality.inspect',
+          result_ref: 'execution:exec-1',
+          result: { summary: '质量摘要' },
+        }],
+      },
+    })
+
+    const card = wrapper.get('[data-testid="agent-tool-result-0"]')
+    expect(card.classes()).toContain('tool-result-card--selected')
+    expect(card.get('[data-testid="agent-tool-result-ref"]').text()).toContain('execution:exec-1')
+    expect(wrapper.get('[data-testid="agent-tool-result-selection"]').text()).toContain('已定位')
+  })
+
   it('renders a bounded safe projection for supported tool results', () => {
     const wrapper = mount(AgentToolResultPanel, {
       props: {

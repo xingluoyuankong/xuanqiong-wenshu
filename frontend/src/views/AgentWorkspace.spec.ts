@@ -199,6 +199,47 @@ describe('AgentWorkspace', () => {
     expect(workspaceSource).toContain('结果：{{ event.resultRef }}')
   })
 
+  it('点击日志动作或结果引用后定位当前 Run，并在切换 Run 时清理定位', async () => {
+    Object.assign(routeQuery, { project_id: 'p1', session_id: 's-locate', run_id: 'run-locate-old' })
+    const session = { id: 's-locate', user_id: 1, project_id: 'p1', status: 'active', created_at: 'now', updated_at: 'now' }
+    const oldRun = { id: 'run-locate-old', session_id: session.id, user_id: 1, project_id: 'p1', status: 'completed', current_phase: 'completed', current_step: 1, progress: 100, created_at: '2026-08-27T09:00:00Z' }
+    const newRun = { id: 'run-locate-new', session_id: session.id, user_id: 1, project_id: 'p1', status: 'completed', current_phase: 'completed', current_step: 1, progress: 100, created_at: '2026-08-27T09:01:00Z' }
+    listSessionsMock.mockResolvedValue([session])
+    getSessionMock.mockResolvedValue({ ...session, messages: [], runs: [oldRun, newRun] })
+    listEventsMock.mockImplementation(async (_sessionId: string, runId: string) => [{
+      id: `${runId}-event`, run_id: runId, sequence: 1, event_type: 'tool_call_completed', summary: '工具已完成',
+      data: { action_id: `step:${runId}`, result_ref: `execution:${runId}`, phase: 'tool_execution', progress: 100 },
+    }])
+    listRunStepsMock.mockImplementation(async (runId: string) => [{
+      id: runId, run_id: runId, user_id: 1, step_order: 1, tool_name: 'quality.inspect',
+      idempotency_key: `idem-${runId}`, status: 'completed', attempt_count: 1, output_json: { execution_id: runId, summary: '安全摘要' },
+    }])
+    listApprovalsMock.mockResolvedValue([])
+    listArtifactsMock.mockResolvedValue([])
+    getRunStateMock.mockImplementation(async (runId: string) => ({
+      correlation_id: `c-${runId}`, run_id: runId, user_id: 1, progress: 100, phase: 'completed', current_step: 1,
+      terminal_status: 'completed', recoverable: false, cancellation_requested: false, last_event_sequence: 1,
+      steps: [], approvals: [], artifacts: [], accepted_version_ids: [], jobs: [], task_runtime_refs: [],
+    }))
+
+    const wrapper = mount(AgentWorkspace)
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="agent-log-action-ref"]').trigger('click')
+    expect(wrapper.get('[data-testid="agent-selected-location"]').text()).toContain('step:run-locate-old')
+    expect(wrapper.get('[data-testid="agent-step-run-locate-old"]').classes()).toContain('step-list__item--selected')
+
+    await wrapper.get('[data-testid="agent-log-result-ref"]').trigger('click')
+    expect(wrapper.get('[data-testid="agent-selected-location"]').text()).toContain('execution:run-locate-old')
+
+    await wrapper.get('[data-testid="agent-run-selector"]').setValue('run-locate-new')
+    await flushPromises()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="agent-selected-location"]').text()).toContain('尚未定位')
+    expect(wrapper.find('.step-list__item--selected').exists()).toBe(false)
+  })
+
   it('将导航、聊天和运行日志分隔为可折叠的独立区域', async () => {
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
