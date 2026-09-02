@@ -81656,3 +81656,429 @@ Provider 健康：4/4 loaded；
 CARD-068 反向验证：移除观测摘要节点后退出码 1；
 总任务：active，继续推进。
 ```
+
+
+# 18. 2026-09-02｜CARD-069 Provider 调用统计闭环（代码已推送，文档单独记录）
+
+## 18.1 本批目标与完成边界
+
+本批目标是把 CARD-068 已持久化的 Provider attempt 元数据，整理成当前 Run 可读取、可验证、可在工作台查看的脱敏统计摘要。统计只返回计数、错误类别和时间字段，不复制 Provider 请求正文、响应正文、提示词、请求头或密钥。
+
+本批已完成：
+
+1. 后端 `AgentExecutionFactService.provider_usage_summary()` 聚合单个用户所有者 Run 的 Provider attempt 快照；
+2. 新增 `GET /api/agent/runs/{run_id}/provider-usage-summary`；
+3. 新增 `AgentProviderUsageSummaryRead` 响应模型并禁止额外字段；
+4. 后端路由回归覆盖所有者、非所有者、空快照、统计字段和脱敏边界；
+5. 前端 `AgentAPI.getProviderUsageSummary()` 接入；
+6. “数据与候选”面板增加“当前 Run Provider 调用”紧凑卡片；
+7. 统计按 Run 隔离，深链恢复、刷新会话和手动切换 Run 均会重新读取对应统计；
+8. 统计读取失败显示在独立数据面板中，不阻断中央聊天、事件日志和运行检查器；
+9. 更新前端既有 `AgentRunInspector` 样式契约断言，使测试与当前真实 CSS 保持一致；
+10. 完成反向验证、后端/前端全量门禁、代码提交推送。
+
+本批未完成且明确留给下一批：
+
+- 左侧“项目与内容 / 会话 / 项目工具 / 数据与候选”在不同窗口宽度下的最终压缩验收；
+- 中央聊天阅读宽度和消息区高度的浏览器实测基线；
+- 右侧运行日志从活动堆栈中进一步独立成固定滚动区的浏览器验收；
+- 跨 Run、跨项目的 Provider 统计聚合；
+- Provider 真实外部通道的人工验收记录。
+
+## 18.2 代码变更清单
+
+本批代码提交只包含以下 11 个文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\execution_facts.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\schemas.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_execution_facts.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_runtime_route.py
+D:\小说写作\xuanqiong-wenshu\frontend\src\api\agent.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\data\AgentDataPanel.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\data\AgentDataPanel.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\run\AgentRunInspector.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
+```
+
+未跟踪历史审计、恢复和探针工件仍保留在工作树中，本批未纳入提交；不得使用 `git add -A`、批量删除或覆盖这些工件。
+
+## 18.3 后端实现口径
+
+服务方法：
+
+```python
+AgentExecutionFactService.provider_usage_summary(
+    run_id: str,
+    user_id: int,
+)
+```
+
+响应字段：
+
+```text
+run_id
+ total_attempts
+succeeded_attempts
+failed_attempts
+fallback_attempts
+first_token_attempts
+digest_attempts
+selected_attempts
+last_error_category
+latest_first_token_at
+```
+
+聚合规则：
+
+- 只读取 `Run.context_json` 中键名以 `_provider_attempts` 结尾且结构为映射的快照；
+- 每个快照只读取 `provider_attempts` 列表的前 64 个条目，避免异常快照无限膨胀；
+- `status == succeeded` 计入成功；`status == failed` 计入失败；
+- 存在 `fallback_from_attempt` 即计入 fallback；
+- 存在非空 `first_token_at` 即计入首 token；
+- 存在非空 `output_digest` 即计入输出指纹；
+- `selected_provider_attempt >= 1` 的快照计入已选 attempt；
+- 错误类别只保留最后一个失败 attempt 的脱敏短字符串，最大 40 字符；
+- 首 token 时间取遍历顺序中最后一个非空值；
+- Run 不存在或不属于当前用户统一映射为 404 `AGENT_NOT_FOUND`；
+- 响应模型 `extra='forbid'`，禁止通过接口额外带出原始 payload。
+
+## 18.4 前端实现口径
+
+新增 API 类型和方法：
+
+```text
+AgentProviderUsageSummary
+AgentAPI.getProviderUsageSummary(runId)
+```
+
+工作台新增按 Run 隔离的状态：
+
+```text
+providerUsageSummaryByRunId
+providerUsageSummaryLoadingByRunId
+providerUsageSummaryErrorByRunId
+activeProviderUsageSummary
+```
+
+读取入口：
+
+```text
+hydrateSessionRun       深链恢复
+refreshSessionMessages  当前会话刷新
+selectRunAction         手动切换 Run
+```
+
+当前数据显示在：
+
+```text
+AgentDataPanel.vue
+[data-testid="agent-provider-usage-panel"]
+```
+
+显示内容：
+
+```text
+总调用、成功、失败、fallback、首 token、输出指纹、已选 attempt、最近错误、最近首 token
+```
+
+显示约束：
+
+- 没有 active Run 时显示“暂无选中的 Run”；
+- 正在读取时显示独立加载状态；
+- 接口错误只显示可读错误，不清空中央聊天；
+- 空快照显示“本次 Run 暂无 Provider attempt 记录”；
+- 不显示 `input`、`output`、prompt、headers、token 等原始内容；
+- 统计卡片位于“数据与候选”折叠区，不扩大中央聊天和右侧日志。
+
+## 18.5 定向验证
+
+后端：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_execution_facts.py app/api/routers/test_agent_runtime_route.py
+```
+
+结果：
+
+```text
+29 passed
+```
+
+前端：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run test:run -- src/features/agent/data/AgentDataPanel.spec.ts src/views/AgentWorkspace.spec.ts
+npm run test:run -- src/features/agent/run/AgentRunInspector.spec.ts
+npm run type-check
+```
+
+结果：
+
+```text
+AgentDataPanel + AgentWorkspace：23 passed；
+AgentRunInspector：5 passed；
+type-check：退出码 0。
+```
+
+## 18.6 反向验证
+
+验证方法：临时移除服务层返回字典中的 `failed_attempts` 字段，运行后端统计与路由测试，然后无条件恢复原文件。
+
+结果：
+
+```text
+3 failed, 26 passed
+EXPECTED_FAILURE_EXIT=1
+```
+
+失败集中在服务聚合字段断言和响应模型必填字段校验，证明测试能够识别关键统计字段缺失。恢复后再次运行同一定向测试：
+
+```text
+29 passed
+```
+
+## 18.7 全量门禁
+
+后端：
+
+```text
+1452 passed in 622.06s
+```
+
+前端首次全量发现 1 个既有样式原文断言与当前真实 CSS 不一致；该断言已按实际 `.provider-observability` 样式契约同步后重跑。
+
+最终前端：
+
+```text
+74 files passed
+472 tests passed
+```
+
+前端构建：
+
+```text
+4906 modules transformed
+built successfully
+```
+
+`git diff --check`：通过。
+
+## 18.8 提交、推送与回退点
+
+代码提交：
+
+```text
+0537c89 feat: add provider usage summary
+```
+
+推送：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+远端推进：
+
+```text
+3d8f412..0537c89
+```
+
+代码回退：
+
+```powershell
+git revert 0537c89
+```
+
+只撤销本批代码时使用上述 revert，不触碰未跟踪历史工件。本文档使用独立提交，文档提交完成后记录文档哈希；撤销文档时只对文档提交执行：
+
+```powershell
+git revert <CARD-069-文档提交哈希>
+```
+
+## 18.9 当前运行状态
+
+```text
+前端：http://127.0.0.1:5174/agent
+后端：http://127.0.0.1:8013
+健康：http://127.0.0.1:8013/health → 200 healthy
+Provider registry_status=healthy
+Provider count=4
+loaded=4
+DB_PROVIDER=sqlite
+```
+
+当前工作树仍包含历史未跟踪文件和后续任务临时工件；这些内容属于持续审计上下文，不代表本批代码提交遗漏。
+
+# 19. 下一任务目标：CARD-070 前端工作台三栏阅读布局重构
+
+## 19.1 用户可见问题
+
+当前用户反馈集中在三个布局问题：
+
+1. 左侧标签页和折叠区过多、过大，项目、会话、工具、数据内容纵向堆叠，首屏信息密度过高；
+2. 中央聊天区域太小，消息正文被左右栏和顶部状态区挤压，阅读与流式输出体验差；
+3. 运行日志区域占用活动列过多，视觉上仍像中间内容的一部分，日志滚动会干扰对话阅读。
+
+当前源码基线：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.spec.ts
+```
+
+当前壳层基线：
+
+```css
+grid-template-columns: minmax(124px, 8rem) minmax(0, 1fr) minmax(160px, 10.5rem)
+```
+
+这会把中央区限制在剩余空间；左右栏的最小宽度与多个详情卡片叠加后，实际中央阅读宽度继续收缩。当前日志虽然有 `max-height` 和 `overflow-y: auto`，但仍属于右侧活动栈普通子项，尚未形成独立的固定日志视口模型。
+
+## 19.2 CARD-070 目标
+
+CARD-070 不改变 Agent 工具注册表、Run 投影、事件协议和 Provider 统计数据，只重构前端布局容器和可视状态：
+
+1. 左侧变为紧凑导航 rail，默认只保留项目选择、会话选择和内容树入口；
+2. 项目工具、数据与候选改为按需折叠，减少首屏纵向占用；
+3. 中央聊天获得主要宽度和主要垂直空间，消息区支持稳定独立滚动；
+4. 右侧日志独立成为固定宽度、独立滚动的运行观察区；
+5. 日志滚动只影响日志，不改变聊天滚动位置；
+6. 运行检查器、Provider 统计和工具结果保留右侧按需展开，不把详细数据塞进中央聊天；
+7. 960px 以下降级为单列，顺序固定为聊天、项目控制、活动日志；
+8. 650px 以下进一步缩短标题、按钮和统计卡片，保证输入框与消息可读；
+9. 用浏览器/组件测试验证中央阅读宽度、右侧独立滚动和左侧折叠状态。
+
+## 19.3 建议架构
+
+```text
+AgentWorkspaceShell
+├── agent-page
+│   ├── agent-hero（压缩为单行状态栏；窄屏折叠）
+│   └── agent-layout
+│       ├── agent-sidebar-rail
+│       │   ├── project-control
+│       │   ├── session-control
+│       │   └── optional-sections（tools/data/content）
+│       ├── agent-main-reading
+│       │   └── AgentConversation（主阅读区）
+│       └── agent-activity-dock
+│           ├── run-selector
+│           ├── runtime-log-viewport（唯一日志滚动容器）
+│           └── inspector/details
+```
+
+布局原则：
+
+- 使用 `minmax(0, 1fr)` 保护中央区不被内容最小宽度撑破；
+- 左侧默认 `clamp(12rem, 16vw, 15rem)`，右侧默认 `clamp(15rem, 22vw, 21rem)`，中央区始终拿到剩余主空间；
+- 活动列不再把日志和所有检查器放进同一无限高度流；
+- 日志列表设置 `min-height: 0; flex: 1; overflow-y: auto;`，外层 dock 设置 `display: flex; flex-direction: column;`；
+- 聊天列设置 `min-width: 0; min-height: 0;`，消息区设置 `flex: 1 1 auto; min-height: 0; overflow-y: auto;`；
+- 不用 JS 计算窗口宽度，不新增按屏幕写死的工具列表；
+- 只调整容器和 CSS，保持事件、引用定位、Run 选择和统计加载逻辑不变。
+
+## 19.4 预计修改文件
+
+第一阶段：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
+```
+
+第二阶段，如需抽离日志容器：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\runtime\AgentRuntimeLogDock.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\runtime\AgentRuntimeLogDock.spec.ts
+```
+
+不直接修改 Provider 后端接口，不移动现有事件 reducer，不复制日志正文。
+
+## 19.5 CARD-070 执行顺序
+
+1. 先增加失败测试：
+   - 三栏壳层包含明确的 sidebar/main/activity 语义类；
+   - 运行日志拥有唯一 `data-testid="agent-runtime-log-viewport"` 滚动容器；
+   - 左侧 details 默认状态可验证；
+   - 中央聊天列存在阅读区最小高度和 `min-width: 0` 契约；
+   - 右侧日志滚动状态与聊天列 DOM 分离。
+2. 修改 `AgentWorkspaceShell.vue` 的列定义、dock 容器和响应式断点。
+3. 修改 `AgentWorkspace.vue` 的 class、日志容器和折叠区排列，不改变业务状态。
+4. 定向运行 Shell、Workspace、Conversation 和日志相关测试。
+5. 做反向验证：临时移除 `overflow-y: auto` 或把中央列改成固定小宽度，确认布局契约测试退出码为 1；恢复实现。
+6. 执行：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+npm run test:run
+npm run build-only
+```
+
+7. 代码单独提交并推送：
+
+```text
+feat: rebalance agent workspace reading layout
+```
+
+8. 再单独更新本文档，记录精确门禁、浏览器验收窗口尺寸、截图/日志证据、提交哈希和 revert 命令。
+
+## 19.6 浏览器验收矩阵
+
+至少记录以下视口：
+
+```text
+1920 x 1080：中央聊天为主阅读区，左右栏不覆盖消息；
+1440 x 900：左侧压缩，右侧日志独立滚动；
+1280 x 800：中央消息正文不出现异常横向滚动；
+960 x 800：切换为单列，聊天优先；
+650 x 844：输入框、消息区、日志入口均可操作。
+```
+
+验收记录：
+
+- 打开 `http://127.0.0.1:5174/agent`；
+- 选择一个项目和会话；
+- 生成或载入一个已有 Run；
+- 向日志追加足够多事件，确认仅日志滚动；
+- 滚动聊天消息，确认日志位置不变；
+- 切换 Run，确认日志和 Provider 统计均按 Run 更新；
+- 折叠左侧项目工具和数据区，确认中央宽度立即恢复；
+- 刷新页面，确认深链恢复不改变三栏顺序。
+
+## 19.7 CARD-070 回退策略
+
+CARD-070 代码提交完成后使用其独立哈希回退：
+
+```powershell
+git revert <CARD-070-代码提交哈希>
+```
+
+文档使用独立提交：
+
+```powershell
+git revert <CARD-070-文档提交哈希>
+```
+
+任何回退都只针对对应提交，不重置分支，不清理历史未跟踪文件。
+
+## 19.8 总目标状态
+
+```text
+总目标：active
+当前权威完成批次：CARD-069
+当前下一任务：CARD-070
+代码最新提交：0537c89
+CARD-069 文档提交：待本次单独提交后填入
+下一步：先完成前端三栏阅读布局重构，再做浏览器验收
+```
