@@ -269,6 +269,20 @@ def _visible_event_data(event_type: str, value: Any) -> dict[str, Any]:
             result[name] = item
         elif isinstance(item, list) and all(isinstance(entry, (str, int, float, bool)) or entry is None for entry in item):
             result[name] = item[:100]
+    if event_type == "progress_update":
+        if "progress" in result:
+            try:
+                result["progress"] = max(0.0, min(100.0, float(result["progress"])))
+            except (TypeError, ValueError):
+                result.pop("progress", None)
+        for key, limit in (("phase", 80), ("action_id", 160), ("progress_message", 500), ("tool_name", 120)):
+            if isinstance(result.get(key), str):
+                result[key] = result[key][:limit]
+        if "step" in result:
+            try:
+                result["step"] = max(0, int(result["step"]))
+            except (TypeError, ValueError):
+                result.pop("step", None)
     return result
 
 

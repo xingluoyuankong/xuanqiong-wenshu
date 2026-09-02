@@ -31,6 +31,36 @@ async def test_agent_session_message_run_event_and_cursor(task_session):
 
 
 @pytest.mark.asyncio
+async def test_direct_progress_event_uses_same_bounded_public_contract(task_session):
+    user = await _user(task_session, 7021, "agent-progress-contract")
+    service = AgentRuntimeService(task_session)
+    agent_session = await service.create_session(user_id=user.id)
+    run = await service.create_run(session_id=agent_session.id, user_id=user.id)
+
+    event = await service.append_event(
+        run_id=run.id,
+        user_id=user.id,
+        event_type="progress_update",
+        summary="direct progress",
+        data={
+            "progress": 9999,
+            "phase": "p" * 120,
+            "action_id": "a" * 240,
+            "progress_message": "m" * 800,
+            "step": -4,
+            "tool_name": "tool" + "x" * 200,
+        },
+    )
+
+    assert event.data_json["progress"] == 100.0
+    assert len(event.data_json["phase"]) <= 80
+    assert len(event.data_json["action_id"]) <= 160
+    assert len(event.data_json["progress_message"]) <= 500
+    assert event.data_json["step"] == 0
+    assert len(event.data_json["tool_name"]) <= 120
+
+
+@pytest.mark.asyncio
 async def test_agent_scope_and_terminal_transition_are_enforced(task_session):
     owner = await _user(task_session, 702, "agent-owner-2")
     other = await _user(task_session, 703, "agent-other")
