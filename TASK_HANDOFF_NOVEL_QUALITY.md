@@ -78028,3 +78028,165 @@ cd D:\小说写作\xuanqiong-wenshu\backend
 ```
 
 7. CARD-057 完成后再安排下一轮前端布局：前端只消费统一事实源，不在组件层自行修正后端事件语义。
+
+
+---
+
+# CARD-057 实际完成记录：历史事件与 SSE 回放的公开 payload 一致性（2026-09-02）
+
+## 1. 问题证据
+
+CARD-056 统一了新写入 `progress_update` 的字段边界，但后端数据库可能保留历史版本事件，或存在绕过当前发布服务的旧记录。旧的 `list_events()` 直接读取 `AgentEventRecord.data_json`，历史 JSON 接口和 SSE 虽然共用同一个查询，却把旧 payload 原样返回。因此旧记录中的 `progress=9999`、超长 `phase/action_id/progress_message` 或隐藏字段仍可能进入前端，形成“新事件规范、历史事件绕过”的事实源分裂。
+
+先插入一条旧格式事件并请求历史接口，旧实现真实失败：
+
+```text
+history.status_code == 200 通过后，
+history_data["progress"] 实际为 9999，而预期为 100.0；
+```
+
+## 2. 实际修复
+
+实现文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+```
+
+新增读取端 helper：
+
+```text
+_sanitize_loaded_event(event)
+```
+
+处理规则：
+
+1. `list_events()` 查询结果逐条通过当前 `_visible_event_data(event_type, data_json)` 重新投影。
+2. `list_timeline()` 同样处理，保证跨会话审计和运行事件读取使用同一公开契约。
+3. 使用 `set_committed_value()` 替换 ORM 对象当前加载值，不将清洗结果标记为待写入，避免“读取展示”意外修改数据库历史记录。
+4. SSE 继续调用 `list_events()`，历史 JSON 也调用同一服务，因此两条接口现在天然共享同一份读取事实源。
+5. 隐藏字段、未知字段、进度范围、长度和步骤边界均复用 CARD-056 的统一清洗规则。
+
+## 3. 接口级回归测试
+
+测试文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_stream_http.py
+```
+
+测试：
+
+```text
+test_history_and_sse_replay_sanitize_legacy_progress_payloads
+```
+
+测试构造一条旧格式 `AgentEventRecord`，同时请求：
+
+```text
+GET /api/agent/sessions/{session_id}/runs/{run_id}/events
+GET /api/agent/sessions/{session_id}/runs/{run_id}/stream
+```
+
+断言：
+
+```text
+历史接口 progress == 100.0；
+phase 长度 == 80；
+action_id 长度 == 160；
+progress_message 长度 == 500；
+reasoning 不存在；
+SSE data payload 与历史接口 data_json 完全相等。
+```
+
+原有 `Last-Event-ID`、SSE header、终态分页和游标重连测试继续保留。
+
+## 4. 修复后定向结果
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/api/routers/test_agent_stream_http.py -k "legacy_progress_payloads or honors_last_event_id"
+```
+
+结果：
+
+```text
+2 passed, 13 deselected
+```
+
+## 5. 反向验证
+
+临时移除 `list_events()` 的 `_sanitize_loaded_event()` 调用，再运行新接口回归，真实失败：
+
+```text
+history_data["progress"] 实际为 9999；
+assert 9999 == 100.0；
+1 failed, 14 deselected；
+EXPECTED_FAILURE_EXIT=1
+```
+
+验证结束后恢复读取清洗实现。
+
+## 6. 后端全量门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+结果：
+
+```text
+1442 passed in 457.96s (0:07:37)
+```
+
+## 7. 提交、推送与回退
+
+代码提交：
+
+```text
+9d3acb3 fix: sanitize legacy agent events on replay
+```
+
+已推送到：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+代码回退：
+
+```powershell
+git revert 9d3acb3
+```
+
+该回退只撤销 CARD-057 的读取端投影和接口回归测试，不影响 CARD-049 至 CARD-056；文档使用独立提交。
+
+## 8. 当前事实源状态
+
+```text
+新写入事件：append_event/publish_progress 统一白名单与边界；
+历史读取：list_events/list_timeline 统一重新投影；
+SSE：通过 list_events 读取同一份清洗后的事件；
+前端：agentEventSafety 继续作为浏览器侧第二道归一化边界；
+数据库历史记录：读取清洗不反写，原始历史保留，公开展示统一。
+```
+
+## 9. 下一任务目标：CARD-058 Agent 对话流式输出与公开进度事件链路审查
+
+CARD-058 继续后端优先，但聚焦用户要求的“流式输出、实时进度、Agent 自主调用项目能力”是否在真实运行链成立：
+
+1. 审查 `execution.py -> visible_response job -> runner.py -> provider gateway -> SSE` 的完整 durable 链路。
+2. 用受控 Provider fixture 验证 `assistant_delta` 按顺序落库、`progress_update` 与 `action_id` 同 Run 对齐、重连后不丢 delta、终态只生成一次。
+3. 覆盖 Provider 中途失败、Worker 重试、死信重放和最终成功，断言 assistant 消息、`assistant_completed`、`run_completed` 不重复。
+4. 检查“公开进度”与隐藏 reasoning 的边界，确保实时输出只暴露作者可读摘要，不把内部推理字段写入 durable event 或 SSE。
+5. 先写失败驱动的端到端/Worker 回归；若当前实现已经满足，则只补缺少的证据测试，不制造无效代码改动。
+6. 代码与测试独立提交推送，接续文档再次独立提交推送；记录每个精确回退点。
+7. 后端门禁继续执行：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+8. CARD-058 完成后再进入下一轮前端布局细化；布局调整必须基于浏览器视口实测，而不是只改源码字符串。
