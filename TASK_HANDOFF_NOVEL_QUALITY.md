@@ -80229,3 +80229,401 @@ CARD-064 反向验证：移除 result_ref 投影后退出码 1；
 execution-facts 路由已写入代码，但运行进程需重启后再做真实接口联调；
 总任务：active，继续推进。
 ```
+
+
+---
+
+# 2026-09-02 CARD-065 实际完成记录：真实 execution-facts 联调与 facts 失败态可读化
+
+> 本节记录 CARD-065 相对于 CARD-064 新增的运行实例联调和前端可用性修复。旧批次文字和测试数字不重复计算。总任务继续保持 `active`。
+
+## 14.1 提交状态
+
+项目：
+
+```text
+D:\小说写作\xuanqiong-wenshu
+```
+
+分支：
+
+```text
+codex/bohrium-integration-20260831
+```
+
+CARD-065 代码提交：
+
+```text
+3f7df27 feat: surface execution facts failures
+```
+
+已推送：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+CARD-064 代码和文档提交：
+
+```text
+542b864 feat: expose agent execution facts
+d7bbba6 docs: record card 064 execution facts
+```
+
+本轮仍未使用 `git add -A`，历史未跟踪文件和审计目录完整保留。
+
+## 14.2 真实后端实例重载
+
+CARD-064 新增路由写入代码后，先结束旧的 Uvicorn 进程，再用项目虚拟环境启动最新后端：
+
+```text
+旧进程：PID 55640
+新进程：PID 33340
+```
+
+最新实例健康检查：
+
+```text
+GET http://127.0.0.1:8013/health
+→ 200
+{"status":"healthy","app":"玄穹文枢 API","version":"1.0.0"}
+```
+
+OpenAPI 实际包含：
+
+```text
+/api/agent/runs/{run_id}/execution-facts
+```
+
+其安全定义包含 bearer 认证、`limit` 1～500 约束和 `AgentExecutionFactRead` 数组响应。
+
+## 14.3 真实 execution-facts 接口联调
+
+使用当前 SQLite 数据库中的现有用户会话完成登录，再调用真实接口。真实数据库当时存在 3 个最近 Run：
+
+```text
+Run A：返回 2 条 facts；
+Run B：返回 1 条 fact；
+Run C：返回 0 条 facts。
+```
+
+返回字段实际包括：
+
+```text
+execution_id
+result_ref
+action_id
+tool_name
+status
+attempt
+```
+
+其中真实返回的引用形态为：
+
+```text
+result_ref：execution:<execution_id>
+action_id：step:<step_id>
+```
+
+Run A 的两条真实事实状态均为 `completed`，工具分别为：
+
+```text
+project.context
+outline.inspect
+```
+
+Run B 的真实事实工具为：
+
+```text
+project.context
+```
+
+Run C 返回空数组，证明“合法 Run 但没有关系化执行记录”和“路由不存在”已被区分。
+
+不存在的 UUID 调用结果：
+
+```text
+HTTP 404
+```
+
+事实响应中没有：
+
+```text
+input_json
+output_json
+```
+
+因此本次联调验证了真实运行实例上的用户级 Run 查询、空结果和安全字段边界。
+
+## 14.4 Provider 通道健康联调
+
+真实调用：
+
+```text
+GET http://127.0.0.1:8013/api/agent/tools/health
+```
+
+结果：
+
+```text
+registry_status：healthy
+provider_count：4
+```
+
+4 个实际 Provider 均为 `loaded`：
+
+```text
+project-read
+memory-read
+foreshadowing-read
+structure-read
+```
+
+健康响应同时带有：
+
+```text
+provider_id
+path
+status
+source
+tools
+failure_code
+provider_version
+api_version
+capability_tags
+dependencies
+```
+
+响应没有 API key、Provider 原始输出或正文。工作台已有管理员专用 Provider 健康面板，能够展示注册表状态、Provider 数量、加载状态、工具数、来源、版本和能力标签。
+
+## 14.5 CARD-065 新增代码变更
+
+### A. 检查器失败态
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\run\AgentRunInspector.vue
+```
+
+新增输入：
+
+```text
+executionFactsError?: string | null
+```
+
+当 facts 请求失败时，检查器显示：
+
+```text
+执行事实接口暂时不可用
+```
+
+并保留当前 Run 状态、步骤列表、工具结果面板和中央聊天内容。
+
+### B. 工作台按 Run 保存错误
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+新增：
+
+```text
+executionFactsErrorByRunId
+activeExecutionFactsError
+```
+
+`loadExecutionFacts()` 的行为：
+
+- 成功时写入当前 Run facts，并清除该 Run 旧错误；
+- 失败时只记录该 Run 的可读错误；
+- 不清空聊天消息；
+- 不影响日志独立滚动；
+- 不把旧 Run 的错误显示到新 Run；
+- `resetRuntime()` 同时清理 facts 和错误分桶。
+
+### C. 回归测试
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\run\AgentRunInspector.spec.ts
+```
+
+新增行为：
+
+```text
+facts loading error 显示可读错误，同时 Run 状态仍然存在。
+```
+
+## 14.6 失败驱动和反向验证
+
+### 先失败
+
+新增 facts 失败态测试后，旧实现真实失败：
+
+```text
+Unable to get [data-testid="agent-execution-facts-error"]
+1 failed
+```
+
+### 反向验证
+
+临时移除：
+
+```html
+<p v-if="executionFactsError" ... data-testid="agent-execution-facts-error">...</p>
+```
+
+再次运行该回归，真实失败：
+
+```text
+Unable to get [data-testid="agent-execution-facts-error"]
+EXPECTED_FAILURE_EXIT=1
+```
+
+验证完成后从副本恢复，临时文件已清理。
+
+## 14.7 门禁结果
+
+### CARD-065 定向结果
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+npm run test:run -- src/features/agent/run/AgentRunInspector.spec.ts -t "facts loading error"
+```
+
+结果：
+
+```text
+type-check：退出码 0；
+1 passed，3 skipped。
+```
+
+### CARD-064 相关前端定向回归
+
+```text
+AgentWorkspace、AgentRunInspector、AgentToolResultPanel 定位和历史 facts 集成测试：通过。
+```
+
+### 前端全量门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+npm run test:run
+npm run build-only
+```
+
+本轮结果：
+
+```text
+npm run type-check：通过；
+npm run test:run：74 files passed，467 tests passed；
+npm run build-only：4905 modules transformed，built successfully。
+```
+
+CARD-064 紧邻基线的后端全量结果仍为：
+
+```text
+1449 passed in 379.12s
+```
+
+CARD-065 只修改前端错误展示与检查器输入，没有修改后端执行事实服务，因此没有篡改或重复伪造后端全量数字。
+
+## 14.8 当前运行地址
+
+当前前端：
+
+```text
+http://127.0.0.1:5174/agent
+```
+
+当前后端：
+
+```text
+http://127.0.0.1:8013
+```
+
+健康检查：
+
+```text
+http://127.0.0.1:8013/health
+```
+
+Provider 健康：
+
+```text
+http://127.0.0.1:8013/api/agent/tools/health
+```
+
+统一启动脚本仍有本机依赖：
+
+```text
+D:\小说写作\xuanqiong-wenshu\start.ps1
+→ 默认查找 D:\download\MySQL\bin\mysqld.exe
+→ 当前文件不存在
+```
+
+所以当前查看页面继续使用 SQLite 配置；这不等同于 MySQL 正式部署验收。
+
+## 14.9 回退命令
+
+只回退 CARD-065 代码：
+
+```powershell
+git revert 3f7df27
+```
+
+CARD-065 文档使用独立提交，提交完成后回退形式为：
+
+```powershell
+git revert <CARD-065-文档提交哈希>
+```
+
+## 14.10 下一任务目标：CARD-066
+
+下一目标预登记为：
+
+```text
+CARD-066：Provider 状态语义拆分与真实流式调用可观测性
+```
+
+目标：
+
+1. 盘点 Provider 健康接口、Provider provenance、Provider attempt 和 fallback 字段的语义交叉；
+2. 区分“Provider 已注册”“Provider 可加载”“本次 Run 实际调用”“本次调用成功/失败”“发生 fallback”五种状态；
+3. 在右侧数据区域提供紧凑状态摘要，不扩张中央聊天和日志高度；
+4. 把真实 Provider 流式输出的开始、增量、结束、失败和 partial digest 与当前 Run/action/result 引用关联；
+5. 失败时展示错误类别和恢复状态，不展示密钥、原始响应或隐藏思维内容；
+6. 先补后端事件/投影失败测试，再补前端状态显示测试；
+7. 继续做故意破坏验证、全量后端门禁、全量前端门禁、代码/文档分离提交和远端推送。
+
+建议文件范围：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\provider_attempt.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_provider_attempt.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_progress_updates.py
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\data\AgentDataPanel.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\data\AgentDataPanel.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.spec.ts
+```
+
+CARD-066 开始基线：
+
+```text
+HEAD：3f7df27；
+CARD-065 文档待提交；
+真实后端 execution-facts 路由：已加载并返回 2/1/0 条 facts；
+Provider 健康：4 个 loaded Provider；
+前端全量：74 files / 467 tests；
+前端构建：4905 modules transformed；
+CARD-065 反向验证：移除 facts 错误节点后退出码 1；
+总任务：active，继续推进。
+```
