@@ -534,20 +534,27 @@ class AgentJobService:
         job.finished_at = None
         detail = (reason or "operator_replay")[:255]
         job.error_detail = f"replayed_by={int(operator_id)}; reason={detail}"[:1000]
-        await self.session.commit()
-        await self.session.refresh(job)
         from ..services.agent_runtime import AgentRuntimeService
-        await AgentRuntimeService(self.session).append_event(
-            run_id=job.run_id,
-            user_id=job.user_id,
-            event_type="job_replayed",
-            summary="管理员已将 Agent Job 从死信队列重新排队",
-            data={
-                "job_id": job.id,
-                "attempt_count": job.attempt_count,
-                "operator_id": int(operator_id),
-            },
-        )
+        try:
+            await AgentRuntimeService(self.session).append_event(
+                run_id=job.run_id,
+                user_id=job.user_id,
+                event_type="job_replayed",
+                summary="管理员已将 Agent Job 从死信队列重新排队",
+                data={
+                    "job_id": job.id,
+                    "attempt_count": job.attempt_count,
+                    "operator_id": int(operator_id),
+                },
+                commit=False,
+            )
+            await self.session.commit()
+        except Exception:
+            # Requeue and its audit event are one durable state transition.
+            # A failed event append must not leave an untracked queued Job.
+            await self.session.rollback()
+            raise
+        await self.session.refresh(job)
         return job
     async def list_jobs(self, *, user_id: int, project_id: str | None = None, status: str | None = None, limit: int = 100) -> list[AgentJob]:
         stmt = select(AgentJob).where(AgentJob.user_id == user_id)

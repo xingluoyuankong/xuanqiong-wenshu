@@ -66,6 +66,35 @@ async def test_job_cancel_heartbeat_and_complete_are_lease_safe(task_session):
 
 
 @pytest.mark.asyncio
+async def test_dead_letter_replay_rolls_back_job_when_audit_event_fails(task_session, monkeypatch):
+    user = await _user(task_session, 1406, 'job-replay-atomic')
+    runtime = AgentRuntimeService(task_session)
+    agent_session = await runtime.create_session(user_id=user.id)
+    run = await runtime.create_run(session_id=agent_session.id, user_id=user.id)
+    service = AgentJobService(task_session)
+    user_id = user.id
+    job = await service.create_job(
+        run_id=run.id, user_id=user_id, project_id=None, kind='provider',
+        idempotency_key='replay-atomic-key', max_attempts=1,
+    )
+    job_id = job.id
+    await service.claim_job(job_id=job_id, user_id=user_id, lease_owner='worker-a')
+    await service.fail(job_id=job_id, user_id=user_id, lease_owner='worker-a', error_type='ProviderTimeout')
+
+    async def fail_audit(*_args, **_kwargs):
+        raise RuntimeError('fixture-audit-write-failed')
+
+    monkeypatch.setattr(AgentRuntimeService, 'append_event', fail_audit)
+    with pytest.raises(RuntimeError, match='fixture-audit-write-failed'):
+        await service.replay_dead_letter(job_id=job_id, operator_id=999, reason='atomic test')
+
+    restored = await service.get_job(job_id=job_id, user_id=user_id)
+    assert restored.status == 'dead_letter'
+    assert restored.attempt_count == 1
+    assert restored.error_type == 'ProviderTimeout'
+
+
+@pytest.mark.asyncio
 async def test_dead_letter_operator_replay_requeues_and_audits_without_losing_history(task_session):
     user = await _user(task_session, 1405, 'job-replay')
     runtime = AgentRuntimeService(task_session)
