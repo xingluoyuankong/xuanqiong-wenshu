@@ -84,6 +84,57 @@ async def test_agent_stream_http_honors_last_event_id_and_preserves_sse_headers(
 
 
 @pytest.mark.asyncio
+async def test_assistant_delta_sse_payload_is_redacted_and_cursor_is_monotonic(task_session, monkeypatch):
+    user = await _user(task_session, 1319, "stream-delta-redaction-owner")
+    runtime = AgentRuntimeService(task_session)
+    agent_session = await runtime.create_session(user_id=user.id)
+    run = await runtime.create_run(session_id=agent_session.id, user_id=user.id)
+    delta_events = await runtime.append_assistant_delta(
+        run_id=run.id,
+        user_id=user.id,
+        content="可见增量",
+        action_id="response:stream",
+        result_ref="response:redacted",
+        data={"reasoning": "PRIVATE_REASONING", "prompt": "PRIVATE_PROMPT", "provider_secret": "PRIVATE_SECRET"},
+    )
+    await runtime.update_run(run_id=run.id, user_id=user.id, status="completed", progress=100)
+    terminal = await runtime.append_event(
+        run_id=run.id,
+        user_id=user.id,
+        event_type="run_completed",
+        summary="完成",
+        data={"phase": "finish"},
+    )
+    monkeypatch.setattr(agent_router, "AsyncSessionLocal", async_sessionmaker(task_session.bind, expire_on_commit=False))
+
+    class Request:
+        headers = {"last-event-id": str(delta_events[0].sequence - 1)}
+
+        async def is_disconnected(self):
+            return False
+
+    response = await agent_router.stream_agent_events(
+        agent_session.id,
+        run.id,
+        Request(),
+        after_sequence=0,
+        current_user=SimpleNamespace(id=user.id),
+    )
+    body = "".join([
+        chunk.decode() if isinstance(chunk, bytes) else chunk
+        async for chunk in response.body_iterator
+    ])
+    assert f"id: {delta_events[0].sequence}" in body
+    assert f"id: {terminal.sequence}" in body
+    assert "可见增量" in body
+    assert "PRIVATE_REASONING" not in body
+    assert "PRIVATE_PROMPT" not in body
+    assert "PRIVATE_SECRET" not in body
+    emitted = [int(line.removeprefix("id: ")) for line in body.splitlines() if line.startswith("id: ")]
+    assert emitted == sorted(set(emitted))
+
+
+@pytest.mark.asyncio
 async def test_history_and_sse_replay_sanitize_legacy_progress_payloads(task_session, monkeypatch):
     user = await _user(task_session, 1317, "stream-legacy-payload-owner")
     runtime = AgentRuntimeService(task_session)
