@@ -84774,3 +84774,416 @@ CARD-074-B1 文档回退：git revert 4eec0f9（回写提交完成后再补最�
 当前任务目标：CARD-074-B2
 总目标状态：active
 ```
+
+---
+
+# 2026-09-03｜CARD-074-B2 完成记录：SSE 游标、断线回放、终端关闭与脱敏契约加固
+
+> 本节记录 CARD-074-B2 的真实完成范围。B2 主要是对已存在的后端 SSE 机制进行跨层回归加固，确认它满足 Agent 流式工作台需要的回放契约；本阶段没有为了制造差异而重复改动已经正确的生产逻辑。
+
+## 1. 阶段目标与结论
+
+阶段编号：`CARD-074-B2`
+
+阶段名称：SSE `after_sequence` 游标、断线重连、分页回放、终端关闭与公开事件脱敏契约。
+
+本阶段验证并固定：
+
+1. 合法 `Last-Event-ID` 优先于查询参数 `after_sequence`；
+2. 空、非数字、负数和超范围 header 回退到查询参数或零；
+3. SSE 重连只读取 `sequence > cursor` 的 durable event；
+4. 500 条分页边界以及 499、500、501、1000 条历史事件均不丢失、不重复；
+5. 终端 Run 在最后一批事件发送后关闭流，不进行无意义的第二次轮询；
+6. 客户端已断开时，服务端不打开数据库会话；
+7. Session/Run scope 错误在 SSE 响应头发送前返回；
+8. ledger 查询异常只输出 `stream_error` 控制事件，不泄漏数据库驱动文本，也不推进 durable cursor；
+9. `assistant_delta` 经真实 SSE endpoint 输出时只保留公开白名单字段；
+10. `assistant_delta`、`work_trace_delta`、`run_completed` 的 sequence 在流中严格递增；
+11. 断线重连后的流式文本可以由 B1 的分片事件按序完整重建；
+12. CARD-074-A 的数据库终端事件唯一 fence 与 SSE terminal close 组合成立。
+
+阶段状态：`completed`
+
+CARD-074 总状态：`in_progress`
+
+总目标状态：`active`
+
+下一阶段任务目标：
+
+```text
+CARD-075｜前端把结构化进度与 Assistant delta 接入中央聊天主阅读区
+```
+
+## 2. 当前后端 SSE 真实实现
+
+核心文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+```
+
+### 2.1 游标解析
+
+现有函数：
+
+```text
+resolve_agent_stream_cursor(last_event_id, after_sequence)
+```
+
+口径：
+
+```text
+1. after_sequence 先归一化为 0～MAX_AGENT_STREAM_CURSOR；
+2. Last-Event-ID 为空、非 ASCII 数字、负数或超上限时忽略；
+3. 合法 Last-Event-ID 覆盖 query cursor；
+4. stream_error 不输出 SSE id，不改变客户端 durable cursor。
+```
+
+### 2.2 durable event 查询
+
+现有服务方法：
+
+```text
+AgentRuntimeService.list_events(
+    run_id,
+    user_id,
+    after_sequence,
+    limit,
+)
+```
+
+SQL 口径：
+
+```text
+run_id == 当前 Run
+user_id == 当前用户
+sequence > after_sequence
+ORDER BY sequence ASC
+LIMIT 500
+```
+
+这保证前端可以把 history replay 和 live SSE 放进同一个按序 reducer。
+
+### 2.3 SSE generator
+
+现有路由：
+
+```text
+GET /api/agent/sessions/{session_id}/runs/{run_id}/stream
+```
+
+每个 durable event 输出：
+
+```text
+id: <event.sequence>
+event: <event.event_type>
+data: {
+  id,
+  run_id,
+  sequence,
+  event_type,
+  summary,
+  data,
+  created_at
+}
+```
+
+终端行为：
+
+```text
+- 每批最多读取 500 个事件；
+- 发送后将 cursor 推进到最后一个已发送 sequence；
+- terminal Run 且当前批小于 500 时关闭；
+- terminal Run 恰好有 500 条时继续读取下一页；
+- 没有事件且 Run 未终止时按心跳间隔发送 keepalive；
+- ledger 查询异常发送 stream_error 并保持原 cursor。
+```
+
+## 3. 本阶段新增真实回归
+
+代码提交只新增一个测试文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_stream_http.py
+```
+
+新增测试：
+
+```text
+test_assistant_delta_sse_payload_is_redacted_and_cursor_is_monotonic
+```
+
+测试步骤：
+
+```text
+1. 创建 owner、AgentSession 和 Run；
+2. 通过 AgentRuntimeService.append_assistant_delta 写入可见增量；
+3. 同时向 data 注入 reasoning/prompt/provider_secret 伪字段；
+4. 写入 run_completed；
+5. 通过真实 stream_agent_events 读取 SSE body；
+6. 检查 delta 和 terminal 的 SSE id；
+7. 检查公开文本存在；
+8. 检查三个敏感字段不出现在 body；
+9. 检查输出 id 序列为排序后的唯一序列。
+```
+
+这条测试把以下跨层边界锁死：
+
+```text
+runtime 写入 → event allowlist → list_events 清洗 → SSE 序列化
+```
+
+## 4. 测试执行记录
+
+### 4.1 现有 B2 SSE 回归
+
+命令：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q `
+  app/api/routers/test_agent_stream_resume.py `
+  app/api/routers/test_agent_stream_pagination.py `
+  app/api/routers/test_agent_stream_http.py `
+  app/agent/test_asgi_worker_event_replay.py `
+  -k "stream or replay or cursor or pagination"
+```
+
+结果：
+
+```text
+34 passed in 74.95s
+```
+
+覆盖：
+
+```text
+Last-Event-ID 优先级
+非法 header 回退
+after_sequence 续接
+terminal close
+500 条分页边界
+ASGI HTTP stream
+跨进程 replay
+ledger error redaction
+owner scope preflight
+```
+
+### 4.2 新增脱敏与单调 cursor 测试
+
+第一次执行新增测试时，测试 body 拼接表达式缺少异步列表推导括号，得到：
+
+```text
+TypeError: can only join an iterable
+```
+
+该失败定位为测试 harness 表达式错误，未被当作业务缺陷；修正测试读取方式后继续执行。
+
+修正后的定向结果：
+
+```text
+3 passed, 13 deselected in 4.92s
+```
+
+### 4.3 B2 核心回归
+
+```text
+SSE HTTP + resume + pagination + ASGI replay
+34 passed
+```
+
+加上新增测试及相关事件回放后，最终 B2 定向验证保持绿色。
+
+### 4.4 反向验证
+
+本阶段验证的是已有正确生产实现，因此反向验证针对公开契约：临时把 `assistant_delta` 的测试入口改为不经过统一 `append_assistant_delta`，并使用超长/未清洗 payload 运行 SSE 契约，测试退出码为：
+
+```text
+EXPECTED_FAILURE_EXIT=1
+```
+
+验证后恢复统一入口，当前工作区未保留破坏版本。
+
+> 注：本阶段代码提交本身只包含回归测试，没有把临时破坏改动推送到仓库；生产代码仍由 CARD-074-A 与 CARD-074-B1 的提交提供。
+
+### 4.5 完整后端门禁
+
+命令：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+结果：
+
+```text
+1457 passed in 332.06s (0:05:32)
+```
+
+本次结果对应当前 B2 测试加固后的代码基线。
+
+## 5. 为什么本阶段不改 SSE 生产代码
+
+审查后确认以下生产逻辑已经存在并且测试全部通过：
+
+```text
+cursor header/query 选择
+after_sequence 查询
+500 条分页
+terminal close
+keepalive
+scope preflight
+stream_error 脱敏
+assistant_delta 白名单
+```
+
+如果为满足“每轮都有生产代码差异”而重复改写这些逻辑，会增加回归风险，也会破坏已经通过 CARD-071、CARD-074-A、CARD-074-B1 的行为。因此本阶段采用：
+
+```text
+真实缺口 → 新增跨层回归 → 定向验证 → 反向验证 → 全量门禁
+```
+
+这仍然是项目优化：它把关键行为从“当前实现碰巧正确”提升为“仓库中有明确测试约束”。
+
+## 6. 本阶段文件清单
+
+代码提交实际包含：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_stream_http.py
+```
+
+未修改的生产核心文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\runner.py
+D:\小说写作\xuanqiong-wenshu\backend\app\models\agent.py
+```
+
+原因：
+
+```text
+这些文件在前序阶段已经提供并验证了 B2 所需能力；本阶段只增加跨层证明。
+```
+
+所有历史未跟踪审计工件继续原样保留。
+
+## 7. 提交、推送和回退点
+
+代码/测试提交：
+
+```text
+58aa196 test: harden agent stream cursor contract
+```
+
+代码推送：
+
+```text
+b397995..58aa196 codex/bohrium-integration-20260831 -> origin/codex/bohrium-integration-20260831
+```
+
+代码回退：
+
+```powershell
+git revert 58aa196
+```
+
+该回退只移除 B2 新增跨层回归，不移除 B1 的 Assistant delta 统一入口，也不移除 A 阶段 terminal fence。
+
+## 8. 下一目标：CARD-075 前端结构化流式主阅读区
+
+用户要求的产品形态是：
+
+```text
+AI 与用户聊天是主界面
+实时输出 Assistant 可见文本
+实时显示当前阶段、动作、进度
+日志保持右侧独立区域
+项目/会话/工具/数据继续作为可折叠侧栏
+```
+
+CARD-075 要把后端已经验证的事件投影接入中央聊天，但不显示内部思考正文，不把固定小说生成流程硬编码在前端。
+
+### 8.1 目标行为
+
+1. `useAgentRunStream` 收到 `assistant_delta` 时按 sequence 去重并增量渲染；
+2. `progress_update` 和 `work_trace_delta` 进入聊天顶部的结构化进度条/状态卡；
+3. `tool_call_started/completed/failed` 以紧凑事件卡展示，可点击 action_id/result_ref；
+4. history replay 与 live stream 走同一 reducer；
+5. 断线重连不重复文本、不回退进度；
+6. terminal event 后停止 reconnect；
+7. 日志继续位于右栏独立 viewport，不搬回中央；
+8. 五视口布局保持中央聊天优先；
+9. 项目摘要继续位于左栏数据折叠区；
+10. 事件中的敏感字段在 API、stream hook、reducer 和组件层均不渲染。
+
+### 8.2 预计文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentRunStream.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentRunStream.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\e2e\agent-workspace.spec.ts
+```
+
+### 8.3 实施顺序
+
+```text
+1. 先写 Assistant delta 去重、进度投影和 terminal stop 失败测试；
+2. 运行得到真实失败基线；
+3. 修改 reducer/stream hook，使 history/live 共用同一序列事实；
+4. 修改中央聊天组件，增加紧凑结构化进度区；
+5. 保持右侧日志独立 viewport；
+6. 做旧 reducer/terminal stop 反向验证；
+7. npm run type-check；
+8. npm run test:run；
+9. npm run build-only；
+10. 真实 Chromium 五视口验收；
+11. 代码独立提交推送；
+12. 文档独立提交推送；
+13. 记录精确回退点。
+```
+
+## 9. 当前运行状态
+
+```text
+前端：http://127.0.0.1:5174/agent → HTTP 200
+后端：http://127.0.0.1:8013/health → HTTP 200 healthy
+DB_PROVIDER=sqlite
+分支：codex/bohrium-integration-20260831
+远端：origin/codex/bohrium-integration-20260831
+代码最新提交：58aa196
+CARD-074-A：completed
+CARD-074-B1：completed
+CARD-074-B2：completed
+CARD-075：active
+总目标：active
+```
+
+## 10. 最终回写
+
+```text
+CARD-072 代码：375c6ba
+CARD-072 文档：e917ec6 → d17d865
+CARD-073 代码：2175320
+CARD-073 文档：210864e → e12a4a1 → ea46ac1
+CARD-074-A 代码：3c06898
+CARD-074-A 文档：7a416e8 → 820ad69
+CARD-074-B1 代码：b1daafe
+CARD-074-B1 文档：4eec0f9 → b397995
+CARD-074-B2 代码/测试：58aa196
+CARD-074-B2 文档：待本次文档提交完成后填入
+CARD-074-B2 代码推送：已完成
+CARD-074-B2 文档推送：待本次文档提交完成后确认
+CARD-074-B2 回退：git revert 58aa196
+当前任务目标：CARD-075
+总目标状态：active
+```
