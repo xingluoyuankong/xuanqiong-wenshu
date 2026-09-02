@@ -27,6 +27,8 @@ describe('AgentRunInspector', () => {
     expect(wrapper.get('[data-testid="agent-selected-location"]').text()).toContain('execution:exec-1')
     expect(wrapper.get('[data-testid="agent-step-step-1"]').classes()).toContain('step-list__item--selected')
     expect(wrapper.get('[data-testid="agent-tool-result-0"]').classes()).toContain('tool-result-card--selected')
+    expect(wrapper.get('[data-testid="agent-execution-fact"]').text()).toContain('quality.inspect')
+    expect(wrapper.get('[data-testid="agent-execution-fact"]').text()).toContain('第 1 次')
   })
 
   it('shows a readable state for a stale location reference', () => {

@@ -15,6 +15,7 @@
         class="tool-result-card"
         :class="{ 'tool-result-card--selected': view.selected }"
         :data-testid="`agent-tool-result-${view.index}`"
+        :data-location-ref="view.resultRef"
       >
         <header class="tool-result-card__header">
           <strong>{{ view.toolName }}</strong>

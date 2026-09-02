@@ -98,6 +98,12 @@ const providerAttemptSummary = (snapshot?: AgentProviderAttemptSnapshot | null) 
         <template v-else-if="locationStatus === 'stale'">引用暂不可用：{{ selectedLocation }}（正在恢复执行事实）</template>
         <template v-else>尚未定位动作或结果</template>
       </p>
+      <div v-if="selectedResultRef && selectedStep" class="execution-fact" data-testid="agent-execution-fact">
+        <strong>执行事实</strong>
+        <span>{{ selectedStep.tool_name }} · {{ stepStatus(selectedStep.status) }} · 第 {{ selectedStep.attempt_count }} 次</span>
+        <small>{{ selectedResultRef }}</small>
+        <small v-if="selectedStep.started_at || selectedStep.finished_at">{{ selectedStep.started_at || '—' }} → {{ selectedStep.finished_at || '进行中' }}</small>
+      </div>
       <dl class="run-summary">
         <dt>状态</dt><dd data-testid="agent-run-status">{{ run?.status || 'idle' }}</dd>
         <dt v-if="state">关联</dt><dd v-if="state" data-testid="agent-correlation-id">{{ state.correlation_id.slice(0, 8) }}</dd>
@@ -123,7 +129,7 @@ const providerAttemptSummary = (snapshot?: AgentProviderAttemptSnapshot | null) 
     </XqPanel>
     <AgentToolResultPanel v-if="run" :results="toolResults" :selected-result-ref="selectedResultRef" title="当前运行工具结果" subtitle="由当前 Run 响应或持久化步骤投影；正文、提示词与密钥不会回显。" />
     <XqPanel v-if="steps.length" title="执行检查点" subtitle="持久化步骤状态与恢复依据。" data-testid="agent-step-panel">
-      <ol class="step-list"><li v-for="step in steps" :key="step.id" :class="{ 'step-list__item--selected': selectedStep?.id === step.id }" :data-testid="`agent-step-${step.id}`"><b>{{ step.step_order }}. {{ step.tool_name }}</b><span>{{ stepStatus(step.status) }} · 第 {{ step.attempt_count }} 次</span><small v-if="selectedStep?.id === step.id" class="step-list__selection">已定位到此动作</small><small v-if="step.lease_owner">当前执行器：{{ step.lease_owner }}</small><small v-if="step.error_type" :class="{ error: step.status === 'failed' }">{{ stepErrorLabel(step.error_type) }}</small><small v-else-if="step.status === 'completed' && Object.keys(step.output_json).length">已复用/保存结果</small></li></ol>
+      <ol class="step-list"><li v-for="step in steps" :key="step.id" :class="{ 'step-list__item--selected': selectedStep?.id === step.id }" :data-testid="`agent-step-${step.id}`" :data-location-ref="`step:${step.id}`" :data-result-ref="typeof step.output_json.execution_id === 'string' ? `execution:${step.output_json.execution_id}` : undefined"><b>{{ step.step_order }}. {{ step.tool_name }}</b><span>{{ stepStatus(step.status) }} · 第 {{ step.attempt_count }} 次</span><small v-if="selectedStep?.id === step.id" class="step-list__selection">已定位到此动作</small><small v-if="step.lease_owner">当前执行器：{{ step.lease_owner }}</small><small v-if="step.error_type" :class="{ error: step.status === 'failed' }">{{ stepErrorLabel(step.error_type) }}</small><small v-else-if="step.status === 'completed' && Object.keys(step.output_json).length">已复用/保存结果</small></li></ol>
     </XqPanel>
   </section>
 </template>
@@ -139,6 +145,19 @@ const providerAttemptSummary = (snapshot?: AgentProviderAttemptSnapshot | null) 
   font-size: 0.78rem;
   line-height: 1.45;
 }
+.execution-fact {
+  display: grid;
+  gap: .16rem;
+  margin: 0 0 .65rem;
+  padding: .45rem .55rem;
+  border-radius: .5rem;
+  background: rgba(61, 143, 125, .08);
+  color: var(--xq-ink);
+  font-size: .76rem;
+  line-height: 1.4;
+}
+.execution-fact span,
+.execution-fact small { color: var(--xq-ink-muted); }
 .run-summary { display: grid; grid-template-columns: auto 1fr; gap: .45rem .75rem; margin: 0; }
 .run-summary dt { color: var(--xq-ink-muted); }
 .run-summary dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-weight: 700; }

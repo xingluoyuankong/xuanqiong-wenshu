@@ -231,7 +231,7 @@
           </div>
         </XqPanel>
 
-        <details class="workspace-section workspace-inspector-section" data-testid="agent-inspector-section">
+        <details ref="inspectorSectionEl" class="workspace-section workspace-inspector-section" data-testid="agent-inspector-section">
           <summary>
             <span>当前运行</span>
             <small>{{ activeRun ? `${runStatus(activeRun.status)} · ${Math.round(activeRun.progress)}%` : '暂无运行' }}</small>
@@ -461,6 +461,7 @@ const runs = runProjection.runs
 const selectedRunId = runProjection.selectedRunId
 const selectedActionRef = ref<string | null>(null)
 const selectedResultRef = ref<string | null>(null)
+const inspectorSectionEl = ref<HTMLDetailsElement | null>(null)
 const activeRun = runProjection.activeRun
 const runState = runProjection.activeRunState
 const runSteps = runProjection.activeRunSteps
@@ -577,6 +578,11 @@ const toolResults = computed<AgentToolResult[]>(() => {
     })
     .filter((item) => Boolean(item.tool_name) && Object.keys(item.result).length > 0)
 })
+watch(
+  () => [selectedActionRef.value, selectedResultRef.value, runSteps.value.length, toolResults.value.length].join('|'),
+  () => { void revealSelectedLocation() },
+  { flush: 'post' },
+)
 const runtimeSupported = computed(
   () =>
     typeof AgentAPI.createSession === 'function' &&
@@ -788,6 +794,18 @@ const clearRunLocation = () => {
   selectedActionRef.value = null
   selectedResultRef.value = null
 }
+const revealSelectedLocation = async () => {
+  await nextTick()
+  const section = inspectorSectionEl.value
+  if (!section || !activeRun.value) return
+  section.open = true
+  await nextTick()
+  const reference = selectedResultRef.value || selectedActionRef.value
+  if (!reference) return
+  const candidates = Array.from(section.querySelectorAll<HTMLElement>('[data-location-ref], [data-result-ref]'))
+  const target = candidates.find((element) => element.dataset.locationRef === reference || element.dataset.resultRef === reference)
+  target?.scrollIntoView?.({ block: 'nearest' })
+}
 const selectLogLocation = (kind: 'action' | 'result', reference: string | null | undefined) => {
   const normalized = typeof reference === 'string' ? reference.trim() : ''
   if (!activeRun.value || !normalized) return
@@ -798,6 +816,7 @@ const selectLogLocation = (kind: 'action' | 'result', reference: string | null |
     selectedResultRef.value = normalized
     selectedActionRef.value = null
   }
+  void revealSelectedLocation()
 }
 
 const selectRunAction = async (runId: string) => {
@@ -1780,3 +1799,4 @@ onBeforeUnmount(() => {
 }
 
 </style>
+

@@ -197,9 +197,12 @@ describe('AgentWorkspace', () => {
   it('右侧日志显示动作对应的结果引用，而不把结果正文混入日志', () => {
     expect(workspaceSource).toContain('v-if="event.actionId || event.phase || event.resultRef"')
     expect(workspaceSource).toContain('结果：{{ event.resultRef }}')
+    expect(workspaceSource).toContain('scrollIntoView')
   })
 
   it('点击日志动作或结果引用后定位当前 Run，并在切换 Run 时清理定位', async () => {
+    const scrollIntoViewMock = vi.fn()
+    Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoViewMock })
     Object.assign(routeQuery, { project_id: 'p1', session_id: 's-locate', run_id: 'run-locate-old' })
     const session = { id: 's-locate', user_id: 1, project_id: 'p1', status: 'active', created_at: 'now', updated_at: 'now' }
     const oldRun = { id: 'run-locate-old', session_id: session.id, user_id: 1, project_id: 'p1', status: 'completed', current_phase: 'completed', current_step: 1, progress: 100, created_at: '2026-08-27T09:00:00Z' }
@@ -227,11 +230,16 @@ describe('AgentWorkspace', () => {
     await flushPromises()
 
     await wrapper.get('[data-testid="agent-log-action-ref"]').trigger('click')
+    await flushPromises()
+    expect((wrapper.get('[data-testid="agent-inspector-section"]').element as HTMLDetailsElement).open).toBe(true)
     expect(wrapper.get('[data-testid="agent-selected-location"]').text()).toContain('step:run-locate-old')
     expect(wrapper.get('[data-testid="agent-step-run-locate-old"]').classes()).toContain('step-list__item--selected')
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: 'nearest' })
 
     await wrapper.get('[data-testid="agent-log-result-ref"]').trigger('click')
+    await flushPromises()
     expect(wrapper.get('[data-testid="agent-selected-location"]').text()).toContain('execution:run-locate-old')
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: 'nearest' })
 
     await wrapper.get('[data-testid="agent-run-selector"]').setValue('run-locate-new')
     await flushPromises()
