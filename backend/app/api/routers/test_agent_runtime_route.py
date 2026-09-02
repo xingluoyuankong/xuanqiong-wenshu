@@ -12,7 +12,7 @@ from app.agent.execution import execute_agent_execution_job
 from app.agent.executor import build_agent_plan
 from app.agent.jobs import AgentJobService
 from app.agent.schemas import AgentMessageCreateRequest, AgentPlanRequest, AgentRunCommandRequest, AgentSessionCreateRequest
-from app.api.routers.agent import list_agent_execution_facts, create_agent_session, list_agent_project_entity_summaries, get_agent_run_plan, get_agent_run_provider_provenance, get_agent_run_state, get_agent_session, list_agent_dead_letters, list_agent_jobs, list_agent_run_steps, list_agent_run_activity, list_agent_run_commands, post_agent_message, replay_agent_dead_letter, submit_agent_run_command
+from app.api.routers.agent import list_agent_execution_facts, get_agent_provider_usage_summary, create_agent_session, list_agent_project_entity_summaries, get_agent_run_plan, get_agent_run_provider_provenance, get_agent_run_state, get_agent_session, list_agent_dead_letters, list_agent_jobs, list_agent_run_steps, list_agent_run_activity, list_agent_run_commands, post_agent_message, replay_agent_dead_letter, submit_agent_run_command
 from app.models import AgentCapabilityDefinition, AgentCapabilityExecution, AgentRunCapabilitySnapshot, Chapter, ChapterVersion, NovelProject, User
 from app.models.faction import Faction
 from app.models.foreshadowing import Foreshadowing
@@ -812,6 +812,100 @@ async def test_agent_run_provider_provenance_route_is_scoped_and_stage_specific(
         )
     assert error.value.status_code == 404
 
+
+
+@pytest.mark.asyncio
+async def test_provider_usage_summary_route_is_owner_scoped_and_redacts_payload(task_session):
+    owner = await _route_user(task_session, 1036, "usage-summary-owner")
+    other = await _route_user(task_session, 1037, "usage-summary-other")
+    created = await create_agent_session(
+        AgentSessionCreateRequest(), session=task_session, current_user=SimpleNamespace(id=owner.id)
+    )
+    runtime = AgentRuntimeService(task_session)
+    run = await runtime.create_run(
+        session_id=created.id,
+        user_id=owner.id,
+        context={
+            "response_provider_attempts": {
+                "provider_attempts": [
+                    {
+                        "attempt": 1,
+                        "status": "failed",
+                        "error_category": "TIMEOUT",
+                        "first_token_at": "2026-09-02T10:00:00Z",
+                        "output_digest": "a" * 64,
+                        "input": "SECRET_INPUT",
+                        "output": "SECRET_OUTPUT",
+                    },
+                    {
+                        "attempt": 2,
+                        "status": "succeeded",
+                        "first_token_at": "2026-09-02T10:01:00Z",
+                        "output_digest": "b" * 64,
+                        "fallback_from_attempt": 1,
+                    },
+                ],
+                "selected_provider_attempt": 2,
+                "fallback_used": True,
+            },
+        },
+    )
+
+    summary = await get_agent_provider_usage_summary(
+        run.id, session=task_session, current_user=SimpleNamespace(id=owner.id)
+    )
+
+    assert summary.run_id == run.id
+    assert summary.total_attempts == 2
+    assert summary.succeeded_attempts == 1
+    assert summary.failed_attempts == 1
+    assert summary.fallback_attempts == 1
+    assert summary.first_token_attempts == 2
+    assert summary.digest_attempts == 2
+    assert summary.selected_attempts == 1
+    assert summary.last_error_category == "TIMEOUT"
+    assert summary.latest_first_token_at == "2026-09-02T10:01:00Z"
+    dumped = summary.model_dump()
+    assert "input" not in dumped
+    assert "output" not in dumped
+    assert "SECRET_INPUT" not in str(dumped)
+    assert "SECRET_OUTPUT" not in str(dumped)
+
+    with pytest.raises(HTTPException) as error:
+        await get_agent_provider_usage_summary(
+            run.id, session=task_session, current_user=SimpleNamespace(id=other.id)
+        )
+    assert error.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_provider_usage_summary_route_returns_zero_snapshot_without_payload(task_session):
+    owner = await _route_user(task_session, 1038, "usage-summary-empty")
+    created = await create_agent_session(
+        AgentSessionCreateRequest(), session=task_session, current_user=SimpleNamespace(id=owner.id)
+    )
+    run = await AgentRuntimeService(task_session).create_run(
+        session_id=created.id,
+        user_id=owner.id,
+        context={"reasoning": "PRIVATE", "response_provider_called": False},
+    )
+
+    summary = await get_agent_provider_usage_summary(
+        run.id, session=task_session, current_user=SimpleNamespace(id=owner.id)
+    )
+
+    assert summary.model_dump() == {
+        "run_id": run.id,
+        "total_attempts": 0,
+        "succeeded_attempts": 0,
+        "failed_attempts": 0,
+        "fallback_attempts": 0,
+        "first_token_attempts": 0,
+        "digest_attempts": 0,
+        "selected_attempts": 0,
+        "last_error_category": None,
+        "latest_first_token_at": None,
+    }
 
 
 

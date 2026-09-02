@@ -27,7 +27,7 @@ from ...agent.write_executor import accept_candidate_artifact, diff_artifact_wit
 from ...agent.context_refs import ContextRefValidationError, project_plan_arguments, resolve_agent_context_refs
 from ...agent.tool_adapters import execute_read_tool
 from ...agent.schemas import (
-    AgentApprovalDecisionRequest, AgentApprovalRead, AgentArtifactAcceptRequest, AgentExecutionFactRead, AgentArtifactDiffRead, AgentArtifactRead, AgentArtifactVersionDiffRead, AgentEventRead, AgentMessageCreateRequest,
+    AgentApprovalDecisionRequest, AgentApprovalRead, AgentArtifactAcceptRequest, AgentExecutionFactRead, AgentProviderUsageSummaryRead, AgentArtifactDiffRead, AgentArtifactRead, AgentArtifactVersionDiffRead, AgentEventRead, AgentMessageCreateRequest,
     AgentAuditRecordRead, AgentJobRead, AgentRewriteInstructionRead, AgentMessageRead, AgentPlan, AgentPlanRequest, AgentPlanStep, AgentQualityBlockerRead, AgentArtifactQualityRead, AgentArtifactLineageRead, AgentArtifactLineageEdgeRead, AgentArtifactLineageArtifactRead, AgentQualityFindingRead, AgentQualityGateRead, AgentQualityResultRead, AgentRunRead, AgentRunStepRead, AgentTimelineEventRead,
     AgentSessionCreateRequest, AgentSessionDetail, AgentSessionRead, AgentToolCatalog, AgentToolHealthRead,
     AgentRunCommandRequest, AgentRunCommandRead, AgentContextSnapshotRead, AgentPlanRevisionRead, AgentConversationSummaryRead, AgentProviderProvenanceRead, AgentProjectEntitySummariesRead,
@@ -913,6 +913,23 @@ async def list_agent_run_activity(
             after_sequence=after_sequence,
             limit=limit,
         )
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
+        raise _error(exc) from exc
+
+
+@router.get("/runs/{run_id}/provider-usage-summary", response_model=AgentProviderUsageSummaryRead)
+async def get_agent_provider_usage_summary(
+    run_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> AgentProviderUsageSummaryRead:
+    try:
+        summary = await AgentExecutionFactService(session).provider_usage_summary(
+            run_id=run_id, user_id=current_user.id
+        )
+        return AgentProviderUsageSummaryRead.model_validate(summary)
+    except AgentExecutionFactNotFound as exc:
+        raise HTTPException(status_code=404, detail={"code": "AGENT_NOT_FOUND", "message": str(exc)}) from exc
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 

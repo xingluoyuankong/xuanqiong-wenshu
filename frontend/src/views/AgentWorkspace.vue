@@ -131,6 +131,10 @@
               :provider-health="providerHealth"
               :provider-health-loading="providerHealthLoading"
               :provider-health-error="providerHealthError"
+              :active-run-id="activeRun?.id || null"
+              :provider-usage-summary="activeProviderUsageSummary"
+              :provider-usage-summary-loading="providerUsageSummaryLoading"
+              :provider-usage-summary-error="activeProviderUsageSummaryError || ''"
               :timeline="timeline"
               :timeline-loading="timelineLoading"
               :timeline-event-type="timelineEventType"
@@ -388,6 +392,7 @@ import {
   type AgentMessage,
   type AgentPlanResponse,
   type AgentProviderProvenance,
+  type AgentProviderUsageSummary,
   type AgentRewriteInstruction,
   type AgentRiskLevel,
   type AgentRun,
@@ -467,6 +472,9 @@ const selectedResultRef = ref<string | null>(null)
 const inspectorSectionEl = ref<HTMLDetailsElement | null>(null)
 const executionFactsByRunId = ref<Record<string, AgentExecutionFact[]>>({})
 const executionFactsErrorByRunId = ref<Record<string, string>>({})
+const providerUsageSummaryByRunId = ref<Record<string, AgentProviderUsageSummary>>({})
+const providerUsageSummaryLoadingByRunId = ref<Record<string, boolean>>({})
+const providerUsageSummaryErrorByRunId = ref<Record<string, string>>({})
 const activeRun = runProjection.activeRun
 const runState = runProjection.activeRunState
 const runSteps = runProjection.activeRunSteps
@@ -478,6 +486,15 @@ const activeExecutionFacts = computed<AgentExecutionFact[]>(() =>
 )
 const activeExecutionFactsError = computed(() =>
   activeRun.value ? executionFactsErrorByRunId.value[activeRun.value.id] || null : null,
+)
+const activeProviderUsageSummary = computed(() =>
+  activeRun.value ? providerUsageSummaryByRunId.value[activeRun.value.id] || null : null,
+)
+const providerUsageSummaryLoading = computed(() =>
+  activeRun.value ? Boolean(providerUsageSummaryLoadingByRunId.value[activeRun.value.id]) : false,
+)
+const activeProviderUsageSummaryError = computed(() =>
+  activeRun.value ? providerUsageSummaryErrorByRunId.value[activeRun.value.id] || null : null,
 )
 const workspaceEvents = ref<AgentDisplayEvent[]>([
   { id: 'ready', label: '已就绪', detail: '请选择小说项目，然后描述你希望 Agent 完成的目标。', sequence: 0, eventType: 'workspace' },
@@ -812,6 +829,30 @@ const loadExecutionFacts = async (runId: string) => {
     }
   }
 }
+const loadProviderUsageSummary = async (runId: string) => {
+  if (typeof AgentAPI.getProviderUsageSummary !== 'function') return
+  providerUsageSummaryLoadingByRunId.value = {
+    ...providerUsageSummaryLoadingByRunId.value,
+    [runId]: true,
+  }
+  try {
+    const summary = await AgentAPI.getProviderUsageSummary(runId)
+    providerUsageSummaryByRunId.value = { ...providerUsageSummaryByRunId.value, [runId]: summary }
+    const nextErrors = { ...providerUsageSummaryErrorByRunId.value }
+    delete nextErrors[runId]
+    providerUsageSummaryErrorByRunId.value = nextErrors
+  } catch (error) {
+    providerUsageSummaryErrorByRunId.value = {
+      ...providerUsageSummaryErrorByRunId.value,
+      [runId]: error instanceof Error ? error.message : 'Provider 调用统计暂时不可用',
+    }
+  } finally {
+    providerUsageSummaryLoadingByRunId.value = {
+      ...providerUsageSummaryLoadingByRunId.value,
+      [runId]: false,
+    }
+  }
+}
 const refreshSessionMessages = async () => {
   if (!session.value || typeof AgentAPI.getSession !== 'function') return
   try {
@@ -821,7 +862,7 @@ const refreshSessionMessages = async () => {
     const selected = activeRun.value
     if (selected && typeof AgentAPI.listApprovals === 'function')
       runProjection.setRunApprovals(selected.id, await AgentAPI.listApprovals(selected.id))
-    if (selected) await Promise.all([loadRunSteps(selected.id), loadRunState(selected.id), loadExecutionFacts(selected.id)])
+    if (selected) await Promise.all([loadRunSteps(selected.id), loadRunState(selected.id), loadExecutionFacts(selected.id), loadProviderUsageSummary(selected.id)])
   } catch {
     /* terminal refresh is best effort */
   }
@@ -862,7 +903,7 @@ const selectRunAction = async (runId: string) => {
   if (!run) return
   artifactPreview.value = ''
   resetArtifactFacts({ preserveScopedState: true })
-  const loads: Promise<unknown>[] = [loadRunSteps(run.id), loadRunState(run.id), loadRunFacts(run.id), loadExecutionFacts(run.id)]
+  const loads: Promise<unknown>[] = [loadRunSteps(run.id), loadRunState(run.id), loadRunFacts(run.id), loadExecutionFacts(run.id), loadProviderUsageSummary(run.id)]
   if (typeof AgentAPI.listApprovals === 'function') {
     loads.push(AgentAPI.listApprovals(run.id).then((items) => runProjection.setRunApprovals(run.id, items)))
   }
@@ -1092,7 +1133,7 @@ const hydrateSessionRun = async (
       await previewArtifact(requestedArtifact)
     }
   }
-  await Promise.all([loadRunFacts(selected.id), loadExecutionFacts(selected.id)])
+  await Promise.all([loadRunFacts(selected.id), loadExecutionFacts(selected.id), loadProviderUsageSummary(selected.id)])
   await loadEventsAndStream(detail, selected)
   return { runId: selected.id, artifactId }
 }

@@ -396,6 +396,21 @@ class AgentRunStepRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AgentProviderUsageSummaryRead(BaseModel):
+    run_id: str
+    total_attempts: int = Field(ge=0)
+    succeeded_attempts: int = Field(ge=0)
+    failed_attempts: int = Field(ge=0)
+    fallback_attempts: int = Field(ge=0)
+    first_token_attempts: int = Field(ge=0)
+    digest_attempts: int = Field(ge=0)
+    selected_attempts: int = Field(ge=0)
+    last_error_category: str | None = None
+    latest_first_token_at: str | None = None
+
+    model_config = ConfigDict(extra='forbid')
+
+
 class AgentExecutionFactRead(BaseModel):
     execution_id: str
     run_id: str

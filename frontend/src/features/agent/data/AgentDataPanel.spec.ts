@@ -64,6 +64,10 @@ const mountPanel = (overrides: Record<string, unknown> = {}) =>
       },
       providerHealthLoading: false,
       providerHealthError: '',
+      activeRunId: 'run-1',
+      providerUsageSummary: null,
+      providerUsageSummaryLoading: false,
+      providerUsageSummaryError: '',
       timeline: [timeline],
       timelineLoading: false,
       timelineEventType: '',
@@ -90,6 +94,36 @@ describe('AgentDataPanel', () => {
     expect(wrapper.get('[data-testid="agent-job-panel"]').text()).toContain('状态码 running')
     expect(wrapper.get('[data-testid="agent-dead-letter-panel"]').text()).toContain('ProviderTimeout')
     expect(wrapper.get('[data-testid="agent-audit-panel"]').text()).toContain('候选已生成')
+  })
+
+  it('显示当前 Run 的 Provider 调用统计且只展示脱敏字段', () => {
+    const wrapper = mountPanel({
+      providerUsageSummary: {
+        run_id: 'run-usage-123456',
+        total_attempts: 4,
+        succeeded_attempts: 2,
+        failed_attempts: 2,
+        fallback_attempts: 1,
+        first_token_attempts: 2,
+        digest_attempts: 2,
+        selected_attempts: 1,
+        last_error_category: 'TIMEOUT',
+        latest_first_token_at: '2026-09-02T10:01:00Z',
+      },
+    })
+    const panel = wrapper.get('[data-testid="agent-provider-usage-panel"]')
+    expect(panel.text()).toContain('Run run-usag')
+    expect(panel.text()).toContain('总调用4')
+    expect(panel.text()).toContain('成功2')
+    expect(panel.text()).toContain('fallback1')
+    expect(panel.text()).toContain('最近错误：TIMEOUT')
+    expect(panel.text()).not.toContain('SECRET_OUTPUT')
+  })
+
+  it('统计加载失败和无 Run 时显示独立可读状态', () => {
+    expect(mountPanel({ providerUsageSummaryError: '统计接口失败' }).get('[data-testid="agent-provider-usage-panel"]').text()).toContain('统计接口失败')
+    expect(mountPanel({ activeRunId: null }).get('[data-testid="agent-provider-usage-panel"]').text()).toContain('暂无选中的 Run')
+    expect(mountPanel({ providerUsageSummary: null }).get('[data-testid="agent-provider-usage-panel"]').text()).toContain('本次 Run 暂无 Provider attempt 记录')
   })
 
   it('筛选值和 Job 操作通过 typed emits 上送页面', async () => {

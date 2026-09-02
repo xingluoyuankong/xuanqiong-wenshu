@@ -18,6 +18,7 @@ const {
   listArtifactsMock,
   listRunStepsMock,
   listExecutionFactsMock,
+  getProviderUsageSummaryMock,
   getRunPlanMock,
   getRunStateMock,
   getArtifactContentMock,
@@ -43,6 +44,7 @@ const {
   listArtifactsMock: vi.fn(),
   listRunStepsMock: vi.fn(),
   listExecutionFactsMock: vi.fn(),
+  getProviderUsageSummaryMock: vi.fn(),
   getRunPlanMock: vi.fn(),
   getRunStateMock: vi.fn(),
   getArtifactContentMock: vi.fn(),
@@ -80,6 +82,7 @@ vi.mock('@/api/agent', () => ({
     listArtifacts: listArtifactsMock,
     listRunSteps: listRunStepsMock,
     listExecutionFacts: listExecutionFactsMock,
+    getProviderUsageSummary: getProviderUsageSummaryMock,
     getRunPlan: getRunPlanMock,
     getRunState: getRunStateMock,
     getArtifactContent: getArtifactContentMock,
@@ -110,6 +113,19 @@ describe('AgentWorkspace', () => {
     listRunStepsMock.mockReset()
     listExecutionFactsMock.mockReset()
     listExecutionFactsMock.mockResolvedValue([])
+    getProviderUsageSummaryMock.mockReset()
+    getProviderUsageSummaryMock.mockImplementation(async (runId: string) => ({
+      run_id: runId,
+      total_attempts: 0,
+      succeeded_attempts: 0,
+      failed_attempts: 0,
+      fallback_attempts: 0,
+      first_token_attempts: 0,
+      digest_attempts: 0,
+      selected_attempts: 0,
+      last_error_category: null,
+      latest_first_token_at: null,
+    }))
     getRunPlanMock.mockReset()
     getRunStateMock.mockReset()
     getArtifactContentMock.mockReset()
@@ -199,6 +215,45 @@ describe('AgentWorkspace', () => {
       events: [],
     })
   })
+  it('按当前 Run 请求 Provider 统计并把失败留在数据面板', async () => {
+    Object.assign(routeQuery, { project_id: 'p1', session_id: 's-usage', run_id: 'run-usage' })
+    const session = { id: 's-usage', user_id: 1, project_id: 'p1', status: 'active', created_at: 'now', updated_at: 'now' }
+    const run = { id: 'run-usage', session_id: session.id, user_id: 1, project_id: 'p1', status: 'completed', current_phase: 'completed', current_step: 1, progress: 100, created_at: '2026-09-02T09:00:00Z' }
+    listSessionsMock.mockResolvedValue([session])
+    getSessionMock.mockResolvedValue({ ...session, messages: [], runs: [run] })
+    listEventsMock.mockResolvedValue([])
+    listApprovalsMock.mockResolvedValue([])
+    listArtifactsMock.mockResolvedValue([])
+    listRunStepsMock.mockResolvedValue([])
+    getRunStateMock.mockResolvedValue({
+      correlation_id: 'c-usage',
+      progress: 100,
+      phase: 'completed',
+      current_step: 1,
+      terminal_status: 'completed',
+      capability_snapshot: { generation: 1, providers: [], tools: [] },
+    })
+    getProviderUsageSummaryMock.mockResolvedValue({
+      run_id: run.id,
+      total_attempts: 2,
+      succeeded_attempts: 1,
+      failed_attempts: 1,
+      fallback_attempts: 1,
+      first_token_attempts: 1,
+      digest_attempts: 1,
+      selected_attempts: 1,
+      last_error_category: 'TIMEOUT',
+      latest_first_token_at: '2026-09-02T09:00:01Z',
+    })
+
+    const wrapper = mount(AgentWorkspace)
+    await flushPromises()
+    await flushPromises()
+
+    expect(getProviderUsageSummaryMock).toHaveBeenCalledWith(run.id)
+    expect(wrapper.get('[data-testid="agent-provider-usage-panel"]').text()).toContain('TIMEOUT')
+  })
+
   it('右侧日志显示动作对应的结果引用，而不把结果正文混入日志', () => {
     expect(workspaceSource).toContain('v-if="event.actionId || event.phase || event.resultRef"')
     expect(workspaceSource).toContain('结果：{{ event.resultRef }}')

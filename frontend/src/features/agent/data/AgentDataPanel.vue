@@ -27,6 +27,27 @@
       <p v-else class="muted">暂无 Provider 健康数据。</p>
     </XqPanel>
 
+    <XqPanel title="当前 Run Provider 调用" subtitle="只显示本次运行的脱敏计数，不展示请求或输出正文。" data-testid="agent-provider-usage-panel">
+      <p v-if="!activeRunId" class="muted">暂无选中的 Run。</p>
+      <p v-else-if="providerUsageSummaryLoading" class="muted">正在读取本次调用统计…</p>
+      <p v-else-if="providerUsageSummaryError" class="error">{{ providerUsageSummaryError }}</p>
+      <template v-else-if="providerUsageSummary">
+        <p class="muted" data-testid="agent-provider-usage-run">Run {{ providerUsageSummary.run_id.slice(0, 8) }}</p>
+        <dl class="usage-summary-grid">
+          <div><dt>总调用</dt><dd>{{ providerUsageSummary.total_attempts }}</dd></div>
+          <div><dt>成功</dt><dd>{{ providerUsageSummary.succeeded_attempts }}</dd></div>
+          <div><dt>失败</dt><dd>{{ providerUsageSummary.failed_attempts }}</dd></div>
+          <div><dt>fallback</dt><dd>{{ providerUsageSummary.fallback_attempts }}</dd></div>
+          <div><dt>首 token</dt><dd>{{ providerUsageSummary.first_token_attempts }}</dd></div>
+          <div><dt>输出指纹</dt><dd>{{ providerUsageSummary.digest_attempts }}</dd></div>
+          <div><dt>已选 attempt</dt><dd>{{ providerUsageSummary.selected_attempts }}</dd></div>
+        </dl>
+        <p v-if="providerUsageSummary.last_error_category" class="muted">最近错误：{{ providerUsageSummary.last_error_category }}</p>
+        <p v-if="providerUsageSummary.latest_first_token_at" class="muted">最近首 token：{{ providerUsageSummary.latest_first_token_at }}</p>
+      </template>
+      <p v-else class="muted">本次 Run 暂无 Provider attempt 记录。</p>
+    </XqPanel>
+
     <XqPanel title="项目 Agent 时间线" subtitle="跨会话查看当前项目的可见执行摘要。" data-testid="agent-timeline-panel">
       <div class="timeline-filters">
         <select :value="timelineEventType" aria-label="时间线事件类型" @change="emit('update:timeline-event-type', selectValue($event))">
@@ -110,7 +131,7 @@
 </template>
 
 <script setup lang="ts">
-import type { AgentAuditRecord, AgentJob, AgentTimelineEvent, AgentToolHealth } from '@/api/agent'
+import type { AgentAuditRecord, AgentJob, AgentProviderUsageSummary, AgentTimelineEvent, AgentToolHealth } from '@/api/agent'
 import { agentEventLabel as eventLabel } from '@/features/agent/reducers/agentEventReducer'
 import { XqButton, XqPanel } from '@/shared/ui'
 
@@ -119,6 +140,10 @@ withDefaults(defineProps<{
   providerHealth: AgentToolHealth | null
   providerHealthLoading: boolean
   providerHealthError: string
+  activeRunId: string | null
+  providerUsageSummary: AgentProviderUsageSummary | null
+  providerUsageSummaryLoading: boolean
+  providerUsageSummaryError: string
   timeline: AgentTimelineEvent[]
   timelineLoading: boolean
   timelineEventType: string
@@ -167,3 +192,31 @@ const jobStatusLabel = (status: string) => ({
 }[status] || status)
 const canCancelJob = (job: AgentJob) => !['succeeded', 'failed', 'cancelled', 'dead_letter'].includes(job.status)
 </script>
+
+<style scoped>
+.usage-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+  margin: 0.55rem 0;
+}
+.usage-summary-grid div {
+  min-width: 0;
+  padding: 0.45rem;
+  border: 1px solid var(--xq-border);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.48);
+}
+.usage-summary-grid dt {
+  color: var(--xq-ink-muted);
+  font-size: 0.7rem;
+}
+.usage-summary-grid dd {
+  margin: 0.15rem 0 0;
+  font-size: 1.1rem;
+  font-weight: 850;
+}
+@media (max-width: 1100px) {
+  .usage-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+</style>

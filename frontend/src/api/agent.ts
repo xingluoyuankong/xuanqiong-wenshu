@@ -648,6 +648,18 @@ export interface AgentStateProjection {
     progress: number
   }>
 }
+export interface AgentProviderUsageSummary {
+  run_id: string
+  total_attempts: number
+  succeeded_attempts: number
+  failed_attempts: number
+  fallback_attempts: number
+  first_token_attempts: number
+  digest_attempts: number
+  selected_attempts: number
+  last_error_category?: string | null
+  latest_first_token_at?: string | null
+}
 export interface AgentExecutionFact {
   execution_id: string
   run_id: string
@@ -878,6 +890,8 @@ export const AgentAPI = {
     request<AgentRunStep[]>(`/agent/runs/${encodeURIComponent(runId)}/steps`),
   listExecutionFacts: (runId: string, limit = 200) =>
     request<AgentExecutionFact[]>(`/agent/runs/${encodeURIComponent(runId)}/execution-facts?limit=${Math.max(1, Math.min(500, limit))}`),
+  getProviderUsageSummary: (runId: string) =>
+    request<AgentProviderUsageSummary>(`/agent/runs/${encodeURIComponent(runId)}/provider-usage-summary`),
   listArtifacts: (runId: string) =>
     request<AgentArtifact[]>(`/agent/runs/${encodeURIComponent(runId)}/artifacts`),
   executeApproval: (approvalId: string) =>
