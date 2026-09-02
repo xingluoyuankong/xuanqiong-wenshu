@@ -77883,3 +77883,148 @@ cd D:\小说写作\xuanqiong-wenshu\backend
 ```
 
 7. CARD-056 完成后再决定是否进入下一轮前端布局改造；前端布局不能靠反复复制 CSS 伪造进度，必须以浏览器视口测量和回归证据为准。
+
+
+---
+
+# CARD-056 实际完成记录：直接进度事件的公开字段边界统一（2026-09-02）
+
+## 1. 问题证据
+
+后端已经通过 `publish_progress()` 对进度值、阶段、动作、提示文本和步骤做边界处理，但通用 `AgentRuntimeService.append_event(event_type="progress_update")` 可以被其他 Agent 模块直接调用，旧实现只执行事件字段白名单，不执行同一套数值和长度归一化。因此不同发布入口会产生不同的 durable event：专用入口有界，直接入口可能把超界百分比、过长动作标识和超长进度文案写入数据库，进而被历史接口和 SSE 回放直接暴露给前端。
+
+先写失败测试运行旧实现，真实结果：
+
+```text
+assert event.data_json["progress"] == 100.0
+E assert 9999 == 100.0
+1 failed, 31 deselected
+```
+
+## 2. 实际修复
+
+实现文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+```
+
+新增的统一清洗规则只作用于 `progress_update` 事件：
+
+```text
+progress：转换为 float，并限制在 0.0–100.0；
+phase：最多 80 字符；
+action_id：最多 160 字符；
+progress_message：最多 500 字符；
+tool_name：最多 120 字符；
+step：转换为非负整数，负数归零；非法值删除；
+```
+
+清洗位于 `_visible_event_data()` 的 durable event 边界，因此无论事件来自 `publish_progress()`、其他执行器还是直接 `append_event()`，历史列表、SSE 和前端 reducer 读取到的公开 payload 都遵守同一契约。隐藏字段过滤逻辑保持不变，未引入正文生成硬编码。
+
+## 3. 新增回归测试
+
+测试文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\test_agent_runtime.py
+```
+
+测试：
+
+```text
+test_direct_progress_event_uses_same_bounded_public_contract
+```
+
+覆盖内容：
+
+```text
+直接 append_event(progress_update) 传入 progress=9999；
+phase/action_id/progress_message/tool_name 传入超长值；
+step 传入负数；
+断言持久化公开 payload 已统一归一化；
+```
+
+已有 `test_publish_progress_is_persisted_visible_and_monotonic` 继续验证专用进度入口的单调进度与完整字段，两条入口共同构成回归矩阵。
+
+## 4. 修复后定向结果
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/services/test_agent_runtime.py -k "direct_progress_event_uses_same_bounded_public_contract or agent_session_message_run_event_and_cursor"
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_progress_updates.py
+```
+
+结果：
+
+```text
+2 passed, 30 deselected；
+4 passed；
+```
+
+## 5. 反向验证
+
+临时移除 `_visible_event_data()` 中新增的 `progress_update` 归一化逻辑，再运行新增测试，真实失败：
+
+```text
+progress=9999 未被限制为 100.0；
+1 failed, 31 deselected；
+EXPECTED_FAILURE_EXIT=1
+```
+
+测试后恢复实现，未留下临时破坏。
+
+## 6. 后端全量门禁
+
+执行：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+结果：
+
+```text
+1441 passed in 569.61s (0:09:29)
+```
+
+## 7. 提交、推送与回退
+
+代码提交：
+
+```text
+38cbf21 fix: bound direct progress event payloads
+```
+
+已推送到：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+代码回退：
+
+```powershell
+git revert 38cbf21
+```
+
+该回退只撤销 CARD-056 的事件清洗和测试，不影响 CARD-049 至 CARD-055；文档使用独立提交。
+
+## 8. 下一任务目标：CARD-057 Provider/SSE 回放一致性闭环
+
+CARD-057 继续后端优先，目标是验证并统一实时流与历史回放的公开事件事实源：
+
+1. 对同一 Run 生成包含 `progress_update`、`public_work_summary`、`work_trace_delta`、`assistant_delta` 和终态事件的 durable ledger。
+2. 分别通过历史事件接口和 SSE 接口读取同一游标范围，比较事件的 `run_id`、`sequence`、`event_type`、`data` 和 `created_at`。
+3. 覆盖断线后 `after_sequence` 重连、重复事件去重、长历史分页和终态关闭条件。
+4. 确认所有回放入口都执行同一公开字段过滤，不能因接口不同重新暴露隐藏字段或绕过进度边界。
+5. 先写能在旧实现上失败的接口/服务测试；若实际缺口存在，按代码提交、文档提交、回退命令的独立边界落地。
+6. 后端全量门禁仍为：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+7. CARD-057 完成后再安排下一轮前端布局：前端只消费统一事实源，不在组件层自行修正后端事件语义。
