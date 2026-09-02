@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { writeFile } from 'node:fs/promises'
 
 const project = {
   id: 'e2e-project-1',
@@ -60,6 +61,19 @@ const contentTree = {
     evaluation: null,
     generation_status: 'successful',
   },
+}
+
+async function expandWorkspaceSection(
+  page: import('@playwright/test').Page,
+  testId: string,
+) {
+  const section = page.getByTestId(testId)
+  await expect(section).toBeVisible()
+  if (!(await section.evaluate((element) => (element as HTMLDetailsElement).open))) {
+    await section.locator('summary').scrollIntoViewIfNeeded()
+    await section.locator('summary').click()
+  }
+  await expect.poll(() => section.evaluate((element) => (element as HTMLDetailsElement).open)).toBe(true)
 }
 
 async function mockAgentApi(page: import('@playwright/test').Page) {
@@ -378,6 +392,7 @@ test.describe('Agent 创作工作台浏览器冒烟', () => {
     await expect(page.getByTestId('agent-workspace')).toBeVisible()
     await expect(page.getByTestId('agent-project-select')).toContainText('E2E 星河旧梦')
     await expect(page.getByTestId('agent-tool-list')).toContainText('project.context')
+    await expandWorkspaceSection(page, 'agent-session-section')
     await expect(page.getByTestId('agent-session-panel')).toBeVisible()
     await expect(page.getByTestId('agent-project-content-tree')).toBeVisible()
     await expect(page.getByTestId('agent-content-chapter-1')).toContainText('E2E 第一章')
@@ -591,6 +606,7 @@ test.describe('Agent 创作工作台浏览器冒烟', () => {
     })
 
     await page.goto(`/agent?project_id=${project.id}&session_id=${session.id}&run_id=${run.id}`)
+    await expandWorkspaceSection(page, 'agent-run-details-section')
     await expect(page.getByTestId('agent-quality-finding-quality-finding-e2e')).toHaveText('加入上下文')
     await page.getByTestId('agent-quality-finding-quality-finding-e2e').click()
     await expect(page.getByTestId('agent-quality-finding-quality-finding-e2e')).toHaveText('移除上下文')
@@ -979,6 +995,7 @@ test.describe('Agent 恢复与 DLQ 浏览器交互', () => {
       })
     })
     await page.goto('/agent')
+    await expandWorkspaceSection(page, 'agent-data-section')
     await expect(page.getByTestId('agent-dead-letter-panel')).toContainText('ProviderTimeout')
     await expect(page.getByTestId('agent-dead-letter-panel')).toContainText(
       'temporary provider failure',
@@ -991,4 +1008,147 @@ test.describe('Agent 恢复与 DLQ 浏览器交互', () => {
     expect(replayed).toBe(true)
     expect(state).toBeTruthy()
   })
+
+  test('CARD-071 五视口布局测量与日志/聊天滚动隔离', async ({ page }, testInfo) => {
+    const state = await mockAgentApi(page)
+    state.messages = Array.from({ length: 80 }, (_, index) => ({
+      id: `layout-message-${index}`,
+      session_id: session.id,
+      role: index % 2 ? 'assistant' : 'user',
+      content: `布局验收历史消息 ${index}`,
+      created_at: session.created_at,
+    }))
+    await page.unroute('**/api/agent/sessions?project_id=*')
+    await page.route('**/api/agent/sessions?project_id=*', async (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([session]) }),
+    )
+    const viewports = [
+      { width: 1920, height: 1080 },
+      { width: 1440, height: 900 },
+      { width: 1280, height: 800 },
+      { width: 960, height: 800 },
+      { width: 650, height: 844 },
+    ]
+    const measurements: Array<Record<string, unknown>> = []
+
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport)
+      await page.goto('/agent')
+      await expect(page.getByTestId('agent-workspace')).toBeVisible()
+      await expect(page.getByTestId('agent-project-select')).toContainText('E2E 星河旧梦')
+      await expect(page.getByTestId('agent-message-list')).toBeVisible()
+
+      const measurement = await page.evaluate(() => {
+        const query = (selector: string) => document.querySelector(selector)
+        const rect = (selector: string) => {
+          const element = query(selector)
+          if (!element) return null
+          const value = element.getBoundingClientRect()
+          return {
+            x: Math.round(value.x),
+            y: Math.round(value.y),
+            width: Math.round(value.width),
+            height: Math.round(value.height),
+          }
+        }
+        const style = (selector: string) => {
+          const element = query(selector)
+          if (!element) return null
+          const value = getComputedStyle(element)
+          return {
+            display: value.display,
+            overflowY: value.overflowY,
+            minWidth: value.minWidth,
+            minHeight: value.minHeight,
+            maxHeight: value.maxHeight,
+            gridTemplateColumns: value.gridTemplateColumns,
+          }
+        }
+        const logViewport = query('[data-testid="agent-runtime-log-viewport"]') as HTMLElement | null
+        const chatMessages = query('[data-testid="agent-message-list"]') as HTMLElement | null
+        if (logViewport) {
+          const logList = logViewport.querySelector('[data-testid="agent-process-stream"]') as HTMLElement | null
+          if (logList) {
+            logList.innerHTML = Array.from({ length: 80 }, (_, index) => `<p>布局验收日志 ${index}</p>`).join('')
+          }
+        }
+        const chatScrollTopBefore = chatMessages?.scrollTop || 0
+        const logScrollHeight = logViewport?.scrollHeight || 0
+        const logClientHeight = logViewport?.clientHeight || 0
+        if (logViewport) logViewport.scrollTop = Math.max(0, logScrollHeight - logClientHeight)
+        const logScrollTopAfter = logViewport?.scrollTop || 0
+        const chatScrollTopAfterLog = chatMessages?.scrollTop || 0
+        const logScrollTopBeforeChat = logViewport?.scrollTop || 0
+        const chatScrollHeight = chatMessages?.scrollHeight || 0
+        const chatClientHeight = chatMessages?.clientHeight || 0
+        if (chatMessages) chatMessages.scrollTop = Math.max(0, chatScrollHeight - chatClientHeight)
+        const chatScrollTopAfter = chatMessages?.scrollTop || 0
+        const logScrollTopAfterChat = logViewport?.scrollTop || 0
+        return {
+          layout: rect('.agent-layout'),
+          sidebar: rect('.agent-sidebar'),
+          main: rect('.agent-main'),
+          activity: rect('.agent-activity'),
+          chat: rect('[data-testid="agent-chat-column"]'),
+          logViewport: rect('[data-testid="agent-runtime-log-viewport"]'),
+          layoutStyle: style('.agent-layout'),
+          logStyle: style('[data-testid="agent-runtime-log-viewport"]'),
+          logScrollHeight,
+          logClientHeight,
+          logScrollTopAfter,
+          chatScrollTopBefore,
+          chatScrollTopAfterLog,
+          chatScrollHeight,
+          chatClientHeight,
+          chatScrollTopAfter,
+          logScrollTopBeforeChat,
+          logScrollTopAfterChat,
+          horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth,
+        }
+      })
+
+      expect(measurement.layout).not.toBeNull()
+      expect(measurement.main).not.toBeNull()
+      expect(measurement.logViewport).not.toBeNull()
+      expect((measurement.logStyle as { overflowY: string }).overflowY).toBe('auto')
+      expect((measurement.logStyle as { minWidth: string }).minWidth).toBe('0px')
+      expect(measurement.logScrollHeight).toBeGreaterThan(measurement.logClientHeight)
+      expect(measurement.logScrollTopAfter).toBeGreaterThan(0)
+      expect(measurement.chatScrollTopAfterLog).toBe(measurement.chatScrollTopBefore)
+      expect(measurement.chatScrollHeight).toBeGreaterThan(measurement.chatClientHeight)
+      expect(measurement.chatScrollTopAfter).toBeGreaterThan(0)
+      expect(measurement.logScrollTopAfterChat).toBe(measurement.logScrollTopBeforeChat)
+      expect(measurement.horizontalOverflow).toBe(false)
+
+      const layoutColumns = String((measurement.layoutStyle as { gridTemplateColumns: string }).gridTemplateColumns)
+        .trim()
+        .split(/\s+/)
+      if (viewport.width <= 960) {
+        expect(layoutColumns).toHaveLength(1)
+        expect((measurement.main as { y: number }).y).toBeLessThan((measurement.sidebar as { y: number }).y)
+        expect((measurement.sidebar as { y: number }).y).toBeLessThan((measurement.activity as { y: number }).y)
+      } else {
+        expect(layoutColumns).toHaveLength(3)
+        expect((measurement.sidebar as { width: number }).width).toBeGreaterThanOrEqual(160)
+        expect((measurement.activity as { width: number }).width).toBeGreaterThanOrEqual(190)
+        expect((measurement.main as { width: number }).width).toBeGreaterThan(700)
+        expect((measurement.main as { width: number }).width).toBeGreaterThan((measurement.sidebar as { width: number }).width)
+        expect((measurement.main as { width: number }).width).toBeGreaterThan((measurement.activity as { width: number }).width)
+      }
+
+      await page.screenshot({
+        path: testInfo.outputPath(`card071-layout-${viewport.width}x${viewport.height}.png`),
+        fullPage: true,
+      })
+      measurements.push({ viewport, ...measurement })
+    }
+
+    const measurementJson = JSON.stringify(measurements, null, 2)
+    await writeFile(testInfo.outputPath('card071-layout-measurements.json'), measurementJson, 'utf8')
+    await testInfo.attach('card071-layout-measurements.json', {
+      body: measurementJson,
+      contentType: 'application/json',
+    })
+  })
+
 })

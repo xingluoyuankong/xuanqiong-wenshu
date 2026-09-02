@@ -1,0 +1,347 @@
+[
+  {
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "layout": {
+      "x": 88,
+      "y": 177,
+      "width": 1816,
+      "height": 1133
+    },
+    "sidebar": {
+      "x": 88,
+      "y": 177,
+      "width": 192,
+      "height": 658
+    },
+    "main": {
+      "x": 292,
+      "y": 177,
+      "width": 1376,
+      "height": 1133
+    },
+    "activity": {
+      "x": 1680,
+      "y": 177,
+      "width": 224,
+      "height": 383
+    },
+    "chat": {
+      "x": 292,
+      "y": 177,
+      "width": 1376,
+      "height": 1133
+    },
+    "logViewport": {
+      "x": 1690,
+      "y": 250,
+      "width": 196,
+      "height": 160
+    },
+    "layoutStyle": {
+      "display": "grid",
+      "overflowY": "visible",
+      "minWidth": "0px",
+      "minHeight": "auto",
+      "maxHeight": "none",
+      "gridTemplateColumns": "192px 1376px 224px"
+    },
+    "logStyle": {
+      "display": "block",
+      "overflowY": "auto",
+      "minWidth": "0px",
+      "minHeight": "38.4px",
+      "maxHeight": "160px",
+      "gridTemplateColumns": "none"
+    },
+    "logScrollHeight": 448,
+    "logClientHeight": 160,
+    "logScrollTopAfter": 288,
+    "chatScrollTopBefore": 0,
+    "chatScrollTopAfterLog": 0,
+    "chatScrollHeight": 6633,
+    "chatClientHeight": 756,
+    "chatScrollTopAfter": 5877,
+    "logScrollTopBeforeChat": 288,
+    "logScrollTopAfterChat": 288,
+    "horizontalOverflow": false
+  },
+  {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "layout": {
+      "x": 88,
+      "y": 177,
+      "width": 1336,
+      "height": 1007
+    },
+    "sidebar": {
+      "x": 88,
+      "y": 177,
+      "width": 192,
+      "height": 658
+    },
+    "main": {
+      "x": 292,
+      "y": 177,
+      "width": 896,
+      "height": 1007
+    },
+    "activity": {
+      "x": 1200,
+      "y": 177,
+      "width": 224,
+      "height": 383
+    },
+    "chat": {
+      "x": 292,
+      "y": 177,
+      "width": 896,
+      "height": 1007
+    },
+    "logViewport": {
+      "x": 1210,
+      "y": 250,
+      "width": 196,
+      "height": 160
+    },
+    "layoutStyle": {
+      "display": "grid",
+      "overflowY": "visible",
+      "minWidth": "0px",
+      "minHeight": "auto",
+      "maxHeight": "none",
+      "gridTemplateColumns": "192px 896px 224px"
+    },
+    "logStyle": {
+      "display": "block",
+      "overflowY": "auto",
+      "minWidth": "0px",
+      "minHeight": "38.4px",
+      "maxHeight": "160px",
+      "gridTemplateColumns": "none"
+    },
+    "logScrollHeight": 448,
+    "logClientHeight": 160,
+    "logScrollTopAfter": 288,
+    "chatScrollTopBefore": 0,
+    "chatScrollTopAfterLog": 0,
+    "chatScrollHeight": 6633,
+    "chatClientHeight": 630,
+    "chatScrollTopAfter": 6003,
+    "logScrollTopBeforeChat": 288,
+    "logScrollTopAfterChat": 288,
+    "horizontalOverflow": false
+  },
+  {
+    "viewport": {
+      "width": 1280,
+      "height": 800
+    },
+    "layout": {
+      "x": 88,
+      "y": 172,
+      "width": 1176,
+      "height": 934
+    },
+    "sidebar": {
+      "x": 88,
+      "y": 172,
+      "width": 192,
+      "height": 658
+    },
+    "main": {
+      "x": 292,
+      "y": 172,
+      "width": 736,
+      "height": 934
+    },
+    "activity": {
+      "x": 1040,
+      "y": 172,
+      "width": 224,
+      "height": 367
+    },
+    "chat": {
+      "x": 292,
+      "y": 172,
+      "width": 736,
+      "height": 934
+    },
+    "logViewport": {
+      "x": 1050,
+      "y": 245,
+      "width": 196,
+      "height": 144
+    },
+    "layoutStyle": {
+      "display": "grid",
+      "overflowY": "visible",
+      "minWidth": "0px",
+      "minHeight": "auto",
+      "maxHeight": "none",
+      "gridTemplateColumns": "192px 736px 224px"
+    },
+    "logStyle": {
+      "display": "block",
+      "overflowY": "auto",
+      "minWidth": "0px",
+      "minHeight": "38.4px",
+      "maxHeight": "144px",
+      "gridTemplateColumns": "none"
+    },
+    "logScrollHeight": 448,
+    "logClientHeight": 144,
+    "logScrollTopAfter": 304,
+    "chatScrollTopBefore": 0,
+    "chatScrollTopAfterLog": 0,
+    "chatScrollHeight": 6633,
+    "chatClientHeight": 560,
+    "chatScrollTopAfter": 6073,
+    "logScrollTopBeforeChat": 304,
+    "logScrollTopAfterChat": 304,
+    "horizontalOverflow": false
+  },
+  {
+    "viewport": {
+      "width": 960,
+      "height": 800
+    },
+    "layout": {
+      "x": 88,
+      "y": 177,
+      "width": 856,
+      "height": 1895
+    },
+    "sidebar": {
+      "x": 88,
+      "y": 1114,
+      "width": 856,
+      "height": 598
+    },
+    "main": {
+      "x": 88,
+      "y": 177,
+      "width": 856,
+      "height": 927
+    },
+    "activity": {
+      "x": 88,
+      "y": 1722,
+      "width": 856,
+      "height": 350
+    },
+    "chat": {
+      "x": 88,
+      "y": 177,
+      "width": 856,
+      "height": 927
+    },
+    "logViewport": {
+      "x": 98,
+      "y": 1778,
+      "width": 836,
+      "height": 144
+    },
+    "layoutStyle": {
+      "display": "grid",
+      "overflowY": "visible",
+      "minWidth": "0px",
+      "minHeight": "auto",
+      "maxHeight": "none",
+      "gridTemplateColumns": "856px"
+    },
+    "logStyle": {
+      "display": "block",
+      "overflowY": "auto",
+      "minWidth": "0px",
+      "minHeight": "38.4px",
+      "maxHeight": "144px",
+      "gridTemplateColumns": "none"
+    },
+    "logScrollHeight": 448,
+    "logClientHeight": 144,
+    "logScrollTopAfter": 304,
+    "chatScrollTopBefore": 0,
+    "chatScrollTopAfterLog": 0,
+    "chatScrollHeight": 6633,
+    "chatClientHeight": 560,
+    "chatScrollTopAfter": 6073,
+    "logScrollTopBeforeChat": 304,
+    "logScrollTopAfterChat": 304,
+    "horizontalOverflow": false
+  },
+  {
+    "viewport": {
+      "width": 650,
+      "height": 844
+    },
+    "layout": {
+      "x": 16,
+      "y": 267,
+      "width": 618,
+      "height": 1837
+    },
+    "sidebar": {
+      "x": 16,
+      "y": 1139,
+      "width": 618,
+      "height": 598
+    },
+    "main": {
+      "x": 16,
+      "y": 267,
+      "width": 618,
+      "height": 862
+    },
+    "activity": {
+      "x": 16,
+      "y": 1746,
+      "width": 618,
+      "height": 358
+    },
+    "chat": {
+      "x": 16,
+      "y": 267,
+      "width": 618,
+      "height": 862
+    },
+    "logViewport": {
+      "x": 26,
+      "y": 1802,
+      "width": 598,
+      "height": 152
+    },
+    "layoutStyle": {
+      "display": "grid",
+      "overflowY": "visible",
+      "minWidth": "0px",
+      "minHeight": "auto",
+      "maxHeight": "none",
+      "gridTemplateColumns": "618px"
+    },
+    "logStyle": {
+      "display": "block",
+      "overflowY": "auto",
+      "minWidth": "0px",
+      "minHeight": "38.4px",
+      "maxHeight": "151.92px",
+      "gridTemplateColumns": "none"
+    },
+    "logScrollHeight": 448,
+    "logClientHeight": 152,
+    "logScrollTopAfter": 296,
+    "chatScrollTopBefore": 0,
+    "chatScrollTopAfterLog": 0,
+    "chatScrollHeight": 6633,
+    "chatClientHeight": 464,
+    "chatScrollTopAfter": 6169,
+    "logScrollTopBeforeChat": 296,
+    "logScrollTopAfterChat": 296,
+    "horizontalOverflow": false
+  }
+]
