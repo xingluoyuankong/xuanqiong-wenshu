@@ -80627,3 +80627,331 @@ Provider 健康：4 个 loaded Provider；
 CARD-065 反向验证：移除 facts 错误节点后退出码 1；
 总任务：active，继续推进。
 ```
+
+
+---
+
+# 2026-09-02 CARD-066 实际完成记录：Provider 阶段结果语义与调用可观测性
+
+> 本节记录 CARD-066 相对于 CARD-065 新增的 Provider 阶段显示语义和真实健康联调结果。旧章节不重复计算。总任务继续保持 `active`。
+
+## 15.1 提交状态
+
+项目：
+
+```text
+D:\小说写作\xuanqiong-wenshu
+```
+
+分支：
+
+```text
+codex/bohrium-integration-20260831
+```
+
+CARD-066 代码提交：
+
+```text
+e7b70a4 feat: clarify provider attempt outcomes
+```
+
+已推送到：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+本轮只修改 Provider 运行检查器和对应测试，没有修改后端数据结构、运行日志布局、中央聊天结构或历史未跟踪文件。
+
+## 15.2 审查结论
+
+当前项目原有 Provider 状态分成两层：
+
+```text
+工具注册表健康：Provider 是否 loaded、工具集合、来源、版本、能力标签；
+Run provenance：本次规划/回复/候选正文阶段是否调用、fallback 原因、attempt 列表。
+```
+
+审查发现 Run 检查器之前只显示：
+
+```text
+已调用 Provider；
+已降级：<reason>；
+N 次调用；
+最后失败：<category>。
+```
+
+这会造成一个语义歧义：某阶段可能 `provider_called=false`，但 attempt ledger 已记录真实失败；UI 直接显示“未调用”会掩盖该阶段实际发生过调用尝试。
+
+CARD-066 将结果语义拆开：
+
+```text
+注册/加载状态：由 Provider 健康面板提供；
+调用状态：已有 provider_called/fallback；
+本次结果：由 attempt ledger 计算；
+调用次数和错误类别：继续显示在 attempt 摘要。
+```
+
+## 15.3 真实代码变更
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\run\AgentRunInspector.vue
+```
+
+新增：
+
+```text
+providerOutcome(called, snapshot)
+```
+
+状态优先级：
+
+```text
+存在 failed attempt → 本次调用失败；
+存在 succeeded attempt → 本次调用成功；
+called=false 且没有 attempt 结果 → 本次未调用；
+called=true 但没有终态 attempt → 本次调用进行中；
+其他情况 → 本次状态未知。
+```
+
+三类阶段均展示独立 outcome：
+
+```text
+规划 Provider；
+回复 Provider；
+候选正文 Provider。
+```
+
+新增可读节点：
+
+```text
+agent-planner-provider-outcome
+agent-response-provider-outcome
+agent-candidate-writer-provider-outcome
+```
+
+原有 Provider 状态、模型引用、fallback 原因和 attempt 摘要全部保留。
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\run\AgentRunInspector.spec.ts
+```
+
+新增验证：
+
+```text
+规划阶段 attempt 成功 → 本次调用成功；
+回复阶段 attempt 失败，即使 called=false → 本次调用失败；
+候选正文阶段含 fallback 且最终成功 → 本次调用成功；
+三类 outcome 均不泄露 Provider 原文、密钥或隐藏内容。
+```
+
+## 15.4 失败驱动和修复过程
+
+先加入 outcome 断言后，旧实现真实失败：
+
+```text
+Unable to get [data-testid="agent-planner-provider-outcome"]
+1 failed
+```
+
+补充第一次实现后，测试又暴露语义优先级缺陷：
+
+```text
+response_provider_called=false
+但 response_provider_attempts 最后一项 status=failed
+```
+
+初版错误显示：
+
+```text
+本次未调用
+```
+
+修正优先级后，回复阶段正确显示：
+
+```text
+本次调用失败
+```
+
+最终定向测试通过。
+
+反向验证时临时移除规划 outcome 节点，结果真实失败：
+
+```text
+Unable to get [data-testid="agent-planner-provider-outcome"]
+EXPECTED_FAILURE_EXIT=1
+```
+
+真实节点已恢复，临时副本已清理。
+
+## 15.5 真实 Provider 健康联调
+
+后端重载后的健康检查：
+
+```text
+GET http://127.0.0.1:8013/health
+→ 200
+```
+
+Provider 健康接口：
+
+```text
+GET http://127.0.0.1:8013/api/agent/tools/health
+→ 200
+registry_status=healthy
+provider_count=4
+```
+
+真实 loaded Provider：
+
+```text
+project-read
+memory-read
+foreshadowing-read
+structure-read
+```
+
+每个 Provider 均返回：
+
+```text
+provider_id
+path
+status
+source
+tools
+failure_code
+provider_version
+api_version
+capability_tags
+dependencies
+```
+
+健康接口响应没有 API key、提示词、原始 Provider 输出或小说正文。
+
+## 15.6 门禁结果
+
+定向：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run test:run -- src/features/agent/run/AgentRunInspector.spec.ts -t "provenance"
+npm run type-check
+```
+
+结果：
+
+```text
+Provider provenance：1 passed，3 skipped；
+type-check：退出码 0。
+```
+
+全量前端：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+npm run test:run
+npm run build-only
+```
+
+结果：
+
+```text
+npm run type-check：通过；
+npm run test:run：74 files passed，467 tests passed；
+npm run build-only：4905 modules transformed，built successfully。
+```
+
+本轮只修改前端 Provider outcome 展示，因此沿用最近一次后端全量事实：
+
+```text
+1449 passed in 379.12s
+```
+
+该数字对应 CARD-064 后端实现和 CARD-065 前端错误态之前的后端基线；CARD-066 没有修改后端文件。
+
+## 15.7 当前运行地址
+
+```text
+前端 Agent 工作台：http://127.0.0.1:5174/agent
+后端健康：http://127.0.0.1:8013/health
+Provider 健康：http://127.0.0.1:8013/api/agent/tools/health
+```
+
+当前后端 PID：
+
+```text
+33340
+```
+
+当前服务使用 SQLite 配置查看工作台。统一 `start.ps1` 仍受本机缺少以下文件影响：
+
+```text
+D:\download\MySQL\bin\mysqld.exe
+```
+
+因此当前页面运行事实不等同于 MySQL 正式部署验收。
+
+## 15.8 回退命令
+
+只回退 CARD-066 代码：
+
+```powershell
+git revert e7b70a4
+```
+
+CARD-066 文档使用独立提交，提交完成后：
+
+```powershell
+git revert <CARD-066-文档提交哈希>
+```
+
+## 15.9 下一任务目标：CARD-067
+
+下一目标预登记为：
+
+```text
+CARD-067：Provider 流式事件与 action/result 引用全链路观测
+```
+
+目标：
+
+1. 盘点 `provider_gateway.py`、`ProviderAttemptLedger`、`assistant_started`、`assistant_delta`、`assistant_completed` 和 `run_failed` 的字段边界；
+2. 把阶段 outcome、attempt_id、action_id、result_ref、partial output digest 在可见事件之间建立一致关联；
+3. 增加流式开始、首 token、增量、完成、失败、取消和 fallback 的公开摘要，但不把原始流文本全部写入日志；
+4. 前端中央聊天实时显示公开进度，右侧日志显示紧凑引用和阶段状态；
+5. Provider 中断时保留可恢复状态和摘要指纹，重连/重放后不重复追加可见回复；
+6. 先补后端 Provider 流式事件失败测试，再补前端流式投影测试；
+7. 继续保持左侧紧凑可折叠、中央聊天最大化、右侧日志独立滚动；
+8. 继续执行故意破坏验证、全量后端门禁、全量前端门禁、代码/文档分离提交和推送。
+
+建议文件范围：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\provider_gateway.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\provider_attempt.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_provider_attempt.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_progress_updates.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.spec.ts
+```
+
+CARD-067 开始基线：
+
+```text
+HEAD：e7b70a4；
+CARD-066 文档待提交；
+Provider 健康真实结果：4 个 loaded Provider；
+前端全量：74 files / 467 tests；
+前端构建：4905 modules transformed；
+后端最近全量：1449 passed；
+CARD-066 反向验证：移除 provider outcome 节点后退出码 1；
+总任务：active，继续推进。
+```
