@@ -80955,3 +80955,360 @@ Provider 健康真实结果：4 个 loaded Provider；
 CARD-066 反向验证：移除 provider outcome 节点后退出码 1；
 总任务：active，继续推进。
 ```
+
+
+---
+
+# 2026-09-02 CARD-067 实际完成记录：Provider 流式事件与 action/result 引用全链路观测
+
+> 本节记录 CARD-067 相对于 CARD-066 新增的后端流式事件关联、进度引用和前端 Reducer 回归。旧批次内容和测试数字不重复计算。总任务继续保持 `active`。
+
+## 16.1 提交状态
+
+项目：
+
+```text
+D:\小说写作\xuanqiong-wenshu
+```
+
+分支：
+
+```text
+codex/bohrium-integration-20260831
+```
+
+CARD-067 代码提交：
+
+```text
+89fb572 feat: link provider stream events to run references
+```
+
+已推送：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+本轮只暂存 CARD-067 指定的后端 Runner、运行时事件白名单、进度测试、Worker 测试和前端 Reducer 测试；历史未跟踪审计资料、恢复脚本、数据库备份和 `node_modules` 继续原样保留。
+
+## 16.2 审查发现的流式链路缺口
+
+CARD-066 已经把 Provider attempt 的结果语义拆开，但流式可见事件仍存在引用断裂：
+
+```text
+assistant_started 没有 action_id/result_ref；
+assistant_delta 没有 action_id/result_ref；
+assistant_completed 只能由 completion data 间接识别；
+run_completed 未纳入 action/result 公开白名单；
+重试等待事件没有引用；
+响应阶段 progress_update 没有 result_ref。
+```
+
+这会导致中央聊天的流式回复、右侧运行日志、Provider attempt 和失败重试无法使用同一条关系化引用串联。
+
+CARD-067 统一采用：
+
+```text
+结果引用：response:<run_id>
+开始动作：response:started
+流式动作：response:stream
+完成动作：response:completed
+失败动作：response:failed
+重试动作：response:retry
+```
+
+该引用只标识当前 Run 的响应阶段，不保存或回显 Provider 原始流文本。
+
+## 16.3 后端事件白名单变更
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+```
+
+新增公开字段：
+
+```text
+assistant_started：action_id、result_ref；
+assistant_delta：action_id、result_ref；
+assistant_completed：action_id、result_ref；
+run_completed：action_id、result_ref；
+run_failed：action_id、result_ref；
+visible_response_retry_pending：新增事件类型及 action/result 字段；
+progress_update：result_ref。
+```
+
+原有 Provider called/fallback 字段继续保留，事件仍经过已有的公开字段过滤和敏感字段清理。
+
+## 16.4 Runner 流式关联实现
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\runner.py
+```
+
+`_run_visible_response()` 为当前 Run 建立：
+
+```python
+response_result_ref = f"response:{run_id}"
+```
+
+实际写入事件：
+
+```text
+assistant_started：response:started + response:<run_id>
+assistant_delta：response:stream + response:<run_id>
+assistant_completed：response:completed + response:<run_id>
+run_completed：response:completed + response:<run_id>
+run_failed：response:failed + response:<run_id>
+visible_response_retry_pending：response:retry + response:<run_id>
+```
+
+响应阶段三个可见进度点也带引用：
+
+```text
+85%：response:started
+增量输出：response:stream
+99%：response:completed
+```
+
+这样流式输出、公开进度、失败重试和终态事件均可在同一 Run 内关联，而不把正文塞进日志。
+
+## 16.5 前端投影验证
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.spec.ts
+```
+
+新增测试确认：
+
+- assistant delta 的可见正文继续进入 `assistantText`；
+- `action_id=response:stream` 进入 `AgentDisplayEvent.actionId`；
+- `result_ref=response:<run_id>` 进入 `AgentDisplayEvent.resultRef`；
+- 隐藏 reasoning 字段不会进入投影；
+- 右侧日志可复用现有 action/result 展示，无需复制正文。
+
+现有安全层已经把 `action_id` 和 `result_ref` 作为公共文本字段处理，因此没有放宽原始 Provider payload 边界。
+
+## 16.6 失败驱动测试
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_worker.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_progress_updates.py
+```
+
+先加入失败断言后，旧实现真实失败：
+
+```text
+assistant_* 事件缺少 action_id；
+assistant_* 事件缺少 result_ref；
+publish_progress() 不接受 result_ref；
+```
+
+逐步修复后，以下链路通过：
+
+```text
+Provider 第一次失败；
+visible_response_retry_pending 带 response:retry；
+Job 重新排队；
+Provider 第二次成功；
+assistant_delta/assistant_completed/run_completed 共享 response:<run_id>；
+最终 assistant message、assistant_completed、run_completed 仍各生成一次。
+```
+
+## 16.7 定向验证
+
+后端：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_worker.py app/agent/test_progress_updates.py -k "provider_retry_uses_real_runner or visible_response_emits_progress or publish_progress_is_persisted_visible_and_monotonic"
+```
+
+结果：
+
+```text
+3 passed，17 deselected
+```
+
+前端：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run test:run -- src/features/agent/reducers/agentEventReducer.spec.ts -t "response stream action"
+```
+
+结果：
+
+```text
+1 passed，10 skipped
+```
+
+## 16.8 反向验证
+
+临时从 `agent_runtime.py` 的 `assistant_delta` 公开白名单移除：
+
+```text
+result_ref
+```
+
+再次运行真实 Worker 重试测试，结果：
+
+```text
+result_ref 断言失败
+EXPECTED_FAILURE_EXIT=1
+```
+
+验证后真实白名单已恢复，临时副本已清理。
+
+## 16.9 全量门禁
+
+后端：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+结果：
+
+```text
+1449 passed in 542.60s
+```
+
+前端：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+npm run test:run
+npm run build-only
+```
+
+结果：
+
+```text
+npm run type-check：通过；
+npm run test:run：74 files passed，467 tests passed；
+npm run build-only：4905 modules transformed，built successfully。
+```
+
+## 16.10 最新运行实例验证
+
+CARD-067 代码提交后重启后端，最新实例 PID：
+
+```text
+16548
+```
+
+服务状态：
+
+```text
+GET http://127.0.0.1:8013/health
+→ healthy
+```
+
+OpenAPI 已确认 execution-facts 路由仍存在：
+
+```text
+/api/agent/runs/{run_id}/execution-facts
+```
+
+Provider 健康：
+
+```text
+registry_status=healthy
+provider_count=4
+loaded=4
+```
+
+前端：
+
+```text
+http://127.0.0.1:5174/agent → HTTP 200
+```
+
+## 16.11 当前架构状态更新
+
+截至 CARD-067，Agent 运行链路已具备：
+
+```text
+Run 创建时冻结 Catalog Release、Capability Resolution、Context Snapshot；
+执行和恢复使用 Run-bound Tool Registry；
+工具步骤使用 step:<checkpoint.id> action_id；
+关系化工具执行使用 execution:<execution_id> result_ref；
+历史旧事件可通过 execution-facts 补全 result_ref；
+响应流式事件使用 response:<run_id> result_ref；
+开始、增量、完成、失败、取消/重试和进度事件可关联；
+Provider attempt ledger 记录成功、失败、fallback、首 token 和 partial digest；
+中央聊天显示可见回复和公开进度；
+右侧日志显示紧凑引用并独立滚动；
+左侧项目/会话/工具/数据分组紧凑可折叠；
+Provider 健康面板区分注册表和 loaded 状态；
+```
+
+## 16.12 回退命令
+
+只回退 CARD-067 代码：
+
+```powershell
+git revert 89fb572
+```
+
+CARD-067 文档使用独立提交，提交完成后：
+
+```powershell
+git revert <CARD-067-文档提交哈希>
+```
+
+## 16.13 下一任务目标：CARD-068
+
+下一目标预登记为：
+
+```text
+CARD-068：真实 Provider 流式联调、首 token/partial digest 展示和重连幂等验收
+```
+
+目标：
+
+1. 使用当前 Provider 配置建立一次真实可见回复流，记录 assistant_started、首 token、assistant_delta、assistant_completed 的真实序列；
+2. 验证 `response:<run_id>` 在中央聊天、右侧日志、Run 状态和 Provider attempt 之间一致；
+3. 制造流式中断或使用已有中断 fixture，确认 partial digest 持久化、失败分类和重试状态可读；
+4. 重连/事件回放后不重复追加 assistant delta 和最终 assistant message；
+5. 对真实 Provider 超时、空流、fallback、取消和恢复分别记录结果；
+6. 检查公开进度不会被旧事件回写覆盖，日志仍保持独立滚动；
+7. Provider 健康面板增加实际调用次数/最近结果的只读摘要，但不展示密钥和原始响应；
+8. 先写真实联调失败测试，再实现修复；继续反向验证、后端/前端全量门禁、代码/文档分离提交和推送。
+
+建议文件范围：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_asgi_worker_event_replay.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_provider_attempt.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_progress_updates.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_worker.py
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\data\AgentDataPanel.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\data\AgentDataPanel.spec.ts
+```
+
+CARD-068 开始基线：
+
+```text
+HEAD：89fb572；
+CARD-067 文档待提交；
+后端全量：1449 passed；
+前端全量：74 files / 467 tests；
+前端构建：4905 modules transformed；
+最新后端：healthy，execution-facts 路由已加载；
+Provider 健康：4/4 loaded；
+CARD-067 反向验证：移除 assistant_delta.result_ref 白名单后退出码 1；
+总任务：active，继续推进。
+```
