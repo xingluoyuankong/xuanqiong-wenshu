@@ -84766,10 +84766,11 @@ CARD-073 文档：210864e → e12a4a1 → ea46ac1
 CARD-074-A 代码：3c06898
 CARD-074-A 文档：7a416e8 → 820ad69
 CARD-074-B1 代码：b1daafe
-CARD-074-B1 文档：待本次文档提交完成后填入
+CARD-074-B1 文档提交链：4eec0f9（本次首版）
 CARD-074-B1 代码推送：已完成
-CARD-074-B1 文档推送：待本次文档提交完成后确认
-CARD-074-B1 回退：git revert b1daafe
+CARD-074-B1 文档推送：已完成（后续回写提交继续单独推送）
+CARD-074-B1 代码回退：git revert b1daafe
+CARD-074-B1 文档回退：git revert 4eec0f9（回写提交完成后再补最终哈希）
 当前任务目标：CARD-074-B2
 总目标状态：active
 ```
