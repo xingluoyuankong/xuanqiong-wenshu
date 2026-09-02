@@ -43,6 +43,8 @@ describe('AgentConversation', () => {
     expect(wrapper.get('[data-testid="agent-current-progress"]').text()).toContain('正在检查第三章质量')
     expect(wrapper.get('[data-testid="agent-current-progress"]').text()).toContain('tool:quality.inspect')
     expect(wrapper.get('[data-testid="agent-current-progress"]').text()).toContain('42%')
+    expect((wrapper.get('[data-testid="agent-progress-meter"]').element as HTMLProgressElement).value).toBe(42)
+    expect(wrapper.get('[data-testid="agent-current-progress"]').attributes('aria-live')).toBe('polite')
     expect(wrapper.find('[data-testid="agent-process-stream"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('实时运行流已连接')
 
@@ -51,6 +53,32 @@ describe('AgentConversation', () => {
 
     await wrapper.get('form').trigger('submit')
     expect(wrapper.emitted('submit')).toHaveLength(1)
+  })
+
+  it('仅收到公开工作轨迹时也在中央聊天显示实时活动', () => {
+    const wrapper = mount(AgentConversation, {
+      props: {
+        messages: [],
+        goal: '',
+        latestWorkTrace: {
+          sequence: 7,
+          traceId: 'trace-7',
+          phase: 'act',
+          actionId: 'tool:content.search',
+          kind: 'tool',
+          message: '正在读取项目章节索引',
+          progress: 38,
+          resultRef: 'execution:search-7',
+        },
+      },
+    })
+
+    const activity = wrapper.get('[data-testid="agent-live-trace"]')
+    expect(activity.text()).toContain('正在读取项目章节索引')
+    expect(activity.text()).toContain('阶段：act')
+    expect(activity.text()).toContain('动作：tool:content.search')
+    expect(activity.text()).toContain('38%')
+    expect((wrapper.get('[data-testid="agent-live-trace-meter"]').element as HTMLProgressElement).value).toBe(38)
   })
 
   it('当前进度摘要在浅色背景上使用高对比度文本', () => {

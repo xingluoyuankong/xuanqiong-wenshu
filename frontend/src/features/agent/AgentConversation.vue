@@ -9,12 +9,41 @@
       <small v-else-if="streamConnectionState === 'disconnected'" class="error">实时运行流已断开，可手动重连</small>
       <small v-else-if="sessionError" class="error">{{ sessionError }}</small>
     </div>
-    <section v-if="latestProgressMessage" class="current-progress" data-testid="agent-current-progress">
+    <section v-if="latestProgressMessage" class="current-progress" data-testid="agent-current-progress" aria-live="polite">
       <strong>当前进度</strong>
       <span>{{ latestProgressMessage }}</span>
       <small v-if="latestProgressPhase">阶段：{{ latestProgressPhase }}</small>
       <small v-if="latestProgressActionId">动作：{{ latestProgressActionId }}</small>
       <small v-if="latestProgress !== undefined">{{ Math.round(latestProgress) }}%</small>
+      <progress
+        v-if="latestProgress !== undefined"
+        class="current-progress-meter"
+        data-testid="agent-progress-meter"
+        max="100"
+        :value="latestProgress"
+        :aria-label="`当前进度 ${Math.round(latestProgress)}%`"
+      />
+    </section>
+    <section
+      v-if="!latestProgressMessage && latestWorkTrace"
+      class="current-progress current-progress--trace"
+      data-testid="agent-live-trace"
+      aria-live="polite"
+    >
+      <strong>实时活动</strong>
+      <span>{{ latestWorkTrace.message }}</span>
+      <small>阶段：{{ latestWorkTrace.phase }}</small>
+      <small v-if="latestWorkTrace.actionId">动作：{{ latestWorkTrace.actionId }}</small>
+      <small v-if="latestWorkTrace.resultRef">结果：{{ latestWorkTrace.resultRef }}</small>
+      <small v-if="latestWorkTrace.progress !== undefined">{{ Math.round(latestWorkTrace.progress) }}%</small>
+      <progress
+        v-if="latestWorkTrace.progress !== undefined"
+        class="current-progress-meter"
+        data-testid="agent-live-trace-meter"
+        max="100"
+        :value="latestWorkTrace.progress"
+        :aria-label="`实时活动进度 ${Math.round(latestWorkTrace.progress)}%`"
+      />
     </section>
     <div v-if="messages.length" class="messages" data-testid="agent-message-list">
       <article v-for="message in messages" :key="message.id" class="message" :class="`message-${message.role}`">
@@ -159,6 +188,12 @@ const updateGoal = (event: Event) => {
 .current-progress strong { color: var(--xq-jade); font-size: 0.78rem; }
 .current-progress span { min-width: 0; overflow-wrap: anywhere; line-height: 1.45; }
 .current-progress small { color: var(--xq-ink-muted); font-size: 0.72rem; }
+.current-progress-meter {
+  flex: 1 0 100%;
+  width: 100%;
+  height: 0.45rem;
+  accent-color: var(--xq-jade);
+}
 .messages { display: grid; gap: 0.7rem; max-height: 26rem; overflow: auto; margin-bottom: 1rem; }
 .message { max-width: 88%; padding: 0.7rem 0.85rem; border-radius: 0.8rem; background: rgba(255, 255, 255, 0.1); }
 .message-streaming { border-left: 3px solid var(--xq-jade); opacity: 0.92; }
