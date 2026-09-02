@@ -78352,3 +78352,191 @@ npm run build-only
 ```
 
 7. CARD-059 代码、反向验证、全量门禁、代码提交推送、文档独立提交推送全部写入本文件。
+
+
+---
+
+# CARD-059 实际完成记录：Agent 工作台三栏第二阶段紧凑化（2026-09-02）
+
+## 1. 真实浏览器测量与问题定位
+
+本批没有重复前序三栏结构改造，而是复用运行中的前端服务进行真实视口测量。测试视口为 `1258×622`，旧布局实测：
+
+```text
+左栏约 144px；中央聊天约 794px；右栏约 192px；
+日志列表高度约 87px，但右侧面板标题、说明和内边距带来额外视觉占用；
+左栏嵌套 XqPanel 标题字号和 body padding 仍偏大，项目内容文字频繁换行。
+```
+
+这与用户提出的“左侧太多太大、中央太小、日志影响阅读”直接对应。
+
+## 2. 实际变更
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.spec.ts
+```
+
+布局轨道调整：
+
+```text
+桌面：minmax(124px, 8rem) minmax(0, 1fr) minmax(160px, 10.5rem)；
+中等桌面：minmax(116px, 7.5rem) minmax(0, 1fr) minmax(152px, 9.5rem)；
+```
+
+侧栏与日志紧凑化：
+
+```text
+侧栏/活动栏 XqPanel 标题字号：1rem → 0.88rem；
+侧栏/活动栏 header padding：0.62rem 0.68rem → 0.48rem 0.55rem；
+侧栏/活动栏 body padding：0.7rem → 0.55rem；
+工具/时间线内部列表 max-height：10rem → 6rem；
+运行日志 min-height：3rem → 2.4rem；
+运行日志 max-height：min(8rem, 14vh) → min(6rem, 11vh)。
+```
+
+核心功能保持不变：项目选择、内容树、会话切换、工具目录、数据入口、运行选择、运行详情和日志事件没有移除；中屏/移动端的聊天优先单列规则保持。
+
+## 3. 失败驱动与契约更新
+
+新增布局契约先在旧实现上失败，随后修复测试装配表达式，再以实际 CSS 选择器和新设计值锁定：
+
+```text
+紧凑桌面两侧轨道；
+侧栏嵌套面板字号与 padding；
+日志窗口 min/max height；
+```
+
+前序测试中要求旧日志高度 `min(8rem, 14vh)` 的断言在新实现上失败，已更新为本批明确的新契约 `min(6rem, 11vh)`，不是删除测试。
+
+工作台定向验证：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run test:run -- src/features/agent/AgentWorkspaceShell.spec.ts src/views/AgentWorkspace.spec.ts
+```
+
+结果：
+
+```text
+Test Files  2 passed
+Tests       24 passed
+```
+
+## 4. 反向验证
+
+临时把壳层新轨道恢复为旧值：
+
+```text
+grid-template-columns: minmax(132px, 9rem) minmax(0, 1fr) minmax(176px, 12rem);
+grid-template-columns: minmax(124px, 8.5rem) minmax(0, 1fr) minmax(168px, 11rem);
+```
+
+再执行宽度契约测试，真实失败：
+
+```text
+expected source to contain new compact grid value;
+1 failed, 8 skipped;
+EXPECTED_FAILURE_EXIT=1
+```
+
+验证后恢复新布局值。
+
+## 5. 前端全量门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+npm run test:run
+npm run build-only
+```
+
+结果：
+
+```text
+npm run type-check：通过；
+npm run test:run：74 files passed，459 tests passed；
+npm run build-only：4905 modules transformed，built successfully。
+```
+
+测试中既有的 Pinia injection warning 和部分失败场景 stderr 仍是现有测试环境输出，不影响退出码；所有测试最终通过。
+
+## 6. 浏览器实测证据
+
+复用现有服务：
+
+```text
+前端：http://127.0.0.1:5174/agent
+```
+
+新布局实测视口 `1258×622`：
+
+```text
+左栏约 128px；中央聊天约 834px；右栏约 168px；
+日志列表约 68px；
+中央列较旧实测增加约 40px；
+```
+
+截图：
+
+```text
+D:\小说写作\xuanqiong-wenshu\audit\card059-compact-layout.png
+```
+
+中屏 `900×700`：
+
+```text
+布局自动变为单列；聊天主列优先；侧栏和活动栏 position=static。
+```
+
+移动 `390×844`：
+
+```text
+保持单列；主聊天 grid-row=1；侧栏/活动栏均为 static，内容可继续向下访问。
+```
+
+截图确认日志仍位于右侧独立区域，没有重新插入中央聊天，也没有遮挡聊天文字。
+
+## 7. 提交、推送与回退
+
+代码提交：
+
+```text
+45f720c fix: compact agent workspace side rails
+```
+
+已推送到：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+代码回退：
+
+```powershell
+git revert 45f720c
+```
+
+该回退只撤销 CARD-059 的三栏紧凑化和契约更新，不影响 CARD-049 至 CARD-058；文档使用独立提交。
+
+## 8. 下一任务目标：CARD-060 Agent 工具自主编排事实链
+
+CARD-060 回到后端 Agent 能力层，继续落实“AI 自主调用项目内功能，而不是把小说内容和功能集合硬编码在页面里”：
+
+1. 盘点 Tool Registry、Capability Resolver、Orchestrator、Execution Job 和 Run Context 的真实调用链。
+2. 选择一个尚未闭环的能力：Agent 根据项目上下文和用户目标选择已注册工具，参数经过 ContextRef 投影，结果经过安全摘要回到下一步计划。
+3. 先写失败驱动测试，覆盖动态工具注册、能力解析、参数投影、执行结果引用和重规划，不新增页面硬编码小说内容。
+4. 验证写入工具仍通过审批/候选 Artifact，不把“自主编排”变成绕过现有状态机的直接写库。
+5. 增加后端单元、Worker/API 集成和最小前端展示回归；保持中央聊天显示作者可读回复，日志显示 action/phase/progress。
+6. CARD-060 仍按代码提交、文档提交分离推送，并记录精确回退命令。
+7. 后端优先门禁：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+8. CARD-060 完成后再决定是否继续前端内容管理和对话交互的下一轮细化。
