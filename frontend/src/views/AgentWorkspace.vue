@@ -250,6 +250,7 @@
               :progress-message="latestProgressMessage"
               :selected-action-ref="selectedActionRef"
               :selected-result-ref="selectedResultRef"
+              :execution-facts="activeExecutionFacts"
               @command="runControlAction"
               @recover="activeRun && recoverRunAction(activeRun)"
               @reconnect="reconnectActiveRun"
@@ -390,6 +391,7 @@ import {
   type AgentRiskLevel,
   type AgentRun,
   type AgentRunStep,
+  type AgentExecutionFact,
   type AgentSession,
   type AgentTimelineEvent,
   type AgentStateProjection,
@@ -462,23 +464,33 @@ const selectedRunId = runProjection.selectedRunId
 const selectedActionRef = ref<string | null>(null)
 const selectedResultRef = ref<string | null>(null)
 const inspectorSectionEl = ref<HTMLDetailsElement | null>(null)
+const executionFactsByRunId = ref<Record<string, AgentExecutionFact[]>>({})
 const activeRun = runProjection.activeRun
 const runState = runProjection.activeRunState
 const runSteps = runProjection.activeRunSteps
 const approvals = runProjection.activeApprovals
 const artifacts = runProjection.activeArtifacts
 const responseToolResults = runProjection.activeToolResults
+const activeExecutionFacts = computed<AgentExecutionFact[]>(() =>
+  activeRun.value ? executionFactsByRunId.value[activeRun.value.id] || [] : [],
+)
 const workspaceEvents = ref<AgentDisplayEvent[]>([
   { id: 'ready', label: '已就绪', detail: '请选择小说项目，然后描述你希望 Agent 完成的目标。', sequence: 0, eventType: 'workspace' },
 ])
 const workspaceEventKeys = new Set<string>()
 const localPlan = ref<AgentPlanResponse | null>(null)
 const plan = computed(() => activeRun.value ? runProjection.activePlan.value : localPlan.value)
-const events = computed<AgentDisplayEvent[]>(() =>
-  activeRun.value
+const events = computed<AgentDisplayEvent[]>(() => {
+  const source = activeRun.value
     ? runProjection.activeEventProjection.value.events
-    : workspaceEvents.value,
-)
+    : workspaceEvents.value
+  if (!activeRun.value || !activeExecutionFacts.value.length) return source
+  return source.map((event) => {
+    if (event.resultRef || !event.actionId) return event
+    const fact = activeExecutionFacts.value.find((item) => item.action_id === event.actionId)
+    return fact ? { ...event, resultRef: fact.result_ref } : event
+  })
+})
 const LOG_RENDER_LIMIT = 120
 const LOG_TAIL_THRESHOLD = 24
 const logListEl = ref<HTMLElement | null>(null)
@@ -560,7 +572,8 @@ const toolResults = computed<AgentToolResult[]>(() => {
   if (responseToolResults.value.length) {
     return responseToolResults.value.map((item, index) => {
       const step = completedSteps[index] || completedSteps.find((candidate) => candidate.tool_name === item.tool_name)
-      const executionId = step && typeof step.output_json.execution_id === 'string' ? step.output_json.execution_id : ''
+      const fact = step ? activeExecutionFacts.value.find((candidate) => candidate.step_id === step.id) : undefined
+      const executionId = step && typeof step.output_json.execution_id === 'string' ? step.output_json.execution_id : fact?.execution_id || ''
       return {
         ...item,
         result_ref: item.result_ref || (step ? (executionId ? `execution:${executionId}` : `step:${step.id}`) : undefined),
@@ -569,7 +582,8 @@ const toolResults = computed<AgentToolResult[]>(() => {
   }
   return completedSteps
     .map((step) => {
-      const executionId = typeof step.output_json.execution_id === 'string' ? step.output_json.execution_id : ''
+      const fact = activeExecutionFacts.value.find((candidate) => candidate.step_id === step.id)
+      const executionId = typeof step.output_json.execution_id === 'string' ? step.output_json.execution_id : fact?.execution_id || ''
       return {
         tool_name: step.tool_name,
         result: recordOf(step.output_json),
@@ -621,6 +635,7 @@ const resetRuntime = () => {
   closeRunLifecycle()
   clearRunLocation()
   runProjection.reset()
+  executionFactsByRunId.value = {}
   localPlan.value = null
   resetArtifactFacts()
   workspaceEventKeys.clear()
@@ -776,6 +791,17 @@ const decideApproval = async (approval: AgentApproval, approved: boolean) => {
     add('审批失败', error instanceof Error ? error.message : '审批请求失败')
   }
 }
+const loadExecutionFacts = async (runId: string) => {
+  if (typeof AgentAPI.listExecutionFacts !== 'function') return
+  try {
+    const facts = await AgentAPI.listExecutionFacts(runId)
+    if (activeRun.value?.id === runId)
+      executionFactsByRunId.value = { ...executionFactsByRunId.value, [runId]: facts }
+  } catch {
+    if (activeRun.value?.id === runId)
+      executionFactsByRunId.value = { ...executionFactsByRunId.value, [runId]: [] }
+  }
+}
 const refreshSessionMessages = async () => {
   if (!session.value || typeof AgentAPI.getSession !== 'function') return
   try {
@@ -785,7 +811,7 @@ const refreshSessionMessages = async () => {
     const selected = activeRun.value
     if (selected && typeof AgentAPI.listApprovals === 'function')
       runProjection.setRunApprovals(selected.id, await AgentAPI.listApprovals(selected.id))
-    if (selected) await Promise.all([loadRunSteps(selected.id), loadRunState(selected.id)])
+    if (selected) await Promise.all([loadRunSteps(selected.id), loadRunState(selected.id), loadExecutionFacts(selected.id)])
   } catch {
     /* terminal refresh is best effort */
   }
@@ -826,7 +852,7 @@ const selectRunAction = async (runId: string) => {
   if (!run) return
   artifactPreview.value = ''
   resetArtifactFacts({ preserveScopedState: true })
-  const loads: Promise<unknown>[] = [loadRunSteps(run.id), loadRunState(run.id), loadRunFacts(run.id)]
+  const loads: Promise<unknown>[] = [loadRunSteps(run.id), loadRunState(run.id), loadRunFacts(run.id), loadExecutionFacts(run.id)]
   if (typeof AgentAPI.listApprovals === 'function') {
     loads.push(AgentAPI.listApprovals(run.id).then((items) => runProjection.setRunApprovals(run.id, items)))
   }
@@ -1056,7 +1082,7 @@ const hydrateSessionRun = async (
       await previewArtifact(requestedArtifact)
     }
   }
-  await loadRunFacts(selected.id)
+  await Promise.all([loadRunFacts(selected.id), loadExecutionFacts(selected.id)])
   await loadEventsAndStream(detail, selected)
   return { runId: selected.id, artifactId }
 }

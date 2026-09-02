@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { AgentProviderAttemptSnapshot, AgentProviderProvenance, AgentRun, AgentRunCommandType, AgentRunStep, AgentStateProjection, AgentToolResult } from '@/api/agent'
+import type { AgentExecutionFact, AgentProviderAttemptSnapshot, AgentProviderProvenance, AgentRun, AgentRunCommandType, AgentRunStep, AgentStateProjection, AgentToolResult } from '@/api/agent'
 import type { SSEConnectionState } from '@/utils/sseStream'
 import AgentRunControlBar from '@/features/agent/AgentRunControlBar.vue'
 import AgentRunCommandHistory from '@/features/agent/AgentRunCommandHistory.vue'
@@ -12,6 +12,7 @@ const props = withDefaults(defineProps<{
   state: AgentStateProjection | null
   steps: AgentRunStep[]
   toolResults: AgentToolResult[]
+  executionFacts?: AgentExecutionFact[]
   provenance?: AgentProviderProvenance | null
   hasSequenceGap?: boolean
   gapRepairState?: 'idle' | 'repairing' | 'repaired' | 'failed'
@@ -23,6 +24,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   selectedActionRef: null,
   selectedResultRef: null,
+  executionFacts: () => [],
 })
 
 const emit = defineEmits<{
@@ -69,10 +71,13 @@ const selectedStep = computed(() => {
 const hasSelectedResult = computed(() =>
   Boolean(props.selectedResultRef && props.toolResults.some((item) => item.result_ref === props.selectedResultRef)),
 )
+const selectedExecutionFact = computed(() => props.executionFacts.find((fact) =>
+  fact.result_ref === props.selectedResultRef || fact.action_id === props.selectedActionRef
+) || null)
 const selectedLocation = computed(() => props.selectedResultRef || props.selectedActionRef || null)
 const locationStatus = computed(() => {
   if (!selectedLocation.value) return 'none'
-  if (selectedStep.value || hasSelectedResult.value) return 'located'
+  if (selectedStep.value || hasSelectedResult.value || selectedExecutionFact.value) return 'located'
   return 'stale'
 })
 
@@ -98,11 +103,11 @@ const providerAttemptSummary = (snapshot?: AgentProviderAttemptSnapshot | null) 
         <template v-else-if="locationStatus === 'stale'">引用暂不可用：{{ selectedLocation }}（正在恢复执行事实）</template>
         <template v-else>尚未定位动作或结果</template>
       </p>
-      <div v-if="selectedResultRef && selectedStep" class="execution-fact" data-testid="agent-execution-fact">
+      <div v-if="selectedResultRef && (selectedStep || selectedExecutionFact)" class="execution-fact" data-testid="agent-execution-fact">
         <strong>执行事实</strong>
-        <span>{{ selectedStep.tool_name }} · {{ stepStatus(selectedStep.status) }} · 第 {{ selectedStep.attempt_count }} 次</span>
-        <small>{{ selectedResultRef }}</small>
-        <small v-if="selectedStep.started_at || selectedStep.finished_at">{{ selectedStep.started_at || '—' }} → {{ selectedStep.finished_at || '进行中' }}</small>
+        <span>{{ selectedExecutionFact?.tool_name || selectedStep?.tool_name }} · {{ stepStatus(selectedExecutionFact?.status || selectedStep?.status || '') }} · 第 {{ selectedExecutionFact?.attempt || selectedStep?.attempt_count }} 次</span>
+        <small>{{ selectedExecutionFact?.result_ref || selectedResultRef }}</small>
+        <small v-if="selectedExecutionFact?.started_at || selectedExecutionFact?.finished_at || selectedStep?.started_at || selectedStep?.finished_at">{{ selectedExecutionFact?.started_at || selectedStep?.started_at || '—' }} → {{ selectedExecutionFact?.finished_at || selectedStep?.finished_at || '进行中' }}</small>
       </div>
       <dl class="run-summary">
         <dt>状态</dt><dd data-testid="agent-run-status">{{ run?.status || 'idle' }}</dd>

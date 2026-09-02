@@ -17,6 +17,7 @@ const {
   listApprovalsMock,
   listArtifactsMock,
   listRunStepsMock,
+  listExecutionFactsMock,
   getRunPlanMock,
   getRunStateMock,
   getArtifactContentMock,
@@ -41,6 +42,7 @@ const {
   listApprovalsMock: vi.fn(),
   listArtifactsMock: vi.fn(),
   listRunStepsMock: vi.fn(),
+  listExecutionFactsMock: vi.fn(),
   getRunPlanMock: vi.fn(),
   getRunStateMock: vi.fn(),
   getArtifactContentMock: vi.fn(),
@@ -77,6 +79,7 @@ vi.mock('@/api/agent', () => ({
     listApprovals: listApprovalsMock,
     listArtifacts: listArtifactsMock,
     listRunSteps: listRunStepsMock,
+    listExecutionFacts: listExecutionFactsMock,
     getRunPlan: getRunPlanMock,
     getRunState: getRunStateMock,
     getArtifactContent: getArtifactContentMock,
@@ -105,6 +108,8 @@ describe('AgentWorkspace', () => {
     listApprovalsMock.mockReset()
     listArtifactsMock.mockReset()
     listRunStepsMock.mockReset()
+    listExecutionFactsMock.mockReset()
+    listExecutionFactsMock.mockResolvedValue([])
     getRunPlanMock.mockReset()
     getRunStateMock.mockReset()
     getArtifactContentMock.mockReset()
@@ -483,6 +488,11 @@ describe('AgentWorkspace', () => {
         output_json: {},
       },
     ])
+    listExecutionFactsMock.mockImplementation(async (runId: string) => runId === oldRun.id ? [{
+      execution_id: 'execution-facts-history', run_id: runId, step_id: `step-${runId}`,
+      action_id: 'quality:history', result_ref: 'execution:execution-facts-history',
+      tool_name: 'chapter.version.list', status: 'completed', attempt: 1, has_output: true,
+    }] : [])
     getRunStateMock.mockImplementation(async (runId: string) => ({
       correlation_id: `correlation-${runId}`,
       run_id: runId,
@@ -519,6 +529,8 @@ describe('AgentWorkspace', () => {
     expect(wrapper.get('[data-testid="agent-run-selector"]').element).toHaveProperty('value', 'run-old')
     expect(wrapper.get('[data-testid="agent-selected-run-id"]').text()).toContain('run-old')
     expect(wrapper.get('[data-testid="agent-process-stream"]').text()).toContain('动作：quality:history')
+    expect(wrapper.get('[data-testid="agent-process-stream"]').text()).toContain('结果：execution:execution-facts-history')
+    expect(listExecutionFactsMock).toHaveBeenCalledWith('run-old')
     expect(wrapper.get('[data-testid="agent-run-progress"]').text()).toContain('21%')
     expect(wrapper.get('[data-testid="agent-step-panel"]').text()).toContain('chapter.version.list')
     expect(wrapper.get('[data-testid="agent-public-work-summary"]').text()).toContain('历史运行正在整理章节版本。')

@@ -11,6 +11,7 @@ describe('AgentRunInspector', () => {
         state: null,
         selectedActionRef: 'step:step-1',
         selectedResultRef: 'execution:exec-1',
+        executionFacts: [{ execution_id: 'exec-1', run_id: 'run-1', step_id: 'step-1', action_id: 'step:step-1', result_ref: 'execution:exec-1', tool_name: 'quality.inspect', status: 'completed', attempt: 1, has_output: true }],
         steps: [{
           id: 'step-1', run_id: 'run-1', user_id: 1, step_order: 1, tool_name: 'quality.inspect',
           idempotency_key: 'idem-1', status: 'completed', attempt_count: 1,

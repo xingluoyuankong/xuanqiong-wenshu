@@ -648,6 +648,22 @@ export interface AgentStateProjection {
     progress: number
   }>
 }
+export interface AgentExecutionFact {
+  execution_id: string
+  run_id: string
+  step_id?: string | null
+  action_id?: string | null
+  result_ref: string
+  tool_name: string
+  status: string
+  attempt: number
+  started_at?: string | null
+  finished_at?: string | null
+  duration_ms?: number | null
+  error_type?: string | null
+  output_digest?: string | null
+  has_output: boolean
+}
 export interface AgentToolResult {
   tool_name: string
   result: Record<string, unknown>
@@ -860,6 +876,8 @@ export const AgentAPI = {
     request<AgentApproval[]>(`/agent/runs/${encodeURIComponent(runId)}/approvals`),
   listRunSteps: (runId: string) =>
     request<AgentRunStep[]>(`/agent/runs/${encodeURIComponent(runId)}/steps`),
+  listExecutionFacts: (runId: string, limit = 200) =>
+    request<AgentExecutionFact[]>(`/agent/runs/${encodeURIComponent(runId)}/execution-facts?limit=${Math.max(1, Math.min(500, limit))}`),
   listArtifacts: (runId: string) =>
     request<AgentArtifact[]>(`/agent/runs/${encodeURIComponent(runId)}/artifacts`),
   executeApproval: (approvalId: string) =>

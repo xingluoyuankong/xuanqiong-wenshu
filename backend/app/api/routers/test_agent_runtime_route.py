@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sqlalchemy import select
+
 from types import SimpleNamespace
 
 import pytest
@@ -10,8 +12,8 @@ from app.agent.execution import execute_agent_execution_job
 from app.agent.executor import build_agent_plan
 from app.agent.jobs import AgentJobService
 from app.agent.schemas import AgentMessageCreateRequest, AgentPlanRequest, AgentRunCommandRequest, AgentSessionCreateRequest
-from app.api.routers.agent import create_agent_session, list_agent_project_entity_summaries, get_agent_run_plan, get_agent_run_provider_provenance, get_agent_run_state, get_agent_session, list_agent_dead_letters, list_agent_jobs, list_agent_run_steps, list_agent_run_activity, list_agent_run_commands, post_agent_message, replay_agent_dead_letter, submit_agent_run_command
-from app.models import Chapter, ChapterVersion, NovelProject, User
+from app.api.routers.agent import list_agent_execution_facts, create_agent_session, list_agent_project_entity_summaries, get_agent_run_plan, get_agent_run_provider_provenance, get_agent_run_state, get_agent_session, list_agent_dead_letters, list_agent_jobs, list_agent_run_steps, list_agent_run_activity, list_agent_run_commands, post_agent_message, replay_agent_dead_letter, submit_agent_run_command
+from app.models import AgentCapabilityDefinition, AgentCapabilityExecution, AgentRunCapabilitySnapshot, Chapter, ChapterVersion, NovelProject, User
 from app.models.faction import Faction
 from app.models.foreshadowing import Foreshadowing
 from app.models.knowledge_graph import CharacterNode
@@ -307,6 +309,43 @@ async def test_agent_run_step_route_is_user_scoped(task_session):
     assert len(steps) == 1
     with pytest.raises(HTTPException) as error:
         await list_agent_run_steps(run.id, session=task_session, current_user=SimpleNamespace(id=other.id))
+    assert error.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_agent_execution_fact_route_returns_safe_metadata_and_is_user_scoped(task_session):
+    owner = await _route_user(task_session, 6410, "route-execution-owner")
+    other = await _route_user(task_session, 6411, "route-execution-other")
+    created = await create_agent_session(AgentSessionCreateRequest(), session=task_session, current_user=SimpleNamespace(id=owner.id))
+    runtime = AgentRuntimeService(task_session)
+    run = await runtime.create_run(session_id=created.id, user_id=owner.id, context={"requested_tools": ["project.list"]})
+    step = await runtime.ensure_step(run_id=run.id, user_id=owner.id, step_order=1, tool_name="project.list", idempotency_key="route-execution-step")
+    snapshot = (await task_session.execute(select(AgentRunCapabilitySnapshot).where(AgentRunCapabilitySnapshot.run_id == run.id))).scalar_one()
+    capability = (await task_session.execute(select(AgentCapabilityDefinition).where(
+        AgentCapabilityDefinition.catalog_release_id == snapshot.catalog_release_id,
+        AgentCapabilityDefinition.capability_id == "project.list",
+    ))).scalar_one()
+    task_session.add(AgentCapabilityExecution(
+        execution_id="route-execution-1", run_id=run.id, transaction_id=run.transaction_id,
+        step_id=step.id, snapshot_id=snapshot.id, capability_definition_id=capability.id,
+        provider_release_id=capability.provider_release_id, correlation_id=run.correlation_id,
+        capability_id="project.list", resolved_version=capability.version, status="completed",
+        attempt=1, idempotency_key="route-execution-idempotency", input_json={},
+        output_json={"content": "SECRET_ROUTE_PROSE"}, input_digest="a" * 64,
+        output_digest="b" * 64,
+    ))
+    await task_session.commit()
+
+    rows = await list_agent_execution_facts(run.id, session=task_session, current_user=SimpleNamespace(id=owner.id))
+    assert len(rows) == 1
+    assert rows[0].result_ref == "execution:route-execution-1"
+    assert rows[0].action_id == f"step:{step.id}"
+    assert rows[0].tool_name == "project.list"
+    assert "output_json" not in rows[0].model_dump()
+    assert "SECRET_ROUTE_PROSE" not in str(rows[0].model_dump())
+
+    with pytest.raises(HTTPException) as error:
+        await list_agent_execution_facts(run.id, session=task_session, current_user=SimpleNamespace(id=other.id))
     assert error.value.status_code == 404
 
 
@@ -867,3 +906,4 @@ async def test_agent_run_plan_route_does_not_fallback_to_mutable_steps_when_revi
     assert plan.goal == "持久化目标"
     assert plan.mode == "strict"
     assert plan.steps == []
+

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...agent.executor import UnknownAgentTool, build_agent_plan
 from ...agent.execution import launch_agent_execution, recover_agent_execution
+from ...agent.execution_facts import AgentExecutionFactNotFound, AgentExecutionFactService
 from ...agent.jobs import AgentJobError, AgentJobNotFound, AgentJobService
 from ...agent.orchestrator import AgentOrchestrator
 from ...agent.policy import ProjectScopeViolation
@@ -26,7 +27,7 @@ from ...agent.write_executor import accept_candidate_artifact, diff_artifact_wit
 from ...agent.context_refs import ContextRefValidationError, project_plan_arguments, resolve_agent_context_refs
 from ...agent.tool_adapters import execute_read_tool
 from ...agent.schemas import (
-    AgentApprovalDecisionRequest, AgentApprovalRead, AgentArtifactAcceptRequest, AgentArtifactDiffRead, AgentArtifactRead, AgentArtifactVersionDiffRead, AgentEventRead, AgentMessageCreateRequest,
+    AgentApprovalDecisionRequest, AgentApprovalRead, AgentArtifactAcceptRequest, AgentExecutionFactRead, AgentArtifactDiffRead, AgentArtifactRead, AgentArtifactVersionDiffRead, AgentEventRead, AgentMessageCreateRequest,
     AgentAuditRecordRead, AgentJobRead, AgentRewriteInstructionRead, AgentMessageRead, AgentPlan, AgentPlanRequest, AgentPlanStep, AgentQualityBlockerRead, AgentArtifactQualityRead, AgentArtifactLineageRead, AgentArtifactLineageEdgeRead, AgentArtifactLineageArtifactRead, AgentQualityFindingRead, AgentQualityGateRead, AgentQualityResultRead, AgentRunRead, AgentRunStepRead, AgentTimelineEventRead,
     AgentSessionCreateRequest, AgentSessionDetail, AgentSessionRead, AgentToolCatalog, AgentToolHealthRead,
     AgentRunCommandRequest, AgentRunCommandRead, AgentContextSnapshotRead, AgentPlanRevisionRead, AgentConversationSummaryRead, AgentProviderProvenanceRead, AgentProjectEntitySummariesRead,
@@ -912,6 +913,25 @@ async def list_agent_run_activity(
             after_sequence=after_sequence,
             limit=limit,
         )
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
+        raise _error(exc) from exc
+
+
+@router.get("/runs/{run_id}/execution-facts", response_model=list[AgentExecutionFactRead])
+async def list_agent_execution_facts(
+    run_id: str,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> list[AgentExecutionFactRead]:
+    """Return safe, user-scoped execution metadata for locating Run results."""
+    try:
+        facts = await AgentExecutionFactService(session).list_for_run(
+            run_id=run_id, user_id=current_user.id, limit=limit
+        )
+        return [AgentExecutionFactRead.model_validate(fact) for fact in facts]
+    except AgentExecutionFactNotFound as exc:
+        raise HTTPException(status_code=404, detail={"code": "AGENT_NOT_FOUND", "message": str(exc)}) from exc
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 

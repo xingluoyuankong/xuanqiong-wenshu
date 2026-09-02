@@ -396,6 +396,25 @@ class AgentRunStepRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AgentExecutionFactRead(BaseModel):
+    execution_id: str
+    run_id: str
+    step_id: str | None = None
+    action_id: str | None = None
+    result_ref: str
+    tool_name: str
+    status: str
+    attempt: int = Field(ge=1)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    duration_ms: int | None = Field(default=None, ge=0)
+    error_type: str | None = None
+    output_digest: str | None = None
+    has_output: bool = False
+
+    model_config = ConfigDict(extra='forbid')
+
+
 class AgentPublicWorkScope(BaseModel):
     """A compact input reference that is safe to expose in work summaries."""
 
