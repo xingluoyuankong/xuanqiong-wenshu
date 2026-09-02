@@ -31,6 +31,7 @@ TERMINAL_RUN_STATUSES = set(STATE_TERMINAL_RUN_STATUSES)
 VALID_RUN_STATUSES = set(AGENT_RUN_STATUSES)
 CLAIMABLE_RUN_STATUSES = set(STATE_CLAIMABLE_RUN_STATUSES)
 VALID_RUN_COMMAND_TYPES = {"pause", "resume", "cancel"}
+_IDEMPOTENT_EVENT_TYPES = {"assistant_completed", "run_completed", "run_failed", "run_cancelled"}
 _RUN_COMMAND_ORDER = ("pause", "resume", "cancel")
 _RUN_COMMAND_TERMINAL_STATUSES = {"applied", "rejected", "failed"}
 _FORBIDDEN_KEYS = {"thought", "reasoning", "chain_of_thought", "private_reasoning", "system_prompt", "provider_secret"}
@@ -168,7 +169,11 @@ def command_projection(command: AgentRunCommand) -> dict[str, Any]:
 
 def _is_event_sequence_conflict(exc: IntegrityError) -> bool:
     message = str(getattr(exc, "orig", exc)).lower()
-    return "agent_events" in message and ("sequence" in message or "uq_agent_event" in message)
+    return "agent_events" in message and (
+        "sequence" in message
+        or "terminal_key" in message
+        or "uq_agent_event" in message
+    )
 
 
 class AgentRuntimeError(Exception):
@@ -364,6 +369,7 @@ class AgentRuntimeService:
             transaction_id=run.transaction_id,
             user_id=run.user_id,
             event_type=event_type,
+            terminal_key=(f"{run.id}:{event_type}" if event_type in _IDEMPOTENT_EVENT_TYPES else None),
             sequence=run.event_sequence,
             summary=summary[:1000],
             data_json=_visible_event_data(event_type, data or {}),
@@ -944,6 +950,19 @@ class AgentRuntimeService:
     ) -> AgentEventRecord:
         """Build one event inside the caller's transaction without committing."""
         run = await self._locked_run(run_id, user_id)
+        if event_type in _IDEMPOTENT_EVENT_TYPES:
+            existing = (await self.session.execute(
+                select(AgentEventRecord)
+                .where(
+                    AgentEventRecord.run_id == run.id,
+                    AgentEventRecord.user_id == user_id,
+                    AgentEventRecord.event_type == event_type,
+                )
+                .order_by(AgentEventRecord.sequence.asc())
+                .limit(1),
+            )).scalar_one_or_none()
+            if existing is not None:
+                return existing
         event = self._new_visible_event(
             run=run,
             event_type=event_type,

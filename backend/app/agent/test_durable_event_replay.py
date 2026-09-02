@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -8,6 +9,31 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.db.base import Base
 from app.models import User
 from app.services.agent_runtime import AgentRuntimeService
+
+def test_terminal_event_migration_creates_nullable_unique_fence(tmp_path, monkeypatch):
+    """A fresh schema must carry the terminal-event uniqueness fence."""
+    database = (tmp_path / "terminal-migration.sqlite").resolve()
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "database_url", f"sqlite+aiosqlite:///{database.as_posix()}")
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect, text
+
+    config = Config(str(Path(__file__).parents[2] / "alembic.ini"))
+    command.upgrade(config, "head")
+    engine = create_engine(f"sqlite:///{database.as_posix()}")
+    try:
+        inspector = inspect(engine)
+        columns = {item["name"] for item in inspector.get_columns("agent_events")}
+        indexes = {item["name"]: item for item in inspector.get_indexes("agent_events")}
+        with engine.connect() as connection:
+            version = connection.execute(text("select version_num from alembic_version")).scalar_one()
+        assert version == "027_agent_terminal_event_key"
+        assert "terminal_key" in columns
+        assert bool(indexes["uq_agent_event_terminal_key"]["unique"]) is True
+    finally:
+        engine.dispose()
+
 
 
 @pytest.mark.asyncio
@@ -76,6 +102,18 @@ async def test_two_independent_workers_replay_committed_events_by_cursor(tmp_pat
         )
         assert [item.sequence for item in terminal_replay] == [terminal.sequence]
         assert terminal_replay[0].event_type == "run_completed"
+
+        duplicate_terminal = await service_b.append_event(
+            run_id=run.id,
+            user_id=user.id,
+            event_type="run_completed",
+            summary="duplicate completion from reconnect",
+            data={"phase": "finish", "reasoning": "PRIVATE"},
+        )
+        all_events = await service_a.list_events(run_id=run.id, user_id=user.id, after_sequence=0)
+        assert duplicate_terminal.sequence == terminal.sequence
+        assert len([item for item in all_events if item.event_type == "run_completed"]) == 1
+        assert all_events[-1].data_json == {"phase": "finish"}
 
     await engine.dispose()
 

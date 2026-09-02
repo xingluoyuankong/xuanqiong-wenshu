@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Optional
 from uuid import uuid4
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db.base import Base
@@ -111,13 +111,19 @@ class AgentRunStep(Base):
 
 class AgentEventRecord(Base):
     __tablename__ = "agent_events"
-    __table_args__ = (UniqueConstraint("run_id", "sequence", name="uq_agent_event_sequence"),)
+    __table_args__ = (
+        UniqueConstraint("run_id", "sequence", name="uq_agent_event_sequence"),
+        Index("uq_agent_event_terminal_key", "terminal_key", unique=True),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=False, index=True)
     correlation_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     transaction_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    # Only terminal lifecycle events receive a value; NULL keeps ordinary events
+    # outside the uniqueness fence on SQLite/MySQL.
+    terminal_key: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     summary: Mapped[str] = mapped_column(String(1000), nullable=False)
     data_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
