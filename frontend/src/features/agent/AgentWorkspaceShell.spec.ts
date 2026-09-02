@@ -56,10 +56,10 @@ describe('AgentWorkspaceShell', () => {
 
 
   it('把紧凑侧栏、聊天主栏和右侧活动栏的宽度约束集中在壳层', () => {
-    expect(shellSource).toContain('grid-template-columns: minmax(132px, 9rem) minmax(0, 1fr) minmax(176px, 12rem);')
-    expect(shellSource).toContain('grid-template-columns: minmax(124px, 8.5rem) minmax(0, 1fr) minmax(168px, 11rem);')
+    expect(shellSource).toContain('grid-template-columns: minmax(124px, 8rem) minmax(0, 1fr) minmax(160px, 10.5rem);')
+    expect(shellSource).toContain('grid-template-columns: minmax(116px, 7.5rem) minmax(0, 1fr) minmax(152px, 9.5rem);')
     expect(workspaceSource).not.toContain('grid-template-columns: minmax(210px, 0.85fr) minmax(0, 1.8fr) minmax(210px, 0.75fr);')
-    expect(workspaceSource).toContain('max-height: min(8rem, 14vh);')
+    expect(workspaceSource).toContain('max-height: min(6rem, 11vh);')
     expect(workspaceSource).toContain('class="workspace-section workspace-inspector-section"')
     expect(workspaceSource).toContain('data-testid="agent-inspector-section"')
     expect(workspaceSource.indexOf('data-testid="agent-log-panel"')).toBeLessThan(
@@ -68,8 +68,8 @@ describe('AgentWorkspaceShell', () => {
   })
 
   it('把聊天主区做大并压缩两侧轨道和日志窗口', () => {
-    expect(shellSource).toContain('grid-template-columns: minmax(132px, 9rem) minmax(0, 1fr) minmax(176px, 12rem);')
-    expect(shellSource).toContain('grid-template-columns: minmax(124px, 8.5rem) minmax(0, 1fr) minmax(168px, 11rem);')
+    expect(shellSource).toContain('grid-template-columns: minmax(124px, 8rem) minmax(0, 1fr) minmax(160px, 10.5rem);')
+    expect(shellSource).toContain('grid-template-columns: minmax(116px, 7.5rem) minmax(0, 1fr) minmax(152px, 9.5rem);')
     expect(workspaceSource).toContain('min-height: min(78vh, 60rem);')
     expect(workspaceSource).toContain('min-height: min(30rem, 52vh);')
     expect(workspaceSource).toContain('min-height: 1.9rem;')
@@ -86,6 +86,15 @@ describe('AgentWorkspaceShell', () => {
     expect(shellSource).toContain('.agent-sidebar, .agent-main, .agent-activity { grid-column: auto; position: static; max-height: none; overflow: visible; }')
     expect(shellSource).toMatch(/\.agent-main\s*\{\s*min-height: min\(72vh, 56rem\);\s*\}/)
   })
+  it('进一步压缩左侧嵌套面板与右侧日志窗口的视觉占用', () => {
+    expect(workspaceSource).toContain('.workspace-sidebar-stack :deep(.xq-panel__title),')
+    expect(workspaceSource).toContain('font-size: 0.88rem;')
+    expect(workspaceSource).toContain('.workspace-sidebar-stack :deep(.xq-panel__body),')
+    expect(workspaceSource).toContain('padding: 0.55rem;')
+    expect(workspaceSource).toContain('max-height: min(6rem, 11vh);')
+    expect(workspaceSource).toContain('min-height: 2.4rem;')
+  })
+
   it('把右栏运行日志限制为有界渲染窗口', () => {
     expect(workspaceSource).toContain('const LOG_RENDER_LIMIT = 120')
     expect(workspaceSource).toContain('const visibleLogEvents = computed(() => events.value.slice(-LOG_RENDER_LIMIT))')

@@ -1608,11 +1608,11 @@ onBeforeUnmount(() => {
 .workspace-sidebar-stack :deep(.xq-panel__header),
 .workspace-activity-stack :deep(.xq-panel__header) {
   gap: 0.5rem;
-  padding: 0.62rem 0.68rem 0;
+  padding: 0.48rem 0.55rem 0;
 }
 .workspace-sidebar-stack :deep(.xq-panel__title),
 .workspace-activity-stack :deep(.xq-panel__title) {
-  font-size: 1rem;
+  font-size: 0.88rem;
 }
 .workspace-sidebar-stack :deep(.xq-panel__subtitle),
 .workspace-activity-stack :deep(.xq-panel__subtitle) {
@@ -1622,7 +1622,7 @@ onBeforeUnmount(() => {
 }
 .workspace-sidebar-stack :deep(.xq-panel__body),
 .workspace-activity-stack :deep(.xq-panel__body) {
-  padding: 0.7rem;
+  padding: 0.55rem;
 }
 .workspace-sidebar-stack :deep(.muted),
 .workspace-activity-stack :deep(.muted) {
@@ -1632,7 +1632,7 @@ onBeforeUnmount(() => {
 }
 .workspace-sidebar-stack :deep(.tool-list),
 .workspace-sidebar-stack :deep(.timeline-list) {
-  max-height: 10rem;
+  max-height: 6rem;
   overflow: auto;
 }
 .workspace-activity-stack {
@@ -1649,8 +1649,8 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 .workspace-log-list {
-  min-height: 3rem;
-  max-height: min(8rem, 14vh);
+  min-height: 2.4rem;
+  max-height: min(6rem, 11vh);
   overflow-y: auto;
   padding-right: 0.2rem;
   scrollbar-gutter: stable;
