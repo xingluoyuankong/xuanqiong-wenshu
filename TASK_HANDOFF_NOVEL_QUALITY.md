@@ -82082,3 +82082,302 @@ git revert <CARD-070-文档提交哈希>
 CARD-069 文档提交：待本次单独提交后填入
 下一步：先完成前端三栏阅读布局重构，再做浏览器验收
 ```
+
+
+# 20. 2026-09-03｜CARD-070 Agent 工作台三栏阅读布局重构（代码已推送）
+
+## 20.1 本批目标
+
+本批针对工作台首屏阅读体验进行前端容器级重构，重点解决：左侧项目/会话/工具/数据折叠区占用过大、中央聊天宽度不足、右侧运行日志与中间内容视觉混杂的问题。
+
+本批只调整前端布局、日志容器和对应测试，不改变后端 Agent 协议、Provider 调用、Run 投影、事件 reducer、流式数据格式、工具注册表或正文生成逻辑。
+
+## 20.2 已完成内容
+
+1. 收窄宽屏三栏轨道：
+
+```css
+grid-template-columns: minmax(6.25rem, 7rem) minmax(0, 1fr) minmax(8rem, 9rem);
+```
+
+2. 收窄中等宽度三栏轨道：
+
+```css
+grid-template-columns: minmax(6rem, 6.5rem) minmax(0, 1fr) minmax(7.5rem, 8.25rem);
+```
+
+3. 保持中央列使用 `minmax(0, 1fr)`，避免左右内容的最小宽度把中央聊天挤破；
+4. 右侧活动栏改为独立的纵向 flex 容器，便于日志区与运行检查器分层；
+5. 日志从原单层列表改为：
+
+```text
+workspace-log-panel
+└── workspace-runtime-log-viewport（唯一垂直滚动容器）
+    └── workspace-log-list（保留既有事件测试钩子）
+```
+
+6. 日志专用视口使用：
+
+```css
+min-width: 0;
+min-height: 2.4rem;
+max-height: min(10rem, 18vh);
+overflow-y: auto;
+scrollbar-gutter: stable;
+```
+
+7. 保留原有：
+
+```text
+data-testid="agent-process-stream"
+ref="logListEl"
+LOG_RENDER_LIMIT=120
+LOG_TAIL_THRESHOLD=24
+```
+
+8. 中央消息气泡最大宽度从 `88%` 调整为 `96%`，让聊天正文获得更完整的阅读行宽；
+9. 960px 以下仍切换为单列，顺序保持聊天、项目控制、活动区；
+10. 650px 以下仍使用手机单列规则，不引入 JS 窗口宽度计算；
+11. 左侧 details、项目内容树、工具区、数据区的现有折叠行为保持不变；
+12. Provider 统计卡片、运行检查器、工具结果和日志引用定位未被移动到中央聊天中。
+
+## 20.3 代码文件
+
+本批代码提交只包含 4 个文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
+```
+
+未跟踪历史审计/恢复工件仍原样保留，未使用 `git add -A`，未批量删除或重置分支。
+
+## 20.4 测试先行与失败证据
+
+本批先增加布局契约，再修改实现。旧实现首次运行新契约时失败，失败集中在：
+
+```text
+新的日志视口 class/testid 不存在；
+宽屏轨道仍为旧宽度；
+日志高度仍是旧 6rem 规则；
+中央消息仍是旧 88% 宽度；
+```
+
+期间发现并修复两类测试/脚本问题：
+
+1. 组合 class 的源码断言不能要求整个 class 属性精确等于单一 class；已改为检查稳定 class 片段和独立 DOM 钩子；
+2. 反向验证最初筛选了错误的测试名，导致测试被跳过后返回 0；已改用包含目标断言的正确用例，并精确删除 `.workspace-runtime-log-viewport` 规则块内的 `overflow-y: auto`。
+
+## 20.5 定向验证
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run test:run -- src/features/agent/AgentWorkspaceShell.spec.ts src/views/AgentWorkspace.spec.ts
+```
+
+结果：
+
+```text
+Test Files 2 passed
+Tests 28 passed
+```
+
+恢复后的类型检查：
+
+```powershell
+npm run type-check
+```
+
+结果：
+
+```text
+退出码 0
+```
+
+## 20.6 反向验证
+
+验证动作：只在临时副本状态中移除：
+
+```css
+.workspace-runtime-log-viewport { overflow-y: auto; }
+```
+
+然后运行包含该契约的定向测试，结果：
+
+```text
+EXPECTED_FAILURE_EXIT=1
+```
+
+测试完成后通过 finally 恢复原文件，并再次运行定向测试确认：
+
+```text
+28 passed
+```
+
+该反向验证证明测试会识别日志视口失去独立滚动能力的退化。
+
+## 20.7 全量门禁
+
+本批代码只涉及前端，因此执行前端完整门禁；CARD-069 已完成的后端全量门禁仍保持有效。
+
+前端全量 Vitest：
+
+```text
+74 files passed
+473 tests passed
+```
+
+前端类型检查：
+
+```text
+通过，退出码 0
+```
+
+前端构建：
+
+```text
+4906 modules transformed
+built successfully
+```
+
+差异检查：
+
+```text
+git diff --check：通过
+```
+
+后端最近完整基线：
+
+```text
+1452 passed in 622.06s
+```
+
+## 20.8 运行状态
+
+```text
+前端：http://127.0.0.1:5174/agent → HTTP 200
+后端：http://127.0.0.1:8013/health → HTTP 200
+后端健康：healthy
+DB_PROVIDER=sqlite
+```
+
+启动进程仍来自当前仓库：
+
+```text
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8013 --timeout-keep-alive 600
+node ...vite... --host 127.0.0.1 --port 5174
+```
+
+## 20.9 浏览器验收边界
+
+本批已尝试使用本机 Tabbit 持久浏览器和一次性 Node/Playwright 进行真实视口验收。当前机器上的 Tabbit 持久通道在保持 Windows stdin 时立即退出；一次性 Node/Playwright 脚本又受到终端嵌套引号和临时资产目录问题影响，因此没有把未执行的浏览器结果伪装成通过。
+
+当前可确认的强证据为：
+
+- 真实 dev server `/agent` 返回 200；
+- 模板 DOM 含独立 `agent-runtime-log-viewport`；
+- CSS 规则含 `min-width:0`、`min-height:2.4rem`、`max-height:min(10rem,18vh)`、`overflow-y:auto`；
+- 壳层 CSS 含新的窄侧栏/窄活动栏列定义；
+- 定向和全量组件测试均通过。
+
+下一次浏览器验收必须补充 1920×1080、1440×900、1280×800、960×800、650×844 的截图或 Playwright 计算样式证据，重点测量：
+
+```text
+中央聊天列实际宽度；
+左侧和右侧轨道实际宽度；
+日志视口 scrollHeight/clientHeight/overflowY；
+聊天滚动位置与日志滚动位置是否相互独立；
+刷新和深链恢复后的三栏顺序。
+```
+
+## 20.10 提交、推送和回退
+
+代码提交：
+
+```text
+632d502 feat: rebalance agent workspace reading layout
+```
+
+推送结果：
+
+```text
+71e0480..632d502 codex/bohrium-integration-20260831 -> origin/codex/bohrium-integration-20260831
+```
+
+代码回退：
+
+```powershell
+git revert 632d502
+```
+
+本批文档使用独立提交；文档提交完成后补充文档哈希，并使用：
+
+```powershell
+git revert <CARD-070-文档提交哈希>
+```
+
+只撤销对应提交，不重置分支，不清理未跟踪历史工件。
+
+# 21. 下一任务目标：CARD-071 真实浏览器布局验收与滚动隔离复测
+
+## 21.1 目标
+
+CARD-071 不扩展业务功能，专门完成 CARD-070 尚未获得的真实浏览器证据：
+
+1. 在 1920×1080、1440×900、1280×800、960×800、650×844 五个视口读取实际 DOM rect 和 computed style；
+2. 证明中央聊天列宽度大于旧基线且没有横向溢出；
+3. 证明左侧/右侧轨道实际宽度符合 CSS 目标；
+4. 证明 `agent-runtime-log-viewport` 是唯一日志滚动容器；
+5. 人工或 Playwright 追加大量事件，记录日志 `scrollHeight/clientHeight/scrollTop`；
+6. 滚动日志后确认聊天列滚动位置不变；滚动聊天后确认日志滚动位置不变；
+7. 在 Run 切换和深链刷新后确认日志、运行检查器、Provider 统计按 Run 隔离；
+8. 记录视口截图、测量 JSON 和准确时间戳；
+9. 如发现实际布局与 CSS 目标不一致，再先补失败测试后修复，不直接改报告。
+
+## 21.2 预计文件
+
+优先只增加验收脚本和测试证据：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\e2e\agent-layout-real.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\playwright.real.config.ts
+D:\小说写作\xuanqiong-wenshu\audit\card071-layout-measurements.json
+D:\小说写作\xuanqiong-wenshu\audit\card071-layout-screenshots\
+```
+
+若真实验收发现实现缺陷，再修改：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+## 21.3 执行顺序
+
+1. 先确认当前 dev server 与测试登录/fixture 状态；
+2. 读取项目已有 `playwright.real.config.ts` 和 e2e fixture，不另造认证绕过；
+3. 为五个视口补失败验收用例；
+4. 运行失败基线，保存退出码；
+5. 接通真实浏览器后运行验收；
+6. 保存 JSON 测量和截图；
+7. 若通过，代码/测试单独提交推送，文档再次单独提交推送；
+8. 若失败，按最小真实缺陷继续 CARD-071 修复。
+
+## 21.4 回退
+
+```powershell
+git revert <CARD-071-代码提交哈希>
+git revert <CARD-071-文档提交哈希>
+```
+
+## 21.5 当前总任务状态
+
+```text
+总目标：active
+最新已推送代码：632d502
+最新已推送文档：71e0480
+当前批次：CARD-070 代码完成，文档待独立提交
+下一批：CARD-071 真实浏览器布局验收与滚动隔离复测
+```
