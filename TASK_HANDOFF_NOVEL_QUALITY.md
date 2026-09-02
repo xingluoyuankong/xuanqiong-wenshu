@@ -83133,3 +83133,607 @@ CARD-072 文档推送：已完成
 当前任务目标：CARD-073
 总目标状态：active
 ```
+
+---
+
+# 2026-09-03｜CARD-073 完成记录：项目级 Provider 摘要接入与 Agent 工作台阅读布局重构
+
+> 本节记录 CARD-073 的真实代码、测试、浏览器验收和推送状态。代码与文档仍保持分离提交；历史未跟踪审计工件继续保留，不参与本批暂存。
+
+## 1. 任务目标与结果
+
+任务编号：`CARD-073`
+
+任务名称：前端消费项目级 Provider 摘要，并继续优化 Agent 工作台信息密度。
+
+本批实际完成：
+
+1. 前端 API 层新增项目级 Provider 摘要类型和请求方法；
+2. 工作台按当前项目加载并缓存项目级跨 Run 摘要；
+3. 左侧“数据与候选”区域展示项目累计 Provider 统计，不把日志或统计塞入中央聊天；
+4. 左侧分组标题、嵌套面板和内容区进一步收紧，减少大块标签和重复留白；
+5. 桌面三栏改为更小的左右轨道，把更多宽度交给中央聊天；
+6. 运行日志仍在右侧独立滚动，但默认高度由 `10rem/18vh` 压缩为 `7rem/14vh`；
+7. 五视口真实 Chromium 验收继续通过，横向溢出和聊天/日志滚动隔离保持成立；
+8. 项目摘要的加载、错误、空项目状态均有独立可读反馈；
+9. API、面板、工作台、布局和浏览器契约均补充回归测试；
+10. 代码独立提交并推送，当前下一目标切换为 `CARD-074`。
+
+完成状态：`completed`
+
+总目标状态：`active`
+
+## 2. 前端 API 真实变更
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\api\agent.ts
+```
+
+新增类型：
+
+```text
+AgentProjectProviderUsageRun
+AgentProjectProviderUsageSummary
+```
+
+类型字段与后端 CARD-072 响应一致：
+
+```text
+project_id
+run_count
+attempt_count
+succeeded_attempts
+failed_attempts
+fallback_attempts
+first_token_attempts
+digest_attempts
+selected_attempts
+last_error_category
+latest_attempt_at
+runs[]
+```
+
+新增请求：
+
+```text
+AgentAPI.getProjectProviderUsageSummary(projectId, input?)
+```
+
+请求行为：
+
+- 项目 ID 使用 `encodeURIComponent` 语义编码；
+- `since` 可选；
+- `limit` 可选并在客户端限制到 1～100；
+- 默认不附带空查询串；
+- 返回类型严格绑定到 `AgentProjectProviderUsageSummary`；
+- 不在前端对 Provider 原始输入、输出、提示词、headers、token 或 reasoning 做任何展示投影。
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\api\agent.spec.ts
+```
+
+新增请求契约测试确认：
+
+```text
+project/a → project%2Fa
+since=2026-09-03T00:00:00Z → 正确 URL 编码
+limit=999 → limit=100
+```
+
+## 3. 工作台数据流接入
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+新增按项目缓存：
+
+```text
+projectProviderUsageSummaryByProjectId
+projectProviderUsageSummaryLoadingByProjectId
+projectProviderUsageSummaryErrorByProjectId
+```
+
+新增计算投影：
+
+```text
+activeProjectProviderUsageSummary
+projectProviderUsageSummaryLoading
+activeProjectProviderUsageSummaryError
+```
+
+新增加载函数：
+
+```text
+loadProjectProviderUsageSummary(projectId = selectedProjectId.value)
+```
+
+加载时机：
+
+1. 工作台初始确定项目后读取一次；
+2. 用户切换项目后读取新项目；
+3. 项目摘要按项目 ID 缓存，切换回已读取项目时可以直接渲染已有数据；
+4. 加载失败只影响项目摘要状态，不清空聊天、当前 Run 或日志；
+5. 空项目由后端全零快照驱动前端空态，不通过前端猜测。
+
+模板把摘要明确放在：
+
+```text
+左栏 → 数据与候选 → AgentDataPanel → 项目 Provider 累计
+```
+
+没有把项目级统计渲染到：
+
+```text
+中央聊天消息列表
+右侧运行日志
+```
+
+这保持了“聊天是主界面、日志是诊断栏、项目数据是按需展开”的产品层次。
+
+## 4. 数据面板变更
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\data\AgentDataPanel.vue
+```
+
+新增面板：
+
+```text
+data-testid="agent-project-provider-usage-panel"
+```
+
+展示内容：
+
+```text
+项目短引用
+Run 数
+Provider 调用总数
+成功数
+失败数
+fallback 数
+首 token 数
+最近错误类别
+最近调用时间
+```
+
+状态分支：
+
+```text
+暂无选中的项目
+正在读取项目累计调用…
+项目 Provider 摘要暂时不可用
+当前项目暂无 Provider attempt 记录
+正常摘要
+```
+
+面板只展示后端安全读模型，不遍历 `context_json`，不展示 `runs[]` 内部任何原始 payload。
+
+新增测试：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\data\AgentDataPanel.spec.ts
+```
+
+覆盖：
+
+- 正常跨 Run 摘要；
+- 统计数字和最近错误可读；
+- 敏感正文不进入渲染文本；
+- 既有单 Run 摘要仍保持兼容；
+- 项目摘要和单 Run 摘要位于不同语义区域。
+
+## 5. 三栏阅读布局真实变更
+
+### 5.1 壳层轨道
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.vue
+```
+
+桌面默认轨道由：
+
+```css
+grid-template-columns: minmax(10rem, 12rem) minmax(0, 1fr) minmax(12rem, 14rem);
+```
+
+调整为：
+
+```css
+grid-template-columns: minmax(9.5rem, 11rem) minmax(0, 1fr) minmax(11rem, 12.5rem);
+```
+
+1120px 以下、960px 以上由：
+
+```css
+grid-template-columns: minmax(9.5rem, 10.5rem) minmax(0, 1fr) minmax(11.5rem, 12.5rem);
+```
+
+调整为：
+
+```css
+grid-template-columns: minmax(9rem, 10rem) minmax(0, 1fr) minmax(10.5rem, 11.5rem);
+```
+
+960px 以下仍切换为单栏，中央聊天优先显示；650px 以下继续保持移动端单栏。
+
+### 5.2 左栏压缩
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+实际收紧：
+
+```text
+.workspace-sidebar-stack gap: 0.4rem
+.workspace-section summary min-height: 1.75rem
+.workspace-section summary padding: 0.3rem 0.45rem
+左侧嵌套 xq-panel body padding: 0.45rem
+```
+
+结果：
+
+- 项目、会话、工具、数据四个入口仍保持语义分组；
+- 不删除已有功能；
+- 不把四组内容强行展开；
+- 默认以 `<details>` 折叠不常用信息；
+- 中央聊天无需与左侧长列表竞争高度和宽度。
+
+### 5.3 日志压缩与滚动隔离
+
+日志视口保持：
+
+```text
+data-testid="agent-runtime-log-viewport"
+```
+
+最终 CSS：
+
+```css
+.workspace-runtime-log-viewport {
+  min-width: 0;
+  min-height: 2rem;
+  max-height: min(7rem, 14vh);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+```
+
+事件列表仍保留：
+
+```text
+data-testid="agent-process-stream"
+LOG_RENDER_LIMIT = 120
+LOG_TAIL_THRESHOLD = 24
+ref="logListEl"
+```
+
+因此：
+
+- 日志不会进入中央聊天 DOM；
+- 日志拥有独立滚动容器；
+- 用户查看旧日志时聊天 `scrollTop` 不变化；
+- 用户查看聊天历史时日志 `scrollTop` 不变化；
+- 日志默认只占较小高度，详细内容通过独立滚动查看。
+
+## 6. 测试与验证证据
+
+### 6.1 失败基线一：功能契约
+
+先新增项目摘要测试，旧实现得到：
+
+```text
+2 failed, 22 passed
+```
+
+失败点：
+
+```text
+项目摘要面板不存在
+项目级 API 没有调用
+```
+
+实现 API、工作台加载和面板后，相关测试恢复：
+
+```text
+24 passed
+```
+
+### 6.2 失败基线二：布局契约
+
+先新增目标布局断言，旧 CSS 得到：
+
+```text
+1 failed, 10 passed
+```
+
+失败点：
+
+```text
+旧桌面轨道仍为 10–12rem / 12–14rem
+旧日志高度仍为 10rem / 18vh
+```
+
+调整壳层与日志 CSS 后，三份相关测试最终为：
+
+```text
+35 passed
+```
+
+### 6.3 API 与工作台定向回归
+
+最终四份定向文件：
+
+```text
+src/api/agent.spec.ts
+src/features/agent/AgentWorkspaceShell.spec.ts
+src/features/agent/data/AgentDataPanel.spec.ts
+src/views/AgentWorkspace.spec.ts
+```
+
+结果：
+
+```text
+4 files passed
+51 tests passed
+```
+
+### 6.4 反向破坏验证
+
+临时把日志高度恢复为旧值：
+
+```css
+max-height: min(10rem, 18vh);
+```
+
+然后运行布局契约测试，结果：
+
+```text
+EXPECTED_FAILURE_EXIT=1
+```
+
+验证完成后已恢复：
+
+```css
+max-height: min(7rem, 14vh);
+```
+
+工作区未保留破坏版本。
+
+### 6.5 前端类型检查
+
+命令：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+```
+
+结果：
+
+```text
+通过
+```
+
+### 6.6 全量前端单元测试
+
+命令：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run test:run
+```
+
+结果：
+
+```text
+Test Files 74 passed (74)
+Tests 476 passed (476)
+```
+
+### 6.7 生产构建
+
+命令：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run build-only
+```
+
+结果：
+
+```text
+4906 modules transformed
+built successfully
+```
+
+### 6.8 真实 Chromium 验收
+
+命令：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npx playwright test -c playwright.card071.config.ts
+```
+
+最终结果：
+
+```text
+7 passed (33.1s)
+```
+
+包含：
+
+```text
+1920×1080
+1440×900
+1280×800
+960×800
+650×844
+无横向溢出
+日志/聊天双向滚动隔离
+项目/工具/会话/Run 交互
+```
+
+## 7. 本批文件清单
+
+代码提交只包含以下 8 个 tracked 文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\api\agent.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\api\agent.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\data\AgentDataPanel.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\data\AgentDataPanel.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
+```
+
+历史未跟踪工件保持不变，尤其没有使用：
+
+```text
+git add -A
+git reset --hard
+批量删除
+覆盖历史审计目录
+```
+
+## 8. 提交、推送与回退
+
+代码提交：
+
+```text
+2175320 feat: connect project provider summary workspace
+```
+
+代码推送：
+
+```text
+d17d865..2175320 codex/bohrium-integration-20260831 -> origin/codex/bohrium-integration-20260831
+```
+
+代码回退：
+
+```powershell
+git revert 2175320
+```
+
+该回退只撤销 CARD-073 前端代码，不撤销 CARD-072 后端聚合。
+
+文档提交将在本节完成后独立产生；文档回退命令以本节“最终回写”记录为准。
+
+## 9. 当前运行状态
+
+```text
+前端：http://127.0.0.1:5174/agent → HTTP 200
+后端：http://127.0.0.1:8013/health → HTTP 200 healthy
+DB_PROVIDER=sqlite
+分支：codex/bohrium-integration-20260831
+远端：origin/codex/bohrium-integration-20260831
+```
+
+## 10. 下一目标：CARD-074 后端实时进度与流式可追溯契约
+
+用户的核心产品要求不仅是“有聊天界面”，还包括：
+
+```text
+AI 流式输出
+实时输出当前进度
+实时展示当前阶段
+实时展示工具调用和结果引用
+```
+
+CARD-074 不把“思考内容”当作任意内部推理正文直接暴露，而是把 Agent 的可观察工作过程结构化为安全、可回放的公开进度事件：
+
+```text
+progress_started
+progress_updated
+tool_started
+tool_completed
+tool_failed
+assistant_delta
+assistant_completed
+run_completed
+```
+
+### 10.1 CARD-074 目标
+
+1. 后端事件账本统一公开安全进度字段：阶段、动作、进度、可读摘要、引用 ID、序号和时间；
+2. Assistant 文本以增量事件流式传输，前端按序拼接，不重复追加；
+3. 进度事件和 Assistant 增量共享 `correlation_id`、`run_id`、`sequence`；
+4. 断线重连使用 `after_sequence` 回放，不丢事件、不重复消息；
+5. 内部 Prompt、Provider 原始响应、headers、token 和隐藏上下文继续留在服务端边界之外；
+6. Tool 事件可点击定位到 `action_id` / `result_ref`；
+7. Run terminal 事件严格单例，重连和轮询不重复产生 `assistant_completed` 或 `run_completed`；
+8. 进度展示作为 Agent 能力层，由模型/执行器产出事件，前端不硬编码小说正文或固定生成流程。
+
+### 10.2 预计后端文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\runner.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\execution.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\event_contracts.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\state_projection.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_worker.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_event_replay.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_runtime_route.py
+```
+
+### 10.3 CARD-074 实施顺序
+
+```text
+1. 审查当前 AgentEventRecord、SSE、runner、execution 的真实事件口径；
+2. 先新增事件序号、增量、重放和终端单例失败测试；
+3. 第一次定向执行必须形成失败基线；
+4. 实现公开进度事件投影与增量事件合并；
+5. 定向测试；
+6. 故意移除 after_sequence 或 terminal fence，确认测试退出码为 1；
+7. 恢复实现并执行完整后端 pytest；
+8. 代码单独提交、单独推送；
+9. 接续文档独立更新、独立提交、独立推送；
+10. CARD-075 再把结构化流式事件接到前端聊天主阅读区。
+```
+
+### 10.4 CARD-074 完成标准
+
+```text
+- Agent 文本可以按 delta 流式增量进入聊天；
+- 进度事件能显示当前阶段、动作和百分比；
+- 断线重连按 after_sequence 无缝续接；
+- 事件和消息不会重复；
+- Tool 事件能定位 action_id/result_ref；
+- 安全投影不含 Provider 原始正文和内部隐藏字段；
+- 后端全量 pytest 通过；
+- 代码与文档分别提交、分别推送；
+- 记录精确 git revert 点。
+```
+
+## 11. 最终回写
+
+```text
+CARD-072 代码提交：375c6ba
+CARD-072 文档提交链：e917ec6 → d17d865
+CARD-072 代码与文档推送：已完成
+CARD-073 代码提交：2175320
+CARD-073 代码推送：已完成
+CARD-073 文档提交：待本次文档提交完成后填入
+CARD-073 文档推送：待本次文档提交完成后确认
+当前任务目标：CARD-074
+总目标状态：active
+```
