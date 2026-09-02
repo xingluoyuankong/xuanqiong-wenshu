@@ -97,6 +97,30 @@ describe('agentEventReducer', () => {
     })
   })
 
+  it('projects response stream action and result references without changing visible delta text', () => {
+    const projection = reduceAgentRunEvent(
+      createAgentRunEventProjection(),
+      event({
+        sequence: 2,
+        event_type: 'assistant_delta',
+        data: {
+          content: '作者可见片段',
+          phase: 'assistant_response',
+          action_id: 'response:stream',
+          result_ref: 'response:run-1',
+          reasoning: 'HIDDEN_REASONING',
+        },
+      }),
+    ).projection
+
+    expect(projection.assistantText).toBe('作者可见片段')
+    expect(projection.events[0]).toMatchObject({
+      actionId: 'response:stream',
+      resultRef: 'response:run-1',
+    })
+    expect(JSON.stringify(projection)).not.toContain('HIDDEN_REASONING')
+  })
+
   it('projects action and result references for tool completion logs', () => {
     const projection = reduceAgentRunEvent(
       createAgentRunEventProjection(),

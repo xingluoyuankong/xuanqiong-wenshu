@@ -814,6 +814,9 @@ async def test_visible_response_provider_retry_uses_real_runner_and_completes_on
             assert (retry_run.status, retry_run.current_phase) == ("running", "assistant_response_retry")
             assert messages == []
             assert event_types.count("visible_response_retry_pending") == 1
+            retry_event = next(event for event in events if event.event_type == "visible_response_retry_pending")
+            assert retry_event.data_json["action_id"] == "response:retry"
+            assert retry_event.data_json["result_ref"] == f"response:{run_id}"
             assert event_types.count("assistant_completed") == 0
             assert event_types.count("run_completed") == 0
             job.available_at = AgentJobService._now()
@@ -839,6 +842,10 @@ async def test_visible_response_provider_retry_uses_real_runner_and_completes_on
             assert [item["status"] for item in snapshot["provider_attempts"]] == ["failed", "succeeded"]
             assert [item["error_category"] for item in snapshot["provider_attempts"][:1]] == ["TIMEOUT"]
             assert snapshot["selected_provider_attempt"] == 2
+            assistant_events = [event for event in events if event.event_type in {"assistant_started", "assistant_delta", "assistant_completed"}]
+            assert assistant_events
+            assert all(event.data_json.get("action_id") for event in assistant_events)
+            assert all(event.data_json.get("result_ref") == f"response:{run_id}" for event in assistant_events)
             assert event_types.count("visible_response_retry_pending") == 1
             assert event_types.count("assistant_completed") == 1
             assert event_types.count("run_completed") == 1

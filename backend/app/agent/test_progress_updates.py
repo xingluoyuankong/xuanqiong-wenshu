@@ -33,6 +33,7 @@ async def test_publish_progress_is_persisted_visible_and_monotonic(task_session)
         status="planning",
         phase="planning",
         action_id="plan:build",
+        result_ref="response:progress-run",
         progress=20,
         progress_message="正在构建计划。",
     )
@@ -54,6 +55,7 @@ async def test_publish_progress_is_persisted_visible_and_monotonic(task_session)
     events = await runtime.list_events(run_id=run.id, user_id=user.id, after_sequence=0)
     progress_events = [event for event in events if event.event_type == "progress_update"]
     assert [event.data_json["progress"] for event in progress_events] == [20.0, 20.0]
+    assert progress_events[0].data_json["result_ref"] == "response:progress-run"
     assert progress_events[-1].data_json == {
         "progress": 20.0,
         "phase": "tool_execution",
@@ -187,6 +189,8 @@ async def test_visible_response_emits_progress_for_start_delta_and_save(monkeypa
     progress = [entry["data"] for entry in events if entry["event_type"] == "progress_update"]
     assert progress[0]["progress"] == 85
     assert progress[0]["progress_message"] == "正在整理工具结果并生成可见回复。"
+    assert progress[0]["action_id"] == "response:started"
+    assert all(item["result_ref"] == f"response:{run_id}" for item in progress)
     assert any(item["progress"] > 85 and item["progress"] <= 95 for item in progress)
     assert progress[-1]["progress"] == 99
     assert messages == ["甲" * 300 + "。"]

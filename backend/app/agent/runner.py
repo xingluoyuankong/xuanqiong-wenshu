@@ -240,6 +240,7 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
     job_generation = 0
     run_generation = 0
     response_attempts = ProviderAttemptLedger(run_id=run_id)
+    response_result_ref = f"response:{run_id}"
     run_owner = (worker_id or _WORKER_ID)[:128]
     job_owner = f"agent:{run_owner}:{run_id}"[:128]
     try:
@@ -303,7 +304,7 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
                 user_id=user_id,
                 event_type="assistant_started",
                 summary="Agent 正在整理工具结果",
-                data={"phase": "assistant_response", "response_provider_called": False, "response_provider_fallback_reason": None},
+                data={"phase": "assistant_response", "action_id": "response:started", "result_ref": response_result_ref, "response_provider_called": False, "response_provider_fallback_reason": None},
             )
             await _publish_response_activity(
                 runtime,
@@ -316,7 +317,7 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
                 next_action="流式输出作者可见的综合回答。",
                 expected_output="可见创作建议或项目摘要。",
             )
-            await runtime.publish_progress(run_id=run_id, user_id=user_id, status="running", phase="assistant_response", progress=85, progress_message="正在整理工具结果并生成可见回复。")
+            await runtime.publish_progress(run_id=run_id, user_id=user_id, status="running", phase="assistant_response", action_id="response:started", result_ref=response_result_ref, progress=85, progress_message="正在整理工具结果并生成可见回复。")
             llm = LLMService(session)
             user_prompt = f"用户目标：{goal}\n已完成工具摘要：{_tool_context(tool_results)}\n请直接给用户可见答复。"
             async for delta in llm.stream_visible_response(
@@ -344,7 +345,7 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
                 if len(buffer) >= 32 or any(mark in buffer for mark in "。！？!?\n"):
                     await runtime.append_event(
                         run_id=run_id, user_id=user_id, event_type="assistant_delta",
-                        summary="Agent 正在输出回复", data={"content": buffer, "phase": "assistant_response", "response_provider_called": response_provider_called},
+                        summary="Agent 正在输出回复", data={"content": buffer, "phase": "assistant_response", "action_id": "response:stream", "result_ref": response_result_ref, "response_provider_called": response_provider_called},
                     )
                     target_progress = min(95, 85 + len(full_text) // 256)
                     if target_progress > reported_progress:
@@ -353,14 +354,16 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
                             user_id=user_id,
                             status="running",
                             phase="assistant_response",
+                            action_id="response:stream",
+                            result_ref=response_result_ref,
                             progress=target_progress,
                             progress_message=f"正在输出可见回复，已生成 {len(full_text)} 字。",
                         )
                         reported_progress = target_progress
                     buffer = ""
             if buffer:
-                await runtime.append_event(run_id=run_id, user_id=user_id, event_type="assistant_delta", summary="Agent 正在输出回复", data={"content": buffer, "phase": "assistant_response", "response_provider_called": response_provider_called})
-            await runtime.publish_progress(run_id=run_id, user_id=user_id, status="running", phase="assistant_response", progress=99, progress_message="可见回复已生成，正在保存最终消息。")
+                await runtime.append_event(run_id=run_id, user_id=user_id, event_type="assistant_delta", summary="Agent 正在输出回复", data={"content": buffer, "phase": "assistant_response", "action_id": "response:stream", "result_ref": response_result_ref, "response_provider_called": response_provider_called})
+            await runtime.publish_progress(run_id=run_id, user_id=user_id, status="running", phase="assistant_response", action_id="response:completed", result_ref=response_result_ref, progress=99, progress_message="可见回复已生成，正在保存最终消息。")
             if not full_text.strip():
                 full_text = "已完成项目内工具检查，但 Provider 未返回可展示的回答。"
                 await runtime.update_run_provider_provenance(
@@ -380,6 +383,8 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
                 "provider_called": response_provider_called,
                 "response_provider_called": response_provider_called,
                 "response_provider_fallback_reason": response_fallback_reason,
+                "action_id": "response:completed",
+                "result_ref": response_result_ref,
             }
             final_message = await runtime.finalize_visible_response(
                 run_id=run_id,
@@ -433,7 +438,7 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
                         await runtime.update_run(run_id=run_id, user_id=user_id, status="failed", phase="error")
                         await runtime.append_event(
                             run_id=run_id, user_id=user_id, event_type="run_failed", summary="Agent Provider 回复失败",
-                            data={"error_type": type(exc).__name__, "reason": str(exc)[:200], "phase": "error", "response_provider_called": response_called, "response_provider_fallback_reason": type(exc).__name__},
+                            data={"error_type": type(exc).__name__, "reason": str(exc)[:200], "phase": "error", "action_id": "response:failed", "result_ref": response_result_ref, "response_provider_called": response_called, "response_provider_fallback_reason": type(exc).__name__},
                         )
                         await _publish_response_activity(
                             runtime,
@@ -464,6 +469,8 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
                                 "error_type": type(exc).__name__,
                                 "reason": str(exc)[:200],
                                 "phase": "assistant_response_retry",
+                                "action_id": "response:retry",
+                                "result_ref": response_result_ref,
                                 "response_provider_called": response_called,
                                 "response_provider_fallback_reason": type(exc).__name__,
                             },
