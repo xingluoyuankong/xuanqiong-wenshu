@@ -111,9 +111,9 @@ async def collect_stream_with_attempt(
         if record is not None:
             if active_ledger is not None:
                 if isinstance(exc, GeneratorExit):
-                    active_ledger.cancel(record.attempt_id)
+                    active_ledger.fail(record.attempt_id, category="CANCELLED", output="".join(output))
                 else:
-                    active_ledger.fail(record.attempt_id, exc)
+                    active_ledger.fail(record.attempt_id, exc, output="".join(output))
         raise
     else:
         if record is not None:

@@ -130,13 +130,15 @@ class ProviderAttemptLedger:
         if output is not None: record.output_digest = hashlib.sha256(output.encode("utf-8")).hexdigest()
         return record
 
-    def fail(self, attempt_id: str, error: BaseException | None = None, *, http_status: int | None = None, category: str | None = None) -> ProviderAttemptRecord:
+    def fail(self, attempt_id: str, error: BaseException | None = None, *, http_status: int | None = None, category: str | None = None, output: str | None = None) -> ProviderAttemptRecord:
         record = self._records[attempt_id]
         record.status = "failed"
         record.finished_at = record.finished_at or _now()
         record.http_status = int(http_status) if http_status is not None else record.http_status
         record.error_category = category if category in ERROR_CATEGORIES else classify_provider_error(error, http_status=http_status)
         record.cancel_observed = record.error_category == "CANCELLED"
+        if output and not record.output_digest:
+            record.output_digest = hashlib.sha256(output.encode("utf-8")).hexdigest()
         return record
 
     def cancel(self, attempt_id: str) -> ProviderAttemptRecord:

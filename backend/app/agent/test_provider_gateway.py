@@ -28,6 +28,31 @@ async def test_gateway_records_stream_success_and_empty_stream():
 
 
 @pytest.mark.asyncio
+async def test_gateway_records_partial_stream_digest_when_provider_fails():
+    ledger = ProviderAttemptLedger(run_id="run-partial-failure")
+
+    async def partial_failure():
+        yield {"content": "已经输出的可见片段"}
+        raise TimeoutError("provider disconnected after partial output")
+
+    with pytest.raises(TimeoutError, match="provider disconnected"):
+        async for _part in collect_stream_with_attempt(
+            partial_failure(),
+            role="response",
+            provider_ref="fixture",
+            model_ref="model",
+            ledger=ledger,
+        ):
+            pass
+
+    record = ledger.snapshot()["provider_attempts"][0]
+    assert record["status"] == "failed"
+    assert record["error_category"] == "TIMEOUT"
+    assert record["output_digest"]
+    assert "已经输出的可见片段" not in str(record)
+
+
+@pytest.mark.asyncio
 async def test_gateway_records_non_stream_failure_without_raw_error():
     ledger = ProviderAttemptLedger(run_id="run-failure")
 
