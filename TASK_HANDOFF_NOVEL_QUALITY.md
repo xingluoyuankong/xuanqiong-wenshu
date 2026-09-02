@@ -82717,3 +82717,419 @@ active
 CARD-071 文档提交：待本次独立提交后填入
 下一批：CARD-072 后端跨 Run Provider 用量聚合
 ```
+
+---
+
+# 2026-09-03｜CARD-072 完成记录：项目级 Provider 用量聚合与跨 Run 可追溯摘要
+
+> 本节是本次代码优化的独立接续记录。此前章节、历史审计工件和未跟踪文件均保持原状；本节只记录本次实际发生的改动、验证和下一步目标。
+
+## 1. 本批任务目标与完成状态
+
+任务编号：`CARD-072`
+
+任务名称：后端跨 Run Provider 用量聚合与项目级可追溯摘要。
+
+本批目标：
+
+1. 在已有 CARD-069 单 Run Provider usage summary 之上，增加用户/项目范围的跨 Run 聚合；
+2. 让项目级统计复用单 Run 统计口径，避免前后端各自硬编码 Provider 事实；
+3. 对 Run 数、Provider attempt 数、成功/失败、fallback、首 token、digest、selected、最近错误与最近调用时间形成稳定的安全读模型；
+4. 增加时间窗口和有界 Run 数，避免无限扫描历史记录；
+5. 项目与用户所有权校验失败统一返回安全 404；
+6. 保留敏感正文隔离：响应中不得出现 Provider input/output、prompt、headers、token、reasoning 或 `context_json` 原文；
+7. 先写失败测试，再实现，再做反向破坏验证，最后执行全量后端门禁；
+8. 代码和任务文档分开提交、分开推送，并记录精确回退点。
+
+完成状态：`completed`
+
+总目标状态：`active`
+
+下一目标已设置为：`CARD-073｜前端消费项目级 Provider 摘要，并继续压缩左栏/日志栏、扩大中央聊天阅读区`。
+
+## 2. 当前真实代码状态
+
+### 2.1 新增 API
+
+```text
+GET /api/agent/projects/{project_id}/provider-usage-summary
+```
+
+路由文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+```
+
+路由行为：
+
+- `project_id` 先经过项目 owner 查询；
+- `since` 为可选 ISO datetime 时间窗口；
+- `limit` 为 1～100 的有界参数，默认 100；
+- 项目不存在或不属于当前用户时返回 HTTP 404，错误代码沿用 `AGENT_NOT_FOUND`；
+- 只返回安全摘要，不返回原始 Provider 内容；
+- 通过 `AgentProjectProviderUsageSummaryRead` 做严格响应校验。
+
+### 2.2 新增安全响应模型
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\schemas.py
+```
+
+新增：
+
+```text
+AgentProjectProviderUsageRunRead
+AgentProjectProviderUsageSummaryRead
+```
+
+项目级响应字段：
+
+```text
+project_id
+run_count
+attempt_count
+succeeded_attempts
+failed_attempts
+fallback_attempts
+first_token_attempts
+digest_attempts
+selected_attempts
+last_error_category
+latest_attempt_at
+runs[]
+```
+
+`runs[]` 只包含：
+
+```text
+run_id
+status
+attempt_count
+failed_attempts
+fallback_attempts
+last_error_category
+latest_attempt_at
+```
+
+响应模型使用 `extra='forbid'`，防止后续误把 payload 字段扩散到公开读模型。
+
+### 2.3 统计逻辑重构
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\execution_facts.py
+```
+
+新增内部投影：
+
+```text
+AgentExecutionFactService._provider_attempt_summary(context)
+```
+
+该 helper 同时服务：
+
+```text
+provider_usage_summary(run_id=..., user_id=...)
+project_provider_usage_summary(project_id=..., user_id=...)
+```
+
+Provider attempt 的真实字段来源于：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\provider_attempt.py
+```
+
+已核实的持久化字段：
+
+```text
+attempt_id
+attempt
+role
+provider_ref
+model_ref
+status
+started_at
+first_token_at
+finished_at
+error_category
+http_status
+retry_index
+fallback_from_attempt
+cancel_observed
+output_digest
+```
+
+项目摘要的时间口径：
+
+```text
+finished_at → first_token_at → started_at
+```
+
+如果时间字段缺失或格式无法解析，则保留该字段的安全文本投影；旧历史快照的 `last_error_category` 仍按 Provider attempt 列表的持久化顺序取最后一个带类别的失败项，保证历史数据兼容。
+
+项目 Run 查询顺序：
+
+```text
+AgentRun.project_id == project_id
+AgentRun.user_id == user_id
+ORDER BY created_at DESC, id DESC
+LIMIT bounded_limit
+```
+
+这同时保证：
+
+- 项目边界与用户边界在 SQL 查询层成立；
+- 相同时间戳下仍有稳定的 id 二级排序；
+- 聚合扫描是有界的；
+- `since` 只收录窗口内 Run；
+- 空项目返回全零摘要而非异常。
+
+### 2.4 保持 CARD-069 兼容
+
+旧接口仍为：
+
+```text
+GET /api/agent/runs/{run_id}/provider-usage-summary
+```
+
+本批将单 Run 的原始统计循环迁移为共享 helper 后，仍保持原字段：
+
+```text
+run_id
+total_attempts
+succeeded_attempts
+failed_attempts
+fallback_attempts
+first_token_attempts
+digest_attempts
+selected_attempts
+last_error_category
+latest_first_token_at
+```
+
+没有把项目级内部字段 `attempt_count` 或 `latest_attempt_at` 泄漏到旧接口，避免既有前端和调用方契约漂移。
+
+## 3. 测试、失败基线与反向验证
+
+### 3.1 先失败再实现
+
+新增测试先引用尚不存在的项目路由，第一次定向执行得到真实收集失败：
+
+```text
+ImportError: cannot import name 'get_agent_project_provider_usage_summary'
+EXPECTED_FAILURE_EXIT=1
+```
+
+随后才实现 schema、service helper、项目聚合和路由。
+
+### 3.2 定向回归
+
+定向测试命令：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_execution_facts.py app/api/routers/test_agent_runtime_route.py -k "provider_usage_summary"
+```
+
+最终结果：
+
+```text
+5 passed, 26 deselected
+```
+
+覆盖内容：
+
+- 单 Run 既有统计兼容；
+- 项目内多个 Run 合并；
+- 其他项目排除；
+- 其他用户排除；
+- `since` 时间窗口；
+- `limit` 有界取 Run；
+- 空项目全零快照；
+- owner scope 404；
+- `SECRET_INPUT`、`SECRET_OUTPUT` 及旧快照敏感文本不进入摘要；
+- `finished_at` 优先于 `first_token_at` 的最近调用时间口径。
+
+### 3.3 反向破坏验证
+
+临时移除项目 owner 谓词：
+
+```python
+select(NovelProject).where(NovelProject.id == project_id)
+```
+
+故意让其他用户能够读取项目后，两个 owner-scope 测试均按预期失败：
+
+```text
+2 failed, 29 deselected
+EXPECTED_FAILURE_EXIT=1
+```
+
+失败点分别为：
+
+```text
+AgentExecutionFactNotFound 未抛出
+HTTPException(status_code=404) 未抛出
+```
+
+验证完成后已恢复原实现，当前工作区未保留破坏代码。
+
+### 3.4 全量后端门禁
+
+第一次全量运行结果：
+
+```text
+1453 passed, 1 failed
+```
+
+唯一失败为既有独立 ASGI worker 测试在 60 秒启动窗口内发生时序超时；失败发生于 worker health 等待阶段，未进入 CARD-072 逻辑。单独复跑同测试：
+
+```text
+1 passed in 23.03s
+```
+
+恢复后再次执行规定的完整命令，最终结果：
+
+```text
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+
+1454 passed in 355.56s (0:05:55)
+```
+
+因此本批最终后端门禁为绿色，且包含新增测试。
+
+## 4. 本批变更文件清单
+
+仅以下 5 个 tracked 文件进入代码提交：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\execution_facts.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\schemas.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_execution_facts.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_runtime_route.py
+```
+
+明确未纳入本批代码提交的历史未跟踪工件包括：
+
+```text
+.audit-*.txt
+.claude/
+.zcode/
+audit/
+backend/_*.py / backend/_*.txt / backend/_*.tmp
+backend/prompts/contracts/
+backend/storage/novel_imports/
+backend/storage/style_uploads/
+frontend/.audit-*.txt
+node_modules/
+```
+
+上述工件按项目规则全部保留，不作批量暂存、删除或覆盖。
+
+## 5. 提交、推送和精确回退点
+
+### 5.1 代码提交
+
+```text
+375c6ba feat: add project provider usage summary
+```
+
+代码已推送：
+
+```text
+a621ea4..375c6ba codex/bohrium-integration-20260831 -> origin/codex/bohrium-integration-20260831
+```
+
+代码回退命令：
+
+```powershell
+git revert 375c6ba
+```
+
+该回退只撤销 CARD-072 代码提交，不触碰本批之后的文档提交。
+
+### 5.2 文档提交
+
+本节完成后，文档将使用独立提交推送；提交哈希写入本节末尾的“最终回写”小节，避免把文档和代码混在一个不可分辨的回退点内。
+
+## 6. 运行时状态（本批完成时）
+
+```text
+前端：http://127.0.0.1:5174/agent → HTTP 200
+后端：http://127.0.0.1:8013/health → HTTP 200
+后端响应：{"status":"healthy","app":"玄穹文枢 API","version":"1.0.0"}
+DB_PROVIDER=sqlite
+当前分支：codex/bohrium-integration-20260831
+远端：origin/codex/bohrium-integration-20260831
+```
+
+新路由已在 FastAPI 应用中注册：
+
+```text
+/api/agent/projects/{project_id}/provider-usage-summary → GET
+```
+
+## 7. CARD-073 下一步任务目标：前端项目级摘要与阅读区继续优化
+
+当前任务目标已切换为：
+
+```text
+CARD-073｜前端消费项目级 Provider 摘要，并继续优化 Agent 工作台信息密度
+```
+
+目标不改变“聊天是主界面”的产品方向，具体拆为：
+
+1. 在 `frontend/src/api/agent.ts` 增加项目级摘要类型和读取函数；
+2. 在 `frontend/src/features/agent/data/AgentDataPanel.vue` 增加紧凑项目摘要入口，默认展示计数和最近错误，不把日志塞入中央聊天；
+3. 左侧项目/会话/工具/数据标签压缩为分组、折叠和摘要式入口，避免多个大卡片垂直堆叠；
+4. 中央聊天保持第一视觉层级，消息列表、流式文本和用户输入区拥有最大可用宽度；
+5. 右侧日志维持独立滚动，进一步限制默认高度，只展示最近活动和可展开详情；
+6. 保持项目、会话、Run、Provider、Tool、Event 之间的 ID 引用可定位；
+7. 前端先补失败测试：类型/请求参数、项目切换、空摘要、错误状态、滚动隔离和宽度阈值；
+8. 真实 Chromium 至少复测 1920、1440、1280、960、650 五个视口；
+9. 每个可交付优化仍执行：失败测试 → 实现 → 定向测试 → 反向验证 → 全量门禁 → 代码独立提交推送 → 文档独立提交推送；
+10. CARD-073 完成后再评估下一项后端 Agent 事件/流式进度契约，不在前端硬编码小说生成内容。
+
+预计文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\api\agent.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\data\AgentDataPanel.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\e2e\agent-workspace.spec.ts
+```
+
+CARD-073 完成标准：
+
+```text
+- 项目摘要真实来自 GET /api/agent/projects/{project_id}/provider-usage-summary；
+- 左栏不再以大块标签挤压中央聊天；
+- 日志不占据中央聊天，也不与聊天共享滚动容器；
+- 五视口无横向溢出；
+- 聊天区域在桌面视口保持主要宽度；
+- 空项目、无 Provider 调用和错误响应均有可读状态；
+- npm run type-check 通过；
+- npm run test:run 通过；
+- npm run build-only 通过；
+- 真实 Chromium 验收通过；
+- 代码和文档分别提交、分别推送并记录回退点。
+```
+
+## 8. 最终回写（文档提交完成后填写）
+
+```text
+CARD-072 代码提交：375c6ba
+CARD-072 文档提交：待本次文档提交完成后填入
+CARD-072 代码推送：已完成
+CARD-072 文档推送：待本次文档提交完成后确认
+当前任务目标：CARD-073
+总目标状态：active
+```
