@@ -1120,6 +1120,24 @@ class AgentRuntimeService:
             run.latest_public_summary_json = validated.model_dump(mode="json")
             run.latest_public_summary_sequence = event.sequence
             run.latest_public_summary_at = self._now()
+            # The public summary is the author-visible description of the
+            # current Agent action. Keep the top-level read model aligned with
+            # that checkpoint so a state refresh cannot show an old phase or
+            # step beside the newest activity card. Step order is monotonic;
+            # late summaries must not move the Run backwards.
+            state_changed = False
+            if run.status not in TERMINAL_RUN_STATUSES:
+                normalized_phase = validated.phase[:80]
+                if run.current_phase != normalized_phase:
+                    run.current_phase = normalized_phase
+                    state_changed = True
+                if validated.step_order is not None:
+                    normalized_step = max(0, int(validated.step_order))
+                    if normalized_step > int(run.current_step or 0):
+                        run.current_step = normalized_step
+                        state_changed = True
+            if state_changed:
+                run.state_version = max(0, int(run.state_version or 0)) + 1
             if not commit:
                 return event
             try:

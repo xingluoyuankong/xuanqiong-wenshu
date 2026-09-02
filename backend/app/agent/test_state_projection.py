@@ -207,3 +207,32 @@ async def test_state_projection_exposes_command_fences_and_server_allowed_comman
     ]
 
 
+
+@pytest.mark.asyncio
+async def test_public_summary_keeps_run_state_projection_in_sync(task_session):
+    user = await _user(task_session, 1811, "projection-summary-state-sync")
+    runtime = AgentRuntimeService(task_session)
+    agent_session = await runtime.create_session(user_id=user.id)
+    run = await runtime.create_run(session_id=agent_session.id, user_id=user.id)
+    before_version = int(run.state_version or 0)
+
+    await runtime.append_public_work_summary(
+        run_id=run.id,
+        user_id=user.id,
+        summary={
+            "action_id": "tool:state-sync",
+            "phase": "tool_execution",
+            "current_action": "正在执行状态同步测试。",
+            "input_scope": [{"kind": "project"}],
+            "selected_capability": "project.context",
+            "step_order": 3,
+        },
+    )
+
+    projection = await AgentStateProjectionService(task_session).get_run_state(run_id=run.id, user_id=user.id)
+
+    assert projection["phase"] == "tool_execution"
+    assert projection["current_step"] == 3
+    assert projection["state_version"] == before_version + 1
+    assert projection["latest_public_summary"]["phase"] == projection["phase"]
+    assert projection["latest_public_summary"]["step_order"] == projection["current_step"]
