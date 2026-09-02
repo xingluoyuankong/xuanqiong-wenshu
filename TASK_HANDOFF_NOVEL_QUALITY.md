@@ -78781,3 +78781,301 @@ cd D:\小说写作\xuanqiong-wenshu\backend
 ```
 
 8. CARD-061 完成后再继续前端“动作详情/结果定位”交互，避免先改 UI 再补事实源。
+
+
+---
+
+# CARD-061 实际完成记录：Agent 动作与执行结果稳定引用贯通（2026-09-02）
+
+## 1. 问题证据
+
+CARD-060 已让 Agent execution 使用 Run-bound capability snapshot，但工具动作的公开事件仍主要依赖 `tool_name + step`，而关系化 `AgentCapabilityExecution.execution_id` 没有贯通到公开日志。实际表现是：
+
+```text
+progress_update 有 action_id；
+tool_call_started 没有 action_id；
+tool_call_completed 没有 action_id/result_ref；
+AgentCapabilityExecution 虽然有 execution_id，但前端日志无法定位它；
+```
+
+因此用户看到的运行日志不能从“正在调用某个工具”直接追踪到对应的 checkpoint、关系化执行事实和结果摘要。
+
+先在真实 Worker 回归中增加稳定引用断言，旧实现失败：
+
+```text
+KeyError: 'action_id'
+```
+
+失败位置是 `tool_call_started` 事件，证明该问题存在于实际 durable execution 链，而不是单纯 UI 文案。
+
+## 2. 后端实际变更
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\execution.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_worker.py
+```
+
+### 2.1 稳定 action_id
+
+每个已创建的 `AgentRunStep` 使用：
+
+```text
+action_id = step:<checkpoint.id>
+```
+
+该 ID 在同一工具动作的以下事件中保持不变：
+
+```text
+progress_update；
+tool_call_started；
+tool_call_completed；
+tool_call_failed；
+tool_cancelled；
+step_reused；
+public_work_summary。
+```
+
+### 2.2 稳定 result_ref
+
+关系化 Run 存在 `AgentCapabilityExecution` 时，工具执行完成后使用：
+
+```text
+result_ref = execution:<capability_execution.execution_id>
+```
+
+在旧 Run 或没有关系化 execution fact 的兼容路径中，回退为：
+
+```text
+result_ref = step:<checkpoint.id>
+```
+
+结果引用只记录关系化 ID，不把工具结果正文写入事件日志。
+
+### 2.3 后端事件白名单
+
+扩展 `AgentRuntimeService` 的公开事件字段白名单：
+
+```text
+tool_call_started：增加 action_id；
+tool_call_progress：增加 action_id/result_ref；
+tool_call_completed：增加 action_id/result_ref；
+tool_call_result：增加 action_id/result_ref；
+tool_call_failed：增加 action_id/result_ref；
+tool_cancelled：增加 action_id/result_ref；
+step_reused：增加 action_id/result_ref。
+```
+
+已有隐藏字段过滤、历史回放清洗和长度边界继续生效。
+
+## 3. 前端实际变更
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\utils\agentEventSafety.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\utils\agentEventSafety.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
+```
+
+### 3.1 浏览器安全归一化
+
+`result_ref` 加入公开文本字段白名单，继续经过长度限制和隐藏字段过滤；未知字段、正文内容和 reasoning 不进入安全事件。
+
+### 3.2 Reducer 投影
+
+`AgentDisplayEvent` 新增：
+
+```ts
+resultRef?: string
+```
+
+工具完成、失败、取消和复用事件的 `data.result_ref` 会投影到 `resultRef`，与既有 `actionId`、`phase`、`progress` 并列。
+
+### 3.3 右侧日志展示
+
+右侧独立日志增加：
+
+```text
+结果：execution:<execution_id>
+```
+
+日志元信息容器在只有 `resultRef` 时也会显示，避免迁移/旧数据中没有 actionId 时隐藏结果定位信息。结果正文仍不进入日志，中央聊天区职责不变。
+
+## 4. 失败驱动与修复过程
+
+### 4.1 后端失败
+
+新增 Worker 断言后，旧实现真实失败：
+
+```text
+KeyError: 'action_id'
+```
+
+修复开始事件、进度事件、完成事件及白名单后，Worker 回归通过。
+
+### 4.2 前端失败
+
+同时增加三层断言，旧实现分别失败：
+
+```text
+安全层：result_ref 没有进入 SafeAgentEvent.data；
+Reducer：resultRef 没有进入 AgentDisplayEvent；
+工作台：日志模板没有“结果：{{ event.resultRef }}”。
+```
+
+修复三层后，结果定位定向回归通过。
+
+### 4.3 兼容性验证
+
+CARD-060 引入 `registry=` 后，既有测试中的 `lambda provider` fixture 首先暴露参数不兼容；已改为接受 `**kwargs`，保留原有行为断言。该调整证明生产路径新增的 Run-bound registry 参数确实穿过了 Worker 和路由测试链。
+
+## 5. 定向测试
+
+后端：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_worker.py -k "execution_after_enqueue"
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_execution_capability_fence.py app/agent/test_runner.py -k "run_bound_registry or recovery_uses_run_bound_registry"
+```
+
+结果：
+
+```text
+动作/结果引用 Worker 测试：1 passed；
+Run-bound 与恢复路径：2 passed。
+```
+
+前端：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run test:run -- src/utils/agentEventSafety.spec.ts src/features/agent/reducers/agentEventReducer.spec.ts src/views/AgentWorkspace.spec.ts -t "result_ref|结果引用|projects action"
+```
+
+结果：
+
+```text
+3 passed，33 skipped。
+```
+
+## 6. 反向验证
+
+### 6.1 后端
+
+临时移除 `tool_call_started` 的 `action_id`，Worker 回归真实失败：
+
+```text
+KeyError: 'action_id'
+1 failed, 15 deselected
+BACKEND_EXPECTED_FAILURE_EXIT=1
+```
+
+### 6.2 前端
+
+临时移除安全层的 `result_ref` 字段，前端回归真实失败：
+
+```text
+result_ref 断言缺失；
+1 failed, 9 skipped
+FRONTEND_EXPECTED_FAILURE_EXIT=1
+```
+
+验证结束后两处实现均已恢复。
+
+## 7. 全量门禁
+
+后端全量：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+结果：
+
+```text
+1446 passed in 574.61s (0:09:34)
+```
+
+前端全量：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+npm run test:run
+npm run build-only
+```
+
+结果：
+
+```text
+npm run type-check：通过；
+npm run test:run：74 files passed，462 tests passed；
+npm run build-only：4905 modules transformed，built successfully。
+```
+
+最后一处日志元信息条件修复后，工作台定向测试仍通过，浏览器实时测量保持：
+
+```text
+1258×622 视口；
+.agent-layout grid：128px 834px 168px；
+.workspace-log-list max-height：约 68px。
+```
+
+## 8. 提交、推送与回退
+
+代码提交：
+
+```text
+94ad00f feat: link agent actions to execution results
+```
+
+已推送到：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+代码回退：
+
+```powershell
+git revert 94ad00f
+```
+
+该回退只撤销 CARD-061 的动作/结果引用贯通和对应测试，不影响 CARD-049 至 CARD-060；文档使用独立提交。
+
+## 9. 当前 Agent 化能力状态
+
+截至 2026-09-02：
+
+```text
+Run 创建时冻结 Catalog Release、Capability Resolution、Context Snapshot；
+执行和恢复均使用 Run-bound Tool Registry；
+Planner 只从当前 Run 快照能力集合中选工具；
+ContextRef 负责将项目/章节/版本/Artifact 上下文投影为工具参数；
+工具动作具有稳定 step:<checkpoint.id> action_id；
+关系化执行具有 execution:<execution_id> result_ref；
+progress/log/public summary/step reuse 共享动作引用；
+历史接口与 SSE 共享读取端公开 payload 清洗；
+Provider 流式失败可保留 partial output digest；
+中央聊天是主要阅读区，右侧日志独立滚动，左侧分组紧凑可折叠。
+```
+
+## 10. 下一任务目标：CARD-062 前端动作详情与结果定位交互
+
+CARD-062 继续以事实源优先，但转入前端交互：
+
+1. 盘点 `AgentRunInspector`、`AgentToolResultPanel`、右侧日志和 `result_ref` 的现有显示职责。
+2. 让作者点击日志中的动作/结果引用后，可以在右侧运行详情中定位对应的 step/execution 摘要；不把结果正文塞进日志，不复制中央聊天内容。
+3. 按 Run 隔离动作定位状态，切换历史 Run 后清理旧的高亮、展开项和结果摘要。
+4. 对缺失或已过期的 `result_ref` 展示可读的“结果已不可用/正在恢复”状态，不抛出未处理异常。
+5. 先写前端失败测试，再实现最小交互；必要时补后端只读查询接口，但不新增页面硬编码工具列表。
+6. 用浏览器真实点击和截图验证：日志仍独立滚动、中央聊天不被挤压、动作定位可追踪。
+7. 代码提交、文档提交、反向验证和门禁继续分离推送。
