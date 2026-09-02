@@ -85188,3 +85188,342 @@ CARD-074-B2 文档回退：git revert d3e3263（回写提交完成后再补最�
 当前任务目标：CARD-075
 总目标状态：active
 ```
+
+---
+
+# 2026-09-03 追加记录：CARD-075 实际完成与下一轮工作切换
+
+> 本节是对前文 CARD-075 计划的实际结果回写。前文的预计文件、旧状态和旧提交号不再作为当前状态依据；当前状态以本节记录、工作树、远端分支和实际命令输出为准。
+
+## A. 本次任务目标
+
+本批唯一代码目标：
+
+```text
+CARD-075｜把结构化进度和公开工作轨迹接入中央聊天主阅读区。
+```
+
+必须保持的产品约束：
+
+```text
+1. 中央聊天仍是 Agent 工作台主阅读区；
+2. 当前阶段、动作、进度和公开工作轨迹实时可见；
+3. 不展示内部推理正文、Provider 原始响应或密钥；
+4. 日志保持右侧独立区域，不挤占中央聊天；
+5. 不改变左侧项目、会话、工具、数据折叠结构；
+6. 断线、回放和终端事件的既有行为保持不变。
+```
+
+## B. 修改前真实失败基线
+
+在生产实现增加前，先执行新增回归断言。旧实现下得到：
+
+```text
+[data-testid="agent-progress-meter"] 不存在
+[data-testid="agent-live-trace"] 不存在
+```
+
+这证明测试先于实现，并且失败点对应本批真实缺口，而非仅修改文档或调整通过条件。
+
+## C. 实际代码变更
+
+### C.1 中央聊天当前进度区
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.vue
+```
+
+变更：
+
+```text
+1. current-progress 增加 aria-live="polite"；
+2. latestProgress 存在时渲染 agent-progress-meter；
+3. progress 使用原生 progress 元素，最大值为 100；
+4. aria-label 包含经过 Math.round 的公开进度百分比；
+5. 保留已有 message、phase、actionId 文本投影。
+```
+
+### C.2 latestWorkTrace 兜底活动卡
+
+当没有 latestProgressMessage、但存在公开 latestWorkTrace 时，中央聊天增加：
+
+```text
+[data-testid="agent-live-trace"]
+```
+
+展示字段严格限于公开结构化信息：
+
+```text
+message
+phase
+actionId
+resultRef
+progress
+```
+
+同时渲染：
+
+```text
+[data-testid="agent-live-trace-meter"]
+```
+
+不渲染内部推理正文、Provider 原始 payload、token、密钥或隐藏字段。
+
+### C.3 回归测试
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.spec.ts
+```
+
+新增断言：
+
+```text
+1. 当前进度区存在 progress meter；
+2. progress meter.value 正确反映 42；
+3. 当前进度区 aria-live 为 polite；
+4. 只有 latestWorkTrace 时中央聊天仍显示实时活动；
+5. 活动卡显示阶段、动作、公开结果引用和 38%；
+6. 活动卡 progress meter.value 正确反映 38。
+```
+
+## D. 本批验证证据
+
+### D.1 定向测试
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npx vitest run src/features/agent/AgentConversation.spec.ts
+```
+
+结果：
+
+```text
+5 passed
+```
+
+涉及 Agent reducer、stream hook 和 Conversation 的联合定向回归结果：
+
+```text
+21 passed
+```
+
+### D.2 反向破坏验证
+
+临时将实时活动卡渲染条件替换为：
+
+```vue
+v-if="false"
+```
+
+重新执行对应测试，结果：
+
+```text
+EXPECTED_FAILURE_EXIT=1
+```
+
+随后恢复正确实现；破坏版本没有进入提交。
+
+### D.3 类型检查
+
+```powershell
+npm run type-check
+```
+
+结果：
+
+```text
+通过
+```
+
+### D.4 生产构建
+
+```powershell
+npm run build-only
+```
+
+结果：
+
+```text
+✓ 4906 modules transformed.
+✓ built in 25.90s
+```
+
+### D.5 前端全量单元测试
+
+```powershell
+npm run test:run
+```
+
+结果：
+
+```text
+Test Files  74 passed (74)
+Tests       477 passed (477)
+Duration    86.81s
+```
+
+### D.6 真实 Chromium 验收
+
+```powershell
+npx playwright test -c playwright.card071.config.ts
+```
+
+结果：
+
+```text
+7 passed (15.6s)
+```
+
+覆盖项目和工具注册表、历史 Run 深链、Artifact ContextRef、真实运行摘要、恢复/DLQ，以及 CARD-071 五视口布局测量和日志/聊天滚动隔离。
+
+五视口必须保持的布局事实：
+
+```text
+1920×1080
+1440×900
+1280×800
+960×800
+650×844
+```
+
+实际验收保持通过，中央聊天仍为主阅读区，日志仍在右侧独立滚动区域。
+
+## E. 提交、推送和精确回退点
+
+代码提交：
+
+```text
+d15d35e feat: show structured agent progress in chat
+```
+
+推送：
+
+```text
+ab97249..d15d35e codex/bohrium-integration-20260831 -> origin/codex/bohrium-integration-20260831
+```
+
+精确回退命令：
+
+```powershell
+git revert d15d35e
+```
+
+该命令只回退 CARD-075 两个代码/测试文件，不回退 CARD-072、CARD-073、CARD-074-A、CARD-074-B1 或 CARD-074-B2。
+
+代码提交和任务接续文档提交保持分离；本节文档提交将在代码提交之后单独产生并单独推送。
+
+## F. 当前工作树与运行状态
+
+截至 2026-09-03，当前事实为：
+
+```text
+分支：codex/bohrium-integration-20260831
+远端：origin/codex/bohrium-integration-20260831
+前端：D:\小说写作\xuanqiong-wenshu\frontend → 127.0.0.1:5174
+后端：D:\小说写作\xuanqiong-wenshu\backend → 127.0.0.1:8013
+前端 /agent：HTTP 200
+后端 /health：HTTP 200
+后端健康体：{"status":"healthy","app":"玄穹文枢 API","version":"1.0.0"}
+CARD-072：completed
+CARD-073：completed
+CARD-074-A：completed
+CARD-074-B1：completed
+CARD-074-B2：completed
+CARD-075：completed（代码已推送，文档回写进行中）
+总目标：active
+```
+
+历史未跟踪审计、恢复和导入工件继续原样保留，尤其包括：
+
+```text
+.audit-*.txt
+.claude/
+.zcode/
+audit/
+backend/_*.py
+backend/_*.txt
+backend/_*.tmp
+backend/app/agent/test_subprocess_event_replay.py
+backend/app/api/routers/.research.patch
+backend/app/services/task_runtime.py.orig
+backend/prompts/contracts/
+backend/storage/novel_imports/
+backend/storage/style_uploads/
+frontend/.audit-*.txt
+node_modules/
+```
+
+本次代码提交没有使用 `git add -A`，没有清理、重置或覆盖以上工件。
+
+## G. 下一任务目标：CARD-076 后端运行时公开状态契约
+
+按照总目标“先继续优化后端，再逐步继续前端”，CARD-075 完成后切换到后端优先：
+
+```text
+CARD-076｜审查并强化 Agent Runtime 的公开运行状态 checkpoint，保证聊天主界面可稳定读取阶段、动作、进度、结果引用和终端状态。
+```
+
+### G.1 CARD-076 必须解决的问题
+
+```text
+1. 找出当前后端 runtime、checkpoint、公开事件摘要之间仍存在的字段不一致；
+2. 让 progress_update、work_trace_delta、assistant_delta、terminal event 的公开投影具有一致的 run/sequence 语义；
+3. 让断线恢复后的 checkpoint 与事件回放结果一致；
+4. 保证重复请求、重复事件和终端事件不会生成相互矛盾的运行状态；
+5. 对错误只返回结构化、脱敏、可追踪的公开摘要；
+6. 保持现有 Provider 配置和真实流式输出能力，不把小说内容生成硬编码进前端。
+```
+
+### G.2 CARD-076 执行纪律
+
+```text
+1. 先检查 backend/app/services/agent_runtime.py、backend/app/agent/runner.py、backend/app/api/routers/agent.py 及其测试；
+2. 明确一个当前实现确实缺失的后端行为；
+3. 先增加失败测试并记录失败输出；
+4. 修改真实生产代码；
+5. 做定向测试；
+6. 临时破坏生产行为，确认回归测试失败，再恢复；
+7. 执行后端全量 pytest；
+8. 代码单独提交并推送；
+9. 接续文档单独提交并推送；
+10. 在文档写入提交哈希、推送结果、测试数量、回退命令和下一目标。
+```
+
+### G.3 CARD-076 候选文件范围
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\runner.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+D:\小说写作\xuanqiong-wenshu\backend\app\models\agent.py
+D:\小说写作\xuanqiong-wenshu\backend\tests\
+```
+
+最终修改范围必须以失败测试定位出的真实缺口为准，不以候选列表强行扩大改动。
+
+### G.4 CARD-076 完成判据
+
+```text
+1. 新增测试在旧实现上确实失败；
+2. 新实现通过定向测试；
+3. 故意移除关键逻辑后测试退出码为 1；
+4. backend/.venv/Scripts/python.exe -m pytest -q 全量通过；
+5. 代码提交已推送；
+6. 文档提交已推送；
+7. 回退命令可精确定位到本批提交；
+8. 当前服务健康检查仍为 200。
+```
+
+## H. 本节回写索引
+
+```text
+CARD-075 代码：d15d35e
+CARD-075 代码回退：git revert d15d35e
+CARD-075 文档：本节首版提交待生成
+CARD-076：pending / backend-first
+总目标：active
+```
