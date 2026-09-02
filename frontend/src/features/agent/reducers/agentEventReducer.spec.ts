@@ -46,6 +46,22 @@ describe('agentEventReducer', () => {
     expect(projection.lastContiguousSequence).toBe(0)
   })
 
+  it('keeps progress action identity in the replayable display event', () => {
+    const reduction = reduceAgentRunEvent(
+      createAgentRunEventProjection(),
+      event({
+        event_type: 'progress_update',
+        data: { phase: 'tool_execution', action_id: 'tool:chapter.inspect', progress: 42, progress_message: '正在检查章节' },
+      }),
+    )
+
+    expect(reduction.projection.events[0]).toMatchObject({
+      phase: 'tool_execution',
+      actionId: 'tool:chapter.inspect',
+      progress: 42,
+    })
+  })
+
   it('only lets the newest durable event change current Run state', () => {
     const first = reduceAgentRunEvent(
       createAgentRunEventProjection(),

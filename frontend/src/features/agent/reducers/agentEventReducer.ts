@@ -6,6 +6,9 @@ export interface AgentDisplayEvent {
   detail: string
   sequence: number
   eventType: string
+  phase?: string
+  actionId?: string
+  progress?: number
 }
 
 interface AssistantDelta {
@@ -199,6 +202,9 @@ export function reduceAgentRunEvent(
     detail: detailFor(event),
     sequence: event.sequence,
     eventType: event.event_type,
+    ...(typeof event.data.phase === 'string' ? { phase: event.data.phase } : {}),
+    ...(typeof event.data.action_id === 'string' ? { actionId: event.data.action_id } : {}),
+    ...(boundedProgress(event.data.progress) !== undefined ? { progress: boundedProgress(event.data.progress) } : {}),
   }
   const events = [...current.events, display]
     .sort((left, right) => left.sequence - right.sequence)

@@ -216,6 +216,11 @@
           <div ref="logListEl" class="events workspace-log-list" data-testid="agent-process-stream" @scroll="onLogScroll">
             <article v-for="event in visibleLogEvents" :key="event.id">
               <strong>{{ event.label }}</strong>
+              <small v-if="event.actionId || event.phase" class="workspace-log-meta">
+                <span v-if="event.phase">阶段：{{ event.phase }}</span>
+                <span v-if="event.actionId">动作：{{ event.actionId }}</span>
+                <span v-if="event.progress !== undefined">{{ Math.round(event.progress) }}%</span>
+              </small>
               <p>{{ event.detail }}</p>
             </article>
           </div>
@@ -1653,6 +1658,17 @@ onBeforeUnmount(() => {
 }
 .workspace-log-list article {
   min-width: 0;
+}
+.workspace-log-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.6rem;
+  color: var(--xq-ink-muted);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+.workspace-log-meta span {
+  overflow-wrap: anywhere;
 }
 .workspace-log-list p {
   overflow-wrap: anywhere;
