@@ -79415,3 +79415,366 @@ CARD-062 反向验证：已确认缺失点击绑定会失败；
 中央聊天、左侧分组、右侧独立日志结构：保持现状；
 总任务：active，继续推进，不得把局部 CARD 完成写成全项目完成。
 ```
+
+
+---
+
+# 2026-09-02 CARD-063 实际完成记录：运行定位自动展开、目标滚动与执行事实摘要
+
+> 本节只记录 CARD-063 相对于 CARD-062 新增的实现和证据。CARD-062 的旧记录保留在上一节；本节不把旧测试数量重复算作本轮新增成果。当前总目标仍为 `active`，后续继续围绕 Agent 自主调用项目能力、聊天主界面、流式输出、公开进度和可追踪运行事实推进。
+
+## 12.1 当前基线与提交
+
+项目：
+
+```text
+D:\小说写作\xuanqiong-wenshu
+```
+
+分支：
+
+```text
+codex/bohrium-integration-20260831
+```
+
+CARD-063 代码提交：
+
+```text
+4734974 feat: auto reveal agent run locations
+```
+
+已推送：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+CARD-062 的前序提交仍为：
+
+```text
+d96654f feat: add agent log location navigation
+44a96fe docs: record card 062 location navigation
+```
+
+CARD-063 没有修改后端、数据库迁移、Provider 配置或页面路由；改动范围限定在当前 Agent 工作台的运行定位交互。
+
+## 12.2 CARD-063 解决的问题
+
+CARD-062 已经让日志引用可点击，但仍存在三个交互断点：
+
+```text
+1. 检查器 details 默认收起，点击日志后用户看不到定位结果；
+2. 步骤/结果异步回读完成后，目标节点可能在滚动容器之外；
+3. execution:<id> 只显示“已定位”，没有最小执行事实摘要。
+```
+
+本轮实现的完整路径：
+
+```text
+点击日志 action_id/result_ref
+    ↓
+写入当前 active Run 的 selectedActionRef/selectedResultRef
+    ↓
+打开当前运行检查器 details
+    ↓
+等待 Vue DOM 更新和步骤/结果异步回读
+    ↓
+按 data-location-ref/data-result-ref 找到目标
+    ↓
+scrollIntoView({ block: 'nearest' })
+    ↓
+显示步骤高亮、结果卡高亮和执行事实摘要
+```
+
+所有定位仍按当前 active Run 隔离。切换 Run 或重置运行态时，旧引用、旧高亮和旧滚动目标均被清理。
+
+## 12.3 真实修改文件
+
+### A. 结果卡增加 DOM 定位属性
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentToolResultPanel.vue
+```
+
+新增：
+
+```html
+:data-location-ref="view.resultRef"
+```
+
+结果卡仍只渲染安全投影字段，未引入原始 payload、正文、提示词、思维链或密钥。`selectedResultRef` 的高亮逻辑保持 CARD-062 行为不变。
+
+### B. 步骤节点支持动作引用和执行引用滚动
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\run\AgentRunInspector.vue
+```
+
+每个步骤现在同时暴露：
+
+```html
+:data-location-ref="step:<step.id>"
+:data-result-ref="execution:<step.output_json.execution_id>"
+```
+
+其中 `data-result-ref` 仅在 `execution_id` 是字符串时生成。这样即使工具结果面板尚未回读出对应卡，执行引用仍能回落到对应持久化步骤节点。
+
+新增执行事实摘要：
+
+```text
+工具名；
+步骤状态；
+attempt 次数；
+execution/result 引用；
+started_at → finished_at（存在时）。
+```
+
+该摘要只展示元数据和已经受控的安全字段，不展开步骤输出正文。
+
+### C. 工作台自动展开和异步滚动
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+新增：
+
+```text
+inspectorSectionEl
+revealSelectedLocation()
+```
+
+`revealSelectedLocation()` 的实际行为：
+
+1. 等待一次 `nextTick()`，确保定位状态已经进入渲染；
+2. 将当前运行检查器 `details.open` 设置为 `true`；
+3. 再等待一次 `nextTick()`，确保步骤/结果节点进入 DOM；
+4. 在当前检查器范围内查找 `[data-location-ref]` 和 `[data-result-ref]`；
+5. 找到后调用 `scrollIntoView({ block: 'nearest' })`；
+6. 找不到时保留检查器已有的“引用暂不可用/正在恢复执行事实”状态，不抛异常。
+
+定位变化、当前 Run 的步骤数量变化和工具结果数量变化均触发重新 reveal，因此覆盖网络响应先后顺序不同的情况。查询范围限制在当前检查器 `details` 内，不使用全局 DOM 搜索，不会串到其他页面实例。
+
+### D. 测试文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\run\AgentRunInspector.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
+```
+
+新增断言：
+
+```text
+execution 引用展示最小执行事实；
+点击日志动作后检查器自动展开；
+点击动作和结果后调用 scrollIntoView({ block: 'nearest' })；
+步骤/结果 DOM 均保留稳定定位属性。
+```
+
+## 12.4 失败驱动和反向验证
+
+### 实现前的失败
+
+先加入 CARD-063 断言后，旧实现真实失败：
+
+```text
+工作台：点击日志动作后 agent-inspector-section.open 仍为 false；
+检查器：缺少 agent-execution-fact 节点。
+```
+
+旧实现测试结果：
+
+```text
+2 failed
+```
+
+### 反向验证
+
+临时移除：
+
+```ts
+section.open = true
+```
+
+只运行工作台定位测试，结果真实失败：
+
+```text
+expected false to be true
+EXPECTED_FAILURE_EXIT=1
+```
+
+随后从副本恢复真实实现，临时副本清理完毕。该验证证明自动展开不是只靠静态字符串，而是被行为测试实际约束。
+
+## 12.5 定向验证
+
+执行目录：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+```
+
+命令：
+
+```powershell
+npm run type-check
+npm run test:run -- src/features/agent/AgentToolResultPanel.spec.ts src/features/agent/run/AgentRunInspector.spec.ts src/views/AgentWorkspace.spec.ts -t "selected result|locates a step|stale location|点击日志动作"
+```
+
+结果：
+
+```text
+npm run type-check：退出码 0；
+Test Files 3 passed；
+Tests 4 passed；
+scrollIntoView 调用断言通过；
+自动展开断言通过；
+执行事实摘要断言通过。
+```
+
+## 12.6 全量前端门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+npm run test:run
+npm run build-only
+```
+
+本轮实测：
+
+```text
+npm run type-check：通过；
+npm run test:run：74 files passed，466 tests passed；
+npm run build-only：4905 modules transformed，built successfully。
+```
+
+测试中仍出现既有工作台测试环境的 Pinia injection warning；它没有造成失败，也没有被本轮新增代码吞掉或隐藏。
+
+## 12.7 真实浏览器验证
+
+本地页面：
+
+```text
+http://127.0.0.1:5174/agent
+```
+
+浏览器视口：
+
+```text
+1258×622
+```
+
+Playwright 实测：
+
+```text
+运行日志面板存在；
+动作引用按钮数量：10；
+点击第一条动作引用后，当前定位区域显示：
+“引用暂不可用：context:0（正在恢复执行事实）”；
+页面没有未处理异常。
+```
+
+当前恢复的历史运行检查器进入页面时已经是展开状态，因此本次浏览器会话主要验证了真实 DOM 引用点击、失效引用可读状态和页面稳定性；“从收起到展开”的转变由 `AgentWorkspace.spec.ts` 行为测试直接验证。
+
+截图：
+
+```text
+D:\小说写作\xuanqiong-wenshu\audit\card063-agent-browser.png
+```
+
+截图属于未跟踪审计目录，不能通过批量暂存进入代码提交；保持原样供后续审计。
+
+## 12.8 当前服务和运行环境
+
+当前本地运行链路此前已验证：
+
+```text
+前端：http://127.0.0.1:5174/agent → HTTP 200
+后端：http://127.0.0.1:8013/health → HTTP 200
+前端代理：http://127.0.0.1:5174/api/health → HTTP 200
+```
+
+统一启动脚本仍受本机 MySQL 路径影响：
+
+```text
+D:\小说写作\xuanqiong-wenshu\start.ps1
+→ 默认查找 D:\download\MySQL\bin\mysqld.exe
+→ 当前文件不存在
+```
+
+查看工作台时使用：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\.env
+DB_PROVIDER=sqlite
+```
+
+因此本轮 UI 验证是 SQLite 本地运行事实，不能外推为 MySQL 正式部署验收。
+
+## 12.9 回退命令
+
+只回退 CARD-063 代码：
+
+```powershell
+git revert 4734974
+```
+
+CARD-063 文档使用独立提交；文档提交完成后，将其哈希填入：
+
+```powershell
+git revert <CARD-063-文档提交哈希>
+```
+
+代码和文档两个回退动作互相独立，不影响 CARD-061、CARD-062 或更早批次。
+
+## 12.10 下一任务目标：CARD-064
+
+下一目标预登记为：
+
+```text
+CARD-064：执行事实只读补全与历史 result_ref 恢复
+```
+
+当前浏览器实测暴露的实际缺口是：历史事件可以带 `action_id`，但部分旧运行没有 `result_ref`，点击动作后只能进入“引用暂不可用”状态。CARD-064 处理数据补全，不把正文塞回日志，也不在前端硬编码工具集合。
+
+目标：
+
+1. 盘点后端现有 `AgentCapabilityExecution`、Run state、步骤输出和历史事件读取接口；
+2. 为当前 Run 提供最小只读执行事实投影：execution_id、run_id、tool_name、status、attempt、started_at、finished_at、error_type；
+3. 历史事件缺少 `result_ref` 时，按 action_id/step_id 关联执行事实并补出稳定引用；
+4. 只返回安全元数据和已定义的结构化摘要，不返回正文、提示词、原始 payload 或密钥；
+5. 前端在异步事实补全后保持当前 active Run 隔离，并自动更新结果卡和执行事实摘要；
+6. 事实不存在时继续显示“结果已不可用/正在恢复”，不产生未处理异常；
+7. 先补后端失败测试，再实现只读服务/路由，再接前端定向回归；
+8. 继续执行故意破坏验证、后端全量门禁、前端全量门禁、代码提交和文档提交分离推送。
+
+建议代码文件范围：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\execution_facts.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_execution_facts.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_runtime_route.py
+D:\小说写作\xuanqiong-wenshu\frontend\src\api\agent.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
+```
+
+CARD-064 开始基线：
+
+```text
+HEAD：4734974；
+CARD-063 文档待提交；
+前端 type-check：通过；
+前端全量测试：74 files / 466 tests 通过；
+前端构建：4905 modules transformed；
+CARD-063 反向验证：移除 section.open=true 后测试退出码 1；
+历史旧事件的 result_ref 补全：尚未完成；
+总任务：active，不能把 CARD-063 局部完成写成全项目完成。
+```
