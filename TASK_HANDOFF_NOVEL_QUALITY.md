@@ -77383,3 +77383,181 @@ CARD-053 当前状态：
 尚未实施；
 下一步先以真实组件和 Run projection 代码为证据，确定当前进度摘要是否会跨 Run 污染或重复渲染；
 ```
+
+
+---
+
+# CARD-053 实际完成记录：中央当前进度摘要与 Run 隔离（2026-09-02）
+
+> 本节是对文档前面“CARD-053 尚未实施”状态的修订，以本节记录的实测结果和提交为准。CARD-053 已完成代码、测试、反向验证、门禁、推送闭环。
+
+## 1. 本批次目标与实际结果
+
+本批次解决的是 Agent 工作台中“作者需要看到当前正在做什么，但不能被完整运行日志挤占聊天阅读区”的职责边界问题。中央聊天区继续只承担作者可读的消息、候选正文预览、公开工作摘要和输入；右侧运行日志继续承担完整事件序列、动作标识、阶段和百分比。中央新增一块紧凑的“当前进度”摘要，数据只来自当前选中的 Run projection，不从旧 Run 或右侧日志列表复制内容。
+
+实际完成：
+
+1. `progress_update` 事件在前端 reducer 中新增当前进度的结构化投影：`latestProgressActionId`、`latestProgressPhase`、`latestProgress`。
+2. 最新 durable event 才能更新当前摘要；迟到的旧序号事件只进入有序事件集合，不得覆盖当前进度。
+3. 新的 `progress_update` 缺少某个可选元数据时会清理该字段，避免上一动作/阶段/百分比残留在下一动作上。
+4. `AgentConversation` 增加紧凑的 `agent-current-progress` 区块，只显示公开进度消息、阶段、动作和百分比，不显示隐藏 reasoning。
+5. `AgentWorkspace` 从 `runProjection.activeEventProjection` 传递摘要字段，切换 Run 时自动读取新的 Run projection；无 active Run 时使用空投影。
+6. 右侧日志仍保持独立容器和独立滚动，不把完整事件列表注入中央对话。
+
+## 2. 实际变更文件
+
+实现与测试文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+未跟踪审计文件、备份、数据库旁车文件、临时恢复脚本和 `node_modules` 没有被加入本批提交；没有执行 `git add -A`、批量删除、覆盖式清理或 `reset --hard`。
+
+## 3. 失败驱动与定向验证
+
+先增加中央组件断言，再运行旧实现，真实失败如下：
+
+```text
+Unable to get [data-testid="agent-current-progress"]
+```
+
+实现后定向验证：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run test:run -- src/features/agent/AgentConversation.spec.ts -t "展示会话消息和公开进度"
+```
+
+结果：
+
+```text
+Test Files  1 passed
+Tests  1 passed | 2 skipped
+```
+
+Reducer 回归验证：
+
+```powershell
+npm run test:run -- src/features/agent/reducers/agentEventReducer.spec.ts -t "projects current progress metadata"
+```
+
+结果：
+
+```text
+Test Files  1 passed
+Tests  1 passed | 8 skipped
+```
+
+新增 reducer 测试覆盖：
+
+```text
+sequence=4 的最新 progress_update 正确投影消息、action_id、phase、progress；
+sequence=3 的迟到旧 progress_update 不得覆盖 sequence=4 的当前摘要。
+```
+
+## 4. 反向验证
+
+按工程规则故意移除 `AgentConversation.vue` 中的 `agent-current-progress` 模板后，重跑同一定向测试，结果为真实失败：
+
+```text
+Test Files  1 failed
+Tests  1 failed | 2 skipped
+Unable to get [data-testid="agent-current-progress"]
+EXPECTED_FAILURE_EXIT=1
+```
+
+随后恢复模板，组件测试重新通过。反向验证期间文件已在 `finally` 中恢复，工作树没有留下临时破坏。
+
+## 5. 前端门禁结果
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+npm run test:run
+npm run build-only
+```
+
+实测结果：
+
+```text
+npm run type-check：通过；
+npm run test:run：74 files passed，457 tests passed；
+npm run build-only：4905 modules transformed，built successfully；
+产物包含 AgentWorkspace 工作台 chunk，无 TypeScript/Vue 编译错误。
+```
+
+依赖工具输出的 Browserslist / baseline-browser-mapping 过期提示属于环境提示，不是本批代码失败；本批没有借更新依赖来规避测试。
+
+## 6. 提交、推送与回退点
+
+代码提交：
+
+```text
+d81de8c feat: surface current agent progress in chat
+```
+
+代码推送：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+代码回退：
+
+```powershell
+git revert d81de8c
+```
+
+该回退只撤销 CARD-053 的 5 个实现/测试文件，不影响 CARD-049、CARD-050、CARD-051、CARD-052，也不触碰未跟踪历史成果。接续文档将在独立提交中记录本批，不与代码提交混在一起。
+
+## 7. 当前运行与仓库状态
+
+截至 2026-09-02：
+
+```text
+前端：http://127.0.0.1:5174/agent，HTTP 200；
+后端：http://127.0.0.1:8013/health，HTTP 200；
+后端健康响应：{"status":"healthy","app":"玄穹文枢 API","version":"1.0.0"}；
+当前分支：codex/bohrium-integration-20260831；
+CARD-053 代码已推送，文档提交待生成；
+主动修改之外的历史未跟踪项继续原样保留。
+```
+
+## 8. 下一项任务目标：CARD-054 后端 Agent 公开进度与运行状态事实源收敛
+
+CARD-054 不再先改页面，而是先审查后端 `progress_update`、`public_work_summary`、Run state projection、SSE replay 和 Provider attempt 的字段来源，目标是让前端当前摘要、右侧日志、运行详情都消费同一份可回放事实源。
+
+具体任务：
+
+1. 盘点后端所有产生 `progress_update`、`public_work_summary`、`work_trace_delta` 和终态事件的代码路径，建立事件字段矩阵：`run_id`、`sequence`、`phase`、`action_id`、`progress`、`progress_message`、`trace_id`、`created_at`。
+2. 检查 Provider 流式输出、重连、恢复、重放时是否可能出现缺失 `action_id`、重复 sequence、progress 超界、阶段漂移或隐藏字段混入公开事件。
+3. 以真实失败测试先锁定一个缺口，优先选择“公开进度事件经过恢复/重放后字段仍稳定”的后端行为，不改动小说内容生成模板，不把正文生成逻辑硬编码到页面。
+4. 将事件契约集中到现有 Agent contract / schema / event publisher 边界；业务模块通过工具注册表和运行时发布事实，前端只负责投影和展示。
+5. 增加后端单元测试、恢复测试、SSE replay 测试和最小 API 集成测试；先定向失败，再修复通过，再故意破坏实现确认测试失败。
+6. 完成后端门禁：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+7. CARD-054 代码和文档仍然分开提交、分开推送；每个提交记录精确文件列表、测试数字、回退命令和下一项目标。
+
+## 9. 后续前端布局目标（CARD-055 预登记）
+
+在 CARD-054 后端事实源稳定后，进入布局批次 CARD-055：
+
+```text
+左侧项目/会话/工具/数据区默认折叠或紧凑化，减少重复标题和大面板留白；
+中央聊天列获得主要宽度和垂直空间，消息阅读与输入区优先；
+右侧日志维持独立滚动，并把高度限制在可观察但不遮挡聊天的范围；
+通过 AgentWorkspaceShell / AgentWorkspace 的结构化 CSS 变量统一三栏比例，不在业务模板中散落硬编码宽度；
+增加视口级组件测试与 Playwright/浏览器实测截图，验证文字可读、日志不覆盖聊天、左栏可展开恢复。
+```
+
+CARD-055 只能在 CARD-054 推送完成后开始；若布局问题在后端审查期间发现直接阻塞可用性，会另开独立卡片并保持提交边界，不覆盖 CARD-054。
