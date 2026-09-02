@@ -251,6 +251,7 @@
               :selected-action-ref="selectedActionRef"
               :selected-result-ref="selectedResultRef"
               :execution-facts="activeExecutionFacts"
+              :execution-facts-error="activeExecutionFactsError"
               @command="runControlAction"
               @recover="activeRun && recoverRunAction(activeRun)"
               @reconnect="reconnectActiveRun"
@@ -465,6 +466,7 @@ const selectedActionRef = ref<string | null>(null)
 const selectedResultRef = ref<string | null>(null)
 const inspectorSectionEl = ref<HTMLDetailsElement | null>(null)
 const executionFactsByRunId = ref<Record<string, AgentExecutionFact[]>>({})
+const executionFactsErrorByRunId = ref<Record<string, string>>({})
 const activeRun = runProjection.activeRun
 const runState = runProjection.activeRunState
 const runSteps = runProjection.activeRunSteps
@@ -473,6 +475,9 @@ const artifacts = runProjection.activeArtifacts
 const responseToolResults = runProjection.activeToolResults
 const activeExecutionFacts = computed<AgentExecutionFact[]>(() =>
   activeRun.value ? executionFactsByRunId.value[activeRun.value.id] || [] : [],
+)
+const activeExecutionFactsError = computed(() =>
+  activeRun.value ? executionFactsErrorByRunId.value[activeRun.value.id] || null : null,
 )
 const workspaceEvents = ref<AgentDisplayEvent[]>([
   { id: 'ready', label: '已就绪', detail: '请选择小说项目，然后描述你希望 Agent 完成的目标。', sequence: 0, eventType: 'workspace' },
@@ -636,6 +641,7 @@ const resetRuntime = () => {
   clearRunLocation()
   runProjection.reset()
   executionFactsByRunId.value = {}
+  executionFactsErrorByRunId.value = {}
   localPlan.value = null
   resetArtifactFacts()
   workspaceEventKeys.clear()
@@ -795,11 +801,15 @@ const loadExecutionFacts = async (runId: string) => {
   if (typeof AgentAPI.listExecutionFacts !== 'function') return
   try {
     const facts = await AgentAPI.listExecutionFacts(runId)
-    if (activeRun.value?.id === runId)
-      executionFactsByRunId.value = { ...executionFactsByRunId.value, [runId]: facts }
-  } catch {
-    if (activeRun.value?.id === runId)
-      executionFactsByRunId.value = { ...executionFactsByRunId.value, [runId]: [] }
+    executionFactsByRunId.value = { ...executionFactsByRunId.value, [runId]: facts }
+    const nextErrors = { ...executionFactsErrorByRunId.value }
+    delete nextErrors[runId]
+    executionFactsErrorByRunId.value = nextErrors
+  } catch (error) {
+    executionFactsErrorByRunId.value = {
+      ...executionFactsErrorByRunId.value,
+      [runId]: error instanceof Error ? error.message : '执行事实接口暂时不可用',
+    }
   }
 }
 const refreshSessionMessages = async () => {

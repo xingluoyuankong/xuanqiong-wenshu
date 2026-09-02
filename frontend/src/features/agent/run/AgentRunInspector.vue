@@ -13,6 +13,7 @@ const props = withDefaults(defineProps<{
   steps: AgentRunStep[]
   toolResults: AgentToolResult[]
   executionFacts?: AgentExecutionFact[]
+  executionFactsError?: string | null
   provenance?: AgentProviderProvenance | null
   hasSequenceGap?: boolean
   gapRepairState?: 'idle' | 'repairing' | 'repaired' | 'failed'
@@ -25,6 +26,7 @@ const props = withDefaults(defineProps<{
   selectedActionRef: null,
   selectedResultRef: null,
   executionFacts: () => [],
+  executionFactsError: null,
 })
 
 const emit = defineEmits<{
@@ -98,6 +100,7 @@ const providerAttemptSummary = (snapshot?: AgentProviderAttemptSnapshot | null) 
 <template>
   <section class="agent-run-inspector" data-testid="agent-run-inspector" aria-label="Agent运行检查器">
     <XqPanel title="当前运行">
+      <p v-if="executionFactsError" class="execution-facts-error error" data-testid="agent-execution-facts-error">{{ executionFactsError }}</p>
       <p class="selected-location" data-testid="agent-selected-location">
         <template v-if="locationStatus === 'located'">已定位：{{ selectedLocation }}</template>
         <template v-else-if="locationStatus === 'stale'">引用暂不可用：{{ selectedLocation }}（正在恢复执行事实）</template>

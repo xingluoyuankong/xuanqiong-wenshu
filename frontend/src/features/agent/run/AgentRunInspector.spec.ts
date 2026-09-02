@@ -4,6 +4,18 @@ import AgentRunInspector from './AgentRunInspector.vue'
 import source from './AgentRunInspector.vue?raw'
 
 describe('AgentRunInspector', () => {
+  it('shows a readable facts loading error without hiding the run', () => {
+    const wrapper = mount(AgentRunInspector, {
+      props: {
+        run: { id: 'run-facts-error', correlation_id: 'c1', session_id: 's1', user_id: 1, status: 'completed', current_phase: 'summary', current_step: 0, progress: 100, created_at: 'now' },
+        state: null, steps: [], toolResults: [], executionFacts: [], executionFactsError: '执行事实接口暂时不可用', connectionState: 'terminal',
+      },
+      global: { stubs: { XqPanel: { template: '<section><slot /></section>' }, XqButton: { template: '<button><slot /></button>' } } },
+    })
+    expect(wrapper.get('[data-testid="agent-execution-facts-error"]').text()).toContain('执行事实接口暂时不可用')
+    expect(wrapper.get('[data-testid="agent-run-status"]').text()).toContain('completed')
+  })
+
   it('locates a step and execution result from selected references', () => {
     const wrapper = mount(AgentRunInspector, {
       props: {
