@@ -82381,3 +82381,325 @@ git revert <CARD-071-文档提交哈希>
 当前批次：CARD-070 代码完成，文档待独立提交
 下一批：CARD-071 真实浏览器布局验收与滚动隔离复测
 ```
+
+
+# 22. 2026-09-03｜CARD-071 真实 Chromium 布局验收、滚动隔离与可读宽度修复（代码已推送）
+
+## 22.1 本批目标
+
+CARD-071 的目标不是再凭 CSS 字符串判断布局，而是使用项目现有 Playwright mock 运行真实 Chromium，验证 CARD-070 的实际用户可见效果：
+
+1. 五个视口的三栏/单栏断点；
+2. 左侧、中央聊天、右侧活动列的真实矩形尺寸；
+3. 右侧日志的独立垂直滚动；
+4. 聊天滚动与日志滚动双向隔离；
+5. 默认收纳区在真实 UI 中可以展开并操作；
+6. 无水平页面溢出；
+7. 将截图和测量 JSON 作为可提交审计证据保存。
+
+## 22.2 新增真实浏览器验收能力
+
+新增独立 Chromium 配置：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\playwright.card071.config.ts
+```
+
+该配置复用当前运行中的：
+
+```text
+http://127.0.0.1:5174
+```
+
+不重复启动 Vite，不触碰真实 Provider；浏览器请求沿用 `frontend/e2e/agent-workspace.spec.ts` 的完整 API mock。
+
+新增 CARD-071 Playwright 用例：
+
+```text
+CARD-071 五视口布局测量与日志/聊天滚动隔离
+```
+
+覆盖视口：
+
+```text
+1920 × 1080
+1440 × 900
+1280 × 800
+960 × 800
+650 × 844
+```
+
+输出证据目录：
+
+```text
+D:\小说写作\xuanqiong-wenshu\audit\card071-layout-evidence-20260903\
+├── card071-layout-1920x1080.png
+├── card071-layout-1440x900.png
+├── card071-layout-1280x800.png
+├── card071-layout-960x800.png
+├── card071-layout-650x844.png
+└── card071-layout-measurements.json
+```
+
+## 22.3 真实缺陷发现与修复
+
+首次 Chromium 截图虽然满足“无水平溢出”和“中央列大于两侧列”，但 1440px 下实际值为：
+
+```text
+左栏：112px
+中央：1056px
+右栏：144px
+```
+
+左栏项目/章节文字被压缩成不适合阅读的窄列，右栏日志也过窄。这是真实视觉缺陷，不能以自动化通过为由忽略。
+
+已先增加失败阈值：
+
+```text
+桌面左栏 >= 160px
+桌面右栏 >= 190px
+桌面中央聊天 > 700px
+```
+
+首次失败证据：
+
+```text
+Expected sidebar >= 160
+Received 112
+```
+
+随后调整壳层列定义：
+
+```css
+/* 默认宽屏 */
+grid-template-columns: minmax(10rem, 12rem) minmax(0, 1fr) minmax(12rem, 14rem);
+
+/* 1120px 以下、960px 以上 */
+grid-template-columns: minmax(9.5rem, 10.5rem) minmax(0, 1fr) minmax(11.5rem, 12.5rem);
+```
+
+复测后的实际 Chromium 测量：
+
+| 视口 | 左栏 | 中央聊天 | 右栏 | 日志视口 | 布局 |
+|---|---:|---:|---:|---:|---|
+| 1920×1080 | 192px | 1376px | 224px | 196×160px | 三栏 |
+| 1440×900 | 192px | 896px | 224px | 196×160px | 三栏 |
+| 1280×800 | 192px | 736px | 224px | 196×144px | 三栏 |
+| 960×800 | 856px | 856px | 856px | 836×144px | 单栏 |
+| 650×844 | 618px | 618px | 618px | 598×152px | 单栏 |
+
+全部视口：
+
+```text
+horizontalOverflow=false
+```
+
+## 22.4 日志与聊天双向滚动隔离
+
+真实浏览器测量使用：
+
+```text
+data-testid="agent-runtime-log-viewport"
+data-testid="agent-process-stream"
+data-testid="agent-message-list"
+```
+
+验证过程：
+
+1. 写入足够多的日志条目，日志 `scrollHeight > clientHeight`；
+2. 将日志视口滚到末尾；
+3. 验证聊天初始 `scrollTop` 不变；
+4. 使用 80 条真实 mock 会话历史消息形成聊天滚动；
+5. 将聊天消息列表滚到末尾；
+6. 验证日志 `scrollTop` 保持原值。
+
+最终五视口证据均满足：
+
+```text
+logStyle.overflowY = auto
+logScrollHeight > logClientHeight
+logScrollTopAfter > 0
+chatScrollTopAfterLog = chatScrollTopBefore
+chatScrollHeight > chatClientHeight
+chatScrollTopAfter > 0
+logScrollTopAfterChat = logScrollTopBeforeChat
+```
+
+例如 1440×900：
+
+```text
+日志：scrollHeight=448，clientHeight=160，scrollTop=288；
+聊天：scrollHeight=6633，clientHeight=630，scrollTop=6003；
+聊天滚动后日志仍为 288。
+```
+
+## 22.5 完整 e2e 修复
+
+第一次运行完整 7 个 e2e 用例时，三个旧用例因当前工作台默认折叠而尝试操作隐藏控件：
+
+```text
+会话面板 hidden；
+质量发现按钮 hidden；
+死信“重新排队”按钮 hidden。
+```
+
+这不是应当取消默认收纳的理由。新增 helper：
+
+```typescript
+expandWorkspaceSection(page, testId)
+```
+
+它通过真实 `<summary>` 点击按需展开：
+
+```text
+agent-session-section
+agent-run-details-section
+agent-data-section
+```
+
+随后完整 e2e：
+
+```text
+7 passed in 27.2s
+```
+
+这同时验证：默认收纳不妨碍真实用户展开会话、候选质量发现和管理员死信操作。
+
+## 22.6 代码与证据文件
+
+本批代码/验收提交：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\e2e\agent-workspace.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\playwright.card071.config.ts
+D:\小说写作\xuanqiong-wenshu\audit\card071-layout-evidence-20260903\*
+```
+
+本批没有修改后端生产代码。后端完整基线继续为：
+
+```text
+1452 passed in 622.06s
+```
+
+## 22.7 反向验证与门禁
+
+CARD-070 已完成日志 `overflow-y: auto` 的受控反向验证：
+
+```text
+EXPECTED_FAILURE_EXIT=1
+```
+
+CARD-071 新增的可读侧栏阈值也先在旧布局上真实失败：
+
+```text
+Expected sidebar >= 160
+Received 112
+```
+
+修复后完成：
+
+```text
+CARD-071 五视口 e2e：1 passed in 15.5s；
+完整 e2e：7 passed in 27.2s；
+npm run type-check：通过；
+npm run test:run：74 files passed，473 tests passed；
+npm run build-only：4906 modules transformed，built successfully；
+git diff --check：通过。
+```
+
+## 22.8 提交、推送与回退
+
+代码和证据提交：
+
+```text
+11745ac test: verify agent workspace layout responsiveness
+```
+
+推送：
+
+```text
+bbbe560..11745ac codex/bohrium-integration-20260831 -> origin/codex/bohrium-integration-20260831
+```
+
+回退代码和验收证据：
+
+```powershell
+git revert 11745ac
+```
+
+本文档采用独立提交；完成后使用：
+
+```powershell
+git revert <CARD-071-文档提交哈希>
+```
+
+## 22.9 当前运行状态
+
+```text
+前端：http://127.0.0.1:5174/agent → HTTP 200
+后端：http://127.0.0.1:8013/health → HTTP 200 healthy
+Provider registry_status：healthy
+Provider count：4
+DB_PROVIDER：sqlite
+```
+
+## 22.10 下一任务：CARD-072 后端跨 Run Provider 用量聚合与项目级可追溯摘要
+
+本轮已完成前端阅读布局、真实浏览器验收和滚动隔离。下一批按总目标回到后端，优先把 CARD-069 的“单 Run Provider 调用统计”升级为“项目内跨 Run 的可追溯聚合”，不把统计逻辑硬编码到前端。
+
+目标：
+
+1. 新增用户/项目范围的 Provider usage aggregate read service；
+2. 返回项目内 Run 数、Provider attempt 总数、成功/失败/fallback、首 token、partial/full digest、最近错误类别、最近调用时间；
+3. 按 Run 保留可点击/可定位的安全引用，不返回 Provider 输入、输出、提示词、headers 或密钥；
+4. 支持时间窗口和有界 limit，避免扫描无限历史；
+5. owner scope 一律返回安全 404；
+6. 先写 service 和 route 失败测试，再接 API；
+7. 通过后端反向验证；
+8. 后端全量 pytest；
+9. 代码单独提交推送，文档单独提交推送；
+10. 前端只在 CARD-073 消费该项目级摘要，不提前堆叠数据面板。
+
+预计文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\execution_facts.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\schemas.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_execution_facts.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_runtime_route.py
+```
+
+建议 endpoint：
+
+```text
+GET /api/agent/projects/{project_id}/provider-usage-summary
+```
+
+建议响应：
+
+```text
+project_id
+run_count
+attempt_count
+succeeded_attempts
+failed_attempts
+fallback_attempts
+first_token_attempts
+digest_attempts
+last_error_category
+latest_attempt_at
+runs[]: run_id/status/attempt_count/error_category/latest_attempt_at
+```
+
+总目标状态：
+
+```text
+active
+当前权威完成批次：CARD-071
+代码最新提交：11745ac
+CARD-071 文档提交：待本次独立提交后填入
+下一批：CARD-072 后端跨 Run Provider 用量聚合
+```
