@@ -11,7 +11,7 @@ from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy.orm.attributes import flag_modified, set_committed_value
 
 from ..models.agent import AgentApproval, AgentArtifactRef, AgentEventRecord, AgentJob, AgentMessage, AgentRun, AgentRunCommand, AgentRunStep, AgentSession
 from ..agent.schemas import AgentPublicWorkSummary
@@ -284,6 +284,16 @@ def _visible_event_data(event_type: str, value: Any) -> dict[str, Any]:
             except (TypeError, ValueError):
                 result.pop("step", None)
     return result
+
+
+def _sanitize_loaded_event(event: AgentEventRecord) -> AgentEventRecord:
+    """Project legacy event rows through the current public payload contract."""
+    set_committed_value(
+        event,
+        "data_json",
+        _visible_event_data(event.event_type, event.data_json),
+    )
+    return event
 
 
 class AgentRuntimeService:
@@ -1104,7 +1114,10 @@ class AgentRuntimeService:
             .limit(min(max(1, int(limit)), 200))
         )
         rows = (await self.session.execute(stmt)).all()
-        return [(event, str(session_id_value), project_id_value, str(status)) for event, session_id_value, project_id_value, status in rows]
+        return [
+            (_sanitize_loaded_event(event), str(session_id_value), project_id_value, str(status))
+            for event, session_id_value, project_id_value, status in rows
+        ]
 
     async def list_audit_ledger(
         self,
@@ -1212,7 +1225,8 @@ class AgentRuntimeService:
     async def list_events(self, *, run_id: str, user_id: int, after_sequence: int = 0, limit: int = 500) -> list[AgentEventRecord]:
         await self._run(run_id, user_id)
         stmt = select(AgentEventRecord).where(AgentEventRecord.run_id == run_id, AgentEventRecord.user_id == user_id, AgentEventRecord.sequence > max(0, after_sequence)).order_by(AgentEventRecord.sequence.asc()).limit(min(max(limit, 1), 500))
-        return list((await self.session.execute(stmt)).scalars().all())
+        events = list((await self.session.execute(stmt)).scalars().all())
+        return [_sanitize_loaded_event(event) for event in events]
 
     async def claim_run(self, *, run_id: str, user_id: int, lease_owner: str, lease_seconds: int = 120, lease_generation: int | None = None) -> AgentRun:
         owner = str(lease_owner or "").strip()[:128]

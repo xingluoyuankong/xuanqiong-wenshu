@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
+from uuid import uuid4
 
 import httpx
+import json
 import pytest
 from fastapi import FastAPI, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
@@ -13,6 +16,7 @@ from app.core.dependencies import get_current_user
 from app.db.session import get_session
 from app.main import app
 from app.models import User
+from app.models.agent import AgentEventRecord
 from app.services.agent_runtime import AgentRuntimeService
 
 
@@ -77,6 +81,74 @@ async def test_agent_stream_http_honors_last_event_id_and_preserves_sse_headers(
         assert "HTTP 层回放公开轨迹" in response.text
     finally:
         app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
+async def test_history_and_sse_replay_sanitize_legacy_progress_payloads(task_session, monkeypatch):
+    user = await _user(task_session, 1317, "stream-legacy-payload-owner")
+    runtime = AgentRuntimeService(task_session)
+    agent_session = await runtime.create_session(user_id=user.id)
+    run = await runtime.create_run(session_id=agent_session.id, user_id=user.id)
+    now = datetime.now(timezone.utc)
+    task_session.add(AgentEventRecord(
+        id=str(uuid4()),
+        run_id=run.id,
+        correlation_id=run.correlation_id,
+        transaction_id=run.transaction_id,
+        user_id=user.id,
+        event_type="progress_update",
+        sequence=1,
+        summary="legacy progress",
+        data_json={
+            "progress": 9999,
+            "phase": "p" * 120,
+            "action_id": "a" * 240,
+            "progress_message": "m" * 800,
+            "reasoning": "hidden legacy field",
+        },
+        created_at=now,
+    ))
+    run.event_sequence = 1
+    run.status = "completed"
+    run.progress = 100
+    await task_session.commit()
+
+    session_factory = async_sessionmaker(task_session.bind, expire_on_commit=False)
+    monkeypatch.setattr(agent_router, "AsyncSessionLocal", session_factory)
+
+    async def override_current_user():
+        return SimpleNamespace(id=user.id)
+
+    async def override_session():
+        async with session_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_current_user] = override_current_user
+    app.dependency_overrides[get_session] = override_session
+    try:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=True)
+        async with httpx.AsyncClient(transport=transport, base_url="http://agent-http") as client:
+            history = await client.get(f"/api/agent/sessions/{agent_session.id}/runs/{run.id}/events")
+            stream = await client.get(f"/api/agent/sessions/{agent_session.id}/runs/{run.id}/stream")
+
+        assert history.status_code == 200
+        history_data = history.json()[0]["data_json"]
+        assert history_data["progress"] == 100.0
+        assert len(history_data["phase"]) == 80
+        assert len(history_data["action_id"]) == 160
+        assert len(history_data["progress_message"]) == 500
+        assert "reasoning" not in history_data
+
+        assert stream.status_code == 200
+        stream_payload = next(
+            json.loads(line.removeprefix("data: "))
+            for line in stream.text.splitlines()
+            if line.startswith("data: ")
+        )
+        assert stream_payload["data"] == history_data
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(get_session, None)
 
 
 @pytest.mark.asyncio
