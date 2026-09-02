@@ -31,6 +31,34 @@ describe('AgentAPI timeline and artifact diff', () => {
     expect(result.tools[0]).toMatchObject({ provider_id: 'project-read', provider_version: '1.0.0', source: 'builtin' })
   })
 
+  it('请求项目级 Provider 摘要并编码项目、时间窗口和有界 limit', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        project_id: 'project/a',
+        run_count: 0,
+        attempt_count: 0,
+        succeeded_attempts: 0,
+        failed_attempts: 0,
+        fallback_attempts: 0,
+        first_token_attempts: 0,
+        digest_attempts: 0,
+        selected_attempts: 0,
+        last_error_category: null,
+        latest_attempt_at: null,
+        runs: [],
+      }),
+    })
+    await AgentAPI.getProjectProviderUsageSummary('project/a', {
+      since: '2026-09-03T00:00:00Z',
+      limit: 999,
+    })
+    const [url] = fetchMock.mock.calls[0]
+    expect(String(url)).toContain('/api/agent/projects/project%2Fa/provider-usage-summary?')
+    expect(String(url)).toContain('since=2026-09-03T00%3A00%3A00Z')
+    expect(String(url)).toContain('limit=100')
+  })
+
   it('按项目和事件筛选跨会话时间线并保留分页参数', async () => {
     await AgentAPI.listTimeline({ projectId: 'project-a', eventType: 'tool_call_completed', runStatus: 'completed', toolName: 'project.context', offset: 20, limit: 40 })
     const [url, init] = fetchMock.mock.calls[0]

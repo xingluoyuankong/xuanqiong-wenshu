@@ -48,6 +48,26 @@
       <p v-else class="muted">本次 Run 暂无 Provider attempt 记录。</p>
     </XqPanel>
 
+    <XqPanel title="项目 Provider 累计" subtitle="跨 Run 的脱敏调用摘要；不展示请求或输出正文。" data-testid="agent-project-provider-usage-panel">
+      <p v-if="!projectId" class="muted">暂无选中的项目。</p>
+      <p v-else-if="projectProviderUsageSummaryLoading" class="muted">正在读取项目累计调用…</p>
+      <p v-else-if="projectProviderUsageSummaryError" class="error">{{ projectProviderUsageSummaryError }}</p>
+      <template v-else-if="projectProviderUsageSummary">
+        <p class="muted" data-testid="agent-project-provider-usage-project">项目 {{ projectProviderUsageSummary.project_id.slice(0, 8) }}</p>
+        <dl class="usage-summary-grid project-usage-summary-grid">
+          <div><dt>Run</dt><dd>{{ projectProviderUsageSummary.run_count }}</dd></div>
+          <div><dt>调用</dt><dd>{{ projectProviderUsageSummary.attempt_count }}</dd></div>
+          <div><dt>成功</dt><dd>{{ projectProviderUsageSummary.succeeded_attempts }}</dd></div>
+          <div><dt>失败</dt><dd>{{ projectProviderUsageSummary.failed_attempts }}</dd></div>
+          <div><dt>fallback</dt><dd>{{ projectProviderUsageSummary.fallback_attempts }}</dd></div>
+          <div><dt>首 token</dt><dd>{{ projectProviderUsageSummary.first_token_attempts }}</dd></div>
+        </dl>
+        <p v-if="projectProviderUsageSummary.last_error_category" class="muted">最近错误：{{ projectProviderUsageSummary.last_error_category }}</p>
+        <p v-if="projectProviderUsageSummary.latest_attempt_at" class="muted">最近调用：{{ projectProviderUsageSummary.latest_attempt_at }}</p>
+      </template>
+      <p v-else class="muted">当前项目暂无 Provider attempt 记录。</p>
+    </XqPanel>
+
     <XqPanel title="项目 Agent 时间线" subtitle="跨会话查看当前项目的可见执行摘要。" data-testid="agent-timeline-panel">
       <div class="timeline-filters">
         <select :value="timelineEventType" aria-label="时间线事件类型" @change="emit('update:timeline-event-type', selectValue($event))">
@@ -131,7 +151,7 @@
 </template>
 
 <script setup lang="ts">
-import type { AgentAuditRecord, AgentJob, AgentProviderUsageSummary, AgentTimelineEvent, AgentToolHealth } from '@/api/agent'
+import type { AgentAuditRecord, AgentJob, AgentProjectProviderUsageSummary, AgentProviderUsageSummary, AgentTimelineEvent, AgentToolHealth } from '@/api/agent'
 import { agentEventLabel as eventLabel } from '@/features/agent/reducers/agentEventReducer'
 import { XqButton, XqPanel } from '@/shared/ui'
 
@@ -141,6 +161,10 @@ withDefaults(defineProps<{
   providerHealthLoading: boolean
   providerHealthError: string
   activeRunId: string | null
+  projectId?: string | null
+  projectProviderUsageSummary?: AgentProjectProviderUsageSummary | null
+  projectProviderUsageSummaryLoading?: boolean
+  projectProviderUsageSummaryError?: string
   providerUsageSummary: AgentProviderUsageSummary | null
   providerUsageSummaryLoading: boolean
   providerUsageSummaryError: string
@@ -160,6 +184,10 @@ withDefaults(defineProps<{
   providerHealth: null,
   providerHealthLoading: false,
   providerHealthError: '',
+  projectId: null,
+  projectProviderUsageSummary: null,
+  projectProviderUsageSummaryLoading: false,
+  projectProviderUsageSummaryError: '',
   timeline: () => [],
   timelineLoading: false,
   timelineEventType: '',
@@ -200,6 +228,7 @@ const canCancelJob = (job: AgentJob) => !['succeeded', 'failed', 'cancelled', 'd
   gap: 0.4rem;
   margin: 0.55rem 0;
 }
+.project-usage-summary-grid { margin-top: 0.35rem; }
 .usage-summary-grid div {
   min-width: 0;
   padding: 0.45rem;

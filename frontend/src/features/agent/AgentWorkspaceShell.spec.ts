@@ -56,10 +56,10 @@ describe('AgentWorkspaceShell', () => {
 
 
   it('把紧凑侧栏、聊天主栏和右侧活动栏的宽度约束集中在壳层', () => {
-    expect(shellSource).toContain('grid-template-columns: minmax(10rem, 12rem) minmax(0, 1fr) minmax(12rem, 14rem);')
-    expect(shellSource).toContain('grid-template-columns: minmax(9.5rem, 10.5rem) minmax(0, 1fr) minmax(11.5rem, 12.5rem);')
+    expect(shellSource).toContain('grid-template-columns: minmax(9.5rem, 11rem) minmax(0, 1fr) minmax(11rem, 12.5rem);')
+    expect(shellSource).toContain('grid-template-columns: minmax(9rem, 10rem) minmax(0, 1fr) minmax(10.5rem, 11.5rem);')
     expect(workspaceSource).not.toContain('grid-template-columns: minmax(210px, 0.85fr) minmax(0, 1.8fr) minmax(210px, 0.75fr);')
-    expect(workspaceSource).toContain('max-height: min(10rem, 18vh);')
+    expect(workspaceSource).toContain('max-height: min(7rem, 14vh);')
     expect(workspaceSource).toContain('class="workspace-section workspace-inspector-section"')
     expect(workspaceSource).toContain('data-testid="agent-inspector-section"')
     expect(workspaceSource.indexOf('data-testid="agent-log-panel"')).toBeLessThan(
@@ -68,11 +68,18 @@ describe('AgentWorkspaceShell', () => {
   })
 
   it('把聊天主区做大并压缩两侧轨道和日志窗口', () => {
-    expect(shellSource).toContain('grid-template-columns: minmax(10rem, 12rem) minmax(0, 1fr) minmax(12rem, 14rem);')
-    expect(shellSource).toContain('grid-template-columns: minmax(9.5rem, 10.5rem) minmax(0, 1fr) minmax(11.5rem, 12.5rem);')
+    expect(shellSource).toContain('grid-template-columns: minmax(9.5rem, 11rem) minmax(0, 1fr) minmax(11rem, 12.5rem);')
+    expect(shellSource).toContain('grid-template-columns: minmax(9rem, 10rem) minmax(0, 1fr) minmax(10.5rem, 11.5rem);')
     expect(workspaceSource).toContain('min-height: min(78vh, 60rem);')
     expect(workspaceSource).toContain('min-height: min(30rem, 52vh);')
-    expect(workspaceSource).toContain('min-height: 1.9rem;')
+    expect(workspaceSource).toContain('min-height: 1.75rem;')
+  })
+
+  it('把桌面侧栏进一步压缩，把空间优先留给中央聊天', () => {
+    expect(shellSource).toContain('grid-template-columns: minmax(9.5rem, 11rem) minmax(0, 1fr) minmax(11rem, 12.5rem);')
+    expect(shellSource).toContain('grid-template-columns: minmax(9rem, 10rem) minmax(0, 1fr) minmax(10.5rem, 11.5rem);')
+    expect(workspaceSource).toContain('max-height: min(7rem, 14vh);')
+    expect(workspaceSource).toContain('min-height: 2rem;')
   })
 
   it('把日志固定为右侧唯一滚动视口，并保护中央阅读宽度', () => {
@@ -104,8 +111,8 @@ describe('AgentWorkspaceShell', () => {
     expect(workspaceSource).toContain('font-size: 0.88rem;')
     expect(workspaceSource).toContain('.workspace-sidebar-stack :deep(.xq-panel__body),')
     expect(workspaceSource).toContain('padding: 0.55rem;')
-    expect(workspaceSource).toContain('max-height: min(10rem, 18vh);')
-    expect(workspaceSource).toContain('min-height: 2.4rem;')
+    expect(workspaceSource).toContain('max-height: min(7rem, 14vh);')
+    expect(workspaceSource).toContain('min-height: 2rem;')
     expect(workspaceSource.match(/\.workspace-runtime-log-viewport\s*\{[^}]*\}/)?.[0]).toContain('overflow-y: auto;')
   })
 

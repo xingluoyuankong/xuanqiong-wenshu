@@ -660,6 +660,29 @@ export interface AgentProviderUsageSummary {
   last_error_category?: string | null
   latest_first_token_at?: string | null
 }
+export interface AgentProjectProviderUsageRun {
+  run_id: string
+  status: string
+  attempt_count: number
+  failed_attempts: number
+  fallback_attempts: number
+  last_error_category?: string | null
+  latest_attempt_at?: string | null
+}
+export interface AgentProjectProviderUsageSummary {
+  project_id: string
+  run_count: number
+  attempt_count: number
+  succeeded_attempts: number
+  failed_attempts: number
+  fallback_attempts: number
+  first_token_attempts: number
+  digest_attempts: number
+  selected_attempts: number
+  last_error_category?: string | null
+  latest_attempt_at?: string | null
+  runs: AgentProjectProviderUsageRun[]
+}
 export interface AgentExecutionFact {
   execution_id: string
   run_id: string
@@ -892,6 +915,15 @@ export const AgentAPI = {
     request<AgentExecutionFact[]>(`/agent/runs/${encodeURIComponent(runId)}/execution-facts?limit=${Math.max(1, Math.min(500, limit))}`),
   getProviderUsageSummary: (runId: string) =>
     request<AgentProviderUsageSummary>(`/agent/runs/${encodeURIComponent(runId)}/provider-usage-summary`),
+  getProjectProviderUsageSummary: (projectId: string, input?: { since?: string; limit?: number }) => {
+    const params = new URLSearchParams()
+    if (input?.since) params.set('since', input.since)
+    if (Number.isInteger(input?.limit)) params.set('limit', String(Math.max(1, Math.min(100, input?.limit as number))))
+    const suffix = params.toString() ? `?${params.toString()}` : ''
+    return request<AgentProjectProviderUsageSummary>(
+      `/agent/projects/${encodeURIComponent(projectId)}/provider-usage-summary${suffix}`,
+    )
+  },
   listArtifacts: (runId: string) =>
     request<AgentArtifact[]>(`/agent/runs/${encodeURIComponent(runId)}/artifacts`),
   executeApproval: (approvalId: string) =>

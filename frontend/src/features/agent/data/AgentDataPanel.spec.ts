@@ -120,6 +120,32 @@ describe('AgentDataPanel', () => {
     expect(panel.text()).not.toContain('SECRET_OUTPUT')
   })
 
+  it('显示当前项目跨 Run Provider 摘要，并保持只读安全字段', () => {
+    const wrapper = mountPanel({
+      projectId: 'project-usage-1',
+      projectProviderUsageSummary: {
+        project_id: 'project-usage-1',
+        run_count: 6,
+        attempt_count: 14,
+        succeeded_attempts: 9,
+        failed_attempts: 5,
+        fallback_attempts: 3,
+        first_token_attempts: 8,
+        digest_attempts: 9,
+        selected_attempts: 6,
+        last_error_category: 'TIMEOUT',
+        latest_attempt_at: '2026-09-03T12:02:00Z',
+        runs: [],
+      },
+    })
+    const panel = wrapper.get('[data-testid="agent-project-provider-usage-panel"]')
+    expect(panel.text()).toContain('Provider 累计')
+    expect(panel.text()).toContain('Run6')
+    expect(panel.text()).toContain('调用14')
+    expect(panel.text()).toContain('最近错误：TIMEOUT')
+    expect(panel.text()).not.toContain('SECRET_OUTPUT')
+  })
+
   it('统计加载失败和无 Run 时显示独立可读状态', () => {
     expect(mountPanel({ providerUsageSummaryError: '统计接口失败' }).get('[data-testid="agent-provider-usage-panel"]').text()).toContain('统计接口失败')
     expect(mountPanel({ activeRunId: null }).get('[data-testid="agent-provider-usage-panel"]').text()).toContain('暂无选中的 Run')

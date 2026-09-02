@@ -127,6 +127,10 @@
           </summary>
           <div class="workspace-section-body">
             <AgentDataPanel
+              :project-id="selectedProjectId || null"
+              :project-provider-usage-summary="activeProjectProviderUsageSummary"
+              :project-provider-usage-summary-loading="projectProviderUsageSummaryLoading"
+              :project-provider-usage-summary-error="activeProjectProviderUsageSummaryError || ''"
               :is-admin="isAdmin"
               :provider-health="providerHealth"
               :provider-health-loading="providerHealthLoading"
@@ -395,6 +399,7 @@ import {
   type AgentPlanResponse,
   type AgentProviderProvenance,
   type AgentProviderUsageSummary,
+  type AgentProjectProviderUsageSummary,
   type AgentRewriteInstruction,
   type AgentRiskLevel,
   type AgentRun,
@@ -477,6 +482,9 @@ const executionFactsErrorByRunId = ref<Record<string, string>>({})
 const providerUsageSummaryByRunId = ref<Record<string, AgentProviderUsageSummary>>({})
 const providerUsageSummaryLoadingByRunId = ref<Record<string, boolean>>({})
 const providerUsageSummaryErrorByRunId = ref<Record<string, string>>({})
+const projectProviderUsageSummaryByProjectId = ref<Record<string, AgentProjectProviderUsageSummary>>({})
+const projectProviderUsageSummaryLoadingByProjectId = ref<Record<string, boolean>>({})
+const projectProviderUsageSummaryErrorByProjectId = ref<Record<string, string>>({})
 const activeRun = runProjection.activeRun
 const runState = runProjection.activeRunState
 const runSteps = runProjection.activeRunSteps
@@ -497,6 +505,15 @@ const providerUsageSummaryLoading = computed(() =>
 )
 const activeProviderUsageSummaryError = computed(() =>
   activeRun.value ? providerUsageSummaryErrorByRunId.value[activeRun.value.id] || null : null,
+)
+const activeProjectProviderUsageSummary = computed(() =>
+  selectedProjectId.value ? projectProviderUsageSummaryByProjectId.value[selectedProjectId.value] || null : null,
+)
+const projectProviderUsageSummaryLoading = computed(() =>
+  selectedProjectId.value ? Boolean(projectProviderUsageSummaryLoadingByProjectId.value[selectedProjectId.value]) : false,
+)
+const activeProjectProviderUsageSummaryError = computed(() =>
+  selectedProjectId.value ? projectProviderUsageSummaryErrorByProjectId.value[selectedProjectId.value] || null : null,
 )
 const workspaceEvents = ref<AgentDisplayEvent[]>([
   { id: 'ready', label: '已就绪', detail: '请选择小说项目，然后描述你希望 Agent 完成的目标。', sequence: 0, eventType: 'workspace' },
@@ -855,6 +872,33 @@ const loadProviderUsageSummary = async (runId: string) => {
     }
   }
 }
+const loadProjectProviderUsageSummary = async (projectId = selectedProjectId.value) => {
+  if (!projectId || typeof AgentAPI.getProjectProviderUsageSummary !== 'function') return
+  projectProviderUsageSummaryLoadingByProjectId.value = {
+    ...projectProviderUsageSummaryLoadingByProjectId.value,
+    [projectId]: true,
+  }
+  try {
+    const summary = await AgentAPI.getProjectProviderUsageSummary(projectId)
+    projectProviderUsageSummaryByProjectId.value = {
+      ...projectProviderUsageSummaryByProjectId.value,
+      [projectId]: summary,
+    }
+    const nextErrors = { ...projectProviderUsageSummaryErrorByProjectId.value }
+    delete nextErrors[projectId]
+    projectProviderUsageSummaryErrorByProjectId.value = nextErrors
+  } catch (error) {
+    projectProviderUsageSummaryErrorByProjectId.value = {
+      ...projectProviderUsageSummaryErrorByProjectId.value,
+      [projectId]: error instanceof Error ? error.message : '项目 Provider 摘要暂时不可用',
+    }
+  } finally {
+    projectProviderUsageSummaryLoadingByProjectId.value = {
+      ...projectProviderUsageSummaryLoadingByProjectId.value,
+      [projectId]: false,
+    }
+  }
+}
 const refreshSessionMessages = async () => {
   if (!session.value || typeof AgentAPI.getSession !== 'function') return
   try {
@@ -1081,6 +1125,7 @@ const switchProject = () => {
     focus: undefined,
   })
   void loadContentTree({})
+  void loadProjectProviderUsageSummary()
   void restoreSession()
   void reloadGovernanceData()
 }
@@ -1298,6 +1343,7 @@ onMounted(async () => {
   await loadTools()
   await loadProviderHealth()
   await loadContentTree()
+  await loadProjectProviderUsageSummary()
   await restoreSession()
   await reloadGovernanceData()
 })
@@ -1690,6 +1736,9 @@ onBeforeUnmount(() => {
   min-width: 0;
   gap: 0.65rem;
 }
+.workspace-sidebar-stack {
+  gap: 0.4rem;
+}
 .workspace-chat-column {
   min-height: min(78vh, 60rem);
 }
@@ -1704,9 +1753,9 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  min-height: 1.9rem;
+  min-height: 1.75rem;
   box-sizing: border-box;
-  padding: 0.4rem 0.5rem;
+  padding: 0.3rem 0.45rem;
   cursor: pointer;
   list-style: none;
   color: var(--xq-ink);
@@ -1760,7 +1809,7 @@ onBeforeUnmount(() => {
 }
 .workspace-sidebar-stack :deep(.xq-panel__body),
 .workspace-activity-stack :deep(.xq-panel__body) {
-  padding: 0.55rem;
+  padding: 0.45rem;
 }
 .workspace-sidebar-stack :deep(.muted),
 .workspace-activity-stack :deep(.muted) {
@@ -1791,14 +1840,14 @@ onBeforeUnmount(() => {
 .workspace-runtime-log-viewport {
   min-width: 0;
   min-height: 2.4rem;
-  max-height: min(10rem, 18vh);
+  max-height: min(7rem, 14vh);
   overflow-y: auto;
   padding-right: 0.2rem;
   scrollbar-gutter: stable;
 }
 .workspace-log-list {
   min-width: 0;
-  min-height: 2.4rem;
+  min-height: 2rem;
 }
 .workspace-log-list:empty::before {
   content: '暂无运行日志';

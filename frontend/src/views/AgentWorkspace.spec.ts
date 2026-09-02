@@ -19,6 +19,7 @@ const {
   listRunStepsMock,
   listExecutionFactsMock,
   getProviderUsageSummaryMock,
+  getProjectProviderUsageSummaryMock,
   getRunPlanMock,
   getRunStateMock,
   getArtifactContentMock,
@@ -45,6 +46,7 @@ const {
   listRunStepsMock: vi.fn(),
   listExecutionFactsMock: vi.fn(),
   getProviderUsageSummaryMock: vi.fn(),
+  getProjectProviderUsageSummaryMock: vi.fn(),
   getRunPlanMock: vi.fn(),
   getRunStateMock: vi.fn(),
   getArtifactContentMock: vi.fn(),
@@ -83,6 +85,7 @@ vi.mock('@/api/agent', () => ({
     listRunSteps: listRunStepsMock,
     listExecutionFacts: listExecutionFactsMock,
     getProviderUsageSummary: getProviderUsageSummaryMock,
+    getProjectProviderUsageSummary: getProjectProviderUsageSummaryMock,
     getRunPlan: getRunPlanMock,
     getRunState: getRunStateMock,
     getArtifactContent: getArtifactContentMock,
@@ -114,6 +117,21 @@ describe('AgentWorkspace', () => {
     listExecutionFactsMock.mockReset()
     listExecutionFactsMock.mockResolvedValue([])
     getProviderUsageSummaryMock.mockReset()
+    getProjectProviderUsageSummaryMock.mockReset()
+    getProjectProviderUsageSummaryMock.mockResolvedValue({
+      project_id: 'p1',
+      run_count: 0,
+      attempt_count: 0,
+      succeeded_attempts: 0,
+      failed_attempts: 0,
+      fallback_attempts: 0,
+      first_token_attempts: 0,
+      digest_attempts: 0,
+      selected_attempts: 0,
+      last_error_category: null,
+      latest_attempt_at: null,
+      runs: [],
+    })
     getProviderUsageSummaryMock.mockImplementation(async (runId: string) => ({
       run_id: runId,
       total_attempts: 0,
@@ -251,6 +269,7 @@ describe('AgentWorkspace', () => {
     await flushPromises()
 
     expect(getProviderUsageSummaryMock).toHaveBeenCalledWith(run.id)
+    expect(getProjectProviderUsageSummaryMock).toHaveBeenCalledWith('p1')
     expect(wrapper.get('[data-testid="agent-provider-usage-panel"]').text()).toContain('TIMEOUT')
   })
 
