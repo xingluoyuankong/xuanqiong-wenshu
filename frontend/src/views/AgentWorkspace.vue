@@ -221,17 +221,19 @@
 
         <XqPanel class="workspace-log-panel" title="运行日志" subtitle="实时事件摘要；独立滚动，不占用聊天阅读区。" data-testid="agent-log-panel">
           <small v-if="hiddenLogEventCount" class="workspace-log-window" data-testid="agent-log-window">已折叠更早的 {{ hiddenLogEventCount }} 条日志</small>
-          <div ref="logListEl" class="events workspace-log-list" data-testid="agent-process-stream" @scroll="onLogScroll">
-            <article v-for="event in visibleLogEvents" :key="event.id">
-              <strong>{{ event.label }}</strong>
-              <small v-if="event.actionId || event.phase || event.resultRef" class="workspace-log-meta">
-                <span v-if="event.phase">阶段：{{ event.phase }}</span>
-                <button v-if="event.actionId" type="button" class="workspace-log-ref" data-testid="agent-log-action-ref" @click="selectLogLocation('action', event.actionId)">动作：{{ event.actionId }}</button>
-                <button v-if="event.resultRef" type="button" class="workspace-log-ref" data-testid="agent-log-result-ref" @click="selectLogLocation('result', event.resultRef)">结果：{{ event.resultRef }}</button>
-                <span v-if="event.progress !== undefined">{{ Math.round(event.progress) }}%</span>
-              </small>
-              <p>{{ event.detail }}</p>
-            </article>
+          <div ref="logListEl" class="workspace-runtime-log-viewport" data-testid="agent-runtime-log-viewport" @scroll="onLogScroll">
+            <div class="events workspace-log-list" data-testid="agent-process-stream">
+              <article v-for="event in visibleLogEvents" :key="event.id">
+                <strong>{{ event.label }}</strong>
+                <small v-if="event.actionId || event.phase || event.resultRef" class="workspace-log-meta">
+                  <span v-if="event.phase">阶段：{{ event.phase }}</span>
+                  <button v-if="event.actionId" type="button" class="workspace-log-ref" data-testid="agent-log-action-ref" @click="selectLogLocation('action', event.actionId)">动作：{{ event.actionId }}</button>
+                  <button v-if="event.resultRef" type="button" class="workspace-log-ref" data-testid="agent-log-result-ref" @click="selectLogLocation('result', event.resultRef)">结果：{{ event.resultRef }}</button>
+                  <span v-if="event.progress !== undefined">{{ Math.round(event.progress) }}%</span>
+                </small>
+                <p>{{ event.detail }}</p>
+              </article>
+            </div>
           </div>
         </XqPanel>
 
@@ -1464,7 +1466,7 @@ onBeforeUnmount(() => {
   margin-bottom: 1rem;
 }
 .message {
-  max-width: 88%;
+  max-width: 96%;
   padding: 0.7rem 0.85rem;
   border-radius: 0.8rem;
   background: rgba(255, 255, 255, 0.1);
@@ -1782,14 +1784,21 @@ onBeforeUnmount(() => {
   grid-template-columns: 1fr;
 }
 .workspace-log-panel {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
 }
-.workspace-log-list {
+.workspace-runtime-log-viewport {
+  min-width: 0;
   min-height: 2.4rem;
-  max-height: min(6rem, 11vh);
+  max-height: min(10rem, 18vh);
   overflow-y: auto;
   padding-right: 0.2rem;
   scrollbar-gutter: stable;
+}
+.workspace-log-list {
+  min-width: 0;
+  min-height: 2.4rem;
 }
 .workspace-log-list:empty::before {
   content: '暂无运行日志';
@@ -1876,4 +1885,3 @@ onBeforeUnmount(() => {
 }
 
 </style>
-

@@ -64,7 +64,7 @@ const statusText = computed(() => {
 .status-dot.busy { background: #d97706; }
 .agent-layout {
   display: grid;
-  grid-template-columns: minmax(124px, 8rem) minmax(0, 1fr) minmax(160px, 10.5rem);
+  grid-template-columns: minmax(6.25rem, 7rem) minmax(0, 1fr) minmax(8rem, 9rem);
   gap: 0.75rem;
   align-items: start;
   min-width: 0;
@@ -87,6 +87,8 @@ const statusText = computed(() => {
   min-height: min(72vh, 56rem);
 }
 .agent-activity {
+  display: flex;
+  flex-direction: column;
   position: sticky;
   top: 0.75rem;
   max-height: calc(100vh - 1.5rem);
@@ -97,7 +99,7 @@ const statusText = computed(() => {
 .agent-sidebar > *,
 .agent-activity > * { min-width: 0; }
 @media (max-width: 1120px) {
-  .agent-layout { grid-template-columns: minmax(116px, 7.5rem) minmax(0, 1fr) minmax(152px, 9.5rem); gap: 0.6rem; }
+  .agent-layout { grid-template-columns: minmax(6rem, 6.5rem) minmax(0, 1fr) minmax(7.5rem, 8.25rem); gap: 0.6rem; }
   .agent-page { padding-inline: 0.65rem; }
 }
 @media (max-width: 960px) {

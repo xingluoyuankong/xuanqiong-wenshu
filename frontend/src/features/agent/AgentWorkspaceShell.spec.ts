@@ -56,10 +56,10 @@ describe('AgentWorkspaceShell', () => {
 
 
   it('把紧凑侧栏、聊天主栏和右侧活动栏的宽度约束集中在壳层', () => {
-    expect(shellSource).toContain('grid-template-columns: minmax(124px, 8rem) minmax(0, 1fr) minmax(160px, 10.5rem);')
-    expect(shellSource).toContain('grid-template-columns: minmax(116px, 7.5rem) minmax(0, 1fr) minmax(152px, 9.5rem);')
+    expect(shellSource).toContain('grid-template-columns: minmax(6.25rem, 7rem) minmax(0, 1fr) minmax(8rem, 9rem);')
+    expect(shellSource).toContain('grid-template-columns: minmax(6rem, 6.5rem) minmax(0, 1fr) minmax(7.5rem, 8.25rem);')
     expect(workspaceSource).not.toContain('grid-template-columns: minmax(210px, 0.85fr) minmax(0, 1.8fr) minmax(210px, 0.75fr);')
-    expect(workspaceSource).toContain('max-height: min(6rem, 11vh);')
+    expect(workspaceSource).toContain('max-height: min(10rem, 18vh);')
     expect(workspaceSource).toContain('class="workspace-section workspace-inspector-section"')
     expect(workspaceSource).toContain('data-testid="agent-inspector-section"')
     expect(workspaceSource.indexOf('data-testid="agent-log-panel"')).toBeLessThan(
@@ -68,11 +68,24 @@ describe('AgentWorkspaceShell', () => {
   })
 
   it('把聊天主区做大并压缩两侧轨道和日志窗口', () => {
-    expect(shellSource).toContain('grid-template-columns: minmax(124px, 8rem) minmax(0, 1fr) minmax(160px, 10.5rem);')
-    expect(shellSource).toContain('grid-template-columns: minmax(116px, 7.5rem) minmax(0, 1fr) minmax(152px, 9.5rem);')
+    expect(shellSource).toContain('grid-template-columns: minmax(6.25rem, 7rem) minmax(0, 1fr) minmax(8rem, 9rem);')
+    expect(shellSource).toContain('grid-template-columns: minmax(6rem, 6.5rem) minmax(0, 1fr) minmax(7.5rem, 8.25rem);')
     expect(workspaceSource).toContain('min-height: min(78vh, 60rem);')
     expect(workspaceSource).toContain('min-height: min(30rem, 52vh);')
     expect(workspaceSource).toContain('min-height: 1.9rem;')
+  })
+
+  it('把日志固定为右侧唯一滚动视口，并保护中央阅读宽度', () => {
+    expect(workspaceSource).toContain('workspace-runtime-log-viewport')
+    expect(workspaceSource).toContain('data-testid="agent-runtime-log-viewport"')
+    expect(workspaceSource).toContain('.workspace-runtime-log-viewport')
+    expect(workspaceSource).toContain('min-width: 0;')
+    expect(workspaceSource).toContain('min-height: 0;')
+    expect(shellSource).toContain('.agent-activity {')
+    expect(shellSource).toContain('display: flex;')
+    expect(shellSource).toContain('flex-direction: column;')
+    expect(workspaceSource).toContain('.message {')
+    expect(workspaceSource).toContain('max-width: 96%;')
   })
 
   it('把中窄与手机断点的聊天优先规则固定为 CSS contract', () => {
@@ -91,8 +104,9 @@ describe('AgentWorkspaceShell', () => {
     expect(workspaceSource).toContain('font-size: 0.88rem;')
     expect(workspaceSource).toContain('.workspace-sidebar-stack :deep(.xq-panel__body),')
     expect(workspaceSource).toContain('padding: 0.55rem;')
-    expect(workspaceSource).toContain('max-height: min(6rem, 11vh);')
+    expect(workspaceSource).toContain('max-height: min(10rem, 18vh);')
     expect(workspaceSource).toContain('min-height: 2.4rem;')
+    expect(workspaceSource.match(/\.workspace-runtime-log-viewport\s*\{[^}]*\}/)?.[0]).toContain('overflow-y: auto;')
   })
 
   it('把右栏运行日志限制为有界渲染窗口', () => {
