@@ -136,6 +136,9 @@ async def test_visible_response_emits_progress_for_start_delta_and_save(monkeypa
         async def append_event(self, **kwargs):
             events.append(kwargs)
 
+        async def append_assistant_delta(self, **kwargs):
+            events.append({"event_type": "assistant_delta", "data": kwargs})
+
         async def append_public_work_summary(self, **kwargs):
             events.append({"event_type": "public_work_summary", "data": kwargs["summary"]})
 
@@ -223,6 +226,9 @@ async def test_worker_visible_response_timeout_records_retry_provenance_and_rera
 
         async def append_event(self, **kwargs):
             events.append(kwargs)
+
+        async def append_assistant_delta(self, **kwargs):
+            events.append({"event_type": "assistant_delta", "data": kwargs})
 
         async def append_public_work_summary(self, **kwargs):
             events.append({"event_type": "public_work_summary", "data": kwargs["summary"]})

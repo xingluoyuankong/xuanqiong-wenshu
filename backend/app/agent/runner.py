@@ -343,9 +343,14 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
                 buffer += delta
                 full_text += delta
                 if len(buffer) >= 32 or any(mark in buffer for mark in "。！？!?\n"):
-                    await runtime.append_event(
-                        run_id=run_id, user_id=user_id, event_type="assistant_delta",
-                        summary="Agent 正在输出回复", data={"content": buffer, "phase": "assistant_response", "action_id": "response:stream", "result_ref": response_result_ref, "response_provider_called": response_provider_called},
+                    await runtime.append_assistant_delta(
+                        run_id=run_id,
+                        user_id=user_id,
+                        content=buffer,
+                        phase="assistant_response",
+                        action_id="response:stream",
+                        result_ref=response_result_ref,
+                        response_provider_called=response_provider_called,
                     )
                     target_progress = min(95, 85 + len(full_text) // 256)
                     if target_progress > reported_progress:
@@ -362,7 +367,15 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
                         reported_progress = target_progress
                     buffer = ""
             if buffer:
-                await runtime.append_event(run_id=run_id, user_id=user_id, event_type="assistant_delta", summary="Agent 正在输出回复", data={"content": buffer, "phase": "assistant_response", "action_id": "response:stream", "result_ref": response_result_ref, "response_provider_called": response_provider_called})
+                await runtime.append_assistant_delta(
+                    run_id=run_id,
+                    user_id=user_id,
+                    content=buffer,
+                    phase="assistant_response",
+                    action_id="response:stream",
+                    result_ref=response_result_ref,
+                    response_provider_called=response_provider_called,
+                )
             await runtime.publish_progress(run_id=run_id, user_id=user_id, status="running", phase="assistant_response", action_id="response:completed", result_ref=response_result_ref, progress=99, progress_message="可见回复已生成，正在保存最终消息。")
             if not full_text.strip():
                 full_text = "已完成项目内工具检查，但 Provider 未返回可展示的回答。"

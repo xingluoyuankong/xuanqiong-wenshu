@@ -32,6 +32,7 @@ VALID_RUN_STATUSES = set(AGENT_RUN_STATUSES)
 CLAIMABLE_RUN_STATUSES = set(STATE_CLAIMABLE_RUN_STATUSES)
 VALID_RUN_COMMAND_TYPES = {"pause", "resume", "cancel"}
 _IDEMPOTENT_EVENT_TYPES = {"assistant_completed", "run_completed", "run_failed", "run_cancelled"}
+_MAX_ASSISTANT_DELTA_CHARS = 4000
 _RUN_COMMAND_ORDER = ("pause", "resume", "cancel")
 _RUN_COMMAND_TERMINAL_STATUSES = {"applied", "rejected", "failed"}
 _FORBIDDEN_KEYS = {"thought", "reasoning", "chain_of_thought", "private_reasoning", "system_prompt", "provider_secret"}
@@ -275,6 +276,8 @@ def _visible_event_data(event_type: str, value: Any) -> dict[str, Any]:
             result[name] = item
         elif isinstance(item, list) and all(isinstance(entry, (str, int, float, bool)) or entry is None for entry in item):
             result[name] = item[:100]
+    if event_type == "assistant_delta" and isinstance(result.get("content"), str):
+        result["content"] = result["content"][:_MAX_ASSISTANT_DELTA_CHARS]
     if event_type == "progress_update":
         if "progress" in result:
             try:
@@ -1008,6 +1011,45 @@ class AgentRuntimeService:
             await self.session.refresh(event)
             return event
         raise AgentConflict("unable to allocate a unique Agent event sequence") from last_conflict
+
+    async def append_assistant_delta(
+        self,
+        *,
+        run_id: str,
+        user_id: int,
+        content: str,
+        phase: str = "assistant_response",
+        action_id: str | None = None,
+        result_ref: str | None = None,
+        response_provider_called: bool | None = None,
+        data: Optional[dict[str, Any]] = None,
+        commit: bool = True,
+    ) -> list[AgentEventRecord]:
+        """Persist bounded Assistant text chunks without losing stream content."""
+        text = str(content or "")
+        if not text:
+            return []
+        metadata = dict(data or {})
+        events: list[AgentEventRecord] = []
+        for start in range(0, len(text), _MAX_ASSISTANT_DELTA_CHARS):
+            chunk = text[start : start + _MAX_ASSISTANT_DELTA_CHARS]
+            event_data = {
+                **metadata,
+                "content": chunk,
+                "phase": phase[:80],
+                **({"action_id": action_id[:160]} if action_id else {}),
+                **({"result_ref": result_ref[:160]} if result_ref else {}),
+                **({"response_provider_called": response_provider_called} if response_provider_called is not None else {}),
+            }
+            events.append(await self.append_event(
+                run_id=run_id,
+                user_id=user_id,
+                event_type="assistant_delta",
+                summary="Agent 正在输出回复",
+                data=event_data,
+                commit=commit,
+            ))
+        return events
 
     async def append_work_trace_delta(
         self,

@@ -119,6 +119,41 @@ async def test_two_independent_workers_replay_committed_events_by_cursor(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_long_assistant_delta_is_chunked_and_replays_without_loss(task_session):
+    user = User(
+        id=1404,
+        username="assistant-delta-owner",
+        email="assistant-delta-owner@example.com",
+        hashed_password="x",
+        is_active=True,
+    )
+    task_session.add(user)
+    await task_session.flush()
+    service = AgentRuntimeService(task_session)
+    agent_session = await service.create_session(user_id=user.id)
+    run = await service.create_run(session_id=agent_session.id, user_id=user.id)
+    content = "甲" * 9001
+
+    events = await service.append_assistant_delta(
+        run_id=run.id,
+        user_id=user.id,
+        content=content,
+        phase="assistant_response",
+        action_id="response:stream",
+        result_ref="execution:assistant-1",
+        data={"reasoning": "PRIVATE", "prompt": "PRIVATE"},
+    )
+
+    assert len(events) == 3
+    assert [event.sequence for event in events] == [1, 2, 3]
+    assert all(len(event.data_json["content"]) <= 4000 for event in events)
+    assert "reasoning" not in events[0].data_json
+    assert "prompt" not in events[0].data_json
+    replay = await service.list_events(run_id=run.id, user_id=user.id, after_sequence=0)
+    assert "".join(event.data_json["content"] for event in replay) == content
+
+
+@pytest.mark.asyncio
 async def test_worker_replay_is_user_scoped_even_when_event_sequence_matches(tmp_path):
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'worker-scope.db').as_posix()}"
     engine = create_async_engine(database_url, connect_args={"check_same_thread": False})
