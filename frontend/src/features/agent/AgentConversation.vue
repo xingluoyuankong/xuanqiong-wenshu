@@ -144,10 +144,21 @@ const updateGoal = (event: Event) => {
 <style scoped>
 .session-bar { display: flex; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; color: rgba(255, 255, 255, 0.86); font-size: 0.82rem; }
 .session-bar small { color: rgba(255, 255, 255, 0.68); }
-.current-progress { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.65rem; margin: 0 0 0.75rem; padding: 0.55rem 0.7rem; border: 1px solid rgba(93, 211, 158, 0.35); border-radius: 0.65rem; background: rgba(16, 185, 129, 0.08); color: rgba(255, 255, 255, 0.9); }
+.current-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.65rem;
+  margin: 0 0 0.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid rgba(93, 211, 158, 0.35);
+  border-radius: 0.65rem;
+  background: rgba(16, 185, 129, 0.08);
+  color: var(--xq-ink);
+}
 .current-progress strong { color: var(--xq-jade); font-size: 0.78rem; }
 .current-progress span { min-width: 0; overflow-wrap: anywhere; line-height: 1.45; }
-.current-progress small { color: rgba(255, 255, 255, 0.66); font-size: 0.72rem; }
+.current-progress small { color: var(--xq-ink-muted); font-size: 0.72rem; }
 .messages { display: grid; gap: 0.7rem; max-height: 26rem; overflow: auto; margin-bottom: 1rem; }
 .message { max-width: 88%; padding: 0.7rem 0.85rem; border-radius: 0.8rem; background: rgba(255, 255, 255, 0.1); }
 .message-streaming { border-left: 3px solid var(--xq-jade); opacity: 0.92; }

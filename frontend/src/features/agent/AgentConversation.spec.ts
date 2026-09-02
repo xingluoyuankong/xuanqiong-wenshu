@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
 import AgentConversation from './AgentConversation.vue'
+import conversationSource from './AgentConversation.vue?raw'
 
 const message = {
   id: 'message-1',
@@ -50,6 +51,13 @@ describe('AgentConversation', () => {
 
     await wrapper.get('form').trigger('submit')
     expect(wrapper.emitted('submit')).toHaveLength(1)
+  })
+
+  it('当前进度摘要在浅色背景上使用高对比度文本', () => {
+    const block = conversationSource.match(/\.current-progress \{[\s\S]*?\n\}/)?.[0] || ''
+    expect(block).toContain('color: var(--xq-ink);')
+    expect(conversationSource).toContain('.current-progress span {')
+    expect(conversationSource).toContain('.current-progress small { color: var(--xq-ink-muted);')
   })
 
   it('转发上下文移除和候选预览关闭事件，并在空输入时禁用提交', async () => {
