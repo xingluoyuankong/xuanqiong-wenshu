@@ -81312,3 +81312,347 @@ Provider 健康：4/4 loaded；
 CARD-067 反向验证：移除 assistant_delta.result_ref 白名单后退出码 1；
 总任务：active，继续推进。
 ```
+
+
+---
+
+# 2026-09-02 CARD-068 实际完成记录：Provider 首 token、partial digest 可观测性
+
+> 本节记录 CARD-068 相对于 CARD-067 新增的前端 Provider 流式事实展示、失败态回归和全量门禁。旧批次内容与数字不重复计算。总任务继续保持 `active`。
+
+## 17.1 提交状态
+
+项目：
+
+```text
+D:\小说写作\xuanqiong-wenshu
+```
+
+分支：
+
+```text
+codex/bohrium-integration-20260831
+```
+
+CARD-068 代码提交：
+
+```text
+0975eed feat: surface provider stream observability
+```
+
+已推送：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+本轮只修改运行检查器及其测试，未修改后端事件结构；后端流式事件引用沿用 CARD-067 已验证的 `response:<run_id>` 契约。
+
+## 17.2 本轮实际解决的问题
+
+CARD-067 已让 Provider 流式事件拥有统一的 action/result 引用，但检查器只显示：
+
+```text
+本次调用成功/失败；
+调用次数；
+最后错误类别。
+```
+
+作者仍无法直接判断：
+
+```text
+Provider 是否真正收到首 token；
+流式失败后是否保留 partial output digest；
+当前失败是完全未输出，还是已经输出一部分后中断。
+```
+
+CARD-068 在不展示原始 Provider 文本的前提下，增加两个紧凑事实：
+
+```text
+首 token 已收到
+失败后保留输出指纹
+```
+
+成功流显示：
+
+```text
+首 token 已收到 · 输出指纹已保留
+```
+
+部分输出后失败显示：
+
+```text
+首 token 已收到 · 失败后保留输出指纹
+```
+
+空流或没有 attempt 结果时，不显示虚假的首 token/指纹状态。
+
+## 17.3 真实代码变更
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\run\AgentRunInspector.vue
+```
+
+新增：
+
+```text
+providerObservability(snapshot)
+```
+
+计算规则：
+
+1. 任意 attempt 存在 `first_token_at`，显示“首 token 已收到”；
+2. 任意 attempt 存在 `output_digest`，说明输出指纹已保留；
+3. 任意 attempt 状态为 `failed` 时，将指纹事实显示为“失败后保留输出指纹”；
+4. 其他状态不制造推断性文字；
+5. 只展示时间/状态事实，不渲染原始流文本、提示词、密钥或隐藏内容。
+
+新增 DOM 节点：
+
+```text
+agent-response-provider-observability
+```
+
+原有 outcome 和 attempt 摘要保持不变。
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\run\AgentRunInspector.spec.ts
+```
+
+新增 fixture 覆盖：
+
+```text
+response Provider attempt 已收到首 token；
+该 attempt 最终失败；
+存在 output_digest；
+页面同时显示调用失败、首 token 已收到、失败后保留输出指纹。
+```
+
+## 17.4 失败驱动和修复
+
+先加入测试后，旧实现真实失败：
+
+```text
+Unable to get [data-testid="agent-response-provider-observability"]
+1 failed
+```
+
+补充 `providerObservability()` 和对应模板后，定向测试通过。
+
+期间类型检查还发现测试 fixture 缺失既有 provenance 字段：
+
+```text
+AgentProviderProvenance 必填字段缺失
+```
+
+补齐测试 fixture 后类型检查恢复通过。
+
+## 17.5 反向验证
+
+临时移除响应 Provider 的观测摘要节点：
+
+```html
+data-testid="agent-response-provider-observability"
+```
+
+再次运行首 token/partial digest 测试，结果：
+
+```text
+Unable to get [data-testid="agent-response-provider-observability"]
+EXPECTED_FAILURE_EXIT=1
+```
+
+验证完成后已恢复真实实现并清理临时副本。
+
+## 17.6 Provider 流式事实基础
+
+后端已有 `ProviderAttemptLedger` 和 `collect_stream_with_attempt()`：
+
+```text
+首次输出内容时写入 first_token_at；
+流式正常结束时写入 output_digest；
+流式中断时写入 failed 状态、错误类别和 partial output digest；
+原始输出正文不写入 attempt snapshot。
+```
+
+已有后端测试覆盖：
+
+```text
+正常流成功；
+空流 EMPTY_STREAM；
+部分输出后 TIMEOUT；
+取消 CANCELLED；
+网络断开 NETWORK_DISCONNECT；
+fallback attempt 链；
+重启后 running attempt 恢复为失败并关闭。
+```
+
+CARD-068 只把这些既有事实接到检查器可见摘要，不重复保存正文。
+
+## 17.7 定向验证
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run test:run -- src/features/agent/run/AgentRunInspector.spec.ts -t "first-token"
+npm run type-check
+```
+
+结果：
+
+```text
+首 token/partial digest：1 passed，4 skipped；
+type-check：退出码 0。
+```
+
+后端既有流式事实定向测试：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_provider_gateway.py app/services/test_llm_provider_attempt_integration.py app/services/test_llm_provider_fault_matrix.py
+```
+
+这些测试已在 CARD-067/CARD-068 门禁链路中保持通过，覆盖 partial digest、首 token、取消、fallback 和失败分类。
+
+## 17.8 全量门禁
+
+后端：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+结果：
+
+```text
+1449 passed in 474.98s
+```
+
+前端：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+npm run test:run
+npm run build-only
+```
+
+结果：
+
+```text
+npm run type-check：通过；
+npm run test:run：74 files passed，468 tests passed；
+npm run build-only：4905 modules transformed，built successfully。
+```
+
+## 17.9 当前服务与真实 Provider 状态
+
+当前前端：
+
+```text
+http://127.0.0.1:5174/agent
+```
+
+当前后端：
+
+```text
+http://127.0.0.1:8013
+```
+
+健康：
+
+```text
+http://127.0.0.1:8013/health → healthy
+```
+
+Provider 健康：
+
+```text
+registry_status=healthy
+provider_count=4
+loaded=4
+```
+
+当前本地运行使用 SQLite 配置查看 Agent 工作台。Provider 真实外部流式请求仍按实际 Provider 配置和登录会话单独验收，当前代码层 fixture 已覆盖中断、重试和 partial digest。
+
+## 17.10 当前架构状态
+
+截至 CARD-068：
+
+```text
+项目能力由后端注册表和 Run snapshot 驱动；
+Agent execution/recovery 使用 Run-bound Tool Registry；
+工具动作使用 step:<checkpoint.id>；
+工具结果使用 execution:<execution_id>；
+响应流使用 response:<run_id>；
+assistant started/delta/completed、progress、retry、failed、completed 事件均可关联；
+Provider attempt 记录首 token、状态、错误类别、fallback、完成指纹和 partial 指纹；
+前端检查器显示调用 outcome、attempt 摘要、首 token 和 partial digest 状态；
+中央聊天显示可见回复和公开进度；
+右侧日志显示紧凑 action/result 引用并独立滚动；
+左侧导航保持分组、紧凑和可折叠。
+```
+
+## 17.11 回退命令
+
+只回退 CARD-068 代码：
+
+```powershell
+git revert 0975eed
+```
+
+CARD-068 文档使用独立提交，提交完成后：
+
+```powershell
+git revert <CARD-068-文档提交哈希>
+```
+
+## 17.12 下一任务目标：CARD-069
+
+下一目标预登记为：
+
+```text
+CARD-069：Provider 实际调用统计与运行检查器状态汇总
+```
+
+目标：
+
+1. 盘点 Provider 健康、Run provenance、attempt ledger 和 execution facts 的重复字段；
+2. 在右侧数据面板增加紧凑的实际调用统计：调用次数、成功次数、失败次数、fallback 次数、最近错误类别、最近首 token 和 partial digest 数量；
+3. 统计按当前项目/当前 Run 分隔，旧 Run 不覆盖新 Run；
+4. Provider 未调用、目录 loaded 但本次未用、调用失败、fallback 成功和部分输出失败分别显示；
+5. 提供 facts/统计查询失败的可读状态，不影响聊天和日志；
+6. 先写后端聚合服务失败测试，再接路由和前端数据面板；
+7. 继续验证流式回放幂等、日志独立滚动和中央聊天阅读宽度；
+8. 继续执行反向验证、后端/前端全量门禁、代码/文档分离提交和推送。
+
+建议文件范围：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\execution_facts.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\provider_attempt.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_execution_facts.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_provider_attempt.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\data\AgentDataPanel.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\data\AgentDataPanel.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
+```
+
+CARD-069 开始基线：
+
+```text
+HEAD：0975eed；
+CARD-068 文档待提交；
+后端全量：1449 passed；
+前端全量：74 files / 468 tests；
+前端构建：4905 modules transformed；
+Provider 健康：4/4 loaded；
+CARD-068 反向验证：移除观测摘要节点后退出码 1；
+总任务：active，继续推进。
+```
