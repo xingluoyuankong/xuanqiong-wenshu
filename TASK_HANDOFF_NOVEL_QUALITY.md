@@ -84255,3 +84255,521 @@ CARD-074-A 文档回退：git revert 7a416e8（回写提交完成后再补最终
 当前任务目标：CARD-074-B
 总目标状态：active
 ```
+
+---
+
+# 2026-09-03｜CARD-074-B1 完成记录：Assistant delta 统一写入、分片上限与无损回放
+
+> 本节记录 CARD-074-B 的第一阶段实际完成内容。CARD-074-B 的 SSE 断线续接、游标矩阵、终端关闭和前端增量消费仍在后续阶段继续；本节不把阶段性完成误写成整批完成。
+
+## 1. 阶段目标
+
+阶段编号：`CARD-074-B1`
+
+阶段名称：Assistant delta 统一写入、分片上限与无损回放。
+
+本阶段解决的实际问题：
+
+```text
+Runner 原先直接调用 append_event 写入 assistant_delta，
+缺少统一的增量分片入口；当 Provider 一次返回较大的 delta 时，
+单个 durable event 会携带过大的 content，且没有独立测试证明
+回放后文本完整、不丢失、不超出公开事件边界。
+```
+
+完成内容：
+
+1. 在 `AgentRuntimeService` 增加 `append_assistant_delta()`；
+2. 将 Assistant 文本按每块最多 `4000` 字符分片写入 `assistant_delta` 事件；
+3. 所有分片共享 `phase`、`action_id`、`result_ref` 和 `response_provider_called` 安全元数据；
+4. 使用已有 `append_event()`，继续沿用 Run 锁、事件序号分配、事务提交和冲突重试；
+5. 事件白名单继续过滤 `reasoning`、`prompt`、系统提示词、Provider 原始正文和其他未知字段；
+6. Runner 的中间缓冲和流结束残余缓冲都切换到统一接口；
+7. 新增长文本分片、sequence 连续性、无损拼接和敏感字段过滤测试；
+8. 同步更新现有 `FakeRuntime` 测试替身，固定新的 Runner 依赖接口；
+9. 完成有效反向验证和完整后端 pytest；
+10. 代码已独立提交并推送。
+
+阶段状态：`completed`
+
+CARD-074 总状态：`in_progress`
+
+总目标状态：`active`
+
+下一阶段任务目标：
+
+```text
+CARD-074-B2｜SSE after_sequence 游标、断线重连和终端关闭矩阵
+```
+
+## 2. 真实代码变更
+
+### 2.1 AgentRuntimeService 增加统一增量接口
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+```
+
+新增内部常量：
+
+```python
+_MAX_ASSISTANT_DELTA_CHARS = 4000
+```
+
+新增方法：
+
+```python
+async def append_assistant_delta(
+    *,
+    run_id: str,
+    user_id: int,
+    content: str,
+    phase: str = "assistant_response",
+    action_id: str | None = None,
+    result_ref: str | None = None,
+    response_provider_called: bool | None = None,
+    data: Optional[dict[str, Any]] = None,
+    commit: bool = True,
+) -> list[AgentEventRecord]
+```
+
+接口行为：
+
+```text
+- 空 content 返回空列表，不制造空事件；
+- 非空 content 按 4000 字符切片；
+- 每个切片独立持久化为 assistant_delta；
+- content 始终由方法参数覆盖 data 中同名值；
+- phase/action_id/result_ref/response_provider_called 只使用有界安全字段；
+- data 仍交给 append_event 的公开白名单二次过滤；
+- 返回实际写入的 AgentEventRecord 列表，调用方可保留 sequence 引用；
+- commit=True 时每个事件沿用原有事务提交和事件序号冲突重试；
+- commit=False 时保持已有高层事务语义。
+```
+
+新增事件内容上限保护：
+
+```python
+if event_type == "assistant_delta" and isinstance(result.get("content"), str):
+    result["content"] = result["content"][:_MAX_ASSISTANT_DELTA_CHARS]
+```
+
+这层保护的作用是：
+
+```text
+统一入口负责分片；
+底层 sanitizer 负责兜底截断；
+即使未来其他调用方直接使用 append_event，单事件公开 content 仍有上限。
+```
+
+### 2.2 Runner 切换为统一接口
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\runner.py
+```
+
+原先的两处直接写入：
+
+```text
+runtime.append_event(... event_type="assistant_delta" ...)
+```
+
+现已统一为：
+
+```text
+runtime.append_assistant_delta(
+    run_id=run_id,
+    user_id=user_id,
+    content=buffer,
+    phase="assistant_response",
+    action_id="response:stream",
+    result_ref=response_result_ref,
+    response_provider_called=response_provider_called,
+)
+```
+
+切换点覆盖：
+
+1. 达到缓冲阈值或遇到句末标点时的中间增量；
+2. Provider stream 结束后仍残留在 buffer 中的最后一段增量。
+
+Runner 仍保留原有生命周期顺序：
+
+```text
+assistant_started
+progress_update
+assistant_delta（一个或多个）
+progress_update
+assistant_completed
+run_completed
+```
+
+本阶段没有把内部模型思考正文加入事件，也没有改变已有 Provider provenance 存储策略。
+
+### 2.3 测试替身同步
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_progress_updates.py
+```
+
+现有 Runner fake 增加：
+
+```python
+async def append_assistant_delta(self, **kwargs):
+    events.append({"event_type": "assistant_delta", "data": kwargs})
+```
+
+该修改固定了 Runner 对 runtime 的新接口依赖，避免生产代码已切换而测试替身仍停留在旧接口、导致全量测试出现假失败。
+
+## 3. 失败基线、实现和验证
+
+### 3.1 Assistant delta 失败基线
+
+先新增测试：
+
+```text
+test_long_assistant_delta_is_chunked_and_replays_without_loss
+```
+
+测试创建 9001 字符的 Assistant 文本，并要求：
+
+```text
+- 写入 3 个 assistant_delta；
+- 每个 content <= 4000；
+- sequence 为 1、2、3；
+- 公开事件不含 reasoning/prompt；
+- after_sequence=0 回放后拼接文本等于原始文本。
+```
+
+旧实现首次执行真实失败：
+
+```text
+AttributeError: AgentRuntimeService 没有 append_assistant_delta
+EXPECTED_FAILURE_EXIT=1
+```
+
+这证明测试先于实现建立，而不是先写实现再补一个永远通过的断言。
+
+### 3.2 初次实现后的全量兼容失败
+
+Runner 切换到新接口后，完整后端门禁首次发现一个既有测试替身未同步：
+
+```text
+test_visible_response_emits_progress_for_start_delta_and_save
+FakeRuntime 没有 append_assistant_delta
+```
+
+该失败不是通过删除测试或给生产代码加回退分支处理，而是同步 fake 的真实 runtime 契约。修复后定向测试恢复绿色。
+
+### 3.3 定向回归
+
+最终定向命令：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q `
+  app/agent/test_durable_event_replay.py `
+  app/agent/test_subprocess_event_replay.py `
+  app/agent/test_provider_gateway.py `
+  app/agent/test_worker.py `
+  app/agent/test_progress_updates.py `
+  app/api/routers/test_agent_runtime_route.py `
+  -k "assistant or delta or replay or provider_usage or progress or completed"
+```
+
+结果：
+
+```text
+12 passed, 39 deselected in 24.28s
+```
+
+针对测试替身修复后的回归：
+
+```text
+8 passed in 14.14s
+```
+
+长文本与终端回放核心测试：
+
+```text
+2 passed, 2 deselected in 5.13s
+```
+
+### 3.4 反向验证
+
+临时把：
+
+```python
+_MAX_ASSISTANT_DELTA_CHARS = 4000
+```
+
+改为：
+
+```python
+_MAX_ASSISTANT_DELTA_CHARS = 10_000
+```
+
+再运行长 delta 测试，结果：
+
+```text
+EXPECTED_FAILURE_EXIT=1
+```
+
+验证了 4000 字符上限是被测试实际约束的行为，不是无效常量。
+
+验证完成后已恢复：
+
+```python
+_MAX_ASSISTANT_DELTA_CHARS = 4000
+```
+
+并执行：
+
+```text
+git diff --check → 通过
+```
+
+工作区没有保留破坏版本。
+
+### 3.5 完整后端门禁
+
+命令：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+最终结果：
+
+```text
+1456 passed in 451.52s (0:07:31)
+```
+
+门禁覆盖：
+
+```text
+Agent runtime
+Runner
+Provider gateway
+Provider attempt ledger
+Durable event replay
+Subprocess replay
+Worker
+SSE/事件路由
+数据库迁移
+项目 Provider 摘要
+历史小说生成和质量测试
+```
+
+## 4. 数据边界与设计决策
+
+### 4.1 为什么采用统一方法而不是在 Runner 里切片
+
+如果只在 Runner 中按长度切片，会形成两个问题：
+
+```text
+1. 其他未来调用方仍可能直接写超大 assistant_delta；
+2. Runner 和其他调用方的事件序号、白名单、元数据口径容易漂移。
+```
+
+因此本阶段将分片能力放进 `AgentRuntimeService`，让所有增量写入共享：
+
+```text
+Run owner scope
+Run event sequence
+事务提交
+sequence 冲突重试
+公开字段 allowlist
+单事件 content 上限
+```
+
+### 4.2 为什么仍保留底层截断
+
+分片是正常路径，截断是防御性兜底：
+
+```text
+正常调用：append_assistant_delta → 4000 字符切片 → append_event；
+异常调用：append_event 直接收到超长 content → sanitizer 截断到 4000。
+```
+
+两层组合可以防止未来新代码绕过统一方法时破坏事件大小契约。
+
+### 4.3 为什么不直接暴露内部思考正文
+
+本项目需要实时显示的是：
+
+```text
+当前阶段
+当前动作
+进度百分比
+工具调用状态
+结果引用
+作者可见 Assistant 文本增量
+```
+
+这些信息已经通过：
+
+```text
+progress_update
+work_trace_delta
+tool_call_started/tool_call_completed/tool_call_failed
+assistant_delta
+```
+
+结构化表达。内部 Prompt、Provider 原始响应和隐藏上下文继续由公开事件白名单过滤，前端后续只消费安全事件。
+
+## 5. 本阶段文件清单
+
+本阶段代码提交实际包含 4 个 tracked 文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\runner.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_durable_event_replay.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_progress_updates.py
+```
+
+本阶段没有修改：
+
+```text
+frontend/src/
+数据库迁移
+AgentEventRecord 模型
+既有 SSE 路由结构
+```
+
+原因：
+
+```text
+CARD-074-A 已完成终端事件数据库 fence；
+本阶段只是将 Assistant 增量写入收束到统一 runtime 接口；
+SSE 游标和迁移矩阵留给 CARD-074-B2。
+```
+
+历史未跟踪工件继续全部保留，未使用整体暂存或批量清理。
+
+## 6. 提交、推送和回退点
+
+代码提交：
+
+```text
+b1daafe feat: chunk assistant delta events
+```
+
+代码推送：
+
+```text
+820ad69..b1daafe codex/bohrium-integration-20260831 -> origin/codex/bohrium-integration-20260831
+```
+
+代码回退：
+
+```powershell
+git revert b1daafe
+```
+
+该回退只撤销 CARD-074-B1 的增量接口、Runner 接线和对应测试，不撤销：
+
+```text
+CARD-074-A 终端事件 fence：3c06898
+CARD-072 项目 Provider 聚合：375c6ba
+CARD-073 前端摘要与布局：2175320
+```
+
+## 7. 当前任务目标：CARD-074-B2
+
+```text
+CARD-074-B2｜SSE after_sequence 游标、断线重连和终端关闭矩阵
+```
+
+### 7.1 已有能力
+
+当前后端已经具备：
+
+```text
+resolve_agent_stream_cursor()
+Last-Event-ID 解析
+after_sequence 查询参数
+AgentRuntimeService.list_events()
+SSE event_generator()
+terminal run 自动关闭
+heartbeat
+前端 connectSSE cursorParam=after_sequence
+```
+
+### 7.2 需要补的真实测试
+
+1. `Last-Event-ID` 优先于 query `after_sequence`；
+2. 空 header、非数字、负数、超大整数回退到 query/0；
+3. cursor 不会因 `stream_error` 推进；
+4. 断线后只返回 `sequence > cursor` 的事件；
+5. 500 条分页历史后 terminal run 继续读取下一页，避免终态事件被截断；
+6. terminal event 发送后 stream 结束；
+7. 重连不重复 `assistant_delta`；
+8. `assistant_completed` 和 `run_completed` 顺序稳定；
+9. 数据库 terminal_key fence 与 SSE 终态关闭组合验证；
+10. owner scope 失败发生在响应头发送前。
+
+### 7.3 预计文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_asgi_worker_event_replay.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_subprocess_event_replay.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_durable_event_replay.py
+D:\小说写作\xuanqiong-wenshu\frontend\src\utils\sseStream.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentRunStream.spec.ts
+```
+
+### 7.4 实施顺序
+
+```text
+1. 先补游标解析和 stream generator 失败测试；
+2. 运行并记录真实失败基线；
+3. 修复 query/header/cursor/terminal 组合行为；
+4. 做 owner scope、重复终态和分页边界反向验证；
+5. 后端全量 pytest；
+6. 代码独立提交推送；
+7. 接续文档独立提交推送；
+8. CARD-075 再把安全进度和 Assistant delta 放入中央聊天主阅读区。
+```
+
+## 8. 当前运行状态
+
+```text
+前端：http://127.0.0.1:5174/agent → HTTP 200
+后端：http://127.0.0.1:8013/health → HTTP 200 healthy
+DB_PROVIDER=sqlite
+分支：codex/bohrium-integration-20260831
+远端：origin/codex/bohrium-integration-20260831
+代码最新提交：b1daafe
+CARD-074-A：completed
+CARD-074-B1：completed
+CARD-074-B2：active
+总目标：active
+```
+
+## 9. 最终回写
+
+```text
+CARD-072 代码：375c6ba
+CARD-072 文档：e917ec6 → d17d865
+CARD-073 代码：2175320
+CARD-073 文档：210864e → e12a4a1 → ea46ac1
+CARD-074-A 代码：3c06898
+CARD-074-A 文档：7a416e8 → 820ad69
+CARD-074-B1 代码：b1daafe
+CARD-074-B1 文档：待本次文档提交完成后填入
+CARD-074-B1 代码推送：已完成
+CARD-074-B1 文档推送：待本次文档提交完成后确认
+CARD-074-B1 回退：git revert b1daafe
+当前任务目标：CARD-074-B2
+总目标状态：active
+```
