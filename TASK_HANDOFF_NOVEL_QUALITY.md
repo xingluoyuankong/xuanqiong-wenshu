@@ -82383,7 +82383,7 @@ git revert <CARD-071-文档提交哈希>
 ```
 
 
-# 22. 2026-09-03｜CARD-071 真实 Chromium 布局验收、滚动隔离与可读宽度修复（代码已推送）
+# 22. 2026-09-02｜CARD-071 真实 Chromium 布局验收、滚动隔离与可读宽度修复（代码已推送）
 
 ## 22.1 本批目标
 
@@ -82432,7 +82432,7 @@ CARD-071 五视口布局测量与日志/聊天滚动隔离
 输出证据目录：
 
 ```text
-D:\小说写作\xuanqiong-wenshu\audit\card071-layout-evidence-20260903\
+D:\小说写作\xuanqiong-wenshu\audit\card071-layout-evidence-20260902\
 ├── card071-layout-1920x1080.png
 ├── card071-layout-1440x900.png
 ├── card071-layout-1280x800.png
@@ -82574,7 +82574,7 @@ D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell
 D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.spec.ts
 D:\小说写作\xuanqiong-wenshu\frontend\e2e\agent-workspace.spec.ts
 D:\小说写作\xuanqiong-wenshu\frontend\playwright.card071.config.ts
-D:\小说写作\xuanqiong-wenshu\audit\card071-layout-evidence-20260903\*
+D:\小说写作\xuanqiong-wenshu\audit\card071-layout-evidence-20260902\*
 ```
 
 本批没有修改后端生产代码。后端完整基线继续为：
@@ -82616,6 +82616,20 @@ git diff --check：通过。
 ```text
 11745ac test: verify agent workspace layout responsiveness
 ```
+
+证据目录日期更正提交：
+
+```text
+6d9974d chore: correct card 071 evidence date
+```
+
+该提交只把审计目录从 `card071-layout-evidence-20260903` 更正为：
+
+```text
+card071-layout-evidence-20260902
+```
+
+不改变 PNG 或 JSON 内容。
 
 推送：
 
@@ -82699,7 +82713,7 @@ runs[]: run_id/status/attempt_count/error_category/latest_attempt_at
 ```text
 active
 当前权威完成批次：CARD-071
-代码最新提交：11745ac
+代码最新提交：6d9974d（证据日期更正；CARD-071 主代码为 11745ac）
 CARD-071 文档提交：待本次独立提交后填入
 下一批：CARD-072 后端跨 Run Provider 用量聚合
 ```
