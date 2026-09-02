@@ -83732,8 +83732,9 @@ CARD-072 文档提交链：e917ec6 → d17d865
 CARD-072 代码与文档推送：已完成
 CARD-073 代码提交：2175320
 CARD-073 代码推送：已完成
-CARD-073 文档提交（首版）：210864e docs: record card 073 workspace integration
-CARD-073 文档推送：已完成（后续回写提交继续单独推送）
+CARD-073 文档提交链：210864e → e12a4a1
+CARD-073 文档推送：已完成
+CARD-073 文档回退：先执行 `git revert e12a4a1`，再按需执行 `git revert 210864e`
 当前任务目标：CARD-074
 总目标状态：active
 ```
