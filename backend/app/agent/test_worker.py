@@ -303,6 +303,14 @@ async def test_worker_executes_agent_execution_after_enqueue_and_queues_visible_
             assert kinds.index("plan_created") < kinds.index("tool_call_started")
             assert kinds.index("tool_call_started") < kinds.index("tool_call_completed")
             assert kinds.index("tool_call_completed") < kinds.index("assistant_queued")
+            started_event = next(item for item in events if item.event_type == "tool_call_started")
+            completed_event = next(item for item in events if item.event_type == "tool_call_completed")
+            progress_events = [item for item in events if item.event_type == "progress_update" and item.data_json.get("step") == 1]
+            assert started_event.data_json["action_id"] == completed_event.data_json["action_id"]
+            assert started_event.data_json["action_id"].startswith("step:")
+            assert completed_event.data_json["result_ref"].startswith("execution:")
+            assert progress_events
+            assert all(item.data_json["action_id"] == started_event.data_json["action_id"] for item in progress_events)
     finally:
         await engine.dispose()
 

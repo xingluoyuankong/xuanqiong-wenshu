@@ -69,6 +69,7 @@ const TEXT_KEYS = new Set([
   'context_kinds',
   'fallback_reason',
   'action_id',
+  'result_ref',
   'current_action',
   'completed_action',
   'selected_capability',

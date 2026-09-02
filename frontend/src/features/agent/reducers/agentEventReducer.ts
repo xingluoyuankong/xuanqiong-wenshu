@@ -8,6 +8,7 @@ export interface AgentDisplayEvent {
   eventType: string
   phase?: string
   actionId?: string
+  resultRef?: string
   progress?: number
 }
 
@@ -210,6 +211,7 @@ export function reduceAgentRunEvent(
     eventType: event.event_type,
     ...(typeof event.data.phase === 'string' ? { phase: event.data.phase } : {}),
     ...(typeof event.data.action_id === 'string' ? { actionId: event.data.action_id } : {}),
+    ...(typeof event.data.result_ref === 'string' ? { resultRef: event.data.result_ref } : {}),
     ...(boundedProgress(event.data.progress) !== undefined ? { progress: boundedProgress(event.data.progress) } : {}),
   }
   const events = [...current.events, display]

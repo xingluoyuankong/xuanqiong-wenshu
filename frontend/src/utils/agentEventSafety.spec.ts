@@ -216,6 +216,30 @@ describe('toSafeAgentEvent', () => {
     expect(JSON.stringify(privateMessage)).not.toContain('HIDDEN')
   })
 
+  it('保留工具完成事件的公开 result_ref 用于结果定位', () => {
+    const event = toSafeAgentEvent({
+      id: 'event-result-ref',
+      run_id: 'run-result-ref',
+      sequence: 13,
+      event_type: 'tool_call_completed',
+      summary: '工具完成',
+      data: {
+        tool_name: 'project.context',
+        step: 1,
+        phase: 'tool_execution',
+        action_id: 'step:step-1',
+        result_ref: 'execution:execution-1',
+        reasoning: 'HIDDEN_REASONING',
+      },
+    } as any)
+
+    expect(event.data).toMatchObject({
+      action_id: 'step:step-1',
+      result_ref: 'execution:execution-1',
+    })
+    expect(JSON.stringify(event)).not.toContain('HIDDEN_REASONING')
+  })
+
   it('保留 public_work_summary 的受控字段并丢弃 reasoning、正文和密钥', () => {
     const event = toSafeAgentEvent({
       id: 'event-public-summary',

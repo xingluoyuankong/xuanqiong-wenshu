@@ -97,6 +97,26 @@ describe('agentEventReducer', () => {
     })
   })
 
+  it('projects action and result references for tool completion logs', () => {
+    const projection = reduceAgentRunEvent(
+      createAgentRunEventProjection(),
+      event({
+        sequence: 2,
+        event_type: 'tool_call_completed',
+        data: {
+          phase: 'tool_execution',
+          action_id: 'step:step-1',
+          result_ref: 'execution:execution-1',
+        },
+      }),
+    ).projection
+
+    expect(projection.events[0]).toMatchObject({
+      actionId: 'step:step-1',
+      resultRef: 'execution:execution-1',
+    })
+  })
+
   it('only lets the newest durable event change current Run state', () => {
     const first = reduceAgentRunEvent(
       createAgentRunEventProjection(),

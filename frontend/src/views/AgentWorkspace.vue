@@ -220,9 +220,10 @@
           <div ref="logListEl" class="events workspace-log-list" data-testid="agent-process-stream" @scroll="onLogScroll">
             <article v-for="event in visibleLogEvents" :key="event.id">
               <strong>{{ event.label }}</strong>
-              <small v-if="event.actionId || event.phase" class="workspace-log-meta">
+              <small v-if="event.actionId || event.phase || event.resultRef" class="workspace-log-meta">
                 <span v-if="event.phase">阶段：{{ event.phase }}</span>
                 <span v-if="event.actionId">动作：{{ event.actionId }}</span>
+                <span v-if="event.resultRef">结果：{{ event.resultRef }}</span>
                 <span v-if="event.progress !== undefined">{{ Math.round(event.progress) }}%</span>
               </small>
               <p>{{ event.detail }}</p>

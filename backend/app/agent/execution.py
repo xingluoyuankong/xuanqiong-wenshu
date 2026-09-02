@@ -566,6 +566,8 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                     "tool_arguments": step_arguments,
                 },
             )
+            action_id = f"step:{checkpoint.id}"
+            result_ref = action_id
             missing_dependencies = [dependency for dependency in current_dependencies if dependency not in completed_step_orders]
             if missing_dependencies:
                 await runtime.fail_step(
@@ -594,7 +596,7 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                     user_id=run.user_id,
                     event_type="step_reused",
                     summary=f"已复用 {step.tool_name} 的已完成结果",
-                    data={"tool_name": step.tool_name, "step": index, "phase": "checkpoint_replay"},
+                    data={"tool_name": step.tool_name, "step": index, "phase": "checkpoint_replay", "action_id": action_id, "result_ref": result_ref},
                 )
                 continue
             if step.risk_level.value not in {"read", "suggest"}:
@@ -628,6 +630,7 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                 step=index,
                 tool_name=step.tool_name,
                 progress=step_start_progress,
+                action_id=action_id,
                 progress_message=f"正在执行第 {index} 个工具：{step.tool_name}。",
             )
             await runtime.append_event(
@@ -635,13 +638,13 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                 user_id=run.user_id,
                 event_type="tool_call_started",
                 summary=f"开始调用 {step.tool_name}",
-                data={"tool_name": step.tool_name, "step": index, "phase": "tool_execution"},
+                data={"tool_name": step.tool_name, "step": index, "phase": "tool_execution", "action_id": action_id},
             )
             await _publish_public_activity(
                 runtime,
                 run_id=run.id,
                 user_id=run.user_id,
-                action_id=f"step:{index}:started",
+                action_id=action_id,
                 phase="tool_execution",
                 current_action=f"正在执行第 {index} 个项目能力：{step.tool_name}。",
                 canonical_refs=resolved_context.canonical_refs(),
@@ -672,6 +675,7 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                         lease_generation=step_generation,
                         idempotency_key=f"{run.id}:capability:{checkpoint.id}",
                     )
+                    result_ref = f"execution:{capability_execution.execution_id}"
                 result = await execute_read_tool(
                     tool_name=step.tool_name,
                     session=session,
@@ -707,13 +711,15 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                         "step": index,
                         "result_keys": list(result_payload.keys())[:20],
                         "phase": "tool_execution",
+                        "action_id": action_id,
+                        "result_ref": result_ref,
                     },
                 )
                 await _publish_public_activity(
                     runtime,
                     run_id=run.id,
                     user_id=run.user_id,
-                    action_id=f"step:{index}:completed",
+                    action_id=action_id,
                     phase="tool_execution",
                     current_action=f"已完成第 {index} 个能力：{step.tool_name}。",
                     canonical_refs=resolved_context.canonical_refs(),
@@ -732,6 +738,7 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                     phase="tool_execution",
                     step=index,
                     tool_name=step.tool_name,
+                    action_id=action_id,
                     progress=step_end_progress,
                     progress_message=f"第 {index} 个工具已完成：{step.tool_name}。",
                 )
@@ -748,7 +755,7 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                     user_id=run.user_id,
                     event_type="tool_cancelled",
                     summary=f"{step.tool_name} 已取消",
-                    data={"tool_name": step.tool_name, "step": index, "phase": "tool_execution"},
+                    data={"tool_name": step.tool_name, "step": index, "phase": "tool_execution", "action_id": action_id, "result_ref": result_ref},
                 )
                 break
             except AgentConflict as exc:
@@ -778,13 +785,13 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                     user_id=run.user_id,
                     event_type="tool_call_failed",
                     summary=f"{step.tool_name} 执行失败",
-                    data={"tool_name": step.tool_name, "step": index, "error_type": type(exc).__name__, "phase": "tool_execution"},
+                    data={"tool_name": step.tool_name, "step": index, "error_type": type(exc).__name__, "phase": "tool_execution", "action_id": action_id, "result_ref": result_ref},
                 )
                 await _publish_public_activity(
                     runtime,
                     run_id=run.id,
                     user_id=run.user_id,
-                    action_id=f"step:{index}:failed",
+                    action_id=action_id,
                     phase="tool_execution",
                     current_action=f"第 {index} 个能力 {step.tool_name} 未成功完成。",
                     canonical_refs=resolved_context.canonical_refs(),

@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AgentWorkspace from './AgentWorkspace.vue'
+import workspaceSource from './AgentWorkspace.vue?raw'
 
 const {
   pushMock,
@@ -193,6 +194,11 @@ describe('AgentWorkspace', () => {
       events: [],
     })
   })
+  it('右侧日志显示动作对应的结果引用，而不把结果正文混入日志', () => {
+    expect(workspaceSource).toContain('v-if="event.actionId || event.phase || event.resultRef"')
+    expect(workspaceSource).toContain('结果：{{ event.resultRef }}')
+  })
+
   it('将导航、聊天和运行日志分隔为可折叠的独立区域', async () => {
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
