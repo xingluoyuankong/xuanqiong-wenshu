@@ -36,6 +36,9 @@ export interface AgentRunEventProjection {
   workTraceDeltas: AgentWorkTraceDelta[]
   latestWorkTrace: AgentWorkTraceDelta | null
   latestProgressMessage: string
+  latestProgressActionId?: string
+  latestProgressPhase?: string
+  latestProgress?: number
   lastSequence: number
   lastContiguousSequence: number
   pendingSequences: number[]
@@ -114,6 +117,9 @@ export function createAgentRunEventProjection(): AgentRunEventProjection {
     workTraceDeltas: [],
     latestWorkTrace: null,
     latestProgressMessage: '',
+    latestProgressActionId: undefined,
+    latestProgressPhase: undefined,
+    latestProgress: undefined,
     lastSequence: 0,
     lastContiguousSequence: 0,
     pendingSequences: [],
@@ -269,9 +275,21 @@ export function reduceAgentRunEvent(
       workTraceDeltas,
       latestWorkTrace: workTraceDeltas.at(-1) || null,
       latestProgressMessage:
-        isLatest && event.event_type === 'progress_update' && typeof data.progress_message === 'string'
-          ? data.progress_message
+        isLatest && event.event_type === 'progress_update'
+          ? typeof data.progress_message === 'string' ? data.progress_message : ''
           : current.latestProgressMessage,
+      latestProgressActionId:
+        isLatest && event.event_type === 'progress_update' && typeof data.action_id === 'string'
+          ? data.action_id
+          : isLatest && event.event_type === 'progress_update' ? undefined : current.latestProgressActionId,
+      latestProgressPhase:
+        isLatest && event.event_type === 'progress_update' && typeof data.phase === 'string'
+          ? data.phase
+          : isLatest && event.event_type === 'progress_update' ? undefined : current.latestProgressPhase,
+      latestProgress:
+        isLatest && event.event_type === 'progress_update'
+          ? boundedProgress(data.progress ?? data.percent)
+          : current.latestProgress,
       lastSequence: Math.max(current.lastSequence, event.sequence),
       lastContiguousSequence: sequenceState.lastContiguousSequence,
       pendingSequences: sequenceState.pendingSequences,

@@ -21,6 +21,10 @@ describe('AgentConversation', () => {
         sessionTitle: '第三章质量审查',
         streamConnectionState: 'live',
         runtimeSupported: true,
+        latestProgressMessage: '正在检查第三章质量',
+        latestProgressActionId: 'tool:quality.inspect',
+        latestProgressPhase: 'tool_execution',
+        latestProgress: 42,
         goal: '检查第三章',
         publicWorkSummary: {
           action_id: 'planner:1',
@@ -35,6 +39,9 @@ describe('AgentConversation', () => {
     expect(wrapper.get('[data-testid="agent-session-status"]').text()).toContain('会话：第三章质量审查')
     expect(wrapper.get('[data-testid="agent-message-list"]').text()).toContain(message.content)
     expect(wrapper.get('[data-testid="agent-public-work-summary"]').text()).toContain('正在建立创作计划。')
+    expect(wrapper.get('[data-testid="agent-current-progress"]').text()).toContain('正在检查第三章质量')
+    expect(wrapper.get('[data-testid="agent-current-progress"]').text()).toContain('tool:quality.inspect')
+    expect(wrapper.get('[data-testid="agent-current-progress"]').text()).toContain('42%')
     expect(wrapper.find('[data-testid="agent-process-stream"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('实时运行流已连接')
 

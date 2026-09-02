@@ -62,6 +62,41 @@ describe('agentEventReducer', () => {
     })
   })
 
+  it('projects current progress metadata and ignores late older progress', () => {
+    const first = reduceAgentRunEvent(
+      createAgentRunEventProjection(),
+      event({
+        sequence: 4,
+        event_type: 'progress_update',
+        data: { phase: 'tool_execution', action_id: 'tool:quality.inspect', progress: 42, progress_message: '正在检查第三章质量' },
+      }),
+    ).projection
+
+    expect(first).toMatchObject({
+      latestProgressMessage: '正在检查第三章质量',
+      latestProgressActionId: 'tool:quality.inspect',
+      latestProgressPhase: 'tool_execution',
+      latestProgress: 42,
+    })
+
+    const late = reduceAgentRunEvent(
+      first,
+      event({
+        id: 'late-progress',
+        sequence: 3,
+        event_type: 'progress_update',
+        data: { phase: 'planning', action_id: 'planner:old', progress: 5, progress_message: '旧进度' },
+      }),
+    ).projection
+
+    expect(late).toMatchObject({
+      latestProgressMessage: '正在检查第三章质量',
+      latestProgressActionId: 'tool:quality.inspect',
+      latestProgressPhase: 'tool_execution',
+      latestProgress: 42,
+    })
+  })
+
   it('only lets the newest durable event change current Run state', () => {
     const first = reduceAgentRunEvent(
       createAgentRunEventProjection(),
