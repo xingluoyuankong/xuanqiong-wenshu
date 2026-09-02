@@ -78540,3 +78540,244 @@ cd D:\小说写作\xuanqiong-wenshu\backend
 ```
 
 8. CARD-060 完成后再决定是否继续前端内容管理和对话交互的下一轮细化。
+
+
+---
+
+# CARD-060 实际完成记录：Agent 工具执行绑定 Run 能力快照（2026-09-02）
+
+## 1. 问题证据与架构背景
+
+项目已经具备 Tool Registry、Provider Catalog、Capability Resolver、Catalog Release、Run relational snapshot 和 AgentExecutionService，但旧执行阶段仍在 `execution.py` 直接从全局 `DEFAULT_TOOL_REGISTRY` 获取工具、校验计划参数和执行只读工具。这样 Run 创建时记录的 `catalog_release` / `capability_resolution` 主要停留在审计和记录层，尚未真正成为执行时的工具来源边界：如果全局注册表在 Run 创建后发生工具新增、移除或 handler 替换，执行链无法明确证明自己仍按照该 Run 的冻结能力集合工作。
+
+这与 Agent 化目标直接相关：Agent 应通过项目内注册能力和运行时编排工具，而不是将工具集合硬编码在页面中；每次 Run 必须有可追踪、可解释、可回放的能力集合。
+
+先写失败测试导入预期的 `RunBoundToolRegistry`，旧实现真实失败：
+
+```text
+ImportError: cannot import name 'RunBoundToolRegistry' from app.agent.registry
+```
+
+该失败确认当前代码没有运行时快照注册表边界。
+
+## 2. 实际实现文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\registry.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\execution.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\runner.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\tool_adapters.py
+```
+
+新增 `RunBoundToolRegistry`：
+
+1. 从 Run 的 `capability_resolution.tools` 读取允许的能力名称。
+2. 从 Run 的 `catalog_release.tools` 读取冻结的 handler identity。
+3. 只暴露 resolver 快照中允许的工具。
+4. 获取工具时核对当前 Registry 中 handler identity 与 Run 快照一致；名称存在但实现身份漂移时立即抛出契约错误。
+5. 统一转发 `get()`、`list_tools()`、`validate_planned_input()` 和 `execute()`，不复制业务 handler，不把小说内容写死在注册表类中。
+6. 对缺少 resolver 快照的历史 Run 返回原 Registry，保持旧数据兼容。
+
+新增 `bind_run_tool_registry()`：
+
+```text
+新 Run：绑定快照并校验所有快照工具；
+旧 Run：没有 capability_resolution 时继续使用 DEFAULT_TOOL_REGISTRY。
+```
+
+## 3. 真实执行链接入
+
+### 3.1 规划阶段
+
+`execute_agent_execution_job()` 创建 `run_registry`，并将其传入：
+
+```text
+AgentOrchestrator(..., registry=run_registry)
+```
+
+Provider 规划器看到的工具目录来自当前 Run 的绑定注册表，不能选择快照之外的能力。
+
+### 3.2 参数投影与校验
+
+初次规划和重规划均改为：
+
+```text
+run_registry.get(...)
+run_registry.validate_planned_input(...)
+```
+
+ContextRef 仍由现有 `resolve_agent_context_refs()` 和 `project_plan_arguments()` 处理；上下文绑定字段继续由工具 manifest 声明，不允许 Provider 猜测。
+
+### 3.3 只读执行
+
+`execute_read_tool()` 增加可选 `registry` 参数：
+
+```text
+传入 Run-bound registry：按当前 Run 快照执行；
+未传 registry：兼容旧调用，继续使用 DEFAULT_TOOL_REGISTRY。
+```
+
+正常 Agent execution 将绑定注册表传入，因此工具 handler、输入 schema、风险级别和取消策略都在同一运行边界内校验。
+
+### 3.4 服务重启恢复
+
+`runner.py` 的 `_recover_pending_read_steps()` 同样创建并传入 Run-bound registry，避免“正常执行按快照、服务重启恢复却回到全局注册表”的边界不一致。
+
+写入工具仍走现有审批、候选 Artifact、handler identity 和接受流程，没有借本批改动跳过审批状态机。
+
+## 4. 新增与调整测试
+
+### 4.1 快照名称和 handler identity
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_execution_capability_fence.py
+```
+
+覆盖：
+
+```text
+快照允许 project.context 时可以获取该工具；
+chapter.inspect 不在快照中时被拒绝；
+快照 handler_identity 与当前 Registry 不一致时被拒绝；
+旧 Run 没有 resolver snapshot 时保持兼容。
+```
+
+### 4.2 恢复路径绑定
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_runner.py
+```
+
+新增测试确认：
+
+```text
+恢复未完成只读步骤时，execute_read_tool 收到的 registry 是 RunBoundToolRegistry；
+已完成步骤仍只复用 checkpoint，不重复执行；
+未完成写入步骤仍不会被恢复逻辑自动执行。
+```
+
+### 4.3 旧测试替身兼容
+
+以下测试中的 `AgentOrchestrator` 替身从 `lambda provider` 调整为 `lambda provider, **kwargs`，以显式接受真实执行路径新增的 registry 参数：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_worker.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_runtime_route.py
+```
+
+这是测试替身接口跟随生产构造函数契约的兼容调整，没有改变原有断言目标。
+
+## 5. 失败驱动与修复过程
+
+第一次定向执行因为旧 Worker fixture 不接受 `registry=` 而失败：
+
+```text
+TypeError: lambda provider fixture does not accept new registry keyword
+```
+
+随后统一调整测试替身并重跑，执行 Worker 相关测试通过。该过程保留了真实生产接口变化带来的兼容性反馈，没有通过删除新参数绕过快照绑定。
+
+## 6. 定向验证
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_execution_capability_fence.py app/agent/test_catalog_release.py app/agent/test_capability_resolver.py app/agent/test_catalog_relational.py
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_worker.py app/agent/test_runner.py app/agent/test_orchestrator.py
+.\.venv\Scripts\python.exe -m pytest -q app/api/routers/test_agent_runtime_route.py app/agent/test_context_refs.py app/agent/test_tool_adapters.py
+```
+
+结果：
+
+```text
+27 passed；
+59 passed；
+36 passed；
+```
+
+合计：
+
+```text
+122 passed
+```
+
+## 7. 反向验证
+
+对新增快照注册表核心断言进行故意破坏：移除快照名称边界/handler identity 校验时，`RunBoundToolRegistry` 定向测试会失败；恢复实现后重新通过。
+
+此外，执行路径的原有 Worker 测试在生产构造函数加入 `registry=` 后首先真实暴露 fixture 签名不兼容，修复 fixture 后恢复通过，证明新增参数实际穿过了执行链。
+
+## 8. 后端全量门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+结果：
+
+```text
+1446 passed in 512.48s (0:08:32)
+```
+
+## 9. 提交、推送与回退
+
+代码提交：
+
+```text
+1b41d98 feat: bind agent execution to run capability snapshot
+```
+
+已推送到：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+代码回退：
+
+```powershell
+git revert 1b41d98
+```
+
+该回退只撤销 CARD-060 的 Run-bound registry、执行链接入和相关测试兼容调整，不影响 CARD-049 至 CARD-059；文档使用独立提交。
+
+## 10. 当前 Agent 化架构状态
+
+截至 2026-09-02：
+
+```text
+用户目标通过 Agent 会话进入 durable Run；
+Run 创建时绑定 Catalog Release、Capability Resolution、Context Snapshot；
+Planner 从 Run-bound registry 获取能力目录；
+ContextRef 投影工具参数；
+只读工具通过 Run-bound registry 执行；
+写入工具继续走 approval -> candidate Artifact -> accept 状态机；
+Provider 流式输出通过 durable assistant_delta / progress_update / public_work_summary 进入 SSE；
+历史事件和 SSE 共享读取端公开 payload 清洗；
+前端中央聊天显示作者可读内容，右侧显示独立日志和 action/phase/progress。
+```
+
+这为后续“AI 自主调用项目内功能”提供了真实执行边界：页面不负责硬编码工具集合，Agent runtime 通过注册表和 Run 快照决定可用能力。
+
+## 11. 下一任务目标：CARD-061 Agent 计划与执行结果的统一事实引用
+
+CARD-061 继续后端优先，目标是让 Planner 计划、每个 Tool execution fact、checkpoint、tool result digest、重规划和前端日志引用同一组稳定 identity：
+
+1. 审查 `plan_steps`、`AgentRunStep`、`AgentCapabilityExecution`、`tool_results` 和 `tool_result_digests` 的 identity 是否始终可关联。
+2. 为每个实际工具动作统一记录 `action_id` / `step_id` / `execution_id` / `result_ref`，避免只靠工具名称和序号拼接。
+3. 验证重试、恢复、重规划和已完成步骤复用时不会生成重复结果或错误覆盖旧结果。
+4. 让 `work_trace_delta`、`progress_update`、`tool_call_completed` 和 `public_work_summary` 使用同一动作引用，前端可以从日志直接定位到运行详情和结果摘要。
+5. 先写跨模块失败测试，再修改最小后端边界；不得把结果正文、Provider 原始响应或隐藏推理写进公开事件。
+6. 代码与测试独立提交推送，接续文档独立提交推送，记录精确回退命令。
+7. 后端门禁继续执行：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+8. CARD-061 完成后再继续前端“动作详情/结果定位”交互，避免先改 UI 再补事实源。
