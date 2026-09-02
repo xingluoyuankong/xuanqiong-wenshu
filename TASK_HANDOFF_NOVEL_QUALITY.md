@@ -78190,3 +78190,165 @@ cd D:\小说写作\xuanqiong-wenshu\backend
 ```
 
 8. CARD-058 完成后再进入下一轮前端布局细化；布局调整必须基于浏览器视口实测，而不是只改源码字符串。
+
+
+---
+
+# CARD-058 实际完成记录：Provider 流式失败后的部分输出指纹保留（2026-09-02）
+
+## 1. 问题证据
+
+当前 Agent 的可见回复链路是：Provider stream → `LLMService.stream_visible_response()` → `runner.py` → `assistant_delta` durable event → SSE 回放。Provider 流式过程中如果已经产生部分内容，随后发生网络/超时异常，旧的 `collect_stream_with_attempt()` 只把 attempt 标记为失败并记录错误类别，丢弃已经产生过输出的事实指纹。这样恢复、重试和人工审阅只能看到“失败”，无法区分“尚未输出”与“已经输出一部分后中断”。
+
+先写失败测试运行旧实现，真实结果：
+
+```text
+record["status"] == "failed"：通过；
+record["error_category"] == "TIMEOUT"：通过；
+record["output_digest"]：实际为 None；
+1 failed, 2 deselected
+```
+
+## 2. 实际实现
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\provider_attempt.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\provider_gateway.py
+```
+
+变更：
+
+1. `ProviderAttemptLedger.fail()` 增加可选 `output` 参数。
+2. 失败记录在收到 partial output 时计算 SHA-256 `output_digest`。
+3. `collect_stream_with_attempt()` 在 Provider 异常和生成器取消路径都传递已收集的输出片段，只保留摘要指纹，不保留原文。
+4. 原有错误分类、完成时间、HTTP 状态和取消语义保持不变。
+5. 成功流仍走既有 `finish(..., output=...)` 路径，成功/失败两种 attempt 都具备可比较的输出摘要事实。
+
+由此 Provider attempt 时间线可区分：
+
+```text
+失败且无输出：status=failed，output_digest=null；
+部分输出后失败：status=failed，output_digest=<sha256>；
+完整成功：status=succeeded，output_digest=<sha256>。
+```
+
+## 3. 新增回归测试
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_provider_gateway.py
+```
+
+测试：
+
+```text
+test_gateway_records_partial_stream_digest_when_provider_fails
+```
+
+覆盖：
+
+```text
+Provider 先输出“已经输出的可见片段”；
+随后抛出 TimeoutError；
+attempt 状态为 failed；
+错误类别为 TIMEOUT；
+output_digest 存在；
+记录序列化结果不包含可见片段原文。
+```
+
+相关回归继续验证：
+
+```text
+成功流 output_digest；
+空流 EMPTY_STREAM；
+非流式失败错误分类和原始错误不落账；
+LLMService 可见流不输出 reasoning_content；
+可见回复终态消息和 assistant/run completed 幂等。
+```
+
+## 4. 反向验证
+
+临时移除 `collect_stream_with_attempt()` 失败路径向 `fail()` 传递 `output`，新增测试真实失败：
+
+```text
+record["output_digest"] 实际为 None；
+1 failed, 2 deselected；
+EXPECTED_FAILURE_EXIT=1
+```
+
+验证结束后恢复实现。
+
+## 5. 定向回归
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_provider_gateway.py app/agent/test_provider_attempt.py
+.\.venv\Scripts\python.exe -m pytest -q app/services/test_llm_provider_attempt_integration.py app/services/test_agent_visible_stream.py app/services/test_llm_stream_reasoning_fallback.py
+.\.venv\Scripts\python.exe -m pytest -q app/services/test_agent_conversation_runtime.py -k "visible_response or finalize"
+```
+
+结果：
+
+```text
+7 passed；
+8 passed；
+3 passed, 2 deselected。
+```
+
+## 6. 后端全量门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+结果：
+
+```text
+1443 passed in 459.30s (0:07:39)
+```
+
+## 7. 提交、推送与回退
+
+代码提交：
+
+```text
+3befccf feat: retain partial provider stream digest
+```
+
+已推送到：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+代码回退：
+
+```powershell
+git revert 3befccf
+```
+
+该回退只撤销 CARD-058 的 Provider attempt 指纹增强和测试，不影响 CARD-049 至 CARD-057；文档使用独立提交。
+
+## 8. 下一任务目标：CARD-059 前端三栏布局第二阶段真实视口修复
+
+CARD-059 回到前端，但只处理真实浏览器证据支持的布局问题：
+
+1. 用浏览器在桌面、中屏、移动视口分别测量 `.agent-sidebar`、`.agent-main`、`.agent-activity` 的实际宽高和滚动行为。
+2. 左侧项目/会话/工具/数据继续紧凑可折叠，压缩重复说明和面板留白，但保留项目选择、章节树、会话切换、工具目录和数据入口。
+3. 中央聊天继续作为唯一主阅读面，消息正文、流式回复、当前进度摘要和输入区必须获得最大可用宽度。
+4. 右侧日志保持独立容器和独立滚动，日志高度不能挤压中央对话，也不能把事件列表重新插入中央。
+5. 若发现真实缺口，先写失败测试，再修改 `AgentWorkspaceShell.vue` / `AgentWorkspace.vue`，并用浏览器截图验证；若只有视觉问题，则仍必须增加可复现的源码或视口契约测试。
+6. 前端门禁：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+npm run test:run
+npm run build-only
+```
+
+7. CARD-059 代码、反向验证、全量门禁、代码提交推送、文档独立提交推送全部写入本文件。
