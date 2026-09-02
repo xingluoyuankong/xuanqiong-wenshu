@@ -85,6 +85,8 @@ describe('AgentRunInspector', () => {
     })
 
     expect(wrapper.get('[data-testid="agent-planner-provider-provenance"]').text()).toContain('已调用 Provider')
+    expect(wrapper.get('[data-testid="agent-planner-provider-outcome"]').text()).toContain('本次调用成功')
+    expect(wrapper.get('[data-testid="agent-response-provider-outcome"]').text()).toContain('本次调用失败')
     expect(wrapper.get('[data-testid="agent-response-provider-provenance"]').text()).toContain('已降级：empty_response')
     expect(wrapper.get('[data-testid="agent-candidate-writer-provider-provenance"]').text()).toContain('fixture-model')
     expect(wrapper.get('[data-testid="agent-planner-provider-attempts"]').text()).toContain('2 次调用 · 已选 #2')
@@ -92,7 +94,7 @@ describe('AgentRunInspector', () => {
     expect(wrapper.get('[data-testid="agent-candidate-writer-provider-attempts"]').text()).toContain('1 次调用 · 已选 #1 · 含 fallback')
     expect(wrapper.get('[data-testid="agent-sequence-gap-status"]').text()).toContain('正在补齐事件账本')
     expect(source).toContain('.run-summary dd { min-width: 0;')
-    expect(source).toContain('.provider-model-ref, .provider-attempt-summary { display: block;')
+    expect(source).toContain('.provider-model-ref, .provider-attempt-summary, .provider-outcome { display: block;')
   })
 })
 
