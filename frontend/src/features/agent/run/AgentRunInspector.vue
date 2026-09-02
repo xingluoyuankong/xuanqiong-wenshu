@@ -91,6 +91,18 @@ const providerOutcome = (called?: boolean | null, snapshot?: AgentProviderAttemp
   if (called === true) return '本次调用进行中'
   return '本次状态未知'
 }
+const providerObservability = (snapshot?: AgentProviderAttemptSnapshot | null) => {
+  const attempts = snapshot?.provider_attempts || []
+  if (!attempts.length) return ''
+  const parts: string[] = []
+  if (attempts.some((item) => typeof item.first_token_at === 'string' && item.first_token_at))
+    parts.push('首 token 已收到')
+  if (attempts.some((item) => typeof item.output_digest === 'string' && item.output_digest)) {
+    parts.push(attempts.some((item) => item.status === 'failed') ? '失败后保留输出指纹' : '输出指纹已保留')
+  }
+  return parts.join(' · ')
+}
+
 const providerAttemptSummary = (snapshot?: AgentProviderAttemptSnapshot | null) => {
   const attempts = snapshot?.provider_attempts || []
   if (!attempts.length) return ''
@@ -134,7 +146,7 @@ const providerAttemptSummary = (snapshot?: AgentProviderAttemptSnapshot | null) 
         </template>
         <template v-if="provenance">
           <dt>规划 Provider</dt><dd data-testid="agent-planner-provider-provenance">{{ providerStatus(provenance.planner_provider_called, provenance.planner_provider_fallback_reason) }}<span class="provider-outcome" data-testid="agent-planner-provider-outcome">{{ providerOutcome(provenance.planner_provider_called, provenance.planner_provider_attempts) }}</span><span v-if="providerAttemptSummary(provenance.planner_provider_attempts)" class="provider-attempt-summary" data-testid="agent-planner-provider-attempts">{{ providerAttemptSummary(provenance.planner_provider_attempts) }}</span></dd>
-          <dt>回复 Provider</dt><dd data-testid="agent-response-provider-provenance">{{ providerStatus(provenance.response_provider_called, provenance.response_provider_fallback_reason) }}<span class="provider-outcome" data-testid="agent-response-provider-outcome">{{ providerOutcome(provenance.response_provider_called, provenance.response_provider_attempts) }}</span><span v-if="providerAttemptSummary(provenance.response_provider_attempts)" class="provider-attempt-summary" data-testid="agent-response-provider-attempts">{{ providerAttemptSummary(provenance.response_provider_attempts) }}</span></dd>
+          <dt>回复 Provider</dt><dd data-testid="agent-response-provider-provenance">{{ providerStatus(provenance.response_provider_called, provenance.response_provider_fallback_reason) }}<span class="provider-outcome" data-testid="agent-response-provider-outcome">{{ providerOutcome(provenance.response_provider_called, provenance.response_provider_attempts) }}</span><span v-if="providerObservability(provenance.response_provider_attempts)" class="provider-observability" data-testid="agent-response-provider-observability">{{ providerObservability(provenance.response_provider_attempts) }}</span><span v-if="providerAttemptSummary(provenance.response_provider_attempts)" class="provider-attempt-summary" data-testid="agent-response-provider-attempts">{{ providerAttemptSummary(provenance.response_provider_attempts) }}</span></dd>
           <dt>候选正文 Provider</dt><dd data-testid="agent-candidate-writer-provider-provenance">{{ providerStatus(provenance.candidate_writer_provider_called, provenance.candidate_writer_provider_fallback_reason) }}<span class="provider-outcome" data-testid="agent-candidate-writer-provider-outcome">{{ providerOutcome(provenance.candidate_writer_provider_called, provenance.candidate_writer_provider_attempts) }}</span><span v-if="provenance.candidate_writer_model_ref" class="provider-model-ref">{{ provenance.candidate_writer_model_ref }}</span><span v-if="providerAttemptSummary(provenance.candidate_writer_provider_attempts)" class="provider-attempt-summary" data-testid="agent-candidate-writer-provider-attempts">{{ providerAttemptSummary(provenance.candidate_writer_provider_attempts) }}</span></dd>
         </template>
       </dl>
@@ -177,7 +189,7 @@ const providerAttemptSummary = (snapshot?: AgentProviderAttemptSnapshot | null) 
 .run-summary { display: grid; grid-template-columns: auto 1fr; gap: .45rem .75rem; margin: 0; }
 .run-summary dt { color: var(--xq-ink-muted); }
 .run-summary dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-weight: 700; }
-.provider-model-ref, .provider-attempt-summary, .provider-outcome { display: block; margin-top: .16rem; color: var(--xq-ink-muted); font-size: .78rem; font-weight: 600; line-height: 1.42; }
+.provider-model-ref, .provider-attempt-summary, .provider-outcome, .provider-observability { display: block; margin-top: .16rem; color: var(--xq-ink-muted); font-size: .78rem; font-weight: 600; line-height: 1.42; }
 .step-list { display: grid; gap: .55rem; margin: 0; padding-left: 1.2rem; }
 .step-list li { display: grid; gap: .15rem; padding: .3rem .35rem; border: 1px solid transparent; border-radius: .45rem; }
 .step-list li.step-list__item--selected { border-color: var(--xq-gold-deep); background: rgba(214, 169, 74, 0.1); box-shadow: 0 0 0 2px rgba(214, 169, 74, 0.14); }

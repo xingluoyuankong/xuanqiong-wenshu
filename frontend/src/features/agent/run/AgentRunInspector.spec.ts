@@ -4,6 +4,24 @@ import AgentRunInspector from './AgentRunInspector.vue'
 import source from './AgentRunInspector.vue?raw'
 
 describe('AgentRunInspector', () => {
+  it('shows first-token and partial-digest observability for a provider stream', () => {
+    const wrapper = mount(AgentRunInspector, {
+      props: {
+        run: { id: 'run-stream-fact', correlation_id: 'c1', session_id: 's1', user_id: 1, status: 'failed', current_phase: 'error', current_step: 0, progress: 90, created_at: 'now' },
+        state: null, steps: [], toolResults: [], connectionState: 'terminal',
+        provenance: {
+          planner_provider_called: null, planner_provider_fallback_reason: null,
+          candidate_writer_provider_called: null, candidate_writer_provider_fallback_reason: null, candidate_writer_model_ref: null,
+          response_provider_called: true, response_provider_fallback_reason: 'TIMEOUT',
+          response_provider_attempts: { provider_attempts: [{ status: 'failed', first_token_at: '2026-09-02T10:00:00Z', output_digest: 'a'.repeat(64), error_category: 'TIMEOUT' }] },
+        },
+      },
+      global: { stubs: { XqPanel: { template: '<section><slot /></section>' }, XqButton: { template: '<button><slot /></button>' } } },
+    })
+    expect(wrapper.get('[data-testid="agent-response-provider-observability"]').text()).toContain('首 token 已收到')
+    expect(wrapper.get('[data-testid="agent-response-provider-observability"]').text()).toContain('失败后保留输出指纹')
+  })
+
   it('shows a readable facts loading error without hiding the run', () => {
     const wrapper = mount(AgentRunInspector, {
       props: {
