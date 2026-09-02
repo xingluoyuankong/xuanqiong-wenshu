@@ -77060,3 +77060,326 @@ CARD-052 当前状态：
 尚未实施；
 下一步先以真实后端事件样本和前端类型/Reducer 为证据，锁定 action_id 丢失或未展示的具体位置；
 ```
+
+# CARD-052 完成记录：前端接入 action_id 并在右侧日志展示
+
+## 本批目标
+
+CARD-051 已让后端 `progress_update` 事件稳定携带 `action_id`。本批把该公开契约接入前端事件投影和工作台日志，解决前端虽然收到事件却只保存 label/detail/sequence、用户无法知道当前进度属于哪个 Agent 动作的问题。
+
+本批保持既定工作台方向：
+
+```text
+中央聊天区：只承载作者可见 assistant 消息和回复流，不混入运行日志；
+右侧日志区：独立滚动，展示事件摘要、阶段、动作和进度；
+左侧区域：项目/会话/工具/数据继续折叠和紧凑布局；
+Provider 私有 reasoning：不进入聊天正文、日志详情或前端事件投影。
+```
+
+## 失败驱动证据
+
+新增 Reducer 回归测试：
+
+```text
+文件：D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.spec.ts
+测试：keeps progress action identity in the replayable display event
+```
+
+新增工作台回放断言：
+
+```text
+文件：D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
+场景：深链历史 Run 的 progress_update 回放
+输入：action_id = quality:history
+期望：右侧 agent-process-stream 显示 动作：quality:history
+```
+
+前端旧实现的实际缺口：
+
+```text
+SafeAgentEvent 已经保留 action_id；
+Reducer 的 AgentDisplayEvent 只保存 id、label、detail、sequence、eventType；
+工作台日志模板只渲染 label 和 detail；
+因此 action_id 在安全归一化后仍在进入右侧日志前被丢弃。
+```
+
+## 实际代码变更
+
+### 1. AgentDisplayEvent 增加公开动作投影
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.ts
+```
+
+接口新增可选字段：
+
+```ts
+phase?: string
+actionId?: string
+progress?: number
+```
+
+Reducer 在构建每条显示事件时，从已经安全归一化的 `event.data` 读取：
+
+```text
+phase -> display.phase
+action_id -> display.actionId
+progress -> display.progress
+```
+
+字段继续受 SafeAgentEvent 的边界约束：
+
+```text
+actionId 只接受字符串；
+phase 只接受字符串；
+progress 通过 boundedProgress 限制在 0 到 100；
+未知字段不进入显示事件。
+```
+
+这使历史事件和实时 SSE 事件经过同一个 Reducer 后得到一致结构。
+
+### 2. 右侧独立日志展示动作元信息
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+右侧日志每条事件现在按以下顺序渲染：
+
+```text
+事件 label；
+阶段：phase（存在时）；
+动作：actionId（存在时）；
+进度百分比（存在时）；
+事件 detail。
+```
+
+模板结构：
+
+```vue
+<strong>{{ event.label }}</strong>
+<small v-if="event.actionId || event.phase" class="workspace-log-meta">
+  <span v-if="event.phase">阶段：{{ event.phase }}</span>
+  <span v-if="event.actionId">动作：{{ event.actionId }}</span>
+  <span v-if="event.progress !== undefined">{{ Math.round(event.progress) }}%</span>
+</small>
+<p>{{ event.detail }}</p>
+```
+
+CSS 使用紧凑 flex 元信息行，并允许长动作标识折行：
+
+```text
+不改变右侧日志 max-height: min(8rem, 14vh)；
+不增加中央聊天列内容；
+不改变日志独立 overflow-y 滚动；
+不把 progress_update 复制进聊天消息列表。
+```
+
+### 3. 历史回放和实时流共用同一投影
+
+`runProjection.applyEvent()` 仍将 SafeAgentEvent 交给 `reduceAgentRunEvent()`，因此：
+
+```text
+历史 listEvents 回放：action_id 进入 AgentDisplayEvent；
+SSE 新事件：action_id 进入 AgentDisplayEvent；
+同一 run_id + sequence 去重逻辑不变；
+Run 切换的 eventsByRunId 隔离不变；
+右侧日志只读取当前 active Run 的投影。
+```
+
+## 代码与测试文件
+
+本批实现文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src/views/AgentWorkspace.vue
+```
+
+本批测试文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src/views/AgentWorkspace.spec.ts
+```
+
+## 定向验证
+
+Reducer 定向测试：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run test:run -- src/features/agent/reducers/agentEventReducer.spec.ts -t "keeps progress action identity"
+```
+
+结果：
+
+```text
+1 passed
+```
+
+历史 Run 工作台测试：
+
+```powershell
+npm run test:run -- src/views/AgentWorkspace.spec.ts -t "深链历史 Run 后保持显式选择"
+```
+
+结果：
+
+```text
+1 passed
+```
+
+前端全量测试：
+
+```powershell
+npm run test:run
+```
+
+结果：
+
+```text
+74 files passed
+456 tests passed
+```
+
+类型检查：
+
+```powershell
+npm run type-check
+```
+
+结果：
+
+```text
+通过
+```
+
+生产构建：
+
+```powershell
+npm run build-only
+```
+
+结果：
+
+```text
+4905 modules transformed
+built successfully
+```
+
+构建产物中的工作台 chunk 已包含日志元信息模板，构建过程无 TypeScript/Vue 编译错误。
+
+## 反向验证
+
+执行步骤：
+
+```text
+1. 备份 AgentWorkspace.vue；
+2. 临时移除日志模板中的 workspace-log-meta 元信息块；
+3. 执行历史 Run 工作台回放测试；
+4. 确认动作断言失败；
+5. 恢复 AgentWorkspace.vue；
+6. 再次执行定向测试并确认通过。
+```
+
+实际结果：
+
+```text
+移除日志元信息块：1 failed；实际日志仅有“运行进度/历史运行正在校验版本/会话已恢复”，缺少“动作：quality:history”；
+恢复模板：1 passed。
+```
+
+Reducer 级别同时新增了 actionId/progress/phase 的结构化断言，保证以后即使模板改动，也能先发现投影层回退。
+
+## 提交、推送与回退点
+
+实现代码提交：
+
+```text
+510f745 feat: surface progress action ids in agent logs
+```
+
+实现代码推送：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+补交工作台测试提交：
+
+```text
+43295c4 test: cover progress action identity in workspace log
+```
+
+补交测试已推送到同一远程分支。
+
+代码回退：
+
+```powershell
+git revert 43295c4
+git revert 510f745
+```
+
+上一回退点：
+
+```text
+c5f8e7d docs: record card 051 progress action contract
+```
+
+本批文档提交：待本次文档提交生成。
+
+本批两个代码提交均保持可独立回退：
+
+```text
+只回退测试补交：git revert 43295c4；
+回退完整前端 action_id 接入：再执行 git revert 510f745；
+```
+
+文档回退时只回退本批文档提交，不触碰 `510f745`、`43295c4` 和之前 CARD-001 至 CARD-051 的记录。完整回退 CARD-052 时，先回退文档提交，再按依赖顺序回退测试补交和实现提交。
+
+## 当前实际状态（2026-09-02）
+
+```text
+当前分支：codex/bohrium-integration-20260831；
+HEAD 已推送到 origin/codex/bohrium-integration-20260831；
+前端工作台：http://127.0.0.1:5174/agent；
+后端健康接口：http://127.0.0.1:8013/health；
+前端全量：74 files / 456 tests passed；
+前端 build-only：4905 modules transformed，built successfully；
+后端全量：1439 passed；
+CARD-049 Run action 投影恢复保留；
+CARD-050 Provider 中断 attempt 恢复闭合保留；
+CARD-051 后端 progress_update action_id 契约保留；
+CARD-052 前端 Reducer 与右侧日志 action_id 展示保留；
+左栏紧凑/可折叠，中央聊天区仍为主阅读区，右侧日志独立滚动；
+历史审计文件、备份、临时脚本、数据库旁车文件和 node_modules 等未跟踪项继续原样保留；
+本批没有执行全量 add、批量删除、reset --hard 或覆盖式清理。
+```
+
+## 下一任务目标：CARD-053（前端当前进度摘要与聊天/日志职责边界）
+
+下一批继续围绕 Agent 化主界面，但保持后端事实来源优先：
+
+```text
+1. 审查 AgentRunInspector、AgentConversation、AgentWorkspace 对 latestProgressMessage、public_work_summary、assistant_delta 的当前分工；
+2. 明确中央聊天区只显示作者可读回复和一个紧凑的当前进度摘要，不复制右侧日志列表；
+3. 右侧日志显示完整 sequence/action_id/phase 事件，继续独立滚动；
+4. 为当前 progress_update 与 public_work_summary 增加跨 Run 回放测试；
+5. 防止旧 Run 的 progress 摘要泄漏到新 Run；
+6. 先写失败测试，再实施最小前端投影优化；
+7. 执行 npm run type-check、npm run test:run、npm run build-only；
+8. 每个代码优化独立 commit + push；文档独立 commit + push；记录回退点。
+```
+
+CARD-053 当前状态：
+
+```text
+已设置为下一任务目标；
+尚未实施；
+下一步先以真实组件和 Run projection 代码为证据，确定当前进度摘要是否会跨 Run 污染或重复渲染；
+```
