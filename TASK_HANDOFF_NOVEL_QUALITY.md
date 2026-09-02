@@ -77728,3 +77728,158 @@ D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
 ```
 
 CARD-055 不修改后端事件事实源；若测试发现仍有后端字段缺失，则另开 CARD-056，保持每批一个可回退主题。
+
+
+---
+
+# CARD-055 实际完成记录：中央进度摘要可读性与布局实测修正（2026-09-02）
+
+## 1. 本批次定位
+
+当前工作台三栏骨架、左侧可折叠分组、中央聊天主列、右侧独立日志和日志限高已经在前序批次存在。本批不重复提交同一套三栏 CSS，而是通过真实浏览器截图审查此前新增的中央“当前进度”摘要，发现其浅绿色背景上使用接近白色的继承文本，截图中正文几乎不可读。这是一个实际可见的 UI 缺陷，直接影响聊天主区阅读。
+
+本批目标：
+
+```text
+保持中央聊天/右侧日志职责边界；
+保持左侧紧凑可折叠布局；
+只修复当前进度摘要在浅色背景上的文本对比度；
+用源码回归和浏览器截图同时证明修复有效。
+```
+
+## 2. 失败驱动
+
+先新增可读性契约测试，旧样式真实失败：
+
+```text
+Test Files  1 failed
+Tests  1 failed | 3 skipped
+expected '' to contain 'color: var(--xq-ink);'
+```
+
+之后将 `.current-progress` 的基础文字颜色从近白色改为 `var(--xq-ink)`，元信息颜色改为 `var(--xq-ink-muted)`。测试规则同时展开为多行，保证 CSS 契约可被稳定审查。
+
+## 3. 实际变更文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.spec.ts
+```
+
+具体变更：
+
+```text
+.current-progress 使用 color: var(--xq-ink)；
+.current-progress small 使用 color: var(--xq-ink-muted)；
+新增源码契约测试，防止后续把浅色背景文字改回低对比度颜色。
+```
+
+未跟踪审计文件、截图目录、备份、临时脚本和 `node_modules` 没有通过全量 add 纳入提交；本批未执行删除、清理或 reset。
+
+## 4. 反向验证
+
+临时把进度摘要基础文字颜色故意改回 `rgba(255, 255, 255, 0.9)`，再运行可读性测试，真实失败：
+
+```text
+1 failed | 3 skipped
+Expected: color: var(--xq-ink);
+Received: color: rgba(255, 255, 255, 0.9);
+EXPECTED_FAILURE_EXIT=1
+```
+
+随后恢复正确颜色，并重新通过定向测试。
+
+## 5. 定向与全量验证
+
+定向测试：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run test:run -- src/features/agent/AgentConversation.spec.ts -t "当前进度摘要在浅色背景上使用高对比度文本"
+npm run test:run -- src/features/agent/AgentConversation.spec.ts -t "展示会话消息和公开进度"
+```
+
+结果：
+
+```text
+两个定向测试均通过。
+```
+
+全量门禁：
+
+```powershell
+npm run type-check
+npm run test:run
+npm run build-only
+```
+
+结果：
+
+```text
+npm run type-check：通过；
+npm run test:run：74 files passed，458 tests passed；
+npm run build-only：4905 modules transformed，built successfully。
+```
+
+## 6. 浏览器实测证据
+
+复用正在运行的前端，不重启服务：
+
+```text
+http://127.0.0.1:5174/agent
+```
+
+截图：
+
+```text
+D:\小说写作\xuanqiong-wenshu\audit\card055-agent-contrast-fixed-2.png
+```
+
+截图确认：
+
+```text
+中央“当前进度”文字、阶段和百分比均清晰可读；
+左侧项目/内容区域保持紧凑；
+中央聊天仍是主要阅读面；
+右侧运行日志单独显示并保持独立滚动，没有覆盖或插入中央消息流。
+```
+
+## 7. 提交、推送与回退
+
+代码提交：
+
+```text
+19d3c03 fix: improve current progress contrast
+```
+
+已推送到：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+代码回退：
+
+```powershell
+git revert 19d3c03
+```
+
+该回退只撤销 CARD-055 的 2 个前端文件，不影响 CARD-049 至 CARD-054；文档仍使用独立提交。
+
+## 8. 下一任务目标：CARD-056 Agent 后端事件事实源一致性审查
+
+CARD-056 继续后端优先，重点不再改 UI，而是把前端当前进度、右侧日志、运行详情依赖的后端公开事件字段做一次一致性闭环：
+
+1. 盘点后端 `progress_update`、`public_work_summary`、`work_trace_delta`、`assistant_delta`、终态事件的所有发布入口。
+2. 建立事件字段矩阵，至少包括 `run_id`、`sequence`、`phase`、`action_id`、`progress`、`progress_message`、`trace_id`、`created_at` 和公开字段过滤结果。
+3. 检查实时 SSE、历史分页、断线重连、Run 恢复、Provider 重试和死信重放是否从同一 durable ledger 读取，防止实时与历史字段不一致。
+4. 先添加一个能在旧实现上失败的后端回归测试，优先选择“重放/恢复后的 progress_update 仍保留 action_id、phase、progress 且不混入隐藏字段”。
+5. 若发现确有实现缺口，代码与测试单独提交推送；接续文档再单独提交推送，并记录精确回退点。
+6. 后端门禁继续使用：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+7. CARD-056 完成后再决定是否进入下一轮前端布局改造；前端布局不能靠反复复制 CSS 伪造进度，必须以浏览器视口测量和回归证据为准。
