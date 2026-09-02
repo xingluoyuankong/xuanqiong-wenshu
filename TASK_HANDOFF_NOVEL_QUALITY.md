@@ -77561,3 +77561,170 @@ cd D:\小说写作\xuanqiong-wenshu\backend
 ```
 
 CARD-055 只能在 CARD-054 推送完成后开始；若布局问题在后端审查期间发现直接阻塞可用性，会另开独立卡片并保持提交边界，不覆盖 CARD-054。
+
+
+---
+
+# CARD-054 实际完成记录：死信重放与审计事件原子化（2026-09-02）
+
+> 本节是当前 CARD-054 的权威记录。此前对 CARD-054 的预登记保持为问题盘点背景；本节记录已经落地并推送的后端优化。
+
+## 1. 问题证据
+
+`AgentJobService.replay_dead_letter()` 原先先提交 Job 的 `dead_letter -> queued` 状态，再单独追加 `job_replayed` durable event。这样在审计事件写入抛错时，数据库会留下一个已经重新排队、但没有对应审计记录的半完成状态，破坏 Job 状态与运行事件账本的一致性，也让管理员后续难以判断这次重放是否真正完成。
+
+先写失败测试并运行旧实现，得到真实失败：
+
+```text
+AssertionError: assert 'queued' == 'dead_letter'
+```
+
+该失败证明测试捕获的是实际事务行为，而不是只检查代码结构。
+
+## 2. 实际实现
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\jobs.py
+```
+
+实现调整：
+
+1. 保留 Job 原有失败历史：`attempt_count`、`error_type` 和错误详情语义不被清空。
+2. 将 `job_replayed` 事件通过 `AgentRuntimeService.append_event(..., commit=False)` 写入当前事务。
+3. 只有 Job 变更和事件都成功后才执行一次 `session.commit()`。
+4. 事件追加或事务提交任一环节抛错时执行 `session.rollback()` 并继续抛出原异常。
+5. 提交成功后再刷新 Job，调用方得到的对象与数据库状态一致。
+
+这样，死信重放的可观察状态变成单一事务边界：
+
+```text
+dead_letter + 失败历史
+        |
+        | 事务内写入 queued 与 job_replayed
+        v
+queued + job_replayed
+```
+
+失败则保持：
+
+```text
+dead_letter + 原失败历史 + 无半完成 queued 状态
+```
+
+## 3. 新增回归测试
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_jobs.py
+```
+
+测试：
+
+```text
+test_dead_letter_replay_rolls_back_job_when_audit_event_fails
+```
+
+覆盖：
+
+```text
+构造 max_attempts=1 的 Provider Job；
+让 Job 进入 dead_letter；
+注入审计事件写入失败；
+断言重放抛出原异常；
+断言 Job 回滚到 dead_letter；
+断言 attempt_count 仍为 1；
+断言原 error_type 仍为 ProviderTimeout。
+```
+
+原有成功重放用例继续覆盖：
+
+```text
+重放成功后状态为 queued；
+attempt_count 不被重置；
+ProviderTimeout 历史保留；
+operator/reason 记录保留；
+job_replayed 事件存在；
+死信列表不再包含该 Job。
+```
+
+## 4. 反向验证
+
+为证明测试确实锁定事务边界，临时把 `session.commit()` 提前到审计事件写入之前，再运行新增测试，结果重新失败：
+
+```text
+AssertionError: assert 'queued' == 'dead_letter'
+Test result: 1 failed, 13 deselected
+EXPECTED_FAILURE_EXIT=1
+```
+
+验证结束后恢复实现，并重新运行定向死信测试：
+
+```text
+4 passed, 10 deselected
+```
+
+## 5. 后端全量门禁
+
+执行：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+实测结果：
+
+```text
+1440 passed in 549.97s (0:09:09)
+```
+
+本批未删除测试、未降低断言、未修改数据库测试夹具来制造通过。
+
+## 6. 提交、推送与回退
+
+代码与测试提交：
+
+```text
+88e6f9c fix: make dead letter replay audit atomic
+```
+
+已推送：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+代码回退：
+
+```powershell
+git revert 88e6f9c
+```
+
+该回退只撤销 CARD-054 的后端事务修复和新增测试，不影响 CARD-049 至 CARD-053；文档使用独立提交，不与实现提交混合。
+
+## 7. 下一任务目标：CARD-055 前端三栏布局第二阶段
+
+CARD-055 现在进入执行队列，直接对应工作台可用性目标：左侧标签页太多太大、中央对话区太小、日志区太大且干扰阅读。处理顺序：
+
+1. 以 `AgentWorkspaceShell.vue` 的真实 CSS grid/flex 结构为事实源，测量当前三栏最小宽度、最大宽度、视口高度、滚动容器和中小屏断点。
+2. 左侧项目、会话、工具、数据区保持功能不变，默认采用紧凑可折叠分组；压缩重复标题、面板内边距和无必要的大块说明，但不隐藏核心选择控件。
+3. 中央聊天列设置为主弹性列，给消息列表、流式回复和输入框足够宽度；消息正文不能被右侧日志遮挡或挤压。
+4. 右侧日志与运行详情继续独立滚动；日志只显示公开事件，不复制到中央对话；默认高度控制在可观察范围，长日志不撑高整个页面。
+5. 所有比例使用工作台级 CSS 变量和 `minmax(0, ...)`，避免业务内容把 grid 撑破；移动端继续单列排列，确保输入框和日志可访问。
+6. 先写视图/组件失败测试，再改 CSS 和必要的结构；至少覆盖桌面、中屏、移动端断点的 class/DOM 契约，以及日志独立容器和聊天主区存在。
+7. 尽可能用浏览器实测截图验证真实文字可读性；如开发服务器仍在运行，复用现有 `http://127.0.0.1:5174/agent`，不重复启动服务。
+8. CARD-055 代码、测试、反向验证、前端三道门禁、代码提交推送、文档独立提交推送全部单独记录。
+
+预期主要文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
+```
+
+CARD-055 不修改后端事件事实源；若测试发现仍有后端字段缺失，则另开 CARD-056，保持每批一个可回退主题。
