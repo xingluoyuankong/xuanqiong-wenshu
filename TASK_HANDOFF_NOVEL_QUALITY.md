@@ -85527,3 +85527,224 @@ CARD-075 文档：本节首版提交待生成
 CARD-076：pending / backend-first
 总目标：active
 ```
+---
+
+# 2026-09-03 追加记录：CARD-076 后端公开摘要与运行状态同步
+
+> 本节记录 CARD-076 的实际完成结果。它在 CARD-075 的聊天进度 UI 基础上，修复后端 state checkpoint 与最新公开工作摘要之间的读模型不一致；该批不改变 Agent 能力目录、Provider 配置或小说内容生成策略。
+
+## A. 本批目标和发现
+
+目标：
+
+```text
+CARD-076｜让 Agent Runtime 的公开运行状态 checkpoint 与最新公开工作摘要保持一致。
+```
+
+审查范围：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\state_projection.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_state_projection.py
+```
+
+审查发现：`append_public_work_summary()` 会把最新的公开摘要、摘要 sequence 和摘要时间写入 `AgentRun`，但不会同步顶层的：
+
+```text
+AgentRun.current_phase
+AgentRun.current_step
+AgentRun.state_version
+```
+
+因此在“事件到达后前端回读 `/api/agent/runs/{run_id}/state`”的路径里，可能同时得到：
+
+```text
+latest_public_summary.phase = tool_execution
+phase = null 或旧值
+latest_public_summary.step_order = 3
+current_step = 0 或旧值
+```
+
+这会使中央聊天的实时活动与运行详情投影互相矛盾。
+
+## B. 失败优先证据
+
+先在以下文件新增回归：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_state_projection.py
+```
+
+测试名：
+
+```text
+test_public_summary_keeps_run_state_projection_in_sync
+```
+
+旧实现执行：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_state_projection.py -k public_summary_keeps_run_state_projection_in_sync
+```
+
+真实失败：
+
+```text
+AssertionError: assert None == 'tool_execution'
+1 failed, 7 deselected in 3.20s
+```
+
+失败说明旧实现确实会让 state projection 的 `phase` 落后于已持久化的公开摘要，而不是测试误报。
+
+## C. 实际生产修复
+
+修改文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+```
+
+在 `AgentRuntimeService.append_public_work_summary()` 的同一事务中增加以下不变量：
+
+```text
+1. 非终态 Run 的 current_phase 与 validated.phase 同步；
+2. summary.step_order 存在时，current_step 仅向前推进，绝不倒退；
+3. 顶层 phase 或 step 实际发生变化时，state_version 增加 1；
+4. summary event、摘要 checkpoint、顶层状态变更在同一次提交内完成；
+5. terminal Run 保持终态事实，不被迟到的公开摘要重新激活或改写阶段/步骤。
+```
+
+不变行为：
+
+```text
+- AgentEventRecord 仍是 append-only ledger；
+- latest_public_summary_sequence 仍指向对应 public_work_summary 事件；
+- event sequence 乐观并发重试逻辑保持不变；
+- 公开字段仍由 AgentPublicWorkSummary 进行长度限制和脱敏；
+- 不持久化 Provider 原始响应、隐藏推理、prompt、密钥或任意 payload。
+```
+
+## D. 回归与反向验证
+
+### D.1 定向测试
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_state_projection.py app/agent/test_public_work_summary.py app/services/test_agent_runtime.py -k "public_summary or state_projection or run_command"
+```
+
+结果：
+
+```text
+10 passed, 31 deselected in 5.47s
+```
+
+新增断言确保：
+
+```text
+projection.phase == latest_public_summary.phase
+projection.current_step == latest_public_summary.step_order
+state_version 比写入前精确增加 1
+```
+
+### D.2 反向破坏验证
+
+临时删除 `append_public_work_summary()` 中同步顶层 phase、step 和 state_version 的逻辑，然后运行新增测试。
+
+结果：
+
+```text
+EXPECTED_FAILURE_EXIT=1
+AssertionError: assert None == 'tool_execution'
+```
+
+完成后脚本自动恢复正式生产文件，破坏版本没有进入 Git 提交。
+
+### D.3 后端全量门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+结果：
+
+```text
+1458 passed in 317.60s (0:05:17)
+```
+
+## E. 提交、推送与回退
+
+代码提交：
+
+```text
+935752c fix: sync public agent summary state
+```
+
+代码推送：
+
+```text
+5093c41..935752c codex/bohrium-integration-20260831 -> origin/codex/bohrium-integration-20260831
+```
+
+精确代码回退：
+
+```powershell
+git revert 935752c
+```
+
+该回退仅撤销 CARD-076 的摘要/状态同步与回归测试，不影响 CARD-075 的中央聊天进度区，也不影响 CARD-074 的 SSE、terminal fence 和 delta 分片能力。
+
+本节文档会使用独立提交和独立推送记录；代码与文档仍不混合提交。
+
+## F. 当前阶段状态
+
+```text
+CARD-072：completed
+CARD-073：completed
+CARD-074-A：completed
+CARD-074-B1：completed
+CARD-074-B2：completed
+CARD-075：completed
+CARD-076：completed（代码已推送，文档回写进行中）
+总目标：active
+```
+
+## G. 下一任务目标：CARD-077 后端公开摘要终态收敛
+
+下一批继续后端优先：
+
+```text
+CARD-077｜验证并强化 Run 终态与公开摘要之间的收敛契约。
+```
+
+需要以当前代码为准审查以下风险：
+
+```text
+1. completed / failed / cancelled 后，state projection 是否返回与 terminal_status 一致的公开摘要；
+2. 已完成 Run 的迟到 summary/progress/delta 是否保持不可重写的终态；
+3. terminal event 与 last_event_sequence、latest_public_summary_sequence 的顺序是否可稳定回放；
+4. API state、历史 events、SSE terminal close 三个视图是否不会相互矛盾；
+5. 对 failed/cancelled 仅暴露结构化且脱敏的公共原因。
+```
+
+执行纪律不变：
+
+```text
+先查现状 → 新增失败测试 → 真实生产修复 → 定向验证 → 反向破坏 → 后端全量 pytest → 代码独立提交推送 → 文档独立提交推送 → 写回退命令。
+```
+
+## H. 回写索引
+
+```text
+CARD-075 代码：d15d35e
+CARD-075 文档：5093c41
+CARD-075 回退：git revert d15d35e
+CARD-076 代码：935752c
+CARD-076 代码回退：git revert 935752c
+CARD-076 文档：本节首版提交待生成
+CARD-077：pending / backend-first
+总目标：active
+```
