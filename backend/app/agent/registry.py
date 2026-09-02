@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from importlib import import_module
 from typing import Any, Awaitable, Callable
 
@@ -202,6 +202,100 @@ class AgentToolRegistry:
 
     def __contains__(self, name: str) -> bool:
         return name in self._tools
+
+
+class RunBoundToolRegistry:
+    """Expose only the live handlers that match one immutable Run snapshot."""
+
+    def __init__(
+        self,
+        registry: AgentToolRegistry,
+        *,
+        allowed_names: Iterable[str],
+        handler_identities: Mapping[str, str] | None = None,
+    ) -> None:
+        self._registry = registry
+        self._allowed_names = frozenset(str(name).strip() for name in allowed_names if str(name).strip())
+        self._handler_identities = {
+            str(name).strip(): str(identity).strip()
+            for name, identity in (handler_identities or {}).items()
+            if str(name).strip() and str(identity).strip()
+        }
+
+    @classmethod
+    def from_context(cls, registry: AgentToolRegistry, context: Mapping[str, Any]) -> "RunBoundToolRegistry":
+        resolution = context.get("capability_resolution") if isinstance(context, Mapping) else None
+        resolution_tools = resolution.get("tools") if isinstance(resolution, Mapping) else None
+        release = context.get("catalog_release") if isinstance(context, Mapping) else None
+        release_tools = release.get("tools") if isinstance(release, Mapping) else None
+        release_tools = release_tools if isinstance(release_tools, list) else []
+        release_identities = {
+            str(item.get("name") or "").strip(): str(item.get("handler_identity") or "").strip()
+            for item in release_tools
+            if isinstance(item, Mapping) and str(item.get("name") or "").strip()
+        }
+        if isinstance(resolution_tools, list):
+            allowed = [
+                str(item.get("name") or "").strip()
+                for item in resolution_tools
+                if isinstance(item, Mapping) and str(item.get("name") or "").strip()
+            ]
+        else:
+            allowed = list(release_identities)
+        return cls(registry, allowed_names=allowed, handler_identities=release_identities)
+
+    def _manifest(self, name: str) -> ToolManifest:
+        normalized = str(name or "").strip()
+        if normalized not in self._allowed_names:
+            raise ToolContractViolation(f"tool {normalized or '<empty>'} is outside the Run capability snapshot")
+        manifest = self._registry.get(normalized)
+        expected = self._handler_identities.get(normalized)
+        if expected and self._registry.get_handler_identity(normalized) != expected:
+            raise ToolContractViolation(f"tool {normalized} handler identity differs from the Run capability snapshot")
+        return manifest
+
+    def assert_compatible(self) -> None:
+        for name in sorted(self._allowed_names):
+            self._manifest(name)
+
+    def get(self, name: str) -> ToolManifest:
+        return self._manifest(name)
+
+    def list_tools(self) -> list[ToolManifest]:
+        self.assert_compatible()
+        return [self._registry.get(name) for name in sorted(self._allowed_names)]
+
+    def validate_planned_input(self, name: str, arguments: dict[str, Any] | None = None) -> None:
+        self._manifest(name)
+        self._registry.validate_planned_input(name, arguments)
+
+    async def execute(
+        self,
+        name: str,
+        *,
+        session,
+        user_id: int,
+        project_id: str | None,
+        arguments: dict[str, Any] | None = None,
+        cancel_event: asyncio.Event | None = None,
+    ) -> dict[str, Any]:
+        self._manifest(name)
+        return await self._registry.execute(
+            name,
+            session=session,
+            user_id=user_id,
+            project_id=project_id,
+            arguments=arguments,
+            cancel_event=cancel_event,
+        )
+
+
+def bind_run_tool_registry(registry: AgentToolRegistry, context: Mapping[str, Any]) -> AgentToolRegistry | RunBoundToolRegistry:
+    if not isinstance(context, Mapping) or not isinstance(context.get("capability_resolution"), Mapping):
+        return registry
+    bound = RunBoundToolRegistry.from_context(registry, context)
+    bound.assert_compatible()
+    return bound
 
 
 def build_tool_manifest(

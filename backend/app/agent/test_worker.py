@@ -273,7 +273,7 @@ async def test_worker_executes_agent_execution_after_enqueue_and_queues_visible_
         async def fake_execute_read_tool(**kwargs):
             return {"project_id": kwargs["project_id"], "safe": True}
 
-        monkeypatch.setattr("app.agent.execution.AgentOrchestrator", lambda provider: FakePlanner())
+        monkeypatch.setattr("app.agent.execution.AgentOrchestrator", lambda provider, **kwargs: FakePlanner())
         monkeypatch.setattr("app.agent.execution.execute_read_tool", fake_execute_read_tool)
         monkeypatch.setattr("app.agent.execution.launch_visible_response", lambda **kwargs: None)
 
@@ -403,7 +403,7 @@ async def test_worker_projects_structured_plan_draft_arguments_and_persists_dige
             calls.append((kwargs["tool_name"], kwargs["arguments"]))
             return {"versions": [{"version_id": 9, "content": "must not reach digest"}], "count": 1}
 
-        monkeypatch.setattr("app.agent.execution.AgentOrchestrator", lambda provider: FakePlanner())
+        monkeypatch.setattr("app.agent.execution.AgentOrchestrator", lambda provider, **kwargs: FakePlanner())
         monkeypatch.setattr("app.agent.execution.execute_read_tool", fake_execute_read_tool)
         monkeypatch.setattr("app.agent.execution.launch_visible_response", lambda **kwargs: None)
         worker = AgentWorker(factory, worker_id="plan-draft-worker-a", handlers={"agent_execution": handle_agent_execution_job})
@@ -473,7 +473,7 @@ async def test_worker_blocks_structured_plan_step_when_dependency_failed(tmp_pat
                 raise RuntimeError("fixture first step failure")
             return {"ok": True}
 
-        monkeypatch.setattr("app.agent.execution.AgentOrchestrator", lambda provider: FakePlanner())
+        monkeypatch.setattr("app.agent.execution.AgentOrchestrator", lambda provider, **kwargs: FakePlanner())
         monkeypatch.setattr("app.agent.execution.execute_read_tool", fake_execute_read_tool)
         monkeypatch.setattr("app.agent.execution.launch_visible_response", lambda **kwargs: None)
         worker = AgentWorker(factory, worker_id="dependency-worker-a", handlers={"agent_execution": handle_agent_execution_job})
@@ -585,7 +585,7 @@ async def test_worker_queues_and_executes_one_digest_driven_replan_after_read_fa
                 return {"total_chapters": 12, "completed_chapters": 3}
             raise AssertionError(kwargs["tool_name"])
 
-        monkeypatch.setattr("app.agent.execution.AgentOrchestrator", lambda provider: FakePlanner())
+        monkeypatch.setattr("app.agent.execution.AgentOrchestrator", lambda provider, **kwargs: FakePlanner())
         monkeypatch.setattr("app.agent.execution.execute_read_tool", fake_execute_read_tool)
         monkeypatch.setattr("app.agent.execution.launch_visible_response", lambda **kwargs: None)
         worker = AgentWorker(

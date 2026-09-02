@@ -25,7 +25,7 @@ from .context_refs import ContextRefValidationError, project_plan_arguments, res
 from .schemas import AgentContextRef
 from .jobs import AgentJobConflict, AgentJobService
 from .orchestrator import AgentOrchestrator
-from .registry import DEFAULT_TOOL_REGISTRY, ToolExecutionCancelled
+from .registry import DEFAULT_TOOL_REGISTRY, ToolExecutionCancelled, bind_run_tool_registry
 from .runner import get_cancel_event, launch_visible_response, release_cancel_event
 from .tool_adapters import execute_read_tool
 from .tool_result_digest import build_tool_result_digests
@@ -226,6 +226,7 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
         return {"status": "cancelled_or_terminal"}
 
     context = _dict(run.context_json)
+    run_registry = bind_run_tool_registry(DEFAULT_TOOL_REGISTRY, context)
     goal = str(context.get("goal") or "").strip()
     if not goal:
         raise ValueError("agent execution is missing goal")
@@ -361,7 +362,7 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
             }
         from .provider_attempt import ProviderAttemptLedger
         planner_attempts = ProviderAttemptLedger(run_id=run.id)
-        decision = await AgentOrchestrator(LLMService(session)).plan(
+        decision = await AgentOrchestrator(LLMService(session), registry=run_registry).plan(
             goal=goal,
             user_id=run.user_id,
             project_id=run.project_id,
@@ -386,7 +387,7 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                 step.planner_arguments = _dict(metadata.get("planner_arguments"))
                 if step.intent:
                     step.description = step.intent
-        planned_tools = [DEFAULT_TOOL_REGISTRY.get(step.tool_name) for step in plan.steps]
+        planned_tools = [run_registry.get(step.tool_name) for step in plan.steps]
         planner_arguments_by_tool = {
             step.tool_name: dict(step.planner_arguments)
             for step in plan.steps
@@ -413,7 +414,7 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
             tool_arguments=effective_tool_arguments,
         )
         for tool in planned_tools:
-            DEFAULT_TOOL_REGISTRY.validate_planned_input(tool.name, projected_tool_arguments[tool.name])
+            run_registry.validate_planned_input(tool.name, projected_tool_arguments[tool.name])
 
         new_plan_steps = [
             {
@@ -678,6 +679,7 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                     project_id=run.project_id,
                     arguments=step_arguments,
                     cancel_event=cancel_event,
+                    registry=run_registry,
                 )
                 result_payload = _dict(result)
                 results.append({"tool_name": step.tool_name, "result": result_payload})
@@ -820,7 +822,7 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                     "failed_steps": failed_steps[:8],
                     "completed_tool_results": build_tool_result_digests(results),
                 }
-                replan_decision = await AgentOrchestrator(LLMService(session)).plan(
+                replan_decision = await AgentOrchestrator(LLMService(session), registry=run_registry).plan(
                     goal=goal,
                     user_id=run.user_id,
                     project_id=run.project_id,
@@ -836,7 +838,7 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                     and all(step.tool_name not in known_tool_names for step in candidate_steps)
                     and all(step.risk_level.value in {"read", "suggest"} for step in candidate_steps)
                 ):
-                    candidate_tools = [DEFAULT_TOOL_REGISTRY.get(step.tool_name) for step in candidate_steps]
+                    candidate_tools = [run_registry.get(step.tool_name) for step in candidate_steps]
                     candidate_explicit = {
                         step.tool_name: dict(step.planner_arguments)
                         for step in candidate_steps
@@ -849,7 +851,7 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                         tool_arguments=candidate_explicit,
                     )
                     for tool in candidate_tools:
-                        DEFAULT_TOOL_REGISTRY.validate_planned_input(tool.name, candidate_arguments[tool.name])
+                        run_registry.validate_planned_input(tool.name, candidate_arguments[tool.name])
                     revision_number = len(revisions) + 1
                     base_step_order = max((int(item.get("order") or 0) for item in plan_steps), default=0)
                     revision_steps = [

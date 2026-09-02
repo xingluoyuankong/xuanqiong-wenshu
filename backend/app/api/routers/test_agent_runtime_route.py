@@ -170,7 +170,7 @@ async def test_agent_message_route_queues_write_execution_before_approval(task_s
                 fallback_reason=None,
             )
 
-    monkeypatch.setattr("app.agent.execution.AgentOrchestrator", lambda provider: FakePlanner())
+    monkeypatch.setattr("app.agent.execution.AgentOrchestrator", lambda provider, **kwargs: FakePlanner())
     monkeypatch.setattr("app.agent.execution.launch_visible_response", lambda **kwargs: None)
     response = await post_agent_message(created.id, AgentMessageCreateRequest(content="生成第三章候选", arguments={"chapter_number": 3}), session=task_session, current_user=SimpleNamespace(id=owner.id))
 
@@ -239,7 +239,7 @@ async def test_agent_message_route_persists_execution_then_visible_response_job(
     async def fake_execute_read_tool(**kwargs):
         return {"projects": []}
 
-    monkeypatch.setattr("app.agent.execution.AgentOrchestrator", lambda provider: FakePlanner())
+    monkeypatch.setattr("app.agent.execution.AgentOrchestrator", lambda provider, **kwargs: FakePlanner())
     monkeypatch.setattr("app.agent.execution.execute_read_tool", fake_execute_read_tool)
     monkeypatch.setattr("app.agent.execution.launch_visible_response", lambda **kwargs: None)
     response = await post_agent_message(created.id, AgentMessageCreateRequest(content="列出项目"), session=task_session, current_user=SimpleNamespace(id=owner.id))
@@ -386,7 +386,7 @@ async def test_agent_message_context_refs_are_projected_per_tool_and_persisted(t
         calls.append((tool_name, arguments))
         return {"tool_name": tool_name, "safe": True}
 
-    monkeypatch.setattr("app.agent.execution.AgentOrchestrator", lambda provider: FakePlanner())
+    monkeypatch.setattr("app.agent.execution.AgentOrchestrator", lambda provider, **kwargs: FakePlanner())
     monkeypatch.setattr("app.agent.execution.execute_read_tool", fake_execute_read_tool)
     monkeypatch.setattr("app.agent.execution.launch_visible_response", lambda **kwargs: None)
 
@@ -510,7 +510,7 @@ async def test_agent_execution_rejects_legacy_multi_tool_argument_broadcast(task
                 fallback_reason=None,
             )
 
-    monkeypatch.setattr("app.agent.execution.AgentOrchestrator", lambda provider: FakePlanner())
+    monkeypatch.setattr("app.agent.execution.AgentOrchestrator", lambda provider, **kwargs: FakePlanner())
     response = await post_agent_message(
         created.id,
         AgentMessageCreateRequest(content="检查", arguments={"chapter_number": 3}),

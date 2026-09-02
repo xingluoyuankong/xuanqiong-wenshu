@@ -620,10 +620,12 @@ async def execute_foreshadowing_inspect(*, session, user_id: int, project_id: st
     return {"tool_name": "foreshadowing.inspect", "result": {"total": total, "items": _plain(items)}}
 
 
-async def execute_read_tool(*, tool_name: str, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None, cancel_event: asyncio.Event | None = None) -> dict[str, Any]:
-    """Compatibility facade; actual dispatch is owned by the registry."""
-    from .registry import DEFAULT_TOOL_REGISTRY
-    return await DEFAULT_TOOL_REGISTRY.execute(tool_name, session=session, user_id=user_id, project_id=project_id, arguments=arguments, cancel_event=cancel_event)
+async def execute_read_tool(*, tool_name: str, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None, cancel_event: asyncio.Event | None = None, registry=None) -> dict[str, Any]:
+    """Execute through the caller's Run-bound registry when supplied."""
+    if registry is None:
+        from .registry import DEFAULT_TOOL_REGISTRY
+        registry = DEFAULT_TOOL_REGISTRY
+    return await registry.execute(tool_name, session=session, user_id=user_id, project_id=project_id, arguments=arguments, cancel_event=cancel_event)
 
 
 async def execute_chapter_generate_candidate(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:

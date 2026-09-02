@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.agent.registry import DEFAULT_TOOL_REGISTRY, RunBoundToolRegistry
 from app.agent.runner import _AGENT_CANCEL_EVENTS, _agent_run_lease_seconds, _claim_visible_response_run, _lease_heartbeat_interval, _visible_response_max_tokens, cancel_visible_response, get_cancel_event, release_cancel_event
 from app.agent.runner import _recover_pending_read_steps
 
@@ -70,6 +71,54 @@ async def test_recovery_reuses_completed_step_and_executes_only_pending_read(mon
     )
     assert result == [{"tool_name": "project.context", "result": {"cached": True}}, {"tool_name": "chapter.inspect", "result": {"fresh": True}}]
     assert calls == ["chapter.inspect"]
+    release_cancel_event(run.id)
+
+
+@pytest.mark.asyncio
+async def test_recovery_uses_run_bound_registry_for_pending_read(monkeypatch):
+    pending = SimpleNamespace(id="step-bound", status="pending", output_json={})
+    captured = {}
+
+    class FakeRuntime:
+        session = object()
+
+        async def ensure_step(self, **kwargs):
+            return pending
+
+        async def claim_step(self, **kwargs):
+            pending.status = "running"
+            return pending
+
+        async def complete_step(self, **kwargs):
+            pending.status = "completed"
+            return pending
+
+        async def append_event(self, **kwargs):
+            return None
+
+    async def fake_execute(**kwargs):
+        captured.update(kwargs)
+        return {"bound": True}
+
+    monkeypatch.setattr("app.agent.runner.execute_read_tool", fake_execute)
+    tool_name = "project.context"
+    context = {
+        "arguments": {},
+        "capability_resolution": {"tools": [{"name": tool_name}]},
+        "catalog_release": {
+            "tools": [{"name": tool_name, "handler_identity": DEFAULT_TOOL_REGISTRY.get_handler_identity(tool_name)}],
+        },
+    }
+    run = SimpleNamespace(id="run-bound-recover", user_id=1, project_id="project-1")
+    result = await _recover_pending_read_steps(
+        runtime=FakeRuntime(),
+        run=run,
+        context=context,
+        plan_steps=[{"order": 1, "tool_name": tool_name, "risk_level": "read"}],
+    )
+
+    assert result == [{"tool_name": tool_name, "result": {"bound": True}}]
+    assert isinstance(captured["registry"], RunBoundToolRegistry)
     release_cancel_event(run.id)
 
 

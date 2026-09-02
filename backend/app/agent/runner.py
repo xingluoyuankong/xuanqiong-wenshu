@@ -18,7 +18,7 @@ from .tool_adapters import execute_read_tool
 from .tool_result_digest import tool_result_digest_context
 from .jobs import AgentJobService
 from .state_machine import is_recovery_ready
-from .registry import ToolExecutionCancelled
+from .registry import DEFAULT_TOOL_REGISTRY, ToolExecutionCancelled, bind_run_tool_registry
 
 _AGENT_TASKS: dict[str, asyncio.Task[None]] = {}
 _AGENT_CANCEL_EVENTS: dict[str, asyncio.Event] = {}
@@ -567,6 +567,7 @@ async def _recover_pending_read_steps(*, runtime: AgentRuntimeService, run, cont
     canonical_refs = context.get("context_refs") if isinstance(context.get("context_refs"), list) else []
     results: list[dict[str, Any]] = []
     cancel_event = get_cancel_event(run.id)
+    run_registry = bind_run_tool_registry(DEFAULT_TOOL_REGISTRY, context)
     for raw in sorted((item for item in plan_steps if isinstance(item, dict)), key=lambda item: int(item.get("order") or 0)):
         order = int(raw.get("order") or 0)
         tool_name = str(raw.get("tool_name") or "").strip()
@@ -597,7 +598,7 @@ async def _recover_pending_read_steps(*, runtime: AgentRuntimeService, run, cont
             return None
         try:
             checkpoint = await runtime.claim_step(step_id=checkpoint.id, user_id=run.user_id, lease_owner=_WORKER_ID, lease_seconds=120)
-            result = await execute_read_tool(tool_name=tool_name, session=runtime.session, user_id=run.user_id, project_id=run.project_id, arguments=step_arguments, cancel_event=cancel_event)
+            result = await execute_read_tool(tool_name=tool_name, session=runtime.session, user_id=run.user_id, project_id=run.project_id, arguments=step_arguments, cancel_event=cancel_event, registry=run_registry)
             await runtime.complete_step(step_id=checkpoint.id, user_id=run.user_id, lease_owner=_WORKER_ID, output=result)
             results.append({"tool_name": tool_name, "result": result})
         except ToolExecutionCancelled:
