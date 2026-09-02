@@ -79778,3 +79778,454 @@ CARD-063 反向验证：移除 section.open=true 后测试退出码 1；
 历史旧事件的 result_ref 补全：尚未完成；
 总任务：active，不能把 CARD-063 局部完成写成全项目完成。
 ```
+
+
+---
+
+# 2026-09-02 CARD-064 实际完成记录：执行事实只读投影与历史 result_ref 补全
+
+> 本节记录 CARD-064 新增成果，不重复计算 CARD-062、CARD-063 的旧文字和旧测试。当前总目标继续保持 `active`，仍需持续推进 Agent 自主编排、聊天主界面、流式回复、公开进度、运行事实追踪和整体布局优化。
+
+## 13.1 提交与工作树事实
+
+项目目录：
+
+```text
+D:\小说写作\xuanqiong-wenshu
+```
+
+分支：
+
+```text
+codex/bohrium-integration-20260831
+```
+
+CARD-064 代码提交：
+
+```text
+542b864 feat: expose agent execution facts
+```
+
+已推送到：
+
+```text
+origin/codex/bohrium-integration-20260831
+```
+
+本轮只暂存 CARD-064 指定的 10 个代码/测试文件，没有执行 `git add -A`。历史未跟踪审计资料、数据库备份、恢复脚本、Provider 相关资料和 `node_modules` 均保持原样。
+
+## 13.2 本轮实际解决的缺口
+
+CARD-063 浏览器验证显示，历史事件可能只有：
+
+```text
+action_id
+```
+
+而没有：
+
+```text
+result_ref
+```
+
+此前前端只能把这类点击显示为“引用暂不可用”。但后端关系化模型中已经有 `AgentCapabilityExecution`，其中包含执行 ID、Run、步骤、能力、状态、attempt 和时间字段。因此 CARD-064 把这部分真实数据以安全只读投影提供给工作台，并在前端按当前 Run 补齐历史结果引用。
+
+实际链路现在是：
+
+```text
+AgentCapabilityExecution
+    ↓ 安全元数据投影
+GET /api/agent/runs/{run_id}/execution-facts
+    ↓ 当前用户 Run 隔离
+AgentWorkspace loadExecutionFacts()
+    ↓ action_id 关联
+历史日志补出 result_ref
+    ↓
+检查器/结果卡定位 execution fact
+```
+
+## 13.3 后端实现
+
+### A. 执行事实服务
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\execution_facts.py
+```
+
+新增：
+
+```text
+AgentExecutionFactService
+AgentExecutionFactNotFound
+```
+
+`list_for_run()` 的实际约束：
+
+- 先按 `run_id + user_id` 查 Run；
+- Run 不存在或不属于当前用户时抛出明确的 not-found 异常；
+- 再按 Run 的 `correlation_id` 和 `run_id` 读取 `AgentCapabilityExecution`；
+- 默认最多 200 条，服务层限制在 1～500；
+- 按 `started_at` 和 `execution_id` 稳定排序；
+- 输出只包含执行元数据，不复制 `input_json`、`output_json`；
+- 生成稳定引用：`result_ref=execution:<execution_id>`；
+- 若有关联步骤，生成 `action_id=step:<step_id>`；
+- 返回 `output_digest`、`has_output` 和 `error_type`，方便 UI 判断事实状态而不读取正文。
+
+安全投影字段：
+
+```text
+execution_id
+run_id
+step_id
+action_id
+result_ref
+tool_name
+status
+attempt
+started_at
+finished_at
+duration_ms
+error_type
+output_digest
+has_output
+```
+
+### B. Pydantic 响应契约
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\schemas.py
+```
+
+新增 `AgentExecutionFactRead`，使用 `extra='forbid'`，并对 `attempt`、`duration_ms` 做下界校验。接口不会把原始 JSON 输出泄露到响应模型。
+
+### C. 只读路由
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+```
+
+新增：
+
+```text
+GET /api/agent/runs/{run_id}/execution-facts?limit=200
+```
+
+路由行为：
+
+- 通过当前登录用户 ID 调用服务层；
+- 返回 `list[AgentExecutionFactRead]`；
+- 跨用户 Run 返回 404；
+- 数据库异常继续沿用 Agent 运行时错误映射；
+- 接口只读，不创建、修改或重放执行记录。
+
+## 13.4 后端测试和失败驱动
+
+### A. 服务层测试
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_execution_facts.py
+```
+
+覆盖：
+
+1. 执行事实返回稳定 `execution:` 和 `step:` 引用；
+2. 返回工具名、状态、attempt；
+3. 返回结果摘要存在性和 digest，但不包含 `output_json`；
+4. 敏感正文 `SECRET_PROSE` 不出现在投影；
+5. 非 Run 所有者读取触发 `AgentExecutionFactNotFound`。
+
+首次先运行测试时模块不存在，真实结果：
+
+```text
+2 failed
+ModuleNotFoundError: No module named 'app.agent.execution_facts'
+```
+
+实现服务后：
+
+```text
+2 passed
+```
+
+### B. 路由层测试
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_runtime_route.py
+```
+
+新增覆盖：
+
+- 所有者可以读取执行事实；
+- `result_ref`、`action_id`、`tool_name` 正确；
+- 响应模型不包含 `output_json`；
+- 敏感正文不出现在响应；
+- 其他用户读取同一 Run 返回 404。
+
+路由定向结果：
+
+```text
+1 passed，23 deselected
+```
+
+## 13.5 前端实现
+
+### A. API 类型和请求
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\api\agent.ts
+```
+
+新增 `AgentExecutionFact` 类型及：
+
+```ts
+AgentAPI.listExecutionFacts(runId, limit)
+```
+
+请求路径：
+
+```text
+/agent/runs/<run_id>/execution-facts?limit=<bounded-limit>
+```
+
+### B. 运行检查器
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\run\AgentRunInspector.vue
+```
+
+新增 `executionFacts` 输入。选中的 execution 引用现在可以从 facts 元数据直接显示：
+
+```text
+工具名；
+状态；
+attempt 次数；
+result_ref；
+开始/结束时间。
+```
+
+如果步骤输出尚未包含 `execution_id`，但 facts 已经回读，检查器仍可以展示执行事实，不把原始 output JSON 放到 UI。
+
+### C. 工作台历史引用补全
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+新增按 Run 存储：
+
+```text
+executionFactsByRunId
+activeExecutionFacts
+loadExecutionFacts()
+```
+
+加载时机：
+
+- 深链恢复当前 Run；
+- 切换 Run；
+- 会话终态刷新；
+- 当前 Run 的其他事实加载流程。
+
+历史事件投影补全规则：
+
+```text
+event 已有 resultRef → 保留原引用；
+event 没有 resultRef 且有 actionId → 查找 fact.action_id；
+查到 → 仅在前端显示投影 result_ref；
+查不到 → 保留“引用暂不可用/正在恢复执行事实”。
+```
+
+工具结果数组补全规则：
+
+```text
+优先使用响应自带 result_ref；
+否则按当前完成步骤匹配 execution fact；
+再否则使用 step:<step.id> 兼容引用。
+```
+
+所有事实数据以 Run ID 分桶，切换 Run 时不会把旧事实写入新 Run。
+
+## 13.6 定向门禁、反向验证和全量门禁
+
+### 定向门禁
+
+后端：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_execution_facts.py app/api/routers/test_agent_runtime_route.py -k "execution_fact"
+```
+
+结果：
+
+```text
+3 passed，23 deselected
+```
+
+前端：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+npm run test:run -- src/features/agent/AgentToolResultPanel.spec.ts src/features/agent/run/AgentRunInspector.spec.ts src/views/AgentWorkspace.spec.ts -t "selected result|locates a step|深链历史 Run|点击日志动作"
+```
+
+结果：
+
+```text
+type-check：退出码 0；
+Test Files 3 passed；
+Tests 4 passed。
+```
+
+### 反向验证
+
+临时移除服务层 `_safe_fact()` 中的：
+
+```python
+result_ref
+```
+
+再运行服务层投影测试，结果：
+
+```text
+KeyError: 'result_ref'
+EXPECTED_FAILURE_EXIT=1
+```
+
+随后恢复真实实现并清理临时副本。
+
+### 全量后端门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+结果：
+
+```text
+1449 passed in 379.12s
+```
+
+### 全量前端门禁
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run type-check
+npm run test:run
+npm run build-only
+```
+
+结果：
+
+```text
+npm run type-check：通过；
+npm run test:run：74 files passed，466 tests passed；
+npm run build-only：4905 modules transformed，built successfully。
+```
+
+## 13.7 当前运行状态和限制
+
+本地 Agent 工作台页面仍为：
+
+```text
+http://127.0.0.1:5174/agent
+```
+
+后端健康检查：
+
+```text
+http://127.0.0.1:8013/health
+```
+
+前端代理健康检查：
+
+```text
+http://127.0.0.1:5174/api/health
+```
+
+CARD-064 代码已进入远端，但当时已启动的后端进程若未重启，内存中的旧 Uvicorn 进程不会自动加载新增路由。进行真实接口浏览器验收前，应重启项目后端；统一 `start.ps1` 仍会先查找：
+
+```text
+D:\download\MySQL\bin\mysqld.exe
+```
+
+该文件当前不存在，故本机查看工作台继续使用 `backend\.env` 的 SQLite 配置。SQLite 页面运行结果不等同于 MySQL 正式部署验收。
+
+## 13.8 回退命令
+
+只回退 CARD-064 代码：
+
+```powershell
+git revert 542b864
+```
+
+CARD-064 文档使用独立提交，提交完成后回退形式为：
+
+```powershell
+git revert <CARD-064-文档提交哈希>
+```
+
+两个回退互不影响。回退代码会撤销执行事实接口、facts 前端读取和历史引用补全，但不会撤销 CARD-062、CARD-063。
+
+## 13.9 下一任务目标：CARD-065
+
+下一目标预登记为：
+
+```text
+CARD-065：真实执行事实接口联调、旧事件补引用验收与 Provider 通道健康状态
+```
+
+目标：
+
+1. 重启当前后端进程，使新增 execution-facts 路由进入运行实例；
+2. 使用已有登录/测试会话调用真实接口，确认 owner Run 返回 facts，跨用户和不存在 Run 返回 404；
+3. 在浏览器中制造或选择一条“只有 action_id 的旧事件”，确认异步 facts 回读后日志出现 result 引用；
+4. 检查结果卡、检查器、日志三处引用完全一致；
+5. 记录接口耗时、空结果、旧 Run、facts 查询失败和重连状态；
+6. 对 facts 查询失败保留可读降级，不影响中央聊天内容和右侧独立滚动；
+7. 盘点 Provider 健康面板是否能区分目录状态、配置状态、实际调用状态和 fallback；
+8. 先写真实联调失败测试，再修复运行链路；完成后继续反向验证、全量门禁、代码/文档分离提交推送。
+
+建议文件范围：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_runtime_route.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_execution_facts.py
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\run\AgentRunInspector.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\run\AgentRunInspector.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentToolResultPanel.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentToolResultPanel.spec.ts
+```
+
+CARD-065 开始基线：
+
+```text
+HEAD：542b864；
+CARD-064 文档待提交；
+后端全量：1449 passed；
+前端全量：74 files / 466 tests；
+前端构建：4905 modules transformed；
+CARD-064 反向验证：移除 result_ref 投影后退出码 1；
+execution-facts 路由已写入代码，但运行进程需重启后再做真实接口联调；
+总任务：active，继续推进。
+```
