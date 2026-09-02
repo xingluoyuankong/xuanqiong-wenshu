@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import time
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -27,7 +28,7 @@ from ...agent.write_executor import accept_candidate_artifact, diff_artifact_wit
 from ...agent.context_refs import ContextRefValidationError, project_plan_arguments, resolve_agent_context_refs
 from ...agent.tool_adapters import execute_read_tool
 from ...agent.schemas import (
-    AgentApprovalDecisionRequest, AgentApprovalRead, AgentArtifactAcceptRequest, AgentExecutionFactRead, AgentProviderUsageSummaryRead, AgentArtifactDiffRead, AgentArtifactRead, AgentArtifactVersionDiffRead, AgentEventRead, AgentMessageCreateRequest,
+    AgentApprovalDecisionRequest, AgentApprovalRead, AgentArtifactAcceptRequest, AgentExecutionFactRead, AgentProviderUsageSummaryRead, AgentProjectProviderUsageSummaryRead, AgentArtifactDiffRead, AgentArtifactRead, AgentArtifactVersionDiffRead, AgentEventRead, AgentMessageCreateRequest,
     AgentAuditRecordRead, AgentJobRead, AgentRewriteInstructionRead, AgentMessageRead, AgentPlan, AgentPlanRequest, AgentPlanStep, AgentQualityBlockerRead, AgentArtifactQualityRead, AgentArtifactLineageRead, AgentArtifactLineageEdgeRead, AgentArtifactLineageArtifactRead, AgentQualityFindingRead, AgentQualityGateRead, AgentQualityResultRead, AgentRunRead, AgentRunStepRead, AgentTimelineEventRead,
     AgentSessionCreateRequest, AgentSessionDetail, AgentSessionRead, AgentToolCatalog, AgentToolHealthRead,
     AgentRunCommandRequest, AgentRunCommandRead, AgentContextSnapshotRead, AgentPlanRevisionRead, AgentConversationSummaryRead, AgentProviderProvenanceRead, AgentProjectEntitySummariesRead,
@@ -917,6 +918,29 @@ async def list_agent_run_activity(
         raise _error(exc) from exc
 
 
+@router.get("/projects/{project_id}/provider-usage-summary", response_model=AgentProjectProviderUsageSummaryRead)
+async def get_agent_project_provider_usage_summary(
+    project_id: str,
+    since: Annotated[datetime | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> AgentProjectProviderUsageSummaryRead:
+    """Return a bounded, payload-free Provider usage aggregate for one user-owned project."""
+    try:
+        summary = await AgentExecutionFactService(session).project_provider_usage_summary(
+            project_id=project_id,
+            user_id=current_user.id,
+            since=since,
+            limit=limit,
+        )
+        return AgentProjectProviderUsageSummaryRead.model_validate(summary)
+    except AgentExecutionFactNotFound as exc:
+        raise HTTPException(status_code=404, detail={"code": "AGENT_NOT_FOUND", "message": str(exc)}) from exc
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
+        raise _error(exc) from exc
+
+
 @router.get("/runs/{run_id}/provider-usage-summary", response_model=AgentProviderUsageSummaryRead)
 async def get_agent_provider_usage_summary(
     run_id: str,
@@ -1147,6 +1171,3 @@ async def decide_agent_approval(approval_id: str, payload: AgentApprovalDecision
         return AgentApprovalRead.model_validate(approval)
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
-
-
-

@@ -411,6 +411,35 @@ class AgentProviderUsageSummaryRead(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
 
+class AgentProjectProviderUsageRunRead(BaseModel):
+    run_id: str
+    status: str
+    attempt_count: int = Field(ge=0)
+    failed_attempts: int = Field(ge=0)
+    fallback_attempts: int = Field(ge=0)
+    last_error_category: str | None = None
+    latest_attempt_at: str | None = None
+
+    model_config = ConfigDict(extra='forbid')
+
+
+class AgentProjectProviderUsageSummaryRead(BaseModel):
+    project_id: str
+    run_count: int = Field(ge=0)
+    attempt_count: int = Field(ge=0)
+    succeeded_attempts: int = Field(ge=0)
+    failed_attempts: int = Field(ge=0)
+    fallback_attempts: int = Field(ge=0)
+    first_token_attempts: int = Field(ge=0)
+    digest_attempts: int = Field(ge=0)
+    selected_attempts: int = Field(ge=0)
+    last_error_category: str | None = None
+    latest_attempt_at: str | None = None
+    runs: list[AgentProjectProviderUsageRunRead] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra='forbid')
+
+
 class AgentExecutionFactRead(BaseModel):
     execution_id: str
     run_id: str

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 
 from types import SimpleNamespace
@@ -12,7 +14,7 @@ from app.agent.execution import execute_agent_execution_job
 from app.agent.executor import build_agent_plan
 from app.agent.jobs import AgentJobService
 from app.agent.schemas import AgentMessageCreateRequest, AgentPlanRequest, AgentRunCommandRequest, AgentSessionCreateRequest
-from app.api.routers.agent import list_agent_execution_facts, get_agent_provider_usage_summary, create_agent_session, list_agent_project_entity_summaries, get_agent_run_plan, get_agent_run_provider_provenance, get_agent_run_state, get_agent_session, list_agent_dead_letters, list_agent_jobs, list_agent_run_steps, list_agent_run_activity, list_agent_run_commands, post_agent_message, replay_agent_dead_letter, submit_agent_run_command
+from app.api.routers.agent import list_agent_execution_facts, get_agent_provider_usage_summary, get_agent_project_provider_usage_summary, create_agent_session, list_agent_project_entity_summaries, get_agent_run_plan, get_agent_run_provider_provenance, get_agent_run_state, get_agent_session, list_agent_dead_letters, list_agent_jobs, list_agent_run_steps, list_agent_run_activity, list_agent_run_commands, post_agent_message, replay_agent_dead_letter, submit_agent_run_command
 from app.models import AgentCapabilityDefinition, AgentCapabilityExecution, AgentRunCapabilitySnapshot, Chapter, ChapterVersion, NovelProject, User
 from app.models.faction import Faction
 from app.models.foreshadowing import Foreshadowing
@@ -1001,3 +1003,101 @@ async def test_agent_run_plan_route_does_not_fallback_to_mutable_steps_when_revi
     assert plan.mode == "strict"
     assert plan.steps == []
 
+
+
+@pytest.mark.asyncio
+async def test_project_provider_usage_summary_route_is_owner_scoped_and_redacts_project_runs(task_session):
+    owner = await _route_user(task_session, 1043, 'project-usage-owner')
+    other = await _route_user(task_session, 1044, 'project-usage-other')
+    project = NovelProject(id='route-provider-project', user_id=owner.id, title='Route provider project')
+    empty_project = NovelProject(id='route-provider-empty', user_id=owner.id, title='Route provider empty')
+    task_session.add_all([project, empty_project])
+    await task_session.flush()
+
+    created = await create_agent_session(
+        AgentSessionCreateRequest(project_id=project.id), session=task_session, current_user=SimpleNamespace(id=owner.id)
+    )
+    runtime = AgentRuntimeService(task_session)
+    newest = await runtime.create_run(
+        session_id=created.id,
+        user_id=owner.id,
+        project_id=project.id,
+        context={
+            'response_provider_attempts': {
+                'provider_attempts': [
+                    {'status': 'failed', 'error_category': 'TIMEOUT', 'input': 'SECRET_ROUTE_INPUT', 'output': 'SECRET_ROUTE_OUTPUT'},
+                    {'status': 'succeeded', 'first_token_at': '2026-09-03T12:00:00Z', 'finished_at': '2026-09-03T12:02:00Z', 'output_digest': 'a' * 64, 'fallback_from_attempt': 1},
+                ],
+                'selected_provider_attempt': 2,
+            },
+        },
+    )
+    older = await runtime.create_run(
+        session_id=created.id,
+        user_id=owner.id,
+        project_id=project.id,
+        context={'planner_provider_attempts': {'provider_attempts': [{'status': 'succeeded'}]}},
+    )
+    newest.created_at = datetime(2026, 9, 3, 11, 0, tzinfo=timezone.utc)
+    older.created_at = datetime(2026, 9, 2, 11, 0, tzinfo=timezone.utc)
+    await task_session.commit()
+
+    summary = await get_agent_project_provider_usage_summary(
+        project.id,
+        limit=1,
+        session=task_session,
+        current_user=SimpleNamespace(id=owner.id),
+    )
+    dumped = summary.model_dump()
+    assert dumped['project_id'] == project.id
+    assert dumped['run_count'] == 1
+    assert dumped['attempt_count'] == 2
+    assert dumped['runs'] == [{
+        'run_id': newest.id,
+        'status': newest.status,
+        'attempt_count': 2,
+        'failed_attempts': 1,
+        'fallback_attempts': 1,
+        'last_error_category': 'TIMEOUT',
+        'latest_attempt_at': '2026-09-03T12:02:00Z',
+    }]
+    assert older.id not in str(dumped)
+    assert 'SECRET_ROUTE_INPUT' not in str(dumped)
+    assert 'SECRET_ROUTE_OUTPUT' not in str(dumped)
+
+    windowed = await get_agent_project_provider_usage_summary(
+        project.id,
+        since=datetime(2026, 9, 3, tzinfo=timezone.utc),
+        session=task_session,
+        current_user=SimpleNamespace(id=owner.id),
+    )
+    assert windowed.run_count == 1
+    assert windowed.runs[0].run_id == newest.id
+
+    empty = await get_agent_project_provider_usage_summary(
+        empty_project.id,
+        session=task_session,
+        current_user=SimpleNamespace(id=owner.id),
+    )
+    assert empty.model_dump() == {
+        'project_id': empty_project.id,
+        'run_count': 0,
+        'attempt_count': 0,
+        'succeeded_attempts': 0,
+        'failed_attempts': 0,
+        'fallback_attempts': 0,
+        'first_token_attempts': 0,
+        'digest_attempts': 0,
+        'selected_attempts': 0,
+        'last_error_category': None,
+        'latest_attempt_at': None,
+        'runs': [],
+    }
+
+    with pytest.raises(HTTPException) as error:
+        await get_agent_project_provider_usage_summary(
+            project.id,
+            session=task_session,
+            current_user=SimpleNamespace(id=other.id),
+        )
+    assert error.value.status_code == 404
