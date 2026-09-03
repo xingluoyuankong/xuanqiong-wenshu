@@ -1,0 +1,48 @@
+{
+ "domain": "导入导出与工程往返",
+ "slug": "domain-07",
+ "nodes": [
+  {
+   "id": "PR-052",
+   "title": "版本化工程 manifest 与 checksums",
+   "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-053",
+   "title": "TXT 阅读版与工程包能力声明",
+   "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+   "severity": "P1",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-054",
+   "title": "DOCX 阅读版能力声明与往返边界",
+   "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-055",
+   "title": "导入 staging 校验后原子发布",
+   "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-056",
+   "title": "分章预览、置信度与人工确认",
+   "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-057",
+   "title": "空库 roundtrip 图同构与 hash",
+   "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  }
+ ]
+}

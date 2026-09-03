@@ -1,0 +1,18 @@
+        semantic_hits = [marker for marker in cls.ENDING_SEMANTIC_HOOK_MARKERS if marker in ending_excerpt]
+        weak_hits = [marker for marker in cls.ENDING_WEAK_HOOK_MARKERS if marker in ending_excerpt]
+        # 明确倒计时是可验证的章末压力，不能因没有复述任务书原词而漏判。
+        if re.search(r"[一二三四五六七八九十]\s*[、，,]\s*[一二三四五六七八九十]", ending_excerpt):
+            semantic_hits.append("倒计时")
+        closure_hits = [marker for marker in cls.ENDING_CLOSURE_MARKERS if marker in ending_excerpt]
+        # 语义压力是必要条件：两个问号叹号骗不过章末压力门。
+        generic_pass = bool(semantic_hits) and (len(semantic_hits) + len(weak_hits)) >= 2
+        mission_hook_pass = bool(mission_hook_hits and (semantic_hits or weak_hits))
+        passed = bool((deliver_hits or mission_hook_pass or generic_pass) and not closure_hits)
+        return {
+            "ending_pressure_passed": passed,
+            "ending_pressure_hits": (deliver_hits + mission_hook_hits + semantic_hits + weak_hits)[:10],
+            "mission_hook_hits": mission_hook_hits[:6],
+            "ending_semantic_hit_count": len(semantic_hits),
+            "ending_weak_hit_count": len(weak_hits),
+            "flat_closure_markers": closure_hits[:4],
+        }

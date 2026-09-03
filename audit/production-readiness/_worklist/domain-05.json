@@ -1,0 +1,62 @@
+{
+ "domain": "原子定稿与连续性账本",
+ "slug": "domain-05",
+ "nodes": [
+  {
+   "id": "PR-037",
+   "title": "FinalizationSession 冻结版本与 hash",
+   "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-038",
+   "title": "ProjectMemory 真正 CAS 更新",
+   "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-039",
+   "title": "章节快照幂等与 commit_id",
+   "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-040",
+   "title": "单事务提交正文和数据库事实",
+   "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-041",
+   "title": "DomainEventOutbox 外部副作用",
+   "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-042",
+   "title": "人物势力时间线因果 append-only 事件",
+   "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-043",
+   "title": "伏笔线索回收证据与状态机",
+   "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+   "severity": "P0",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-044",
+   "title": "投影 stale、回退与可重建",
+   "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  }
+ ]
+}

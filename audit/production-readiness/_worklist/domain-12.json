@@ -1,0 +1,41 @@
+{
+ "domain": "可观测性与审计证据",
+ "slug": "domain-12",
+ "nodes": [
+  {
+   "id": "PR-085",
+   "title": "request_id task_id commit_id 关联",
+   "location": "backend/app/main.py; backend/app/services/task_runtime.py; audit/production-readiness/evidence",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-086",
+   "title": "结构化错误与可执行动作",
+   "location": "backend/app/main.py; backend/app/services/task_runtime.py; audit/production-readiness/evidence",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-087",
+   "title": "任务延迟重试取消恢复指标",
+   "location": "backend/app/main.py; backend/app/services/task_runtime.py; audit/production-readiness/evidence",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-088",
+   "title": "密钥隐私 canary 扫描",
+   "location": "backend/app/main.py; backend/app/services/task_runtime.py; audit/production-readiness/evidence",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-089",
+   "title": "证据 manifest、产物 checksum、故障注入与反向验证",
+   "location": "backend/app/main.py; backend/app/services/task_runtime.py; audit/production-readiness/evidence",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  }
+ ]
+}

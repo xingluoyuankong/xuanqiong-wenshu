@@ -1,0 +1,62 @@
+{
+ "domain": "版本化创作结构资产",
+ "slug": "domain-03",
+ "nodes": [
+  {
+   "id": "PR-019",
+   "title": "创作意图与长度合同 revision",
+   "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-020",
+   "title": "蓝图 revision 与 If-Match",
+   "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-021",
+   "title": "全书总纲 canonical shape",
+   "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-022",
+   "title": "分卷范围完整且无重叠",
+   "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-023",
+   "title": "故事弧与剧情线稳定 ID",
+   "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-024",
+   "title": "章节纲富字段 revision",
+   "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-025",
+   "title": "ScenePlan 与 Scene 稳定资产",
+   "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-026",
+   "title": "结构资产回填、双读与 checksum",
+   "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  }
+ ]
+}

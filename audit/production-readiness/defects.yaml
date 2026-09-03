@@ -1,0 +1,3575 @@
+{
+  "schema_version": 1,
+  "audit_batch": 0,
+  "language": "zh-CN",
+  "declared_count": 97,
+  "source_enumerated_count": 35,
+  "enumerated_count": 97,
+  "domain_count": 13,
+  "count_note": "原总体逻辑树显式枚举 A1—G5 共 35 项；本台账结合五份分域目标文本拆分为 97 个叶子功能，保留声明数与源枚举数差异。",
+  "allowed_initial_statuses": [
+    "CONFIRMED",
+    "IMPLEMENTED_UNVERIFIED"
+  ],
+  "forbidden_initial_statuses": [
+    "TESTED",
+    "REAL_VERIFIED",
+    "RELEASED"
+  ],
+  "source_documents": [
+    "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+    "PRODUCTION_PLAN_AGENT_TASK_RUNTIME.md",
+    "PRODUCTION_PLAN_AGENT_GENERATION.md",
+    "PRODUCTION_PLAN_AGENT_FRONTEND.md",
+    "PRODUCTION_PLAN_AGENT_BUSINESS.md",
+    "PRODUCTION_PLAN_AGENT_RELEASE.md",
+    "PRODUCTION_RECONSTRUCTION_AUDIT.md"
+  ],
+  "defects": [
+    {
+      "id": "PR-001",
+      "domain": "身份、权限与资产隔离",
+      "title": "登录与令牌生命周期",
+      "severity": "P0",
+      "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“登录与令牌生命周期”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“登录与令牌生命周期”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“登录与令牌生命周期”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“登录与令牌生命周期”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“登录与令牌生命周期”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“登录与令牌生命周期”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-002",
+      "domain": "身份、权限与资产隔离",
+      "title": "生产环境禁用匿名默认用户",
+      "severity": "P0",
+      "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“生产环境禁用匿名默认用户”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“生产环境禁用匿名默认用户”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“生产环境禁用匿名默认用户”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“生产环境禁用匿名默认用户”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“生产环境禁用匿名默认用户”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“生产环境禁用匿名默认用户”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-003",
+      "domain": "身份、权限与资产隔离",
+      "title": "项目 owner 权限矩阵",
+      "severity": "P0",
+      "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“项目 owner 权限矩阵”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“项目 owner 权限矩阵”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“项目 owner 权限矩阵”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“项目 owner 权限矩阵”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“项目 owner 权限矩阵”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“项目 owner 权限矩阵”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-004",
+      "domain": "身份、权限与资产隔离",
+      "title": "任务 owner 与项目双校验",
+      "severity": "P0",
+      "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“任务 owner 与项目双校验”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“任务 owner 与项目双校验”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“任务 owner 与项目双校验”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“任务 owner 与项目双校验”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“任务 owner 与项目双校验”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“任务 owner 与项目双校验”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-005",
+      "domain": "身份、权限与资产隔离",
+      "title": "SSE 持续鉴权与资源隔离",
+      "severity": "P0",
+      "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“SSE 持续鉴权与资源隔离”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“SSE 持续鉴权与资源隔离”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“SSE 持续鉴权与资源隔离”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“SSE 持续鉴权与资源隔离”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“SSE 持续鉴权与资源隔离”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“SSE 持续鉴权与资源隔离”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-006",
+      "domain": "身份、权限与资产隔离",
+      "title": "上传下载路径与文件授权",
+      "severity": "P0",
+      "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“上传下载路径与文件授权”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“上传下载路径与文件授权”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“上传下载路径与文件授权”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“上传下载路径与文件授权”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“上传下载路径与文件授权”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“上传下载路径与文件授权”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-007",
+      "domain": "身份、权限与资产隔离",
+      "title": "管理员显式运维边界与审计",
+      "severity": "P1",
+      "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“管理员显式运维边界与审计”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“管理员显式运维边界与审计”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“管理员显式运维边界与审计”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“管理员显式运维边界与审计”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“管理员显式运维边界与审计”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“管理员显式运维边界与审计”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-008",
+      "domain": "身份、权限与资产隔离",
+      "title": "敏感字段统一脱敏与大小限制",
+      "severity": "P0",
+      "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“敏感字段统一脱敏与大小限制”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“敏感字段统一脱敏与大小限制”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“敏感字段统一脱敏与大小限制”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“敏感字段统一脱敏与大小限制”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“敏感字段统一脱敏与大小限制”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“敏感字段统一脱敏与大小限制”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-009",
+      "domain": "统一任务中心与事件协议",
+      "title": "attempt 与 lease_generation 代际隔离",
+      "severity": "P0",
+      "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“attempt 与 lease_generation 代际隔离”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“attempt 与 lease_generation 代际隔离”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“attempt 与 lease_generation 代际隔离”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“attempt 与 lease_generation 代际隔离”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“attempt 与 lease_generation 代际隔离”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“attempt 与 lease_generation 代际隔离”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-010",
+      "domain": "统一任务中心与事件协议",
+      "title": "全部状态写入数据库 CAS",
+      "severity": "P0",
+      "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“全部状态写入数据库 CAS”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“全部状态写入数据库 CAS”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“全部状态写入数据库 CAS”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“全部状态写入数据库 CAS”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“全部状态写入数据库 CAS”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“全部状态写入数据库 CAS”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-011",
+      "domain": "统一任务中心与事件协议",
+      "title": "幂等键稳定业务作用域",
+      "severity": "P0",
+      "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“幂等键稳定业务作用域”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“幂等键稳定业务作用域”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“幂等键稳定业务作用域”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“幂等键稳定业务作用域”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“幂等键稳定业务作用域”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“幂等键稳定业务作用域”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-012",
+      "domain": "统一任务中心与事件协议",
+      "title": "普通用户不可调用 worker 写接口",
+      "severity": "P0",
+      "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“普通用户不可调用 worker 写接口”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“普通用户不可调用 worker 写接口”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“普通用户不可调用 worker 写接口”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“普通用户不可调用 worker 写接口”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“普通用户不可调用 worker 写接口”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“普通用户不可调用 worker 写接口”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-013",
+      "domain": "统一任务中心与事件协议",
+      "title": "统一持久化 dispatcher",
+      "severity": "P0",
+      "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“统一持久化 dispatcher”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“统一持久化 dispatcher”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“统一持久化 dispatcher”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“统一持久化 dispatcher”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“统一持久化 dispatcher”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“统一持久化 dispatcher”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-014",
+      "domain": "统一任务中心与事件协议",
+      "title": "业务内存字典降为进程句柄",
+      "severity": "P0",
+      "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“业务内存字典降为进程句柄”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“业务内存字典降为进程句柄”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“业务内存字典降为进程句柄”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“业务内存字典降为进程句柄”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“业务内存字典降为进程句柄”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“业务内存字典降为进程句柄”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-015",
+      "domain": "统一任务中心与事件协议",
+      "title": "取消状态最终收敛",
+      "severity": "P0",
+      "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“取消状态最终收敛”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“取消状态最终收敛”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“取消状态最终收敛”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“取消状态最终收敛”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“取消状态最终收敛”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“取消状态最终收敛”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-016",
+      "domain": "统一任务中心与事件协议",
+      "title": "stale 扫描与自动恢复",
+      "severity": "P0",
+      "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“stale 扫描与自动恢复”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“stale 扫描与自动恢复”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“stale 扫描与自动恢复”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“stale 扫描与自动恢复”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“stale 扫描与自动恢复”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“stale 扫描与自动恢复”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-017",
+      "domain": "统一任务中心与事件协议",
+      "title": "统一事件 envelope 与通道",
+      "severity": "P0",
+      "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“统一事件 envelope 与通道”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“统一事件 envelope 与通道”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“统一事件 envelope 与通道”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“统一事件 envelope 与通道”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“统一事件 envelope 与通道”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“统一事件 envelope 与通道”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-018",
+      "domain": "统一任务中心与事件协议",
+      "title": "SSE 游标回放、去重与终态关闭",
+      "severity": "P0",
+      "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“SSE 游标回放、去重与终态关闭”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“SSE 游标回放、去重与终态关闭”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“SSE 游标回放、去重与终态关闭”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“SSE 游标回放、去重与终态关闭”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“SSE 游标回放、去重与终态关闭”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“SSE 游标回放、去重与终态关闭”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-019",
+      "domain": "版本化创作结构资产",
+      "title": "创作意图与长度合同 revision",
+      "severity": "P0",
+      "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“创作意图与长度合同 revision”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“创作意图与长度合同 revision”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“创作意图与长度合同 revision”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“创作意图与长度合同 revision”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“创作意图与长度合同 revision”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“创作意图与长度合同 revision”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-020",
+      "domain": "版本化创作结构资产",
+      "title": "蓝图 revision 与 If-Match",
+      "severity": "P0",
+      "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“蓝图 revision 与 If-Match”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“蓝图 revision 与 If-Match”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“蓝图 revision 与 If-Match”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“蓝图 revision 与 If-Match”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“蓝图 revision 与 If-Match”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“蓝图 revision 与 If-Match”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-021",
+      "domain": "版本化创作结构资产",
+      "title": "全书总纲 canonical shape",
+      "severity": "P0",
+      "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“全书总纲 canonical shape”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“全书总纲 canonical shape”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“全书总纲 canonical shape”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“全书总纲 canonical shape”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“全书总纲 canonical shape”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“全书总纲 canonical shape”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-022",
+      "domain": "版本化创作结构资产",
+      "title": "分卷范围完整且无重叠",
+      "severity": "P0",
+      "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“分卷范围完整且无重叠”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“分卷范围完整且无重叠”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“分卷范围完整且无重叠”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“分卷范围完整且无重叠”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“分卷范围完整且无重叠”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“分卷范围完整且无重叠”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-023",
+      "domain": "版本化创作结构资产",
+      "title": "故事弧与剧情线稳定 ID",
+      "severity": "P0",
+      "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“故事弧与剧情线稳定 ID”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“故事弧与剧情线稳定 ID”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“故事弧与剧情线稳定 ID”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“故事弧与剧情线稳定 ID”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“故事弧与剧情线稳定 ID”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“故事弧与剧情线稳定 ID”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-024",
+      "domain": "版本化创作结构资产",
+      "title": "章节纲富字段 revision",
+      "severity": "P0",
+      "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“章节纲富字段 revision”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“章节纲富字段 revision”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“章节纲富字段 revision”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“章节纲富字段 revision”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“章节纲富字段 revision”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“章节纲富字段 revision”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-025",
+      "domain": "版本化创作结构资产",
+      "title": "ScenePlan 与 Scene 稳定资产",
+      "severity": "P0",
+      "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“ScenePlan 与 Scene 稳定资产”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“ScenePlan 与 Scene 稳定资产”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“ScenePlan 与 Scene 稳定资产”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“ScenePlan 与 Scene 稳定资产”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“ScenePlan 与 Scene 稳定资产”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“ScenePlan 与 Scene 稳定资产”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-026",
+      "domain": "版本化创作结构资产",
+      "title": "结构资产回填、双读与 checksum",
+      "severity": "P1",
+      "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“结构资产回填、双读与 checksum”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“结构资产回填、双读与 checksum”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“结构资产回填、双读与 checksum”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“结构资产回填、双读与 checksum”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“结构资产回填、双读与 checksum”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“结构资产回填、双读与 checksum”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-027",
+      "domain": "正文生成、版本与质量",
+      "title": "短章单候选与调用预算",
+      "severity": "P1",
+      "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“短章单候选与调用预算”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“短章单候选与调用预算”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“短章单候选与调用预算”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“短章单候选与调用预算”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“短章单候选与调用预算”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“短章单候选与调用预算”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-028",
+      "domain": "正文生成、版本与质量",
+      "title": "中长章候选与统一 RetryBudget",
+      "severity": "P0",
+      "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“中长章候选与统一 RetryBudget”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“中长章候选与统一 RetryBudget”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“中长章候选与统一 RetryBudget”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“中长章候选与统一 RetryBudget”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“中长章候选与统一 RetryBudget”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“中长章候选与统一 RetryBudget”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-029",
+      "domain": "正文生成、版本与质量",
+      "title": "生成完成不自动选择最长候选",
+      "severity": "P0",
+      "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“生成完成不自动选择最长候选”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“生成完成不自动选择最长候选”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“生成完成不自动选择最长候选”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“生成完成不自动选择最长候选”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“生成完成不自动选择最长候选”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“生成完成不自动选择最长候选”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-030",
+      "domain": "正文生成、版本与质量",
+      "title": "不可变 ChapterVersion 与父版本图",
+      "severity": "P0",
+      "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“不可变 ChapterVersion 与父版本图”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“不可变 ChapterVersion 与父版本图”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“不可变 ChapterVersion 与父版本图”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“不可变 ChapterVersion 与父版本图”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“不可变 ChapterVersion 与父版本图”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“不可变 ChapterVersion 与父版本图”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-031",
+      "domain": "正文生成、版本与质量",
+      "title": "续写改写局部 patch 基线冲突",
+      "severity": "P0",
+      "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“续写改写局部 patch 基线冲突”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“续写改写局部 patch 基线冲突”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“续写改写局部 patch 基线冲突”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“续写改写局部 patch 基线冲突”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“续写改写局部 patch 基线冲突”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“续写改写局部 patch 基线冲突”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-032",
+      "domain": "正文生成、版本与质量",
+      "title": "正文协议与元文本污染守卫",
+      "severity": "P0",
+      "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“正文协议与元文本污染守卫”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“正文协议与元文本污染守卫”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“正文协议与元文本污染守卫”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“正文协议与元文本污染守卫”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“正文协议与元文本污染守卫”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“正文协议与元文本污染守卫”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-033",
+      "domain": "正文生成、版本与质量",
+      "title": "统一字数口径与测试向量",
+      "severity": "P1",
+      "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“统一字数口径与测试向量”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“统一字数口径与测试向量”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“统一字数口径与测试向量”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“统一字数口径与测试向量”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“统一字数口径与测试向量”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“统一字数口径与测试向量”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-034",
+      "domain": "正文生成、版本与质量",
+      "title": "质量门 blocker warning degraded 契约",
+      "severity": "P0",
+      "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“质量门 blocker warning degraded 契约”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“质量门 blocker warning degraded 契约”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“质量门 blocker warning degraded 契约”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“质量门 blocker warning degraded 契约”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“质量门 blocker warning degraded 契约”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“质量门 blocker warning degraded 契约”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-035",
+      "domain": "正文生成、版本与质量",
+      "title": "20k 分段 artifact 与 checkpoint",
+      "severity": "P0",
+      "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“20k 分段 artifact 与 checkpoint”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“20k 分段 artifact 与 checkpoint”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“20k 分段 artifact 与 checkpoint”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“20k 分段 artifact 与 checkpoint”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“20k 分段 artifact 与 checkpoint”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“20k 分段 artifact 与 checkpoint”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-036",
+      "domain": "正文生成、版本与质量",
+      "title": "长章取消、断线、杀进程和续接",
+      "severity": "P0",
+      "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“长章取消、断线、杀进程和续接”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“长章取消、断线、杀进程和续接”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“长章取消、断线、杀进程和续接”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“长章取消、断线、杀进程和续接”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“长章取消、断线、杀进程和续接”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“长章取消、断线、杀进程和续接”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-037",
+      "domain": "原子定稿与连续性账本",
+      "title": "FinalizationSession 冻结版本与 hash",
+      "severity": "P0",
+      "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“FinalizationSession 冻结版本与 hash”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“FinalizationSession 冻结版本与 hash”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“FinalizationSession 冻结版本与 hash”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“FinalizationSession 冻结版本与 hash”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“FinalizationSession 冻结版本与 hash”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“FinalizationSession 冻结版本与 hash”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-038",
+      "domain": "原子定稿与连续性账本",
+      "title": "ProjectMemory 真正 CAS 更新",
+      "severity": "P0",
+      "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“ProjectMemory 真正 CAS 更新”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“ProjectMemory 真正 CAS 更新”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“ProjectMemory 真正 CAS 更新”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“ProjectMemory 真正 CAS 更新”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“ProjectMemory 真正 CAS 更新”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“ProjectMemory 真正 CAS 更新”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-039",
+      "domain": "原子定稿与连续性账本",
+      "title": "章节快照幂等与 commit_id",
+      "severity": "P0",
+      "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“章节快照幂等与 commit_id”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“章节快照幂等与 commit_id”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“章节快照幂等与 commit_id”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“章节快照幂等与 commit_id”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“章节快照幂等与 commit_id”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“章节快照幂等与 commit_id”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-040",
+      "domain": "原子定稿与连续性账本",
+      "title": "单事务提交正文和数据库事实",
+      "severity": "P0",
+      "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“单事务提交正文和数据库事实”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“单事务提交正文和数据库事实”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“单事务提交正文和数据库事实”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“单事务提交正文和数据库事实”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“单事务提交正文和数据库事实”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“单事务提交正文和数据库事实”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-041",
+      "domain": "原子定稿与连续性账本",
+      "title": "DomainEventOutbox 外部副作用",
+      "severity": "P0",
+      "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“DomainEventOutbox 外部副作用”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“DomainEventOutbox 外部副作用”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“DomainEventOutbox 外部副作用”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“DomainEventOutbox 外部副作用”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“DomainEventOutbox 外部副作用”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“DomainEventOutbox 外部副作用”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-042",
+      "domain": "原子定稿与连续性账本",
+      "title": "人物势力时间线因果 append-only 事件",
+      "severity": "P0",
+      "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“人物势力时间线因果 append-only 事件”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“人物势力时间线因果 append-only 事件”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“人物势力时间线因果 append-only 事件”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“人物势力时间线因果 append-only 事件”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“人物势力时间线因果 append-only 事件”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“人物势力时间线因果 append-only 事件”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-043",
+      "domain": "原子定稿与连续性账本",
+      "title": "伏笔线索回收证据与状态机",
+      "severity": "P0",
+      "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“伏笔线索回收证据与状态机”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“伏笔线索回收证据与状态机”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“伏笔线索回收证据与状态机”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“伏笔线索回收证据与状态机”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“伏笔线索回收证据与状态机”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“伏笔线索回收证据与状态机”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-044",
+      "domain": "原子定稿与连续性账本",
+      "title": "投影 stale、回退与可重建",
+      "severity": "P0",
+      "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“投影 stale、回退与可重建”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“投影 stale、回退与可重建”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-019",
+        "PR-027"
+      ],
+      "fix": "固化“投影 stale、回退与可重建”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“投影 stale、回退与可重建”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“投影 stale、回退与可重建”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“投影 stale、回退与可重建”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-045",
+      "domain": "Provider、配置、成本与资料",
+      "title": "ConfigSnapshot 冻结 Provider 与参数",
+      "severity": "P0",
+      "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“ConfigSnapshot 冻结 Provider 与参数”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“ConfigSnapshot 冻结 Provider 与参数”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“ConfigSnapshot 冻结 Provider 与参数”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“ConfigSnapshot 冻结 Provider 与参数”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“ConfigSnapshot 冻结 Provider 与参数”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“ConfigSnapshot 冻结 Provider 与参数”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-046",
+      "domain": "Provider、配置、成本与资料",
+      "title": "PromptRevision 与版本化缓存键",
+      "severity": "P0",
+      "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“PromptRevision 与版本化缓存键”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“PromptRevision 与版本化缓存键”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“PromptRevision 与版本化缓存键”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“PromptRevision 与版本化缓存键”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“PromptRevision 与版本化缓存键”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“PromptRevision 与版本化缓存键”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-047",
+      "domain": "Provider、配置、成本与资料",
+      "title": "统一超时重试与费用预算",
+      "severity": "P0",
+      "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“统一超时重试与费用预算”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“统一超时重试与费用预算”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“统一超时重试与费用预算”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“统一超时重试与费用预算”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“统一超时重试与费用预算”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“统一超时重试与费用预算”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-048",
+      "domain": "Provider、配置、成本与资料",
+      "title": "跨 worker Provider 并发与背压",
+      "severity": "P1",
+      "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“跨 worker Provider 并发与背压”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“跨 worker Provider 并发与背压”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“跨 worker Provider 并发与背压”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“跨 worker Provider 并发与背压”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“跨 worker Provider 并发与背压”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“跨 worker Provider 并发与背压”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-049",
+      "domain": "Provider、配置、成本与资料",
+      "title": "研究来源、引用与可信度版本化",
+      "severity": "P1",
+      "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“研究来源、引用与可信度版本化”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“研究来源、引用与可信度版本化”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“研究来源、引用与可信度版本化”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“研究来源、引用与可信度版本化”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“研究来源、引用与可信度版本化”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“研究来源、引用与可信度版本化”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-050",
+      "domain": "Provider、配置、成本与资料",
+      "title": "文风来源、授权和画像 revision",
+      "severity": "P1",
+      "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“文风来源、授权和画像 revision”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“文风来源、授权和画像 revision”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“文风来源、授权和画像 revision”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“文风来源、授权和画像 revision”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“文风来源、授权和画像 revision”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“文风来源、授权和画像 revision”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-051",
+      "domain": "Provider、配置、成本与资料",
+      "title": "任务 payload 与正文 artifact 化",
+      "severity": "P0",
+      "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“任务 payload 与正文 artifact 化”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“任务 payload 与正文 artifact 化”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“任务 payload 与正文 artifact 化”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“任务 payload 与正文 artifact 化”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“任务 payload 与正文 artifact 化”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“任务 payload 与正文 artifact 化”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-052",
+      "domain": "导入导出与工程往返",
+      "title": "版本化工程 manifest 与 checksums",
+      "severity": "P0",
+      "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“版本化工程 manifest 与 checksums”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“版本化工程 manifest 与 checksums”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“版本化工程 manifest 与 checksums”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“版本化工程 manifest 与 checksums”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“版本化工程 manifest 与 checksums”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“版本化工程 manifest 与 checksums”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-053",
+      "domain": "导入导出与工程往返",
+      "title": "TXT 阅读版与工程包能力声明",
+      "severity": "P1",
+      "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“TXT 阅读版与工程包能力声明”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“TXT 阅读版与工程包能力声明”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“TXT 阅读版与工程包能力声明”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“TXT 阅读版与工程包能力声明”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“TXT 阅读版与工程包能力声明”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“TXT 阅读版与工程包能力声明”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-054",
+      "domain": "导入导出与工程往返",
+      "title": "DOCX 阅读版能力声明与往返边界",
+      "severity": "P0",
+      "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“DOCX 阅读版能力声明与往返边界”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“DOCX 阅读版能力声明与往返边界”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“DOCX 阅读版能力声明与往返边界”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“DOCX 阅读版能力声明与往返边界”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“DOCX 阅读版能力声明与往返边界”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“DOCX 阅读版能力声明与往返边界”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-055",
+      "domain": "导入导出与工程往返",
+      "title": "导入 staging 校验后原子发布",
+      "severity": "P0",
+      "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“导入 staging 校验后原子发布”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“导入 staging 校验后原子发布”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“导入 staging 校验后原子发布”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“导入 staging 校验后原子发布”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“导入 staging 校验后原子发布”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“导入 staging 校验后原子发布”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-056",
+      "domain": "导入导出与工程往返",
+      "title": "分章预览、置信度与人工确认",
+      "severity": "P1",
+      "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“分章预览、置信度与人工确认”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“分章预览、置信度与人工确认”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“分章预览、置信度与人工确认”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“分章预览、置信度与人工确认”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“分章预览、置信度与人工确认”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“分章预览、置信度与人工确认”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-057",
+      "domain": "导入导出与工程往返",
+      "title": "空库 roundtrip 图同构与 hash",
+      "severity": "P0",
+      "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“空库 roundtrip 图同构与 hash”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“空库 roundtrip 图同构与 hash”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“空库 roundtrip 图同构与 hash”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“空库 roundtrip 图同构与 hash”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“空库 roundtrip 图同构与 hash”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“空库 roundtrip 图同构与 hash”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-058",
+      "domain": "前端统一任务与交互",
+      "title": "全局 TaskRuntime store 与任务发现",
+      "severity": "P0",
+      "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“全局 TaskRuntime store 与任务发现”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“全局 TaskRuntime store 与任务发现”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-035"
+      ],
+      "fix": "固化“全局 TaskRuntime store 与任务发现”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“全局 TaskRuntime store 与任务发现”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“全局 TaskRuntime store 与任务发现”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“全局 TaskRuntime store 与任务发现”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-059",
+      "domain": "前端统一任务与交互",
+      "title": "唯一事件 reducer 代际序列去重",
+      "severity": "P0",
+      "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“唯一事件 reducer 代际序列去重”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“唯一事件 reducer 代际序列去重”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-035"
+      ],
+      "fix": "固化“唯一事件 reducer 代际序列去重”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“唯一事件 reducer 代际序列去重”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“唯一事件 reducer 代际序列去重”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“唯一事件 reducer 代际序列去重”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-060",
+      "domain": "前端统一任务与交互",
+      "title": "蓝图章节纲研究文风导入统一 SSE",
+      "severity": "P0",
+      "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“蓝图章节纲研究文风导入统一 SSE”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“蓝图章节纲研究文风导入统一 SSE”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-035"
+      ],
+      "fix": "固化“蓝图章节纲研究文风导入统一 SSE”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“蓝图章节纲研究文风导入统一 SSE”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“蓝图章节纲研究文风导入统一 SSE”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“蓝图章节纲研究文风导入统一 SSE”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-061",
+      "domain": "前端统一任务与交互",
+      "title": "正文流日志流诊断流严格分区",
+      "severity": "P0",
+      "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“正文流日志流诊断流严格分区”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“正文流日志流诊断流严格分区”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-035"
+      ],
+      "fix": "固化“正文流日志流诊断流严格分区”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“正文流日志流诊断流严格分区”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“正文流日志流诊断流严格分区”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“正文流日志流诊断流严格分区”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-062",
+      "domain": "前端统一任务与交互",
+      "title": "刷新断网重连取消恢复动作",
+      "severity": "P0",
+      "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“刷新断网重连取消恢复动作”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“刷新断网重连取消恢复动作”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-035"
+      ],
+      "fix": "固化“刷新断网重连取消恢复动作”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“刷新断网重连取消恢复动作”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“刷新断网重连取消恢复动作”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“刷新断网重连取消恢复动作”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-063",
+      "domain": "前端统一任务与交互",
+      "title": "revision 冲突 diff 与 stale 提示",
+      "severity": "P1",
+      "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“revision 冲突 diff 与 stale 提示”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“revision 冲突 diff 与 stale 提示”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-035"
+      ],
+      "fix": "固化“revision 冲突 diff 与 stale 提示”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“revision 冲突 diff 与 stale 提示”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“revision 冲突 diff 与 stale 提示”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“revision 冲突 diff 与 stale 提示”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-064",
+      "domain": "前端统一任务与交互",
+      "title": "长正文块缓冲和虚拟化",
+      "severity": "P1",
+      "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“长正文块缓冲和虚拟化”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“长正文块缓冲和虚拟化”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-035"
+      ],
+      "fix": "固化“长正文块缓冲和虚拟化”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“长正文块缓冲和虚拟化”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“长正文块缓冲和虚拟化”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“长正文块缓冲和虚拟化”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-065",
+      "domain": "前端统一任务与交互",
+      "title": "窄屏键盘与可访问性",
+      "severity": "P1",
+      "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“窄屏键盘与可访问性”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“窄屏键盘与可访问性”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-035"
+      ],
+      "fix": "固化“窄屏键盘与可访问性”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“窄屏键盘与可访问性”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“窄屏键盘与可访问性”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“窄屏键盘与可访问性”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-066",
+      "domain": "业务工作台与领域功能",
+      "title": "项目创建编辑归档删除保护",
+      "severity": "P1",
+      "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“项目创建编辑归档删除保护”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“项目创建编辑归档删除保护”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“项目创建编辑归档删除保护”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“项目创建编辑归档删除保护”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“项目创建编辑归档删除保护”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“项目创建编辑归档删除保护”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-067",
+      "domain": "业务工作台与领域功能",
+      "title": "角色、势力、关系稳定 ID 与并发编辑",
+      "severity": "P1",
+      "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“角色、势力、关系稳定 ID 与并发编辑”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“角色、势力、关系稳定 ID 与并发编辑”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“角色、势力、关系稳定 ID 与并发编辑”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“角色、势力、关系稳定 ID 与并发编辑”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“角色、势力、关系稳定 ID 与并发编辑”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“角色、势力、关系稳定 ID 与并发编辑”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-068",
+      "domain": "业务工作台与领域功能",
+      "title": "线索线程红鲱鱼与未解决项",
+      "severity": "P1",
+      "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“线索线程红鲱鱼与未解决项”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“线索线程红鲱鱼与未解决项”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“线索线程红鲱鱼与未解决项”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“线索线程红鲱鱼与未解决项”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“线索线程红鲱鱼与未解决项”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“线索线程红鲱鱼与未解决项”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-069",
+      "domain": "业务工作台与领域功能",
+      "title": "伏笔提醒分析与回收操作",
+      "severity": "P1",
+      "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“伏笔提醒分析与回收操作”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“伏笔提醒分析与回收操作”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“伏笔提醒分析与回收操作”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“伏笔提醒分析与回收操作”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“伏笔提醒分析与回收操作”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“伏笔提醒分析与回收操作”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-070",
+      "domain": "业务工作台与领域功能",
+      "title": "知识图谱节点边与时间线",
+      "severity": "P1",
+      "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“知识图谱节点边与时间线”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“知识图谱节点边与时间线”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“知识图谱节点边与时间线”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“知识图谱节点边与时间线”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“知识图谱节点边与时间线”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“知识图谱节点边与时间线”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-071",
+      "domain": "业务工作台与领域功能",
+      "title": "版本评审 diff patch 回退",
+      "severity": "P0",
+      "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“版本评审 diff patch 回退”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“版本评审 diff patch 回退”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“版本评审 diff patch 回退”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“版本评审 diff patch 回退”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“版本评审 diff patch 回退”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“版本评审 diff patch 回退”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-072",
+      "domain": "业务工作台与领域功能",
+      "title": "阅读器选中版本与导出一致",
+      "severity": "P1",
+      "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“阅读器选中版本与导出一致”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“阅读器选中版本与导出一致”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“阅读器选中版本与导出一致”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“阅读器选中版本与导出一致”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“阅读器选中版本与导出一致”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“阅读器选中版本与导出一致”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-073",
+      "domain": "管理、日志、技能与限额",
+      "title": "管理台 RBAC 与停用用户",
+      "severity": "P0",
+      "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“管理台 RBAC 与停用用户”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“管理台 RBAC 与停用用户”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“管理台 RBAC 与停用用户”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“管理台 RBAC 与停用用户”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“管理台 RBAC 与停用用户”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“管理台 RBAC 与停用用户”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-074",
+      "domain": "管理、日志、技能与限额",
+      "title": "管理员操作 before-after 审计",
+      "severity": "P1",
+      "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“管理员操作 before-after 审计”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“管理员操作 before-after 审计”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“管理员操作 before-after 审计”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“管理员操作 before-after 审计”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“管理员操作 before-after 审计”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“管理员操作 before-after 审计”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-075",
+      "domain": "管理、日志、技能与限额",
+      "title": "运行日志统一 TaskRuntime 事件源",
+      "severity": "P0",
+      "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“运行日志统一 TaskRuntime 事件源”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“运行日志统一 TaskRuntime 事件源”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“运行日志统一 TaskRuntime 事件源”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“运行日志统一 TaskRuntime 事件源”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“运行日志统一 TaskRuntime 事件源”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“运行日志统一 TaskRuntime 事件源”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-076",
+      "domain": "管理、日志、技能与限额",
+      "title": "系统配置版本、校验与回滚",
+      "severity": "P1",
+      "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“系统配置版本、校验与回滚”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“系统配置版本、校验与回滚”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“系统配置版本、校验与回滚”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“系统配置版本、校验与回滚”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“系统配置版本、校验与回滚”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“系统配置版本、校验与回滚”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-077",
+      "domain": "管理、日志、技能与限额",
+      "title": "请求限额与 Token 预算可解释",
+      "severity": "P1",
+      "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“请求限额与 Token 预算可解释”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“请求限额与 Token 预算可解释”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“请求限额与 Token 预算可解释”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“请求限额与 Token 预算可解释”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“请求限额与 Token 预算可解释”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“请求限额与 Token 预算可解释”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-078",
+      "domain": "管理、日志、技能与限额",
+      "title": "写作技能来源校验与执行沙箱",
+      "severity": "P0",
+      "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“写作技能来源校验与执行沙箱”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“写作技能来源校验与执行沙箱”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“写作技能来源校验与执行沙箱”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“写作技能来源校验与执行沙箱”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“写作技能来源校验与执行沙箱”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“写作技能来源校验与执行沙箱”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-079",
+      "domain": "数据库、迁移与部署",
+      "title": "fresh 数据库迁移到 head",
+      "severity": "P0",
+      "location": "backend/alembic; backend/app/db; backend/app/models",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“fresh 数据库迁移到 head”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“fresh 数据库迁移到 head”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“fresh 数据库迁移到 head”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“fresh 数据库迁移到 head”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“fresh 数据库迁移到 head”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“fresh 数据库迁移到 head”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-080",
+      "domain": "数据库、迁移与部署",
+      "title": "legacy 数据升级与数据保留",
+      "severity": "P0",
+      "location": "backend/alembic; backend/app/db; backend/app/models",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“legacy 数据升级与数据保留”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“legacy 数据升级与数据保留”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“legacy 数据升级与数据保留”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“legacy 数据升级与数据保留”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“legacy 数据升级与数据保留”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“legacy 数据升级与数据保留”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-081",
+      "domain": "数据库、迁移与部署",
+      "title": "重复升级与降级再升级",
+      "severity": "P0",
+      "location": "backend/alembic; backend/app/db; backend/app/models",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“重复升级与降级再升级”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“重复升级与降级再升级”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“重复升级与降级再升级”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“重复升级与降级再升级”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“重复升级与降级再升级”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“重复升级与降级再升级”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-082",
+      "domain": "数据库、迁移与部署",
+      "title": "并发迁移锁与异常恢复",
+      "severity": "P0",
+      "location": "backend/alembic; backend/app/db; backend/app/models",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“并发迁移锁与异常恢复”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“并发迁移锁与异常恢复”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“并发迁移锁与异常恢复”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“并发迁移锁与异常恢复”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“并发迁移锁与异常恢复”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“并发迁移锁与异常恢复”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-083",
+      "domain": "数据库、迁移与部署",
+      "title": "SQLite 关键事务和锁竞争",
+      "severity": "P0",
+      "location": "backend/alembic; backend/app/db; backend/app/models",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“SQLite 关键事务和锁竞争”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“SQLite 关键事务和锁竞争”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“SQLite 关键事务和锁竞争”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“SQLite 关键事务和锁竞争”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“SQLite 关键事务和锁竞争”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“SQLite 关键事务和锁竞争”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-084",
+      "domain": "数据库、迁移与部署",
+      "title": "MySQL CAS 事务索引兼容验证",
+      "severity": "P0",
+      "location": "backend/alembic; backend/app/db; backend/app/models",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“MySQL CAS 事务索引兼容验证”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“MySQL CAS 事务索引兼容验证”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [],
+      "fix": "固化“MySQL CAS 事务索引兼容验证”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“MySQL CAS 事务索引兼容验证”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“MySQL CAS 事务索引兼容验证”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“MySQL CAS 事务索引兼容验证”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-085",
+      "domain": "可观测性与审计证据",
+      "title": "request_id task_id commit_id 关联",
+      "severity": "P1",
+      "location": "backend/app/main.py; backend/app/services/task_runtime.py; audit/production-readiness/evidence",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“request_id task_id commit_id 关联”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“request_id task_id commit_id 关联”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“request_id task_id commit_id 关联”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“request_id task_id commit_id 关联”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“request_id task_id commit_id 关联”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“request_id task_id commit_id 关联”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-086",
+      "domain": "可观测性与审计证据",
+      "title": "结构化错误与可执行动作",
+      "severity": "P0",
+      "location": "backend/app/main.py; backend/app/services/task_runtime.py; audit/production-readiness/evidence",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“结构化错误与可执行动作”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“结构化错误与可执行动作”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“结构化错误与可执行动作”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“结构化错误与可执行动作”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“结构化错误与可执行动作”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“结构化错误与可执行动作”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-087",
+      "domain": "可观测性与审计证据",
+      "title": "任务延迟重试取消恢复指标",
+      "severity": "P1",
+      "location": "backend/app/main.py; backend/app/services/task_runtime.py; audit/production-readiness/evidence",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“任务延迟重试取消恢复指标”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“任务延迟重试取消恢复指标”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“任务延迟重试取消恢复指标”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“任务延迟重试取消恢复指标”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“任务延迟重试取消恢复指标”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“任务延迟重试取消恢复指标”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-088",
+      "domain": "可观测性与审计证据",
+      "title": "密钥隐私 canary 扫描",
+      "severity": "P0",
+      "location": "backend/app/main.py; backend/app/services/task_runtime.py; audit/production-readiness/evidence",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“密钥隐私 canary 扫描”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“密钥隐私 canary 扫描”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“密钥隐私 canary 扫描”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“密钥隐私 canary 扫描”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“密钥隐私 canary 扫描”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“密钥隐私 canary 扫描”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-089",
+      "domain": "可观测性与审计证据",
+      "title": "证据 manifest、产物 checksum、故障注入与反向验证",
+      "severity": "P0",
+      "location": "backend/app/main.py; backend/app/services/task_runtime.py; audit/production-readiness/evidence",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“证据 manifest、产物 checksum、故障注入与反向验证”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“证据 manifest、产物 checksum、故障注入与反向验证”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090"
+      ],
+      "fix": "固化“证据 manifest、产物 checksum、故障注入与反向验证”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“证据 manifest、产物 checksum、故障注入与反向验证”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“证据 manifest、产物 checksum、故障注入与反向验证”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“证据 manifest、产物 checksum、故障注入与反向验证”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-090",
+      "domain": "真实验收与发布门禁",
+      "title": "后端正式全量门禁",
+      "severity": "P0",
+      "location": "backend/scripts; frontend; backend; audit/production-readiness",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“后端正式全量门禁”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“后端正式全量门禁”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-035"
+      ],
+      "fix": "固化“后端正式全量门禁”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“后端正式全量门禁”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“后端正式全量门禁”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“后端正式全量门禁”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-091",
+      "domain": "真实验收与发布门禁",
+      "title": "前端类型测试构建三门禁",
+      "severity": "P0",
+      "location": "backend/scripts; frontend; backend; audit/production-readiness",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“前端类型测试构建三门禁”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“前端类型测试构建三门禁”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-035"
+      ],
+      "fix": "固化“前端类型测试构建三门禁”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“前端类型测试构建三门禁”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“前端类型测试构建三门禁”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“前端类型测试构建三门禁”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-092",
+      "domain": "真实验收与发布门禁",
+      "title": "真实 Provider 短章串行稳定性",
+      "severity": "P0",
+      "location": "backend/scripts; frontend; backend; audit/production-readiness",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“真实 Provider 短章串行稳定性”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“真实 Provider 短章串行稳定性”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-035"
+      ],
+      "fix": "固化“真实 Provider 短章串行稳定性”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“真实 Provider 短章串行稳定性”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“真实 Provider 短章串行稳定性”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“真实 Provider 短章串行稳定性”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-093",
+      "domain": "真实验收与发布门禁",
+      "title": "真实入口连续生成并定稿 1 至 10 章",
+      "severity": "P0",
+      "location": "backend/scripts; frontend; backend; audit/production-readiness",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“真实入口连续生成并定稿 1 至 10 章”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“真实入口连续生成并定稿 1 至 10 章”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-035"
+      ],
+      "fix": "固化“真实入口连续生成并定稿 1 至 10 章”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“真实入口连续生成并定稿 1 至 10 章”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“真实入口连续生成并定稿 1 至 10 章”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“真实入口连续生成并定稿 1 至 10 章”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-094",
+      "domain": "真实验收与发布门禁",
+      "title": "真实 20k 分段恢复",
+      "severity": "P0",
+      "location": "backend/scripts; frontend; backend; audit/production-readiness",
+      "status": "IMPLEMENTED_UNVERIFIED",
+      "reproduction": "按“真实 20k 分段恢复”链路执行成功、非法输入、越权、重复提交和故障恢复场景；当前缺少满足验收条件的完整证据。",
+      "root_cause": "已有局部实现或兼容路径，但契约分散，且缺少真实环境、并发、重启或往返证据。",
+      "user_impact": "可能导致“真实 20k 分段恢复”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-035"
+      ],
+      "fix": "固化“真实 20k 分段恢复”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“真实 20k 分段恢复”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“真实 20k 分段恢复”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“真实 20k 分段恢复”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-095",
+      "domain": "真实验收与发布门禁",
+      "title": "双用户双项目双 worker 隔离",
+      "severity": "P0",
+      "location": "backend/scripts; frontend; backend; audit/production-readiness",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“双用户双项目双 worker 隔离”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“双用户双项目双 worker 隔离”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-035"
+      ],
+      "fix": "固化“双用户双项目双 worker 隔离”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“双用户双项目双 worker 隔离”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“双用户双项目双 worker 隔离”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“双用户双项目双 worker 隔离”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-096",
+      "domain": "真实验收与发布门禁",
+      "title": "完整浏览器黑盒主流程",
+      "severity": "P0",
+      "location": "backend/scripts; frontend; backend; audit/production-readiness",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“完整浏览器黑盒主流程”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“完整浏览器黑盒主流程”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-035"
+      ],
+      "fix": "固化“完整浏览器黑盒主流程”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“完整浏览器黑盒主流程”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“完整浏览器黑盒主流程”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“完整浏览器黑盒主流程”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    },
+    {
+      "id": "PR-097",
+      "domain": "真实验收与发布门禁",
+      "title": "连续两轮发布证据与签字",
+      "severity": "P0",
+      "location": "backend/scripts; frontend; backend; audit/production-readiness",
+      "status": "CONFIRMED",
+      "reproduction": "静态审查“连续两轮发布证据与签字”相关模型、路由和服务，可确认目标契约或生产保护尚未完整实现。",
+      "root_cause": "核心模型或事务协议缺少该能力，现有兼容实现不能提供所需不变量。",
+      "user_impact": "可能导致“连续两轮发布证据与签字”在并发、失败、重启或真实入口下出现错误状态、数据不一致或不可审计。",
+      "dependencies": [
+        "PR-001",
+        "PR-009",
+        "PR-090",
+        "PR-035"
+      ],
+      "fix": "固化“连续两轮发布证据与签字”的版本化 schema、权限/幂等/事务边界、错误语义和恢复动作；移除会覆盖持久化真相的兼容写路径。",
+      "tests": [
+        "为“连续两轮发布证据与签字”增加成功、非法输入、权限隔离、重复提交和异常恢复回归",
+        "运行受影响模块定向测试与规定全量门禁"
+      ],
+      "negative_test": "临时移除“连续两轮发布证据与签字”的关键版本、owner、CAS、hash、游标或幂等条件，新增回归必须失败；恢复后复测。",
+      "evidence": [
+        {
+          "source": "PRODUCTION_MASTER_OPTIMIZATION_PLAN.md",
+          "kind": "目标与验收"
+        },
+        {
+          "source": "PRODUCTION_RECONSTRUCTION_AUDIT.md",
+          "kind": "当前审计结论"
+        },
+        {
+          "source": "audit/production-readiness/evidence/",
+          "kind": "待补实测证据"
+        }
+      ],
+      "acceptance": "成功、拒绝和异常恢复均符合“连续两轮发布证据与签字”契约；无静默覆盖、伪终态、重复副作用或跨用户/项目串线；正向与反向验证可复核。"
+    }
+  ]
+}

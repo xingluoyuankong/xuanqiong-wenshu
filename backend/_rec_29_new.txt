@@ -1,0 +1,207 @@
+    # 定向修复的轮数上限。每一轮都是一次 LLM 调用，成本与耗时线性增长，所以
+    # 刻意硬编码而不做配置项——它是成本闸门，不是调参空间。
+    STRUCTURAL_GATE_REPAIR_MAX_ROUNDS = 2
+
+    @staticmethod
+    def _is_structural_repair_improvement(
+        before_codes: Sequence[str],
+        after_codes: Sequence[str],
+    ) -> bool:
+        """判定一次定向修复是否算改善：blocker 严格子集收缩。
+
+        只看数量会把「换了一种毛病」当成「治好了一种毛病」——实测一个只剩
+        `chapter_artifact_markers` 的正文，blocker 数从 7 降到 1，但那是一种全新的失败形态，
+        采纳它会让修复循环朝错误方向收敛。所以要求：数量严格下降，且不引入新的 code 类型。
+        """
+        before = set(before_codes or ())
+        after = set(after_codes or ())
+        return len(after) < len(before) and not (after - before)
+
+    async def _attempt_structural_gate_repair(
+        self,
+        *,
+        best_content: str,
+        review_summaries: Dict[str, Any],
+        structural_quality_gate: Dict[str, Any],
+        guardrail_violations: Optional[List[Dict[str, Any]]],
+        chapter_mission: Optional[dict],
+        repair_context: Optional[Dict[str, Any]],
+        active_config: "PipelineConfig",
+        user_id: int,
+    ) -> Optional[Dict[str, Any]]:
+        """结构质量门失败后的结构定向修复闭环（最多 2 轮）。
+
+        取失败闸门对应的 story guard，转成结构问题清单，交给 revise_chapter 做局部定向修复；
+        用 non-regressive 保护防缩水，再用同一评分口径重评。每轮的采纳标准是
+        `_is_structural_repair_improvement`（blocker 严格子集收缩），**不是「必须一次过门」**：
+        从 7 个 blocker 修到只剩 1 个也要采纳，因为拒稿对用户价值为零，而带未达标标记的部分
+        改善至少可用、可见，并且下一轮从更好的起点继续。
+
+        返回值总是字典（除 `enable_self_critique` 之外的跳过原因也会带诊断），
+        用 `adopted` 表达是否采纳：
+
+        - `adopted=True`：带 `content` / `review_summaries` / `structural_quality_gate`，
+          调用方回写正文；此时门可能仍未通过（部分改善），不能假装过门。
+        - `adopted=False`：只带 `repair_summary`，调用方照原有逻辑落库拒稿 + 422，
+          但要把诊断写进 runtime_metadata，让前端能显示「已尝试自动修复，仍有 N 项未达标」，
+          而不是让用户面对一个无解的 422。
+
+        与其把 quality_issue_codes 甩给用户做“全新随机重试”，不如先按拦截原因做确定性的
+        定向修复——这是结构质量闸门从“只评分”走向“评分并自愈”的闭环补齐。
+        """
+        codes_before = [str(code) for code in (structural_quality_gate.get("quality_issue_codes") or [])]
+
+        def _summary(
+            *,
+            attempted: bool,
+            rounds: int,
+            outcome: str,
+            codes_after: Sequence[str],
+            new_codes: Sequence[str] = (),
+            skipped_reason: Optional[str] = None,
+            issue_count: int = 0,
+        ) -> Dict[str, Any]:
+            after = [str(code) for code in codes_after]
+            return {
+                "status": "applied" if outcome in {"passed", "improved"} else "rejected",
+                "repair_attempted": attempted,
+                "repair_rounds": rounds,
+                "repair_outcome": outcome,
+                "repair_skipped_reason": skipped_reason,
+                "issue_count": issue_count,
+                "issue_codes_before": list(codes_before),
+                "issue_codes_after": after,
+                "new_issue_codes": sorted(set(new_codes)),
+                "remaining_issue_count": len(after),
+            }
+
+        def _skip(reason: str) -> Dict[str, Any]:
+            return {
+                "adopted": False,
+                "repair_summary": _summary(
+                    attempted=False,
+                    rounds=0,
+                    outcome="skipped",
+                    codes_after=codes_before,
+                    skipped_reason=reason,
+                ),
+            }
+
+        if not active_config.enable_self_critique:
+            # TODO(T-17/D-11)：关闭自评时至少要走确定性清理，不该完全无自愈手段。
+            return _skip("self_critique_disabled")
+
+        story_guard = structural_quality_gate.get("story_progression_guard")
+        if not isinstance(story_guard, dict) and isinstance(review_summaries, dict):
+            story_guard = review_summaries.get("story_progression_guard")
+        if not isinstance(story_guard, dict):
+            return _skip("story_guard_missing")
+
+        current_content = best_content
+        current_summaries = review_summaries
+        current_gate = structural_quality_gate
+        current_codes = list(codes_before)
+        current_guard = story_guard
+
+        adopted_content: Optional[str] = None
+        adopted_summaries: Optional[Dict[str, Any]] = None
+        adopted_gate: Optional[Dict[str, Any]] = None
+        rounds = 0
+        new_codes_seen: set = set()
+        issue_count = 0
+        skipped_reason: Optional[str] = None
+
+        for _round in range(self.STRUCTURAL_GATE_REPAIR_MAX_ROUNDS):
+            structural_issues = self._build_structural_reader_polish_issues(current_guard)
+            if not structural_issues:
+                # 闸门失败但没有可定向修复的结构问题（例如纯连续性冲突），交回调用方拦截
+                if rounds == 0:
+                    skipped_reason = "no_structural_issue"
+                break
+            issue_count = len(structural_issues)
+
+            try:
+                repair_service = SelfCritiqueService(self.session, self.llm_service, self.prompt_service)
+                revised = await repair_service.revise_chapter(
+                    chapter_content=current_content,
+                    issues=structural_issues[:8],
+                    context=repair_context or {},
+                    user_id=user_id,
+                    allow_stagewide=False,
+                )
+            except Exception as exc:  # noqa: BLE001 - 修复失败不应吞掉原始拦截，降级即可
+                logger.warning("结构质量门定向修复降级：error=%s", exc)
+                if rounds == 0:
+                    skipped_reason = "revise_failed"
+                break
+
+            rounds += 1
+            if not revised or revised == current_content:
+                continue
+
+            next_content, content_guard = self._preserve_non_regressive_content(
+                previous_content=current_content,
+                candidate_content=revised,
+                stage_label="self_critique",
+                min_word_count=active_config.min_word_count,
+            )
+            if content_guard is not None:
+                # 修复导致内容缩水被回退，没有实质改善
+                continue
+
+            repaired_summaries, repaired_gate = self._evaluate_structural_quality_gate_for_content(
+                review_summaries=current_summaries,
+                content=next_content,
+                violations=guardrail_violations,
+                chapter_mission=chapter_mission,
+            )
+            repaired_codes = [str(code) for code in (repaired_gate.get("quality_issue_codes") or [])]
+            passed = bool(repaired_gate.get("passed", False))
+
+            if not passed and not self._is_structural_repair_improvement(current_codes, repaired_codes):
+                new_codes_seen.update(set(repaired_codes) - set(current_codes))
+                continue
+
+            adopted_content = next_content
+            adopted_summaries = repaired_summaries
+            adopted_gate = repaired_gate
+            current_content = next_content
+            current_summaries = repaired_summaries
+            current_gate = repaired_gate
+            current_codes = repaired_codes
+            guard_candidate = repaired_gate.get("story_progression_guard")
+            if isinstance(guard_candidate, dict):
+                current_guard = guard_candidate
+
+            if passed:
+                break
+
+        if adopted_content is None:
+            return {
+                "adopted": False,
+                "repair_summary": _summary(
+                    attempted=rounds > 0,
+                    rounds=rounds,
+                    outcome="skipped" if rounds == 0 else "unchanged",
+                    codes_after=codes_before,
+                    new_codes=new_codes_seen,
+                    skipped_reason=skipped_reason,
+                    issue_count=issue_count,
+                ),
+            }
+
+        outcome = "passed" if bool((adopted_gate or {}).get("passed", False)) else "improved"
+        return {
+            "adopted": True,
+            "content": adopted_content,
+            "review_summaries": adopted_summaries,
+            "structural_quality_gate": adopted_gate,
+            "repair_summary": _summary(
+                attempted=True,
+                rounds=rounds,
+                outcome=outcome,
+                codes_after=current_codes,
+                new_codes=new_codes_seen,
+                issue_count=issue_count,
+            ),
+        }

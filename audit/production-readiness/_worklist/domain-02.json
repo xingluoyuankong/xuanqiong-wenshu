@@ -1,0 +1,76 @@
+{
+ "domain": "统一任务中心与事件协议",
+ "slug": "domain-02",
+ "nodes": [
+  {
+   "id": "PR-009",
+   "title": "attempt 与 lease_generation 代际隔离",
+   "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-010",
+   "title": "全部状态写入数据库 CAS",
+   "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-011",
+   "title": "幂等键稳定业务作用域",
+   "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-012",
+   "title": "普通用户不可调用 worker 写接口",
+   "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-013",
+   "title": "统一持久化 dispatcher",
+   "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-014",
+   "title": "业务内存字典降为进程句柄",
+   "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-015",
+   "title": "取消状态最终收敛",
+   "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-016",
+   "title": "stale 扫描与自动恢复",
+   "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-017",
+   "title": "统一事件 envelope 与通道",
+   "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-018",
+   "title": "SSE 游标回放、去重与终态关闭",
+   "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+   "severity": "P0",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  }
+ ]
+}

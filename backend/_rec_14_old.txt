@@ -1,0 +1,33 @@
+        _, mission_hook_hits = cls._score_text_hits(mission_hook_sources, ending_excerpt)
+        hook_markers = (
+            "却", "突然", "忽然", "门外", "脚步", "消息", "期限", "代价", "危险",
+            "线索", "证据", "下一刻", "来不及", "问题", "？", "?", "！", "!",
+        )
+        closure_markers = ("终于结束", "告一段落", "松了口气", "一切都", "暂时平静", "圆满", "尘埃落定")
+        zh_hook_markers = (
+            "下一", "下一轮", "下一章",
+            "涨潮", "潮水", "危险", "危机",
+            "压力", "代价", "后果", "证据",
+            "线索", "异常", "不自然",
+            "来不及", "必须", "否则",
+            "退路", "封锁", "缉印令", "通缉",
+            "倒计时", "追索", "追杀", "逼近",
+            "堵死", "锁死", "只能", "不得不",
+            "会先死", "死在", "旧木片",
+            "死人", "会死人", "真会死",
+            "旧南渠", "药渣", "药味", "药耗",
+            "见了地", "人命", "病人",
+        )
+        hook_hits = [marker for marker in (*hook_markers, *zh_hook_markers) if marker in ending_excerpt]
+        # 明确倒计时是可验证的章末压力，不能因没有复述任务书原词而漏判。
+        if re.search(r"[一二三四五六七八九十]\s*[、，,]\s*[一二三四五六七八九十]", ending_excerpt):
+            hook_hits.append("倒计时")
+        closure_hits = [marker for marker in closure_markers if marker in ending_excerpt]
+        mission_hook_pass = bool(mission_hook_hits and hook_hits)
+        passed = bool((deliver_hits or len(hook_hits) >= 2 or mission_hook_pass) and not closure_hits)
+        return {
+            "ending_pressure_passed": passed,
+            "ending_pressure_hits": (deliver_hits + mission_hook_hits + hook_hits)[:10],
+            "mission_hook_hits": mission_hook_hits[:6],
+            "flat_closure_markers": closure_hits[:4],
+        }

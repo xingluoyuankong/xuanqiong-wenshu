@@ -1,0 +1,67 @@
+{
+  "audit_id": "production-baseline-2026-08-17",
+  "captured_at": "2026-08-17",
+  "commit": "32eafd3c72d44548181382cddc78a9d7858d4d33",
+  "workspace_policy": {
+    "preserve_existing_uncommitted_changes": true,
+    "reset_or_bulk_delete_used": false,
+    "historical_reports_are_release_evidence": false
+  },
+  "commands": {
+    "backend_full": "cd backend && .venv/Scripts/python.exe -m pytest -q",
+    "frontend_typecheck": "cd frontend && npm run type-check",
+    "frontend_tests": "cd frontend && npm run test:run",
+    "frontend_build": "cd frontend && npm run build-only",
+    "frontend_global_nav_target": "cd frontend && npm run test:run -- src/components/GlobalNavBar.spec.ts"
+  },
+  "results": {
+    "backend_full": {
+      "status": "passed",
+      "summary": "637 passed in 72.35s"
+    },
+    "frontend_typecheck": {
+      "status": "passed",
+      "summary": "vue-tsc --build exited 0"
+    },
+    "frontend_tests_before_batch0_fix": {
+      "status": "failed",
+      "summary": "45 files passed, 1 failed; 237 passed, 2 failed; 1 unhandled error",
+      "root_cause": "GlobalNavBar.spec.ts mocked useLocale without the production pick export"
+    },
+    "frontend_global_nav_target_after_fix": {
+      "status": "passed",
+      "summary": "1 file passed; 5 tests passed"
+    },
+    "frontend_build_after_fix": {
+      "status": "passed",
+      "summary": "vite build exited 0; 4850 modules transformed; built in 49.06s"
+    },
+    "frontend_tests_after_fix": {
+      "status": "passed",
+      "summary": "46 files passed; 239 tests passed in 110.43s"
+    },
+    "backend_full_after_fix": {
+      "status": "passed",
+      "summary": "637 passed in 67.30s"
+    },
+  },
+  "batch0_change": {
+    "file": "frontend/src/components/GlobalNavBar.spec.ts",
+    "change": "Added a local pick mock matching useLocale's public export; production code unchanged",
+    "regression_test": "GlobalNavBar task card renders persisted task title/progress and cancellation action"
+  },
+  "known_release_blockers": [
+    "TaskRuntime lacks attempt/lease token/state version and broad CAS protection",
+    "Worker write APIs are exposed through ordinary user routes",
+    "Several business routers still use in-memory job registries as state or scheduling truth",
+    "No unified persistent dispatcher proves automatic queued/stale recovery",
+    "Blueprint/outline/scene assets lack revision/If-Match conflict protection",
+    "Finalize and ledger synchronization are not an atomic FinalizationSession/outbox commit",
+    "Frontend blueprint/outline paths still contain legacy polling and time-based progress",
+    "No complete real-browser, real-provider, process-restart, 20k chapter, ten-chapter, or MySQL evidence"
+  ],
+  "evidence_files": [
+    ".audit-status-before.txt",
+    ".audit-diff-stat-before.txt"
+  ]
+}

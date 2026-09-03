@@ -1,0 +1,13 @@
+{
+  "sabotage_id": "frontend-global-nav-locale-pick-2026-08-17",
+  "target_file": "frontend/src/components/GlobalNavBar.spec.ts",
+  "target_symbol": "vi.mock('@/composables/useLocale')",
+  "mutation_summary": "Removed pick from the local useLocale mock while production chapterGeneration still imports it",
+  "baseline_command": "cd frontend && npm run test:run -- src/components/GlobalNavBar.spec.ts",
+  "expected_failure": "The two task-progress tests fail because the mock has no pick export",
+  "actual_failure": "1 file failed; 2 tests failed; Vitest reported No pick export is defined",
+  "restore_summary": "Restored pick(zh, en) => zh in the mock",
+  "restored_pass": "Previously verified: 1 file passed; 5 tests passed",
+  "timestamp": "2026-08-17",
+  "git_status_before_after": "Existing workspace changes preserved; only the intended test mock was changed and restored"
+}

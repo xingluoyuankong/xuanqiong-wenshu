@@ -1,0 +1,206 @@
+backend\app\models\admin_setting.py:8:class AdminSetting(Base):
+backend\app\models\admin_setting.py:11:    __tablename__ = "admin_settings"
+backend\app\models\chapter_blueprint.py:29:class SuspenseDensity(str, enum.Enum):
+backend\app\models\chapter_blueprint.py:37:class ForeshadowingOp(str, enum.Enum):
+backend\app\models\chapter_blueprint.py:45:class ChapterFunction(str, enum.Enum):
+backend\app\models\chapter_blueprint.py:56:class ChapterBlueprint(Base):
+backend\app\models\chapter_blueprint.py:63:    __tablename__ = "chapter_blueprints"
+backend\app\models\chapter_blueprint.py:68:        ForeignKey("novel_projects.id", ondelete="CASCADE"),
+backend\app\models\chapter_blueprint.py:146:class BlueprintTemplate(Base):
+backend\app\models\chapter_blueprint.py:153:    __tablename__ = "blueprint_templates"
+backend\app\models\chapter_blueprint.py:167:    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+backend\app\models\faction.py:25:class Faction(Base):
+backend\app\models\faction.py:28:    __tablename__ = "factions"
+backend\app\models\faction.py:32:        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+backend\app\models\faction.py:66:class FactionRelationship(Base):
+backend\app\models\faction.py:69:    __tablename__ = "faction_relationships"
+backend\app\models\faction.py:73:        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+backend\app\models\faction.py:78:        ForeignKey("factions.id", ondelete="CASCADE"), nullable=False
+backend\app\models\faction.py:81:        ForeignKey("factions.id", ondelete="CASCADE"), nullable=False
+backend\app\models\faction.py:103:class FactionMember(Base):
+backend\app\models\faction.py:106:    __tablename__ = "faction_members"
+backend\app\models\faction.py:110:        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+backend\app\models\faction.py:114:        ForeignKey("factions.id", ondelete="CASCADE"), nullable=False
+backend\app\models\faction.py:117:        ForeignKey("blueprint_characters.id", ondelete="CASCADE"), nullable=False
+backend\app\models\faction.py:132:class FactionRelationshipHistory(Base):
+backend\app\models\faction.py:135:    __tablename__ = "faction_relationship_history"
+backend\app\models\faction.py:139:        ForeignKey("faction_relationships.id", ondelete="CASCADE"), nullable=False
+backend\app\models\foreshadowing.py:20:class Foreshadowing(Base):
+backend\app\models\foreshadowing.py:23:    __tablename__ = "foreshadowings"
+backend\app\models\foreshadowing.py:26:    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+backend\app\models\foreshadowing.py:27:    chapter_id: Mapped[int] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False)
+backend\app\models\foreshadowing.py:37:    resolved_chapter_id: Mapped[Optional[int]] = mapped_column(ForeignKey("chapters.id", ondelete="SET NULL"))
+backend\app\models\foreshadowing.py:74:class ForeshadowingResolution(Base):
+backend\app\models\foreshadowing.py:77:    __tablename__ = "foreshadowing_resolutions"
+backend\app\models\foreshadowing.py:80:    foreshadowing_id: Mapped[int] = mapped_column(ForeignKey("foreshadowings.id", ondelete="CASCADE"), nullable=False)
+backend\app\models\foreshadowing.py:83:    resolved_at_chapter_id: Mapped[int] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False)
+backend\app\models\foreshadowing.py:100:class ForeshadowingReminder(Base):
+backend\app\models\foreshadowing.py:103:    __tablename__ = "foreshadowing_reminders"
+backend\app\models\foreshadowing.py:106:    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+backend\app\models\foreshadowing.py:107:    foreshadowing_id: Mapped[int] = mapped_column(ForeignKey("foreshadowings.id", ondelete="CASCADE"), nullable=False)
+backend\app\models\foreshadowing.py:126:class ForeshadowingStatusHistory(Base):
+backend\app\models\foreshadowing.py:129:    __tablename__ = "foreshadowing_status_history"
+backend\app\models\foreshadowing.py:132:    foreshadowing_id: Mapped[int] = mapped_column(ForeignKey("foreshadowings.id", ondelete="CASCADE"), nullable=False)
+backend\app\models\foreshadowing.py:146:class ForeshadowingAnalysis(Base):
+backend\app\models\foreshadowing.py:149:    __tablename__ = "foreshadowing_analysis"
+backend\app\models\foreshadowing.py:152:    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, unique=True)
+backend\app\models\llm_config.py:8:class LLMConfig(Base):
+backend\app\models\llm_config.py:11:    __tablename__ = "llm_configs"
+backend\app\models\llm_config.py:13:    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+backend\app\models\knowledge_graph.py:26:class CharacterNode(Base):
+backend\app\models\knowledge_graph.py:32:    __tablename__ = "character_nodes"
+backend\app\models\knowledge_graph.py:36:        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+backend\app\models\knowledge_graph.py:58:        ForeignKey("blueprint_characters.id", ondelete="SET NULL"), nullable=True
+backend\app\models\knowledge_graph.py:83:class EventEdge(Base):
+backend\app\models\knowledge_graph.py:89:    __tablename__ = "event_edges"
+backend\app\models\knowledge_graph.py:93:        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+backend\app\models\knowledge_graph.py:98:        ForeignKey("character_nodes.id", ondelete="CASCADE"), nullable=False
+backend\app\models\knowledge_graph.py:101:        ForeignKey("character_nodes.id", ondelete="CASCADE"), nullable=False
+backend\app\models\knowledge_graph.py:144:class KnowledgeGraphMetadata(Base):
+backend\app\models\knowledge_graph.py:147:    __tablename__ = "knowledge_graph_metadata"
+backend\app\models\knowledge_graph.py:151:        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True, unique=True
+backend\app\models\outline_alternative.py:23:class EvolutionStatus(str, enum.Enum):
+backend\app\models\outline_alternative.py:31:class OutlineAlternative(Base):
+backend\app\models\outline_alternative.py:38:    __tablename__ = "outline_alternatives"
+backend\app\models\outline_alternative.py:45:        ForeignKey("novel_projects.id", ondelete="CASCADE"),
+backend\app\models\outline_alternative.py:90:class OutlineEvolutionHistory(Base):
+backend\app\models\outline_alternative.py:96:    __tablename__ = "outline_evolution_history"
+backend\app\models\outline_alternative.py:103:        ForeignKey("novel_projects.id", ondelete="CASCADE"),
+backend\app\models\outline_alternative.py:113:        ForeignKey("outline_alternatives.id", ondelete="SET NULL"),
+backend\app\models\outline_alternative.py:128:        ForeignKey("users.id", ondelete="SET NULL"),
+backend\app\models\novel.py:19:class _MetadataAccessor:
+backend\app\models\novel.py:31:class ProjectLedgerSyncLease(Base):
+backend\app\models\novel.py:34:    __tablename__ = "project_ledger_sync_leases"
+backend\app\models\novel.py:39:        ForeignKey("novel_projects.id", ondelete="CASCADE"),
+backend\app\models\novel.py:50:class NovelProject(Base):
+backend\app\models\novel.py:53:    __tablename__ = "novel_projects"
+backend\app\models\novel.py:56:    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+backend\app\models\novel.py:107:class NovelConversation(Base):
+backend\app\models\novel.py:110:    __tablename__ = "novel_conversations"
+backend\app\models\novel.py:113:    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False)
+backend\app\models\novel.py:124:class NovelBlueprint(Base):
+backend\app\models\novel.py:127:    __tablename__ = "novel_blueprints"
+backend\app\models\novel.py:130:        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), primary_key=True
+backend\app\models\novel.py:146:class BlueprintCharacter(Base):
+backend\app\models\novel.py:149:    __tablename__ = "blueprint_characters"
+backend\app\models\novel.py:152:    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False)
+backend\app\models\novel.py:165:class BlueprintRelationship(Base):
+backend\app\models\novel.py:168:    __tablename__ = "blueprint_relationships"
+backend\app\models\novel.py:171:    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False)
+backend\app\models\novel.py:180:class ChapterOutline(Base):
+backend\app\models\novel.py:183:    __tablename__ = "chapter_outlines"
+backend\app\models\novel.py:189:    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False)
+backend\app\models\novel.py:199:class Chapter(Base):
+backend\app\models\novel.py:202:    __tablename__ = "chapters"
+backend\app\models\novel.py:208:    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False)
+backend\app\models\novel.py:214:        ForeignKey("chapter_versions.id", ondelete="SET NULL"), nullable=True
+backend\app\models\novel.py:239:class ChapterVersion(Base):
+backend\app\models\novel.py:242:    __tablename__ = "chapter_versions"
+backend\app\models\novel.py:245:    chapter_id: Mapped[int] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False)
+backend\app\models\novel.py:271:class ChapterEvaluation(Base):
+backend\app\models\novel.py:274:    __tablename__ = "chapter_evaluations"
+backend\app\models\novel.py:277:    chapter_id: Mapped[int] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False)
+backend\app\models\novel.py:278:    version_id: Mapped[Optional[int]] = mapped_column(ForeignKey("chapter_versions.id", ondelete="CASCADE"))
+backend\app\models\novel.py:288:class BlueprintGenerationJob(Base):
+backend\app\models\novel.py:291:    __tablename__ = "blueprint_generation_jobs"
+backend\app\models\novel.py:294:    project_id: Mapped[str] = mapped_column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+backend\app\models\novel.py:295:    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+backend\app\models\memory_layer.py:20:class CharacterStateType(str, enum.Enum):
+backend\app\models\memory_layer.py:33:class CharacterState(Base):
+backend\app\models\memory_layer.py:39:    __tablename__ = "character_states"
+backend\app\models\memory_layer.py:43:    project_id = Column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+backend\app\models\memory_layer.py:44:    character_id = Column(BigInteger, ForeignKey("blueprint_characters.id", ondelete="CASCADE"), nullable=False, index=True)
+backend\app\models\memory_layer.py:88:class TimelineEvent(Base):
+backend\app\models\memory_layer.py:94:    __tablename__ = "timeline_events"
+backend\app\models\memory_layer.py:98:    project_id = Column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+backend\app\models\memory_layer.py:116:    caused_by_event_id = Column(Integer, ForeignKey("timeline_events.id", ondelete="SET NULL"))
+backend\app\models\memory_layer.py:126:class CausalChain(Base):
+backend\app\models\memory_layer.py:132:    __tablename__ = "causal_chains"
+backend\app\models\memory_layer.py:136:    project_id = Column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+backend\app\models\memory_layer.py:149:    cause_event_id = Column(Integer, ForeignKey("timeline_events.id", ondelete="SET NULL"))
+backend\app\models\memory_layer.py:150:    effect_event_id = Column(Integer, ForeignKey("timeline_events.id", ondelete="SET NULL"))
+backend\app\models\memory_layer.py:163:class StoryTimeTracker(Base):
+backend\app\models\memory_layer.py:169:    __tablename__ = "story_time_trackers"
+backend\app\models\memory_layer.py:173:    project_id = Column(PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, unique=True)
+backend\app\models\research.py:13:class ProjectResearchConfig(Base):
+backend\app\models\research.py:14:    __tablename__ = "project_research_configs"
+backend\app\models\research.py:18:        ForeignKey("novel_projects.id", ondelete="CASCADE"),
+backend\app\models\research.py:44:class ResearchArtifact(Base):
+backend\app\models\research.py:45:    __tablename__ = "research_artifacts"
+backend\app\models\research.py:54:        ForeignKey("novel_projects.id", ondelete="CASCADE"),
+backend\app\models\research.py:58:    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+backend\app\models\prompt.py:11:class Prompt(Base):
+backend\app\models\prompt.py:14:    __tablename__ = "prompts"
+backend\app\models\project_memory.py:26:class ProjectMemory(Base):
+backend\app\models\project_memory.py:35:    __tablename__ = "project_memories"
+backend\app\models\project_memory.py:40:        ForeignKey("novel_projects.id", ondelete="CASCADE"),
+backend\app\models\project_memory.py:72:class ChapterSnapshot(Base):
+backend\app\models\project_memory.py:81:    __tablename__ = "chapter_snapshots"
+backend\app\models\project_memory.py:86:        ForeignKey("novel_projects.id", ondelete="CASCADE"),
+backend\app\models\patch_diff.py:19:class DiffChangeType(str, Enum):
+backend\app\models\patch_diff.py:27:class PatchEdit(Base):
+backend\app\models\patch_diff.py:30:    __tablename__ = "patch_edits"
+backend\app\models\patch_diff.py:33:    chapter_id: Mapped[int] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False, index=True)
+backend\app\models\patch_diff.py:37:    from_version_id: Mapped[Optional[int]] = mapped_column(ForeignKey("chapter_versions.id", ondelete="SET NULL"))
+backend\app\models\patch_diff.py:38:    to_version_id: Mapped[Optional[int]] = mapped_column(ForeignKey("chapter_versions.id", ondelete="SET NULL"))
+backend\app\models\patch_diff.py:43:class DiffLine(Base):
+backend\app\models\patch_diff.py:46:    __tablename__ = "diff_lines"
+backend\app\models\patch_diff.py:49:    patch_edit_id: Mapped[int] = mapped_column(ForeignKey("patch_edits.id", ondelete="CASCADE"), nullable=False, index=True)
+backend\app\models\patch_diff.py:57:class ChapterVersionPatch(Base):
+backend\app\models\patch_diff.py:60:    __tablename__ = "chapter_version_patches"
+backend\app\models\patch_diff.py:63:    chapter_id: Mapped[int] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False, index=True)
+backend\app\models\patch_diff.py:64:    version_id: Mapped[int] = mapped_column(ForeignKey("chapter_versions.id", ondelete="CASCADE"), nullable=False)
+backend\app\models\update_log.py:10:class UpdateLog(Base):
+backend\app\models\update_log.py:13:    __tablename__ = "update_logs"
+backend\app\models\token_budget.py:15:class TokenBudget(Base):
+backend\app\models\token_budget.py:18:    __tablename__ = "token_budgets"
+backend\app\models\token_budget.py:22:        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True, unique=True
+backend\app\models\token_budget.py:49:class TokenUsage(Base):
+backend\app\models\token_budget.py:52:    __tablename__ = "token_usages"
+backend\app\models\token_budget.py:56:        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+backend\app\models\token_budget.py:59:        ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True, index=True
+backend\app\models\token_budget.py:76:class TokenBudgetAlert(Base):
+backend\app\models\token_budget.py:79:    __tablename__ = "token_budget_alerts"
+backend\app\models\token_budget.py:83:        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+backend\app\models\writing_skill.py:14:class WritingSkill(Base):
+backend\app\models\writing_skill.py:17:    __tablename__ = "writing_skills"
+backend\app\models\writing_skill.py:31:class SkillExecution(Base):
+backend\app\models\writing_skill.py:34:    __tablename__ = "skill_executions"
+backend\app\models\writing_skill.py:38:        ForeignKey("writing_skills.id", ondelete="CASCADE"), nullable=False, index=True
+backend\app\models\writing_skill.py:41:        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="SET NULL"), nullable=True, index=True
+backend\app\models\writer_persona.py:26:class WriterPersona(Base):
+backend\app\models\writer_persona.py:29:    __tablename__ = "writer_personas"
+backend\app\models\writer_persona.py:33:        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+backend\app\models\task_runtime.py:13:class TaskRuntime(Base):
+backend\app\models\task_runtime.py:16:    __tablename__ = "task_runtime_tasks"
+backend\app\models\task_runtime.py:52:class TaskRuntimeEvent(Base):
+backend\app\models\task_runtime.py:55:    __tablename__ = "task_runtime_events"
+backend\app\models\task_runtime.py:59:    task_id: Mapped[str] = mapped_column(String(64), ForeignKey("task_runtime_tasks.task_id", ondelete="CASCADE"), nullable=False, index=True)
+backend\app\models\user_style_library.py:10:class UserStyleLibrary(Base):
+backend\app\models\user_style_library.py:13:    __tablename__ = "user_style_libraries"
+backend\app\models\user_style_library.py:15:    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+backend\app\models\system_config.py:8:class SystemConfig(Base):
+backend\app\models\system_config.py:11:    __tablename__ = "system_configs"
+backend\app\models\user_daily_request.py:10:class UserDailyRequest(Base):
+backend\app\models\user_daily_request.py:13:    __tablename__ = "user_daily_requests"
+backend\app\models\user_daily_request.py:17:    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+backend\app\models\usage_metric.py:8:class UsageMetric(Base):
+backend\app\models\usage_metric.py:11:    __tablename__ = "usage_metrics"
+backend\app\models\user.py:11:class User(Base):
+backend\app\models\user.py:14:    __tablename__ = "users"
+backend\app\models\clue_tracker.py:18:class ClueType(str, Enum):
+backend\app\models\clue_tracker.py:28:class ClueStatus(str, Enum):
+backend\app\models\clue_tracker.py:36:class ClueAppearanceType(str, Enum):
+backend\app\models\clue_tracker.py:44:class StoryClue(Base):
+backend\app\models\clue_tracker.py:47:    __tablename__ = "story_clues"
+backend\app\models\clue_tracker.py:51:        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+backend\app\models\clue_tracker.py:90:class ClueChapterLink(Base):
+backend\app\models\clue_tracker.py:93:    __tablename__ = "clue_chapter_links"
+backend\app\models\clue_tracker.py:97:        ForeignKey("story_clues.id", ondelete="CASCADE"), nullable=False, index=True
+backend\app\models\clue_tracker.py:100:        ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True, index=True
+backend\app\models\clue_tracker.py:121:class ClueThread(Base):
+backend\app\models\clue_tracker.py:124:    __tablename__ = "clue_threads"
+backend\app\models\clue_tracker.py:128:        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False, index=True
+backend\app\models\constitution.py:27:class NovelConstitution(Base):
+backend\app\models\constitution.py:30:    __tablename__ = "novel_constitutions"
+backend\app\models\constitution.py:33:        PROJECT_ID_TYPE, ForeignKey("novel_projects.id", ondelete="CASCADE"), primary_key=True

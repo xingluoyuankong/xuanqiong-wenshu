@@ -1,0 +1,55 @@
+{
+ "domain": "业务工作台与领域功能",
+ "slug": "domain-09",
+ "nodes": [
+  {
+   "id": "PR-066",
+   "title": "项目创建编辑归档删除保护",
+   "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-067",
+   "title": "角色、势力、关系稳定 ID 与并发编辑",
+   "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-068",
+   "title": "线索线程红鲱鱼与未解决项",
+   "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-069",
+   "title": "伏笔提醒分析与回收操作",
+   "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-070",
+   "title": "知识图谱节点边与时间线",
+   "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-071",
+   "title": "版本评审 diff patch 回退",
+   "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-072",
+   "title": "阅读器选中版本与导出一致",
+   "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  }
+ ]
+}

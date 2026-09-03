@@ -1,0 +1,55 @@
+{
+ "domain": "Provider、配置、成本与资料",
+ "slug": "domain-06",
+ "nodes": [
+  {
+   "id": "PR-045",
+   "title": "ConfigSnapshot 冻结 Provider 与参数",
+   "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-046",
+   "title": "PromptRevision 与版本化缓存键",
+   "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-047",
+   "title": "统一超时重试与费用预算",
+   "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-048",
+   "title": "跨 worker Provider 并发与背压",
+   "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-049",
+   "title": "研究来源、引用与可信度版本化",
+   "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-050",
+   "title": "文风来源、授权和画像 revision",
+   "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-051",
+   "title": "任务 payload 与正文 artifact 化",
+   "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  }
+ ]
+}

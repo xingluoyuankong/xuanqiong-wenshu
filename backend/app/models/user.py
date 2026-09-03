@@ -29,5 +29,8 @@ class User(Base):
 
     # 关系映射
     novel_projects: Mapped[list["NovelProject"]] = relationship("NovelProject", back_populates="owner")
+    project_members: Mapped[list["ProjectMember"]] = relationship(
+        "ProjectMember", back_populates="user", cascade="all, delete-orphan"
+    )
     llm_config: Mapped[Optional["LLMConfig"]] = relationship("LLMConfig", back_populates="user", uselist=False)
     style_library: Mapped[Optional["UserStyleLibrary"]] = relationship("UserStyleLibrary", back_populates="user", uselist=False)

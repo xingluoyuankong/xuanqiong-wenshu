@@ -1,0 +1,9 @@
+            "repair_summary": {
+                "status": "applied",
+                "issue_count": len(structural_issues),
+                "issue_codes_before": list(structural_quality_gate.get("quality_issue_codes") or []),
+            },
+        }
+
+    async def _rebind_generation_run_if_needed(
+        self,

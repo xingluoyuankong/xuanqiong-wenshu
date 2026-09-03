@@ -12,7 +12,7 @@ from ..models.foreshadowing import Foreshadowing
 from ..models.knowledge_graph import CharacterNode
 from ..models.novel import BlueprintCharacter
 from ..models.research import ResearchArtifact
-from .novel_service import NovelService
+from .project_access_service import ProjectAccessService
 
 AgentEntityKind = Literal[
     "character",
@@ -45,7 +45,7 @@ class AgentEntityContextService:
         per_kind_limit: int = 40,
     ) -> list[AgentEntitySummary]:
         """Return bounded entity rows without prose, raw research sources, or metadata."""
-        await NovelService(self.session).ensure_project_owner(project_id, user_id)
+        await ProjectAccessService(self.session).require_project_read(project_id, user_id)
         limit = max(1, min(int(per_kind_limit), 100))
 
         characters = list(

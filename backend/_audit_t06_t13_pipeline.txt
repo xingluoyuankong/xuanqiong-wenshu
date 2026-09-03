@@ -1,0 +1,1650 @@
+### 390-1040
+390:         return False, "not_improved_enough", before, after
+391: 
+392:     # ====== EXTRACTABLE: _pipeline_quality_gate.py — 结构质量门与内容指纹 ======
+393:     @staticmethod
+394:     def _content_fingerprint(text: Optional[str]) -> str:
+395:         normalized = re.sub(r"\s+", " ", str(text or "")).strip()
+396:         if not normalized:
+397:             return ""
+398:         return hashlib.sha1(normalized.encode("utf-8")).hexdigest()
+399: 
+400:     @classmethod
+401:     def _select_quality_gate_critique_summary(cls, review_summaries: Optional[Dict[str, Any]]) -> Tuple[Dict[str, Any], str]:
+402:         summaries = review_summaries or {}
+403:         baseline_summary = summaries.get("self_critique") or {}
+404:         post_consistency_summary = summaries.get("self_critique_after_consistency") or {}
+405:         if not post_consistency_summary:
+406:             return baseline_summary, "self_critique"
+407:         if not baseline_summary:
+408:             return post_consistency_summary, "self_critique_after_consistency"
+409: 
+410:         baseline_fingerprint = str(baseline_summary.get("content_fingerprint") or "").strip()
+411:         post_fingerprint = str(post_consistency_summary.get("content_fingerprint") or "").strip()
+412:         if baseline_fingerprint and baseline_fingerprint == post_fingerprint:
+413:             before = cls._summarize_self_critique_snapshot(baseline_summary)
+414:             after = cls._summarize_self_critique_snapshot(post_consistency_summary)
+415:             if after["critical"] > before["critical"]:
+416:                 return baseline_summary, "self_critique_same_content_more_stable"
+417:             if (
+418:                 after["critical"] == before["critical"]
+419:                 and after["major"] > before["major"]
+420:                 and after["score"] >= before["score"] - 5
+421:             ):
+422:                 return baseline_summary, "self_critique_same_content_more_stable"
+423: 
+424:         return post_consistency_summary, "self_critique_after_consistency"
+425: 
+426:     @classmethod
+427:     def _evaluate_structural_quality_gate_for_content(
+428:         cls,
+429:         *,
+430:         review_summaries: Optional[Dict[str, Any]],
+431:         content: str,
+432:         violations: Optional[List[Dict[str, Any]]],
+433:         chapter_mission: Optional[dict],
+434:         story_guard_key: str = "story_progression_guard",
+435:         target_word_count: int,
+436:         min_word_count: int,
+437:     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+438:         # 两个字数参数**故意没有默认值**（T-12 步骤 C）。原来的 3000/2000 是硬编码
+439:         # 兜底，而 `_resolve_config` 实际产出的是 target/min = 0.9 的任意档位
+440:         # （800/720 一路到 20000/18000）——默认值一旦存在，新调用点忘记传就会
+441:         # 静默按 3000/2000 判，真实语料上这会让 `below_min` 触发 24.1%。
+442:         # 现在忘记传是 TypeError，在测试里就炸，不会漏到生产。
+443:         summaries = dict(review_summaries or {})
+444:         story_guard = cls._score_story_quality_candidate(
+445:             content=content,
+446:             violations=list(violations or []),
+447:             chapter_mission=chapter_mission,
+448:             target_word_count=target_word_count,
+449:             min_word_count=min_word_count,
+450:         )
+451:         summaries[story_guard_key] = story_guard
+452:         gate_input = dict(summaries)
+453:         gate_input["story_progression_guard"] = story_guard
+454:         gate_input["chapter_mission"] = chapter_mission
+455:         return summaries, cls._build_structural_quality_gate(gate_input)
+456: 
+457:     QUALITY_ISSUE_LABELS = {
+458:         "static_description_risk": "静态描写过多",
+459:         "repeated_paragraph_flood": "整段重复灌水",
+460:         "insufficient_dialogue_pressure": "有效对白不足",
+461:         "chapter_progression_weak": "实质推进不足",
+462:         "scene_fulfillment_weak": "场景兑现不足",
+463:         "dialogue_does_not_change_state": "对白未改变局势",
+464:         "ending_pressure_missing": "章末递压不足",
+465:         "focus_character_missing": "焦点角色缺席",
+466:         "continuity_inherit_missing": "承接锚点缺失",
+467:         "continuity_inherit_late": "承接锚点过晚",
+468:         "critical_issues_remaining": "自检严重问题未消除",
+469:         "score_below_floor": "结构质量分过低",
+470:         "too_many_major_issues": "主要结构问题过多",
+471:         "critical_consistency_unresolved": "严重连续性冲突",
+472:         "major_consistency_unresolved": "连续性冲突未处理",
+473:         "dialogue_pressure_weak": "对白攻防不足",
+474:         "mission_progression_weak": "本章目标命中不足",
+475:         "word_count_far_below_target": "字数离目标过远",
+476:         "event_density_weak": "事件密度不足",
+477:         "state_change_interval_weak": "状态变化间隔过长",
+478:         "scene_structure_weak": "场景结构证据不足",
+479:         "long_chapter_event_density_weak": "长章事件密度不足",
+480:     }
+481: 
+482:     QUALITY_ISSUE_HINTS = {
+483:         "static_description_risk": "压缩独立景物/心理段，把篇幅改成动作回合、对话攻防和后果。",
+484:         "repeated_paragraph_flood": "删掉整段照抄的重复内容，用新的事件、对话或后果补足字数。",
+485:         "insufficient_dialogue_pressure": "补足至少两轮有效对白，让人物互相施压、拒绝、让步或反制。",
+486:         "chapter_progression_weak": "把本章目标、冲突、转折写成可见事件，而不是停留在铺陈。",
+487:         "scene_fulfillment_weak": "逐场兑现 scene_list 的目标、阻碍、反应、转折和钩子。",
+488:         "dialogue_does_not_change_state": "让对白造成主动权、信息量、关系、风险或下一步选择的变化。",
+489:         "ending_pressure_missing": "结尾必须交出危险、证据、期限、误会或代价，避免总结式平收。",
+490:         "focus_character_missing": "让本章焦点角色实际出场、说话、行动或被明确处理。",
+491:         "continuity_inherit_missing": "开场必须承接上一章锚点，不要让前文压力断裂。",
+492:         "continuity_inherit_late": "把上一章承接锚点前置到开场，避免后段才补承接。",
+493:         "critical_consistency_unresolved": "优先修复前后文事实冲突，再继续润色。",
+494:         "major_consistency_unresolved": "补齐承接关系和未闭环钩子，避免章节断裂。",
+495:         "word_count_far_below_target": "扩写只能补行动、对话、后果和短余波，不能用空泛描写凑字。",
+496:         "event_density_weak": "把篇幅写到事件链里：行动、阻碍、反击、发现、代价和关系变化必须持续出现。",
+497:         "state_change_interval_weak": "每个长段落窗口都要有可见变化，不能连续停在解释、回忆或氛围里。",
+498:         "scene_structure_weak": "按目标、阻碍、转折、结果/压力逐场补齐，避免只点到场景关键词。",
+499:         "long_chapter_event_density_weak": "长章需要更多有效场次和状态变化，不能把少量事件拉成一大章。",
+500:     }
+501: 
+502:     @classmethod
+503:     def _build_quality_issue_summary(
+504:         cls,
+505:         *,
+506:         blockers: Optional[List[Dict[str, Any]]] = None,
+507:         story_guard: Optional[Dict[str, Any]] = None,
+508:         reason_codes: Optional[List[str]] = None,
+509:     ) -> Dict[str, Any]:
+510:         items: List[Dict[str, Any]] = []
+511:         seen = set()
+512: 
+513:         def add(code: str, source: str = "story_progression_guard", message: Optional[str] = None) -> None:
+514:             if not code or code in seen:
+515:                 return
+516:             seen.add(code)
+517:             items.append({
+518:                 "code": code,
+519:                 "label": cls.QUALITY_ISSUE_LABELS.get(code, code),
+520:                 "source": source,
+521:                 "hint": cls.QUALITY_ISSUE_HINTS.get(code, message or ""),
+522:                 "message": message or "",
+523:             })
+524: 
+525:         for blocker in blockers or []:
+526:             if isinstance(blocker, dict):
+527:                 add(str(blocker.get("code") or ""), str(blocker.get("source") or "quality_gate"), str(blocker.get("message") or ""))
+528:         for code in reason_codes or []:
+529:             add(str(code or ""))
+530: 
+531:         if blockers is None and reason_codes is None:
+532:             guard = story_guard or {}
+533:             rich_progression_evidence = (
+534:                 float(guard.get("scene_fulfillment_rate") or 0.0) >= 0.75
+535:                 and float(guard.get("scene_structure_rate") or 0.0) >= 0.7
+536:                 # T-13：`is not False` 而不是 `bool(get(..., True))`。语义是「只要不是
+537:                 # 明确失败就不算反对证据」——None（不适用）不再被当成正向证据白送，
+538:                 # 也不会被 bool() 压成 False 而误判为失败。
+539:                 and guard.get("dialogue_changes_state") is not False
+540:                 and bool(guard.get("ending_pressure_passed", guard.get("ending_hook_detected", True)))
+541:                 # T-14：同理，密度两态字段的 bool() 也要去掉。
+542:                 and guard.get("event_density_passed") is not False
+543:                 and guard.get("state_change_interval_passed") is not False
+544:             )
+545:             if guard.get("static_description_risk"):
+546:                 add("static_description_risk")
+547:             if guard.get("repetition_risk"):
+548:                 add("repeated_paragraph_flood")
+549:             if guard.get("expected_dialogue") and int(guard.get("dialogue_marker_count") or 0) < 4 and int(guard.get("word_count") or 0) >= 1500:
+550:                 add("insufficient_dialogue_pressure")
+551:             if (
+552:                 int(guard.get("word_count") or 0) >= 1500
+553:                 and int(guard.get("mission_hit_count") or 0) < 2
+554:                 and not rich_progression_evidence
+555:             ):
+556:                 add("chapter_progression_weak")
+557:             if int(guard.get("scene_count") or 0) > 0 and float(guard.get("scene_fulfillment_rate") or 1.0) < 0.75:
+558:                 add("scene_fulfillment_weak")
+559:             if int(guard.get("scene_count") or 0) > 0 and float(guard.get("scene_structure_rate") or 1.0) < 0.55:
+560:                 add("scene_structure_weak")
+561:             # T-13：与 blocker 侧同一判据（`is False`），否则 warning 摘要会比 blocker 更严，
+562:             # 出现「前端标红了但没拦章」的不一致。
+563:             if guard.get("expected_dialogue") and "dialogue_changes_state" in guard and guard.get("dialogue_changes_state") is False:
+564:                 add("dialogue_does_not_change_state")
+565:             if int(guard.get("word_count") or 0) >= 1200 and not guard.get("ending_pressure_passed", guard.get("ending_hook_detected", True)):
+566:                 add("ending_pressure_missing")
+567:             # T-11：只进 warning 摘要，不进 blockers（别名匹配不可靠，见判罚处注释）。
+568:             # 字数门槛已经在 focus_character_missing 里判过，这里不要再判一次。
+569:             if guard.get("focus_character_missing"):
+570:                 add("focus_character_missing")
+571:             if guard.get("continuity_inherit_missing"):
+572:                 add("continuity_inherit_missing")
+573:             if guard.get("continuity_inherit_late"):
+574:                 add("continuity_inherit_late")
+575:             if int(guard.get("word_count") or 0) >= 1800 and guard.get("event_density_passed") is False:
+576:                 add("event_density_weak")
+577:             if int(guard.get("word_count") or 0) >= 2500 and guard.get("state_change_interval_passed") is False:
+578:                 add("state_change_interval_weak")
+579:             if int(guard.get("word_count") or 0) >= 7000 and guard.get("long_chapter_density_passed") is False:
+580:                 add("long_chapter_event_density_weak")
+581: 
+582:         tone = "success"
+583:         if len(items) >= 2 or any(item["code"] in {"static_description_risk", "critical_consistency_unresolved"} for item in items):
+584:             tone = "danger"
+585:         elif items:
+586:             tone = "warning"
+587: 
+588:         return {
+589:             "passed": not items,
+590:             "tone": tone,
+591:             "count": len(items),
+592:             "codes": [item["code"] for item in items],
+593:             "labels": [item["label"] for item in items],
+594:             "items": items,
+595:         }
+596: 
+597:     @classmethod
+598:     def _attach_quality_gate_status_to_guard(
+599:         cls,
+600:         story_guard: Dict[str, Any],
+601:         structural_quality_gate: Dict[str, Any],
+602:     ) -> Dict[str, Any]:
+603:         guard = deepcopy(story_guard or {})
+604:         gate_passed = bool(structural_quality_gate.get("passed", True))
+605:         gate_summary = {
+606:             "passed": gate_passed,
+607:             "codes": list(structural_quality_gate.get("quality_issue_codes") or []),
+608:             "labels": list(structural_quality_gate.get("quality_issue_labels") or []),
+609:             "blocker_count": len(structural_quality_gate.get("blockers") or []),
+610:         }
+611:         guard["quality_gate_passed"] = gate_passed
+612:         guard["quality_gate_summary"] = gate_summary
+613:         guard["quality_gate_codes"] = gate_summary["codes"]
+614:         guard["quality_gate_labels"] = gate_summary["labels"]
+615: 
+616:         snapshot = dict(guard.get("quality_metric_snapshot") or {})
+617:         raw_summary = snapshot.get("quality_issue_summary") or guard.get("quality_issue_summary")
+618:         if gate_passed and isinstance(raw_summary, dict) and not raw_summary.get("passed", True):
+619:             warning_summary = deepcopy(raw_summary)
+620:             guard["quality_rule_warnings"] = warning_summary
+621:             snapshot["quality_rule_warnings"] = warning_summary
+622:             clean_summary = {
+623:                 "passed": True,
+624:                 "tone": "success",
+625:                 "count": 0,
+626:                 "codes": [],
+627:                 "labels": [],
+628:                 "items": [],
+629:             }
+630:             guard["quality_issue_summary"] = clean_summary
+631:             guard["quality_issue_codes"] = []
+632:             guard["quality_issue_labels"] = []
+633:             snapshot["quality_issue_summary"] = clean_summary
+634:             snapshot["quality_issue_codes"] = []
+635:             snapshot["quality_issue_labels"] = []
+636:         if snapshot:
+637:             snapshot["quality_gate_passed"] = gate_passed
+638:             snapshot["quality_gate_summary"] = gate_summary
+639:             guard["quality_metric_snapshot"] = snapshot
+640:         return guard
+641: 
+642:     @staticmethod
+643:     def _quality_gate_patch_suggestion(issue: Dict[str, Any], chapter_mission: Optional[dict]) -> str:
+644:         code = str((issue or {}).get("code") or "")
+645:         mission = chapter_mission or {}
+646:         scenes = mission.get("scene_list") or []
+647:         scene_goal = str((scenes[0] or {}).get("goal") or "本章场景目标") if scenes else "本章场景目标"
+648:         dialogue = "、".join((mission.get("dialogue_strategy") or {}).get("purpose") or [])
+649:         focus = "、".join(mission.get("focus_characters") or mission.get("character_focus") or [])
+650:         inherit = "、".join((mission.get("continuity_anchor") or {}).get("inherit_from_previous") or [])
+651:         turn = str((scenes[-1] or {}).get("turn") or "局势反转") if scenes else "局势反转"
+652:         mapping = {
+653:             "scene_fulfillment_weak": f"围绕场景目标：{scene_goal}，补齐目标、阻碍、转折与后果。",
+654:             "scene_structure_weak": f"将场景目标：{scene_goal} 写成可见的行动链与结果。",
+655:             "dialogue_does_not_change_state": f"围绕对白职责：{dialogue or '施压与反制'}，让对话改变主动权、信息或风险。",
+656:             "focus_character_missing": f"让任务书指定的焦点人物在本章实际出场、行动、说话或被明确处理。（焦点人物：{focus or '本章焦点人物'}）",
+657:             "continuity_inherit_missing": f"在开场承接上一章锚点：{inherit or '上一章未闭环压力'}。",
+658:             "continuity_inherit_late": f"将承接锚点：{inherit or '上一章未闭环压力'} 前置到开场。",
+659:             "reversal_missing": f"兑现或改写本章转折：{turn}，让后段出现可见局势变化。",
+660:         }
+661:         return mapping.get(code, str((issue or {}).get("message") or "按质量门问题做局部修复。"))
+662: 
+663:     @classmethod
+664:     def _build_quality_gate_patch_repair_issues(
+665:         cls, structural_quality_gate: Optional[Dict[str, Any]], chapter_mission: Optional[dict]
+666:     ) -> List[Dict[str, Any]]:
+667:         if isinstance(structural_quality_gate, list):
+668:             patches = structural_quality_gate
+669:             allowed = {"focus_character_missing", "continuity_inherit_missing", "continuity_inherit_late", "scene_fulfillment_weak", "scene_structure_weak", "dialogue_does_not_change_state", "reversal_missing"}
+670:         else:
+671:             patches = ((structural_quality_gate or {}).get("patch_suggestions") or [])
+672:             allowed = {str(code) for code in ((structural_quality_gate or {}).get("quality_issue_codes") or [])}
+673:         issues: List[Dict[str, Any]] = []
+674:         seen: set = set()
+675:         for patch in patches:
+676:             if not isinstance(patch, dict):
+677:                 continue
+678:             code = str(patch.get("code") or "")
+679:             if not code or code not in allowed or code in seen:
+680:                 continue
+681:             seen.add(code)
+682:             suggestion = cls._quality_gate_patch_suggestion({"code": code, "message": patch.get("suggestion")}, chapter_mission)
+683:             if patch.get("suggestion") and str(patch.get("suggestion")) != suggestion:
+684:                 seen.discard(code)
+685:                 continue
+686:             issues.append({
+687:                 "dimension": "quality_gate_patch",
+688:                 "severity": "major",
+689:                 "location": "章节任务书",
+690:                 "problem": f"质量门任务书补丁[{code}]未落实。",
+691:                 "suggestion": suggestion,
+692:                 "example": "仅做局部结构补丁，禁止重写无关内容。",
+693:             })
+694:         return issues
+695: 
+696:     @classmethod
+697:     def _build_structural_quality_gate(cls, review_summaries: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+698:         summaries = review_summaries or {}
+699:         critique_summary, critique_source = cls._select_quality_gate_critique_summary(summaries)
+700:         consistency_summary = summaries.get("consistency_repair") or summaries.get("consistency") or {}
+701:         ai_review_summary = summaries.get("ai_review") if isinstance(summaries.get("ai_review"), dict) else {}
+702:         ai_review_text = " ".join(
+703:             str(ai_review_summary.get(key) or "")
+704:             for key in ("evaluation", "suggestions", "final_recommendation", "status")
+705:         )
+706:         ai_scene_supports_pass = any(
+707:             marker in ai_review_text
+708:             for marker in (
+709:                 "基本兑现",
+710:                 "结构兑现",
+711:                 "结构兑现度高",
+712:                 "兑现了导演脚本",
+713:                 "导演脚本兑现",
+714:                 "完成度较高",
+715:                 "推进清晰",
+716:                 "四场戏推进清晰",
+717:                 "结构清晰",
+718:                 "能直接上正稿",
+719:                 "可用",
+720:                 "结尾",
+721:                 "压给下一章",
+722:                 "递给下一章",
+723:             )
+724:         )
+725:         unresolved_consistency = cls._collect_unresolved_consistency_violations(consistency_summary)
+726:         critical_consistency = [item for item in unresolved_consistency if item.get("severity") == "critical"]
+727:         major_consistency = [item for item in unresolved_consistency if item.get("severity") == "major"]
+728: 
+729:         critique_score = critique_summary.get("final_score")
+730:         try:
+731:             critique_score = float(critique_score) if critique_score is not None else None
+732:         except (TypeError, ValueError):
+733:             critique_score = None
+734:         critique_critical = int(critique_summary.get("critical_count") or 0)
+735:         critique_major = int(critique_summary.get("major_count") or 0)
+736: 
+737:         blockers: List[Dict[str, Any]] = []
+738:         warnings: List[Dict[str, Any]] = []
+739:         exemptions: List[str] = []
+740:         chapter_mission = summaries.get("chapter_mission") if "chapter_mission" in summaries else None
+741: 
+742:         def add_warning(code: str, message: str) -> None:
+743:             issue = {"source": "story_progression_guard", "code": code, "severity": "warning", "message": message}
+744:             issue["patch_suggestion"] = cls._quality_gate_patch_suggestion(issue, chapter_mission)
+745:             warnings.append(issue)
+746:         if critique_critical > 1:
+747:             blockers.append({
+748:                 "source": "self_critique",
+749:                 "code": "critical_issues_remaining",
+750:                 "message": f"自检后仍残留 {critique_critical} 个 critical 问题，不能静默放行。",
+751:             })
+752:         if critique_score is not None and critique_score > 0 and critique_score < 42:
+753:             blockers.append({
+754:                 "source": "self_critique",
+755:                 "code": "score_below_floor",
+756:                 "message": f"自检最终分仅 {critique_score:.1f}，低于结构质量底线。",
+757:             })
+758:         if critique_major >= 12:
+759:             blockers.append({
+760:                 "source": "self_critique",
+761:                 "code": "too_many_major_issues",
+762:                 "message": f"自检后仍有 {critique_major} 个 unique major 问题，说明文本仍存在大面积结构缺陷。",
+763:             })
+764:         if critical_consistency:
+765:             blockers.append({
+766:                 "source": "consistency",
+767:                 "code": "critical_consistency_unresolved",
+768:                 "message": f"一致性校验仍残留 {len(critical_consistency)} 个 critical 冲突。",
+769:                 "examples": [item.get("description") for item in critical_consistency[:3]],
+770:             })
+771:         if len(major_consistency) >= 5:
+772:             blockers.append({
+773:                 "source": "consistency",
+774:                 "code": "major_consistency_unresolved",
+775:                 "message": f"一致性校验仍残留 {len(major_consistency)} 个 major 冲突。",
+776:                 "examples": [item.get("description") for item in major_consistency[:3]],
+777:             })
+778: 
+779:         story_guard = summaries.get("story_progression_guard") if isinstance(summaries.get("story_progression_guard"), dict) else {}
+780:         if story_guard:
+781:             story_word_count = int(story_guard.get("word_count") or 0)
+782:             story_dialogue_markers = int(story_guard.get("dialogue_marker_count") or 0)
+783:             story_mission_hits = int(story_guard.get("mission_hit_count") or 0)
+784:             scene_count = int(story_guard.get("scene_count") or 0)
+785:             scene_rate = float(story_guard.get("scene_fulfillment_rate") or 1.0)
+786:             scene_structure_rate = float(story_guard.get("scene_structure_rate") or 1.0)
+787:             rich_progression_evidence = (
+788:                 scene_count > 0
+789:                 and scene_rate >= 0.75
+790:                 and scene_structure_rate >= 0.7
+791:                 and story_dialogue_markers >= 8
+792:                 and not story_guard.get("static_description_risk")
+793:                 # T-13/T-14：这三个都是三态字段，一律用 `is not False`。
+794:                 and story_guard.get("dialogue_changes_state") is not False
+795:                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
+796:                 and story_guard.get("event_density_passed") is not False
+797:                 and story_guard.get("state_change_interval_passed") is not False
+798:             )
+799:             if story_guard.get("static_description_risk"):
+800:                 blockers.append({
+801:                     "source": "story_progression_guard",
+802:                     "code": "static_description_risk",
+803:                     "message": "章节主体缺少有效对话/动作承压，存在大段静态描写硬撑篇幅的风险。",
+804:                 })
+805:             if story_guard.get("chapter_artifact_markers"):
+806:                 blockers.append({
+807:                     "source": "story_progression_guard",
+808:                     "code": "chapter_artifact_markers",
+809:                     "message": "章节正文含有提纲/标记残留，不能作为成品章节放行。",
+810:                 })
+811:             # T-10：精确重复是字符串完全相同，判定 100% 可靠，可以直接做 blocker，
+812:             # 不需要 soft_pass 兜底——没有任何正当理由让整段照抄的正文过门。
+813:             if story_guard.get("repetition_risk"):
+814:                 blockers.append({
+815:                     "source": "story_progression_guard",
+816:                     "code": "repeated_paragraph_flood",
+817:                     "message": (
+818:                         "正文里存在整段照抄的重复内容"
+819:                         f"（最长重复段 {int(story_guard.get('longest_repeated_paragraph_chars') or 0)} 字，"
+820:                         f"同一段最多出现 {int(story_guard.get('max_repeated_paragraph_count') or 0)} 次），"
+821:                         "属于凑字数退化，不能放行。"
+822:                     ),
+823:                 })
+824:             if story_guard.get("expected_dialogue") and story_word_count >= 1500 and story_dialogue_markers < 4:
+825:                 blockers.append({
+826:                     "source": "story_progression_guard",
+827:                     "code": "insufficient_dialogue_pressure",
+828:                     "message": "导演脚本要求存在对话/攻防，但正文里的有效对白痕迹过少，局势博弈不足。",
+829:                 })
+830:             progression_soft_pass = (
+831:                 story_dialogue_markers >= 8
+832:                 and not story_guard.get("static_description_risk")
+833:                 # T-13：这一条**故意保持「必须是 True」**，与同批其它消费点的
+834:                 # `is not False` 不同。它的原写法默认值就是 False（要求正向证据），
+835:                 # 而它的作用是豁免 chapter_progression_weak —— 豁免必须有据，
+836:                 # 「不适用」不构成据。另外此处 None 实际不可达：None 只在
+837:                 # dialogue_marker_count <= 0 时产生，与上一行 `>= 8` 互斥。
+838:                 and story_guard.get("dialogue_changes_state") is True
+839:                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", False))
+840:                 and critique_critical <= 1
+841:                 and (critique_score is None or critique_score >= 70)
+842:                 and len(critical_consistency) == 0
+843:                 and len(major_consistency) < 2
+844:             )
+845:             if (
+846:                 story_word_count >= 1500
+847:                 and story_mission_hits < 2
+848:                 and not progression_soft_pass
+849:                 and not rich_progression_evidence
+850:                 and (chapter_mission is not None or story_guard.get("static_description_risk"))
+851:                 and ((critique_score is None or critique_score < 72) or story_guard.get("static_description_risk"))
+852:             ):
+853:                 blockers.append({
+854:                     "source": "story_progression_guard",
+855:                     "code": "chapter_progression_weak",
+856:                     "message": "正文对本章目标、冲突、转折的命中不足，容易读起来像铺陈多、实质推进少。",
+857:                 })
+858:             scene_soft_pass = (
+859:                 (
+860:                     story_mission_hits >= 3
+861:                     or (
+862:                         ai_scene_supports_pass
+863:                         and story_mission_hits >= 2
+864:                         and story_dialogue_markers >= 8
+865:                         and (critique_score is None or critique_score >= 70)
+866:                     )
+867:                 )
+868:                 and story_dialogue_markers >= 4
+869:                 and not story_guard.get("static_description_risk")
+870:                 # T-13：原默认值是 True（缺键即视为不反对），照此映射成 `is not False`。
+871:                 # 上一行 `>= 4` 已让 None 不可达，这里只是把语义写准。
+872:                 and story_guard.get("dialogue_changes_state") is not False
+873:                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
+874:                 and critique_critical <= 1
+875:                 and (critique_score is None or critique_score >= 60)
+876:                 and not critical_consistency
+877:             )
+878:             semantic_scene_soft_pass = (
+879:                 ai_scene_supports_pass
+880:                 and progression_soft_pass
+881:                 and story_dialogue_markers >= 10
+882:                 # T-14：密度三态。这里用 `is not False` 是安全的——None 只在
+883:                 # word_count < 800 时产生，而它豁免的 blocker 门槛都在 1200 字以上，
+884:                 # 两个区间不相交，所以「未评估也算不反对」不会放过任何该拦的样本。
+885:                 and story_guard.get("event_density_passed") is not False
+886:                 and story_guard.get("state_change_interval_passed") is not False
+887:                 and critique_critical <= 1
+888:                 and critique_major < 8
+889:                 and not critical_consistency
+890:                 and len(major_consistency) < 2
+891:             )
+892:             dense_scene_soft_pass = (
+893:                 scene_rate >= 0.75
+894:                 and story_dialogue_markers >= 8
+895:                 and not story_guard.get("static_description_risk")
+896:                 # T-13/T-14：三个三态字段统一 `is not False`（原默认值都是 True）。
+897:                 and story_guard.get("dialogue_changes_state") is not False
+898:                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
+899:                 and story_guard.get("event_density_passed") is not False
+900:                 and story_guard.get("state_change_interval_passed") is not False
+901:                 and critique_critical <= 1
+902:                 and (critique_score is None or critique_score >= 70)
+903:                 and not critical_consistency
+904:                 and len(major_consistency) < 2
+905:             )
+906:             scene_soft_pass = bool(scene_soft_pass or semantic_scene_soft_pass or dense_scene_soft_pass)
+907:             if (
+908:                 story_word_count >= 1200
+909:                 and scene_count > 0
+910:                 and "scene_fulfillment_rate" in story_guard
+911:                 and scene_rate < 0.5
+912:                 and not scene_soft_pass
+913:             ):
+914:                 add_warning("scene_fulfillment_weak", "正文对导演脚本场景目标、阻碍、转折或钩子兑现不足。")
+915:                 """removed legacy blocker"""
+916:             if (
+917:                 story_word_count >= 1800
+918:                 and scene_count > 0
+919:                 and "scene_structure_rate" in story_guard
+920:                 and scene_structure_rate < 0.45
+921:                 and not scene_soft_pass
+922:             ):
+923:                 add_warning("scene_structure_weak", "正文虽然可能点到了场景关键词，但缺少目标、阻碍、转折、结果/压力的结构证据。")
+924:                 """removed legacy blocker"""
+925:             # T-13：blocker 判据改成显式 `is False`。三态下 None 表示「不适用」，
+926:             # 绝不能进 blocker；而 expected_dialogue 为真时 `_evaluate_dialogue_changes_state`
+927:             # 只会返回 True/False（见那里的判定顺序注释），所以这道 blocker 的触发面不变。
+928:             if (
+929:                 story_guard.get("expected_dialogue")
+930:                 and "dialogue_changes_state" in story_guard
+931:                 and story_guard.get("dialogue_changes_state") is False
+932:             ):
+933:                 add_warning("dialogue_does_not_change_state", "正文虽然可能有对话痕迹，但缺少逼问、拒绝、让步、暴露、决断等局势变化，对话没有真正推动剧情。")
+934:             if (
+935:                 story_word_count >= 1200
+936:                 and ("ending_pressure_passed" in story_guard or "ending_hook_detected" in story_guard)
+937:                 and not story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected"))
+938:                 and (critique_score is None or critique_score < 75)
+939:             ):
+940:                 blockers.append({
+941:                     "source": "story_progression_guard",
+942:                     "code": "ending_pressure_missing",
+943:                     "message": "章节结尾没有把压力、危险、误会、证据或后果递给下一章，容易平收。",
+944:                 })
+945:             density_soft_pass = (
+946:                 story_dialogue_markers >= 8
+947:                 and story_mission_hits >= 3
+948:                 # T-13：原默认值 True，映射成 `is not False`。
+949:                 and story_guard.get("dialogue_changes_state") is not False
+950:                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
+951:                 and not story_guard.get("static_description_risk")
+952:             )
+953:             if (
+954:                 story_word_count >= 1800
+955:                 and story_guard.get("event_density_passed") is False
+956:                 and not density_soft_pass
+957:                 and (critique_score is None or critique_score < 70)
+958:             ):
+959:                 blockers.append({
+960:                     "source": "story_progression_guard",
+961:                     "code": "event_density_weak",
+962:                     "message": "正文篇幅没有稳定长在行动、对话、发现、代价和关系变化上，存在低事件密度风险。",
+963:                 })
+964:             if (
+965:                 story_word_count >= 2500
+966:                 and story_guard.get("state_change_interval_passed") is False
+967:                 and not density_soft_pass
+968:             ):
+969:                 blockers.append({
+970:                     "source": "story_progression_guard",
+971:                     "code": "state_change_interval_weak",
+972:                     "message": "章节中存在过长区间没有可见状态变化，读感容易变成解释或氛围拉长。",
+973:                 })
+974:             if (
+975:                 story_word_count >= 7000
+976:                 and story_guard.get("long_chapter_density_passed") is False
+977:                 and not density_soft_pass
+978:             ):
+979:                 blockers.append({
+980:                     "source": "story_progression_guard",
+981:                     "code": "long_chapter_event_density_weak",
+982:                     "message": "长章目标下事件密度和状态变化窗口不足，不能把少量事件拉成长章静默放行。",
+983:                 })
+984: 
+985:             if story_guard.get("focus_character_missing"):
+986:                 add_warning("focus_character_missing", "任务书指定的焦点人物没有在正文中得到可验证的出场或处理。")
+987:             if story_guard.get("continuity_inherit_missing"):
+988:                 add_warning("continuity_inherit_missing", "上一章承接锚点没有在开场落地。")
+989:             if story_guard.get("continuity_inherit_late"):
+990:                 add_warning("continuity_inherit_late", "上一章承接锚点出现过晚，开场承接压力不足。")
+991:             if story_guard.get("reversal_in_late_section") is False:
+992:                 add_warning("reversal_missing", "本章任务书要求的后段转折尚未形成可验证证据。")
+993: 
+994:             if critique_score is not None and critique_score >= 75:
+995:                 if story_guard.get("ending_pressure_passed") is False:
+996:                     exemptions.append("ending_pressure_missing")
+997:                 if story_guard.get("event_density_passed") is False:
+998:                     exemptions.append("event_density_weak")
+999: 
+1000:         quality_issue_summary = cls._build_quality_issue_summary(
+1001:             blockers=blockers,
+1002:             story_guard=story_guard,
+1003:         )
+1004: 
+1005:         return {
+1006:             "passed": not blockers,
+1007:             "blockers": blockers,
+1008:             "warnings": warnings,
+1009:             "patch_suggestions": [{"code": item["code"], "suggestion": item["patch_suggestion"]} for item in warnings],
+1010:             "exemptions": exemptions,
+1011:             "quality_issue_summary": quality_issue_summary,
+1012:             "quality_issue_labels": quality_issue_summary.get("labels", []),
+1013:             "quality_issue_codes": quality_issue_summary.get("codes", []),
+1014:             "selected_critique_source": critique_source,
+1015:             "self_critique_final_score": critique_score,
+1016:             "self_critique_critical_count": critique_critical,
+1017:             "self_critique_major_count": critique_major,
+1018:             "self_critique_raw_issue_count": critique_summary.get("raw_issue_count"),
+1019:             "self_critique_deduped_issue_count": critique_summary.get("deduped_issue_count"),
+1020:             "self_critique_merged_issue_count": critique_summary.get("merged_issue_count"),
+1021:             "baseline_self_critique_major_count": (summaries.get("self_critique") or {}).get("major_count"),
+1022:             "post_consistency_self_critique_major_count": (summaries.get("self_critique_after_consistency") or {}).get("major_count"),
+1023:             "consistency_unresolved_count": len(unresolved_consistency),
+1024:             "consistency_unresolved_critical_count": len(critical_consistency),
+1025:             "consistency_unresolved_major_count": len(major_consistency),
+1026:             "story_progression_guard": story_guard,
+1027:         }
+1028: 
+1029:     # ====== END _pipeline_quality_gate.py ======
+1030: 
+1031:     @staticmethod
+1032:     def _map_reader_problem_to_dimension(problem: Optional[str]) -> str:
+1033:         text = str(problem or "").lower()
+1034:         if any(keyword in text for keyword in ("节奏", "拖", "慢", "信息密度")):
+1035:             return "pacing"
+1036:         if any(keyword in text for keyword in ("对白", "对话", "口吻")):
+1037:             return "dialogue"
+1038:         if any(keyword in text for keyword in ("情绪", "感情", "共鸣")):
+1039:             return "emotion"
+1040:         if any(keyword in text for keyword in ("人设", "角色", "主角")):
+### 6650-7870
+6650: 
+6651:         candidates: List[str] = []
+6652: 
+6653:         def add_phrase(value: Any) -> None:
+6654:             if not value:
+6655:                 return
+6656:             if isinstance(value, dict):
+6657:                 for item in value.values():
+6658:                     add_phrase(item)
+6659:                 return
+6660:             if isinstance(value, list):
+6661:                 for item in value:
+6662:                     add_phrase(item)
+6663:                 return
+6664: 
+6665:             text = str(value).strip()
+6666:             if not text:
+6667:                 return
+6668:             if 2 <= len(text) <= 24:
+6669:                 candidates.append(text)
+6670:             for token in re.split(r"[，。；、,\s/]+", text):
+6671:                 normalized = token.strip("：:- ").strip()
+6672:                 if 2 <= len(normalized) <= 12:
+6673:                     candidates.append(normalized)
+6674: 
+6675:         add_phrase(chapter_mission.get("chapter_purpose"))
+6676:         add_phrase((chapter_mission.get("continuity_anchor") or {}).get("inherit_from_previous"))
+6677:         add_phrase((chapter_mission.get("continuity_anchor") or {}).get("deliver_to_next"))
+6678:         add_phrase(chapter_mission.get("character_arc_task"))
+6679:         add_phrase(chapter_mission.get("pov"))
+6680:         add_phrase(chapter_mission.get("pov_character"))
+6681:         add_phrase(chapter_mission.get("focus_characters"))
+6682:         add_phrase((chapter_mission.get("dialogue_strategy") or {}).get("purpose"))
+6683:         add_phrase((chapter_mission.get("dialogue_strategy") or {}).get("subtext"))
+6684:         for scene in chapter_mission.get("scene_list") or []:
+6685:             if isinstance(scene, dict):
+6686:                 add_phrase(scene.get("characters"))
+6687:                 for key in (
+6688:                     "goal",
+6689:                     "conflict",
+6690:                     "turn",
+6691:                     "outcome",
+6692:                     "payoff",
+6693:                     "bridge",
+6694:                     "emotion_shift",
+6695:                     "dialogue_value",
+6696:                     "end_hook",
+6697:                     "foreshadowing_task",
+6698:                 ):
+6699:                     add_phrase(scene.get(key))
+6700: 
+6701:         deduped: List[str] = []
+6702:         seen = set()
+6703:         for item in candidates:
+6704:             if item not in seen:
+6705:                 seen.add(item)
+6706:                 deduped.append(item)
+6707:         return deduped[:24]
+6708: 
+6709:     @staticmethod
+6710:     def _chapter_mission_expects_dialogue(chapter_mission: Optional[dict]) -> bool:
+6711:         if not isinstance(chapter_mission, dict):
+6712:             return False
+6713:         dialogue_strategy = chapter_mission.get("dialogue_strategy")
+6714:         if isinstance(dialogue_strategy, dict) and dialogue_strategy:
+6715:             return True
+6716:         for scene in chapter_mission.get("scene_list") or []:
+6717:             if isinstance(scene, dict) and any(scene.get(key) for key in ("dialogue_value", "conflict", "turn")):
+6718:                 return True
+6719:         return False
+6720: 
+6721:     @staticmethod
+6722:     def _extract_quality_tokens(value: Any) -> List[str]:
+6723:         if not value:
+6724:             return []
+6725:         if isinstance(value, dict):
+6726:             tokens: List[str] = []
+6727:             for item in value.values():
+6728:                 tokens.extend(PipelineOrchestrator._extract_quality_tokens(item))
+6729:             return tokens
+6730:         if isinstance(value, list):
+6731:             tokens: List[str] = []
+6732:             for item in value:
+6733:                 tokens.extend(PipelineOrchestrator._extract_quality_tokens(item))
+6734:             return tokens
+6735: 
+6736:         text = str(value).strip()
+6737:         if not text:
+6738:             return []
+6739:         stop_tokens = {
+6740:             "本章", "主角", "目标", "冲突", "转折", "压力", "下一章", "下一场",
+6741:             "必须", "不能", "需要", "继续", "同时", "最终", "真正", "方式",
+6742:         }
+6743:         tokens = [text] if 2 <= len(text) <= 32 and text not in stop_tokens else []
+6744:         for token in re.split(r"[，。；、！？：:\s/|,.;!?()\[\]{}<>《》“”\"'\\-]+", text):
+6745:             token = token.strip()
+6746:             if 2 <= len(token) <= 12:
+6747:                 tokens.append(token)
+6748:             compact = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", token)
+6749:             if 5 <= len(compact) <= 18:
+6750:                 # 章节任务常把“潮宗正式发缉印令”这类动作+名词写成一整句，
+6751:                 # 正文更可能只落到“缉印令”。补充较短的命名片段，减少硬关键词误杀。
+6752:                 for size in (5, 4, 3):
+6753:                     for start in range(0, max(0, len(compact) - size + 1)):
+6754:                         piece = compact[start:start + size]
+6755:                         if piece and piece not in stop_tokens:
+6756:                             tokens.append(piece)
+6757: 
+6758:         deduped: List[str] = []
+6759:         seen = set()
+6760:         for token in tokens:
+6761:             if token not in seen and token not in stop_tokens:
+6762:                 seen.add(token)
+6763:                 deduped.append(token)
+6764:         return deduped[:20]
+6765: 
+6766:     @classmethod
+6767:     def _score_text_hits(cls, value: Any, condensed_text: str) -> Tuple[int, List[str]]:
+6768:         tokens = cls._extract_quality_tokens(value)
+6769:         hits = [token for token in tokens if token and token in condensed_text]
+6770:         return len(hits), hits[:6]
+6771: 
+6772:     @classmethod
+6773:     def _evaluate_scene_fulfillment(cls, chapter_mission: Optional[dict], condensed_text: str) -> Dict[str, Any]:
+6774:         scene_list = (chapter_mission or {}).get("scene_list") if isinstance(chapter_mission, dict) else []
+6775:         if not isinstance(scene_list, list) or not scene_list:
+6776:             return {
+6777:                 "scene_count": 0,
+6778:                 "fulfilled_scene_count": 0,
+6779:                 "scene_fulfillment_rate": 1.0,
+6780:                 "structure_passed_scene_count": 0,
+6781:                 "scene_structure_rate": 1.0,
+6782:                 "scene_details": [],
+6783:             }
+6784: 
+6785:         tracked_keys = (
+6786:             "goal",
+6787:             "conflict",
+6788:             "turn",
+6789:             "must_happen",
+6790:             "outcome",
+6791:             "pressure_shift",
+6792:             "dialogue_value",
+6793:             "end_hook",
+6794:             "payoff",
+6795:             "bridge",
+6796:         )
+6797:         structure_groups = {
+6798:             "goal": ("goal", "must_happen"),
+6799:             "conflict": ("conflict", "dialogue_value"),
+6800:             "turn": ("turn", "outcome", "pressure_shift", "payoff"),
+6801:             "bridge": ("bridge", "end_hook"),
+6802:         }
+6803:         details: List[Dict[str, Any]] = []
+6804:         fulfilled_count = 0
+6805:         structure_passed_count = 0
+6806:         for index, scene in enumerate(scene_list[:8], start=1):
+6807:             if not isinstance(scene, dict):
+6808:                 continue
+6809:             required_fields = 0
+6810:             hit_fields = 0
+6811:             hit_by_key: Dict[str, bool] = {}
+6812:             field_results = []
+6813:             for key in tracked_keys:
+6814:                 value = scene.get(key)
+6815:                 if not value:
+6816:                     continue
+6817:                 required_fields += 1
+6818:                 hit_count, hits = cls._score_text_hits(value, condensed_text)
+6819:                 field_hit = hit_count > 0
+6820:                 hit_fields += 1 if field_hit else 0
+6821:                 hit_by_key[key] = field_hit
+6822:                 field_results.append({"field": key, "hit": field_hit, "hits": hits})
+6823: 
+6824:             required_to_pass = max(1, min(3, math.ceil(required_fields * 0.45)))
+6825:             fulfilled = bool(required_fields == 0 or hit_fields >= required_to_pass)
+6826:             structure_hits = 0
+6827:             structure_results: Dict[str, bool] = {}
+6828:             for group_name, keys in structure_groups.items():
+6829:                 group_hit = any(hit_by_key.get(key) for key in keys)
+6830:                 structure_results[group_name] = group_hit
+6831:                 structure_hits += 1 if group_hit else 0
+6832:             structure_required = 2 if required_fields <= 3 else 3
+6833:             structure_passed = bool(required_fields == 0 or structure_hits >= structure_required)
+6834:             fulfilled_count += 1 if fulfilled else 0
+6835:             structure_passed_count += 1 if structure_passed else 0
+6836:             details.append(
+6837:                 {
+6838:                     "scene_index": index,
+6839:                     "required_fields": required_fields,
+6840:                     "hit_fields": hit_fields,
+6841:                     "required_to_pass": required_to_pass,
+6842:                     "fulfilled": fulfilled,
+6843:                     "structure_hits": structure_hits,
+6844:                     "structure_required": structure_required,
+6845:                     "structure_passed": structure_passed,
+6846:                     "structure_results": structure_results,
+6847:                     "fields": field_results,
+6848:                 }
+6849:             )
+6850: 
+6851:         scene_count = len(details)
+6852:         return {
+6853:             "scene_count": scene_count,
+6854:             "fulfilled_scene_count": fulfilled_count,
+6855:             "scene_fulfillment_rate": round(fulfilled_count / max(1, scene_count), 4),
+6856:             "structure_passed_scene_count": structure_passed_count,
+6857:             "scene_structure_rate": round(structure_passed_count / max(1, scene_count), 4),
+6858:             "scene_details": details,
+6859:         }
+6860: 
+6861:     # ====== EXTRACTABLE: _pipeline_story_scoring.py — 故事质量评分与事件密度 ======
+6862:     STORY_PROGRESSION_MARKERS = (
+6863:         "逼问", "质问", "追问", "反问", "试探", "压迫", "威胁", "拒绝", "反制", "让步",
+6864:         "改口", "承认", "暴露", "揭开", "揭露", "证实", "发现", "意识到", "明白", "决定",
+6865:         "选择", "交换", "代价", "风险", "危险", "失控", "反转", "翻脸", "背叛", "线索",
+6866:         "证据", "期限", "后果", "付出", "受伤", "倒下", "失去", "得到", "夺回", "打开",
+6867:         "推开", "抓住", "按住", "拔出", "砸开", "冲进", "闯入", "逃出", "追上", "救下",
+6868:         "杀", "死", "必须", "否则", "来不及",
+6869:     )
+6870:     # 弱转折信号：只是句子之间的转折修饰，不代表故事状态发生了改变；
+6871:     # "活" 还会被「生活 / 干活 / 活动」命中。它们只做辅助，不参与推进判定，
+6872:     # 否则任何日常流水账都能骗过事件密度门。
+6873:     WEAK_TRANSITION_MARKERS = ("却", "但", "然而", "转而", "下一步", "活")
+6874:     # 引号自身不是推进证据——寒暄对话也全是引号。带引号的句子必须另有推进词
+6875:     # 或对话状态改变词才算推进。
+6876:     DIALOGUE_QUOTE_MARKS = ("“", "”", "「", "」", "『", "』", '"')
+6877: 
+6878:     # 章末压力词表分两级：弱信号（标点与纯副词，任何句子都可能出现）只能做辅助，
+6879:     # 不能单独顶替语义压力；语义信号才是"这一章留下了未解决的麻烦"的证据。
+6880:     ENDING_WEAK_HOOK_MARKERS = (
+6881:         "？", "?", "！", "!", "却", "突然", "忽然",
+6882:     )
+6883:     # 必须写成中文字面量而不是 \uXXXX 转义：转义后 grep 不到，谁都没法维护。
+6884:     # 也不许放某一部小说的专有名词（药渣 / 旧南渠 之类），否则换题材就判不出压力。
+6885:     ENDING_SEMANTIC_HOOK_MARKERS = (
+6886:         "门外", "脚步", "消息", "期限", "代价", "危险", "危机", "压力", "后果",
+6887:         "线索", "证据", "异常", "不自然", "来不及", "问题", "警告",
+6888:         "下一", "下一轮", "下一章", "下一刻", "倒计时", "没时间", "最后一次",
+6889:         "必须", "否则", "只能", "不得不", "别无选择", "绝路", "退路",
+6890:         "封锁", "通缉", "追索", "追杀", "追兵", "追上来", "包围", "逼近", "堵死", "锁死",
+6891:         "陷阱", "盯上", "跟踪", "失踪", "失控", "暴露", "真相", "背叛", "威胁",
+6892:         "死人", "会死", "死在", "人命", "生死", "活不过", "重伤",
+6893:     )
+6894:     # 只有完整的收束表达才算平淡结尾。"一切都"是中性前缀（"一切都还是未知"是真钩子），
+6895:     # 单独拿它做硬否决会把强钩子误杀。
+6896:     ENDING_CLOSURE_MARKERS = (
+6897:         "终于结束", "告一段落", "松了口气", "暂时平静", "圆满", "尘埃落定",
+6898:         "一切都结束", "一切都过去", "一切都平静", "一切都恢复",
+6899:         "一切都安稳", "一切都很好", "一切都没事", "平平淡淡才是真",
+6900:     )
+6901: 
+6902:     @classmethod
+6903:     def _story_units(cls, text: str) -> List[str]:
+6904:         units = [unit.strip() for unit in re.split(r"[。！？!?\n]+", str(text or "")) if unit.strip()]
+6905:         expanded: List[str] = []
+6906:         for unit in units:
+6907:             if len(unit) <= 180:
+6908:                 expanded.append(unit)
+6909:                 continue
+6910:             for index in range(0, len(unit), 140):
+6911:                 chunk = unit[index:index + 140].strip()
+6912:                 if chunk:
+6913:                     expanded.append(chunk)
+6914:         return expanded
+6915: 
+6916:     @classmethod
+6917:     def _unit_has_progression(cls, unit: str) -> bool:
+6918:         if not unit:
+6919:             return False
+6920:         has_marker = any(marker in unit for marker in cls.STORY_PROGRESSION_MARKERS)
+6921:         if any(mark in unit for mark in cls.DIALOGUE_QUOTE_MARKS):
+6922:             # 对话句要么带推进词，要么带对话状态改变词；只有引号不算。
+6923:             return has_marker or cls._count_dialogue_state_change_markers(unit) > 0
+6924:         return has_marker
+6925: 
+6926:     # 窗口内推进句占比的下限，以及窗口至少要有的推进句数。
+6927:     # 只要求「占比」会让只剩两三句的窗口靠一句推进就满分，所以两个条件都要满足。
+6928:     # 占比 0.05 是真实语料实测下来的：历史合格章节的整章推进句占比中位数只有 0.079
+6929:     # （p05 0.026），千字窗口里约 50 句、推进 3-4 句。第一版取 0.25 时，107 条真实
+6930:     # 合格正文只有 6.5% 能让 window_pass_rate 达到 0.5，指标等于恒假。
+6931:     # 「推进不能只集中在开头」这个诉求主要由 MIN_HITS 保证，不靠抬高占比。
+6932:     WINDOW_PROGRESSION_RATIO_FLOOR = 0.05
+6933:     WINDOW_PROGRESSION_MIN_HITS = 2
+6934:     # 尾窗短于窗口长度的这个比例时并入前一窗，不单独判定：
+6935:     # 950 字切完只剩十几个字，再要求它有两句推进必然不达标，是纯粹的切分噪声。
+6936:     WINDOW_TAIL_MERGE_RATIO = 0.4
+6937: 
+6938:     @classmethod
+6939:     def _window_has_state_change(cls, window: str) -> bool:
+6940:         """千字窗口是否算「有状态推进」。
+6941: 
+6942:         判定按窗口内的推进句占比算，而不是「窗口里出现过一次推进词」——
+6943:         后者用在 950 字的窗口上等于恒真，指标会完全失去鉴别力。
+6944:         """
+6945:         units = cls._story_units(window)
+6946:         if not units:
+6947:             return False
+6948:         hits = sum(1 for unit in units if cls._unit_has_progression(unit))
+6949:         return (hits / len(units)) >= cls.WINDOW_PROGRESSION_RATIO_FLOOR and hits >= cls.WINDOW_PROGRESSION_MIN_HITS
+6950: 
+6951:     @classmethod
+6952:     def _split_progression_windows(cls, condensed: str, *, window_size: int) -> List[str]:
+6953:         windows = [condensed[index:index + window_size] for index in range(0, len(condensed), window_size)]
+6954:         if not windows:
+6955:             return [condensed]
+6956:         if len(windows) > 1 and len(windows[-1]) < int(window_size * cls.WINDOW_TAIL_MERGE_RATIO):
+6957:             tail = windows.pop()
+6958:             windows[-1] = windows[-1] + tail
+6959:         return windows
+6960: 
+6961:     @classmethod
+6962:     def _event_density_floors(cls, word_count: int) -> Dict[str, Any]:
+6963:         """事件密度门的分档阈值。
+6964: 
+6965:         历史值 1.0 / 1.25 / 1.45 让这个门在数学上不可能失败：`_story_units` 是句子级
+6966:         切分，千字正文能切出 45-65 个单元，`event_density_per_1000` 不可能低到 1.0。
+6967: 
+6968:         当前值由 147 条真实生成章节（去重、剔除退化循环文本后 107 条历史判定合格的
+6969:         正文）实测校准，不是拍脑袋也不是靠合成样本定的——第一版阈值（6.0 / 0.14 /
+6970:         绝对连段 12 句）正是用合成样本定的，在真实语料上误杀 96%。
+6971: 
+6972:         真实分布（历史合格池，n=107）：
+6973:         `event_density_per_1000` p05=2.01 / p50=4.60 / p95=9.48；
+6974:         `progression_unit_rate` p05=0.026 / p50=0.079 / p95=0.204；
+6975:         `max_plain_unit_run` 的绝对值毫无参考性（p50=36 / p95=104 / max=167，随章节
+6976:         长度线性膨胀），必须换成占全章句数的比例 `plain_run_ratio`：p50=0.22 /
+6977:         p95=0.45 / max=0.68，而纯寒暄灌水样本是 1.0——这才是有鉴别力的形态。
+6978: 
+6979:         阈值一律取真实分布的低分位（约 p03-p08），因为这是一道**底线门**：只拦纯描写
+6980:         堆砌、纯寒暄这类灾难样本，不承担质量优选（那是评分与 prompt 的职责）。
+6981:         宁可漏判，也不要误杀真实章节。
+6982:         """
+6983:         if word_count < 2500:
+6984:             return {"density_floor": 1.5, "unit_rate_floor": 0.025, "window_floor": 0.5, "plain_run_ratio_limit": 0.75}
+6985:         if word_count < 7000:
+6986:             return {"density_floor": 1.8, "unit_rate_floor": 0.028, "window_floor": 0.5, "plain_run_ratio_limit": 0.72}
+6987:         return {"density_floor": 2.0, "unit_rate_floor": 0.03, "window_floor": 0.55, "plain_run_ratio_limit": 0.7}
+6988: 
+6989:     # T-14：短样本不评估事件密度的字数下限。**不要下调**——800 字以下切不出
+6990:     # 足够的 story_unit，分位统计没有意义，密度会被单句噪声主导。真实语料
+6991:     # （n=138）里 <800 字只有 2 条（0.014），p03 已经是 950，下调换不到什么。
+6992:     EVENT_DENSITY_MIN_SAMPLE_CHARS = 800
+6993: 
+6994:     @classmethod
+6995:     def _evaluate_event_density(cls, text: str, *, word_count: int) -> Dict[str, Any]:
+6996:         """事件密度评估。样本过短时返回**「未评估」而不是「通过」**。
+6997: 
+6998:         T-14（D-08）。改造前这个分支谎报 `passed=True` + `progression_unit_rate=1.0`
+6999:         + `event_density_per_1000=0.0`，三个数字互相矛盾：推进单元 0 个、密度 0、
+7000:         推进率却是 100%。历史库里实测有 2 条快照就长这样，用户看到的是
+7001:         「推进单元 0 个，推进率 100%，密度达标」。
+7002: 
+7003:         现在三个 passed 与四个比率一律返回 `None`（= 未评估），并显式给出
+7004:         `event_density_evaluated=False` 与跳过原因。消费侧全部改成 `is not False`，
+7005:         所以「未评估」不会被当成失败去拦章，也不会被当成正向证据去激活软放行。
+7006:         """
+7007:         if word_count < cls.EVENT_DENSITY_MIN_SAMPLE_CHARS:
+7008:             return {
+7009:                 # 这两个字段是「未评估」与「评估后不通过」的唯一区分依据。
+7010:                 # 前端靠 event_density_evaluated 显示中性提示而不是红色风险。
+7011:                 "event_density_evaluated": False,
+7012:                 "event_density_skip_reason": "sample_too_short",
+7013:                 "event_density_min_sample_chars": cls.EVENT_DENSITY_MIN_SAMPLE_CHARS,
+7014:                 # 三个 passed 判定：None 而不是 True。绝不能改回 True——
+7015:                 # 那是拿「没测」当「测过且合格」，会连带白送 4 条软放行。
+7016:                 "event_density_passed": None,
+7017:                 "long_chapter_density_passed": None,
+7018:                 "state_change_interval_passed": None,
+7019:                 # 计数是真实的 0（确实没统计出推进单元），保留；
+7020:                 # 但四个**比率/占比**没有分母，必须 None，不能给 1.0 / 0.0。
+7021:                 "progression_unit_count": 0,
+7022:                 "story_unit_count": 0,
+7023:                 "progression_unit_rate": None,
+7024:                 "event_density_per_1000": None,
+7025:                 "state_change_window_pass_rate": None,
+7026:                 "max_plain_unit_run": 0,
+7027:                 "max_plain_unit_run_ratio": None,
+7028:             }
+7029: 
+7030:         units = cls._story_units(text)
+7031:         progression_flags = [cls._unit_has_progression(unit) for unit in units]
+7032:         progression_count = sum(1 for item in progression_flags if item)
+7033:         story_unit_count = len(units)
+7034:         max_plain_run = 0
+7035:         current_plain_run = 0
+7036:         for flag in progression_flags:
+7037:             if flag:
+7038:                 current_plain_run = 0
+7039:             else:
+7040:                 current_plain_run += 1
+7041:                 max_plain_run = max(max_plain_run, current_plain_run)
+7042: 
+7043:         condensed = "".join(str(text or "").split())
+7044:         window_size = 1200 if word_count >= 7000 else 950
+7045:         windows = cls._split_progression_windows(condensed, window_size=window_size) or [condensed]
+7046:         window_hits = sum(1 for window in windows if cls._window_has_state_change(window))
+7047:         window_pass_rate = round(window_hits / max(1, len(windows)), 4)
+7048: 
+7049:         density_per_1000 = round(progression_count / max(1.0, word_count / 1000), 4)
+7050:         progression_rate = round(progression_count / max(1, story_unit_count), 4)
+7051:         # 最长无推进连段要按占全章句数的比例算：绝对句数随章节长度线性膨胀，
+7052:         # 真实章节的 p95 是 104 句，用绝对阈值必然按长度歧视长章。
+7053:         plain_run_ratio = round(max_plain_run / max(1, story_unit_count), 4)
+7054:         floors = cls._event_density_floors(word_count)
+7055:         density_floor = floors["density_floor"]
+7056:         unit_rate_floor = floors["unit_rate_floor"]
+7057:         window_floor = floors["window_floor"]
+7058:         plain_run_ratio_limit = floors["plain_run_ratio_limit"]
+7059: 
+7060:         state_interval_passed = bool(window_pass_rate >= window_floor)
+7061:         dense_progression_override = bool(
+7062:             state_interval_passed
+7063:             and density_per_1000 >= density_floor * 2
+7064:             and progression_rate >= unit_rate_floor * 1.6
+7065:         )
+7066:         event_density_passed = bool(
+7067:             density_per_1000 >= density_floor
+7068:             and progression_rate >= unit_rate_floor
+7069:             and (plain_run_ratio <= plain_run_ratio_limit or dense_progression_override)
+7070:         )
+7071:         long_chapter_passed = True
+7072:         if word_count >= 7000:
+7073:             long_chapter_passed = bool(event_density_passed and state_interval_passed and progression_count >= 12)
+7074: 
+7075:         return {
+7076:             # T-14：正常路径显式标记「评估过了」，与短路分支的 False 成对。
+7077:             # 消费方判断「有没有测」只看这个字段，不要靠 passed is None 反推。
+7078:             "event_density_evaluated": True,
+7079:             "event_density_passed": event_density_passed,
+7080:             "long_chapter_density_passed": long_chapter_passed,
+7081:             "state_change_interval_passed": state_interval_passed,
+7082:             "progression_unit_count": progression_count,
+7083:             "story_unit_count": story_unit_count,
+7084:             "progression_unit_rate": progression_rate,
+7085:             "event_density_per_1000": density_per_1000,
+7086:             "state_change_window_count": len(windows),
+7087:             "state_change_window_hit_count": window_hits,
+7088:             "state_change_window_pass_rate": window_pass_rate,
+7089:             "max_plain_unit_run": max_plain_run,
+7090:             "max_plain_unit_run_ratio": plain_run_ratio,
+7091:         }
+7092: 
+7093:     @staticmethod
+7094:     def _count_dialogue_state_change_markers(text: str) -> int:
+7095:         markers = (
+7096:             "逼问", "反问", "拒绝", "改口", "让步", "沉默", "威胁", "试探", "压低",
+7097:             "盯", "笑了", "停住", "转而", "暴露", "发现", "意识到", "决定", "条件",
+7098:             "交换", "代价", "风险", "失控",
+7099:         )
+7100:         normalized_markers = (
+7101:             "逼问", "反问", "质问", "追问", "试探", "压迫", "压住", "拒绝", "沉默", "打断",
+7102:             "反制", "威胁", "翻脸", "让步", "改口", "承认", "暴露", "泄露", "发现", "意识到",
+7103:             "决定", "选择", "条件", "交换", "代价", "风险", "危险", "失控", "反转", "退路",
+7104:             "拿到", "名单", "医院", "消息",
+7105:         )
+7106:         return sum(str(text or "").count(marker) for marker in markers + normalized_markers)
+7107: 
+7108:     # T-13：未声明对话预期时的状态标记门槛。取 1 而不是 2（声明时用的值），
+7109:     # 因为这批章节本来就没被要求写对话场，用同样严的判据等于追认一个没提过的要求。
+7110:     # 真实语料（n=28，即 expected_dialogue=False 的全部样本）实测 sc 分布
+7111:     # p05=1 / p50=14 / p95=31 / min=0：门槛取 1 时 27 条判 True、1 条判 False，
+7112:     # 取 2 会多罚 1 条。这是底线门不是优选项，按「宁可漏判不要误杀」取 1。
+7113:     UNDECLARED_DIALOGUE_STATE_MARKER_FLOOR = 1
+7114: 
+7115:     @classmethod
+7116:     def _evaluate_dialogue_changes_state(cls, text: str, *, expected_dialogue: bool, dialogue_markers: int) -> Dict[str, Any]:
+7117:         """对话是否改变局势——**三态**：True 通过 / False 不通过 / None 不适用。
+7118: 
+7119:         T-13（D-07）。改造前是 `True if not expected_dialogue else ...`，把「本章没要求
+7120:         对话」直接当成「对话质量合格」，白给 +140 分，还会连带激活 4 条软放行——
+7121:         后者比分数严重，因为它能绕过其它 blocker。
+7122: 
+7123:         **判定顺序刻意与交接文档 D-07 的示例代码不同，不要"改回去"**：文档把
+7124:         `dialogue_markers == 0 → None` 判在最前面，那样「任务书要求了对话、正文却零对话」
+7125:         也会落进 None，而 `dialogue_does_not_change_state` blocker 用的是
+7126:         `is not False` 判据 —— 这道 blocker 会因此静默失效，等于把门改松，与本任务
+7127:         的目的相反。真实语料里这种样本恰好是 0 条（所以两种顺序在现有数据上跑分完全
+7128:         一样，测不出差别），正因为测不出来才必须在代码里把顺序固定住。
+7129: 
+7130:         所以：**先看任务书要求，「不适用」只在「没要求 + 正文确实没对话」时成立。**
+7131:         """
+7132:         marker_count = cls._count_dialogue_state_change_markers(text)
+7133:         if expected_dialogue:
+7134:             # 声明了对话预期 → 判据保持原样，不放松（blocker 依赖这一支）
+7135:             passed: Optional[bool] = bool(dialogue_markers >= 2 and marker_count >= 2)
+7136:             applicable = True
+7137:         elif dialogue_markers <= 0:
+7138:             # 没要求对话，正文也确实没有对话 → 该维度不适用，不加分也不减分
+7139:             passed = None
+7140:             applicable = False
+7141:         else:
+7142:             # 没要求对话但正文有对话 → 仍按内容判，只是门槛更低（见上方常量注释）
+7143:             passed = bool(marker_count >= cls.UNDECLARED_DIALOGUE_STATE_MARKER_FLOOR)
+7144:             applicable = True
+7145:         return {
+7146:             "expected_dialogue": expected_dialogue,
+7147:             # 显式记「任务书有没有声明预期」，让消费方不必靠 expected_dialogue 反推
+7148:             "dialogue_expectation_declared": bool(expected_dialogue),
+7149:             "dialogue_state_applicable": applicable,
+7150:             "dialogue_marker_count": dialogue_markers,
+7151:             "state_change_marker_count": marker_count,
+7152:             "dialogue_changes_state": passed,
+7153:         }
+7154: 
+7155:     # D-24：章末「泄气」判定的两个阈值。
+7156:     # 260 字符窗保留原样（缩窗会把真实语料通过率从 81.2% 打到 47%-74%，是误杀而不是提高召回），
+7157:     # 改成在窗判定之外**加一条针对末段本身的否决**：
+7158:     # - `ENDING_CORE_WEAK_ONLY_LIMIT = 2`：末段零语义命中却有 >= 2 个弱信号（问号、叹号、
+7159:     #   省略号、程度副词），就是「用标点假装压力」。真实语料 n=136 的历史通过池（n=101）
+7160:     #   实测：W>=1 通过率 76.2%、W>=2 是 80.2%、W>=3 是 81.2%（= 基线，等于没修）。
+7161:     #   取 2 是「能拦住合成坏样本、又只净减 1 条真实样本」的唯一取值。
+7162:     # - `ENDING_CORE_FLAT_CHARS = 150`：末段长到 150 字还一个语义压力词都没有，
+7163:     #   属于平铺收尾。真实语料里**没有任何样本落进这一条**（w_min=2 叠加 long_n
+7164:     #   120/150/200 通过率都仍是 80.2%），所以它是零误杀成本的补充覆盖，
+7165:     #   专门堵「不用问号、纯粹写一大段平淡收尾」的形态。
+7166:     ENDING_CORE_WEAK_ONLY_LIMIT = 2
+7167:     ENDING_CORE_FLAT_CHARS = 150
+7168: 
+7169:     @classmethod
+7170:     def _evaluate_ending_pressure(
+7171:         cls,
+7172:         condensed_text: str,
+7173:         chapter_mission: Optional[dict],
+7174:         raw_text: Optional[str] = None,
+7175:     ) -> Dict[str, Any]:
+7176:         """章末压力门。
+7177: 
+7178:         `condensed_text` 是去掉全部空白的正文，用来取 260 字尾窗；`raw_text` 是保留
+7179:         换行的原文，**只用来切出「最后一个非空段落」**（D-24）。不传 raw_text 时退化成
+7180:         「整段就是末段」，老的单元测试调用因此不用改。
+7181:         """
+7182:         ending_excerpt = condensed_text[-260:]
+7183:         # D-24 核心段：真实语料末段长度 p50=24 / p75=73 / p95=151，远短于 260，
+7184:         # 所以正文最后一段几乎必然被卷进尾窗——语义命中可能根本不来自结尾。
+7185:         source_text = raw_text if raw_text is not None else condensed_text
+7186:         ending_paragraphs = [line.strip() for line in str(source_text or "").splitlines() if line.strip()]
+7187:         ending_core = "".join(ending_paragraphs[-1].split()) if ending_paragraphs else ending_excerpt
+7188:         continuity = (chapter_mission or {}).get("continuity_anchor") if isinstance(chapter_mission, dict) else {}
+7189:         deliver_to_next = continuity.get("deliver_to_next") if isinstance(continuity, dict) else []
+7190:         _, deliver_hits = cls._score_text_hits(deliver_to_next, ending_excerpt)
+7191:         mission_hook_sources: List[Any] = []
+7192:         if isinstance(chapter_mission, dict):
+7193:             for key in (
+7194:                 "suspense_hook",
+7195:                 "chapter_role",
+7196:                 "chapter_purpose",
+7197:                 "payoff_window",
+7198:                 "conflict_escalation",
+7199:                 "foreshadowing_tasks",
+7200:             ):
+7201:                 if chapter_mission.get(key):
+7202:                     mission_hook_sources.append(chapter_mission.get(key))
+7203:             scene_list = chapter_mission.get("scene_list")
+7204:             if isinstance(scene_list, list) and scene_list:
+7205:                 last_scene = scene_list[-1] if isinstance(scene_list[-1], dict) else {}
+7206:                 for key in ("end_hook", "bridge", "outcome", "pressure_shift", "payoff", "turn"):
+7207:                     if last_scene.get(key):
+7208:                         mission_hook_sources.append(last_scene.get(key))
+7209:         _, mission_hook_hits = cls._score_text_hits(mission_hook_sources, ending_excerpt)
+7210:         semantic_hits = [marker for marker in cls.ENDING_SEMANTIC_HOOK_MARKERS if marker in ending_excerpt]
+7211:         weak_hits = [marker for marker in cls.ENDING_WEAK_HOOK_MARKERS if marker in ending_excerpt]
+7212:         # 明确倒计时是可验证的章末压力，不能因没有复述任务书原词而漏判。
+7213:         if re.search(r"[一二三四五六七八九十]\s*[、，,]\s*[一二三四五六七八九十]", ending_excerpt):
+7214:             semantic_hits.append("倒计时")
+7215:         closure_hits = [marker for marker in cls.ENDING_CLOSURE_MARKERS if marker in ending_excerpt]
+7216:         # D-24：末段自身的命中情况。语义命中落在窗内但不在末段里，说明压力来自正文而非结尾。
+7217:         core_semantic_hits = [marker for marker in cls.ENDING_SEMANTIC_HOOK_MARKERS if marker in ending_core]
+7218:         core_weak_hits = [marker for marker in cls.ENDING_WEAK_HOOK_MARKERS if marker in ending_core]
+7219:         core_deflating = bool(
+7220:             not core_semantic_hits
+7221:             and (
+7222:                 len(core_weak_hits) >= cls.ENDING_CORE_WEAK_ONLY_LIMIT
+7223:                 or len(ending_core) >= cls.ENDING_CORE_FLAT_CHARS
+7224:             )
+7225:         )
+7226:         # 语义压力是必要条件：只靠两个问号叹号骗不过章末压力门。
+7227:         generic_pass = bool(semantic_hits) and (len(semantic_hits) + len(weak_hits)) >= 2
+7228:         mission_hook_pass = bool(mission_hook_hits and (semantic_hits or weak_hits))
+7229:         passed = bool(
+7230:             (deliver_hits or mission_hook_pass or generic_pass)
+7231:             and not closure_hits
+7232:             and not core_deflating
+7233:         )
+7234:         return {
+7235:             "ending_pressure_passed": passed,
+7236:             "ending_pressure_hits": (deliver_hits + mission_hook_hits + semantic_hits + weak_hits)[:10],
+7237:             "mission_hook_hits": mission_hook_hits[:6],
+7238:             "ending_semantic_hit_count": len(semantic_hits),
+7239:             "ending_weak_hit_count": len(weak_hits),
+7240:             "flat_closure_markers": closure_hits[:4],
+7241:             # D-24 第 3 条要求：语义命中落在尾窗哪个位置必须可观测，否则误杀无法诊断。
+7242:             "ending_core_chars": len(ending_core),
+7243:             "ending_core_semantic_hit_count": len(core_semantic_hits),
+7244:             "ending_core_weak_hit_count": len(core_weak_hits),
+7245:             "ending_core_deflating": core_deflating,
+7246:         }
+7247: 
+7248:     # 静态段落判定用的动作词表（T-09）。两条硬约束，改这张表前先看 D-08：
+7249:     # ① 不放高频单字。原表里的「看 / 却 / 但 / 发现」是汉语超高频字，纯风景描写里
+7250:     #    「湖面看似平滑」「云影却淡」「但风铃不动」轻易出现，整段立刻被判成「有动作」，
+7251:     #    于是 max_static_run 恒为 0 —— 这是 D-08 的第一层根因，实测 130 字纯风景段
+7252:     #    含这四个字时 static_paragraph_count 就是 0。
+7253:     # ② 自然现象动词不算动作，单列在 AMBIENT_MOTION_MARKERS 里，只做文档与护栏用途，
+7254:     #    不参与判定。「风吹过」「光洒在」没有行为主体，不构成情节推进。
+7255:     STATIC_ACTION_MARKERS = (
+7256:         "说", "问", "答", "开口",
+7257:         "回头", "扭头", "转身", "起身", "坐下",
+7258:         "走", "退", "冲向", "冲出", "扑", "撞",
+7259:         "伸手", "抬头", "抬手", "举起", "放下", "拿起", "握", "推", "抓", "按",
+7260:         "拔出", "扣动", "掏出",
+7261:         "盯", "看向", "看着", "瞪",
+7262:         "决定",
+7263:     )
+7264: 
+7265:     # 无主体的自然现象动词：**永远不算动作**。单列出来是为了让护栏测试能断言
+7266:     # 它们没有偷偷混进 STATIC_ACTION_MARKERS。
+7267:     AMBIENT_MOTION_MARKERS = ("吹", "洒", "飘", "流", "垂", "映", "漫", "摇曳", "掠", "拂")
+7268: 
+7269:     # T-11：焦点人物名的占位符黑名单。任务书里写「主角」「男主」这类通用称谓时，
+7270:     # 拿它去正文里做字符串匹配必然匹配不到，会把每一章都判成「焦点人物缺席」。
+7271:     FOCUS_CHARACTER_PLACEHOLDERS = frozenset(
+7272:         {"主角", "男主", "女主", "角色", "角色A", "角色B", "protagonist", "pov"}
+7273:     )
+7274: 
+7275:     @classmethod
+7276:     def _collect_focus_character_names(cls, chapter_mission: Optional[dict]) -> List[str]:
+7277:         """从任务书里收集本章焦点人物名（T-11，逻辑照搬孤儿版 story_quality_scoring.py）。
+7278: 
+7279:         四个数据源按优先级合并：`focus_characters` / `character_focus` / `pov_character` /
+7280:         `scene_list[].characters`。这四个键**生产路径此前一个都没用过**——连续性门用的是
+7281:         另一条数据源 `package.cast_plan.chapter_focus_names`，在 `package is None`
+7282:         （短篇或未启用长篇上下文）时整条门直接放行，所以这里补的是独立的第二条通路。
+7283: 
+7284:         三个约束都是必要的，不是防御性代码：
+7285:         - 占位符过滤：见 FOCUS_CHARACTER_PLACEHOLDERS 的注释。
+7286:         - 2-12 字：短于 2 字的切片是标点残渣，长于 12 字的是被误切的句子而不是人名。
+7287:         - 去重后取前 8：任务书里的人物表可以很长，但一章里真正的焦点不会超过这个数，
+7288:           名字越多，「一个都没出现」这个判定越难成立，也就越保守。
+7289:         """
+7290:         if not isinstance(chapter_mission, dict):
+7291:             return []
+7292:         names: List[str] = []
+7293:         seen: set = set()
+7294: 
+7295:         def add_name(value: Any) -> None:
+7296:             if not value:
+7297:                 return
+7298:             if isinstance(value, dict):
+7299:                 for item in value.values():
+7300:                     add_name(item)
+7301:                 return
+7302:             if isinstance(value, list):
+7303:                 for item in value:
+7304:                     add_name(item)
+7305:                 return
+7306:             text = str(value).strip()
+7307:             if not text:
+7308:                 return
+7309:             for raw in re.split(r"[，。；、,;\s/|]+", text):
+7310:                 name = raw.strip("：:- ").strip()
+7311:                 if not (2 <= len(name) <= 12):
+7312:                     continue
+7313:                 if name in cls.FOCUS_CHARACTER_PLACEHOLDERS or name.lower() in cls.FOCUS_CHARACTER_PLACEHOLDERS:
+7314:                     continue
+7315:                 if name not in seen:
+7316:                     seen.add(name)
+7317:                     names.append(name)
+7318: 
+7319:         add_name(chapter_mission.get("focus_characters"))
+7320:         add_name(chapter_mission.get("character_focus"))
+7321:         add_name(chapter_mission.get("pov_character"))
+7322:         for scene in chapter_mission.get("scene_list") or []:
+7323:             if isinstance(scene, dict):
+7324:                 add_name(scene.get("characters"))
+7325:         return names[:8]
+7326: 
+7327:     @classmethod
+7328:     def _estimate_static_description_runs(cls, paragraphs: List[str]) -> Dict[str, int]:
+7329:         static_count = 0
+7330:         max_run = 0
+7331:         current_run = 0
+7332:         action_markers = cls.STATIC_ACTION_MARKERS
+7333:         for paragraph in paragraphs:
+7334:             plain = "".join(str(paragraph or "").split())
+7335:             is_static = len(plain) >= 100 and not cls._paragraph_has_character_action(plain)
+7336:             if is_static:
+7337:                 static_count += 1
+7338:                 current_run += 1
+7339:                 max_run = max(max_run, current_run)
+7340:             else:
+7341:                 current_run = 0
+7342:         return {"static_paragraph_count": static_count, "max_static_run": max_run}
+7343: 
+7344:     @classmethod
+7345:     def _paragraph_has_character_action(cls, plain: str) -> bool:
+7346:         """环境运动不算人物行动；动作前需出现可识别的人物/人称主体。"""
+7347:         text = str(plain or "")
+7348:         action = "|".join(re.escape(item) for item in (*cls.STATIC_ACTION_MARKERS, "伸手", "推开", "转身", "走进", "迈入", "握住"))
+7349:         subject = r"(?:他|她|他们|她们|林七|顾沉|沈舟|守卫|主角|门卫|证人|男人|女人|少年|少女)"
+7350:         return bool(re.search(rf"{subject}.{{0,12}}(?:{action})", text))
+7351: 
+7352:     @staticmethod
+7353:     def _evaluate_repetition_risk(paragraphs: List[str], *, word_count: int) -> Dict[str, Any]:
+7354:         """精确重复段落检测（T-10，阈值照抄孤儿版 story_quality_scoring.py，不要调）。
+7355: 
+7356:         为什么必须有这道门：重复段落是 LLM 凑字数最典型的退化形式，而评分器会把它
+7357:         当成正分——重复段同样贡献 `paragraph_count` 与 `progression_unit_count`，
+7358:         也就是说在这道门落地之前，**复制粘贴同一段能刷高分**。
+7359: 
+7360:         三个阈值的用意：
+7361:         - `len(plain) >= 30` 才计入：短段落重复是正常的（「好。」「嗯。」这类对话应答）。
+7362:         - `word_count >= 800` 才启用：短文本统计量不稳。
+7363:         - 判定用「同段 >= 3 次且 >= 30 字」或「重复占比 >= 0.3 且最长 >= 80 字」两条，
+7364:           刻意留出排比/复沓修辞的空间。真实语料 n=136 实测触发率 0.000
+7365:           （`repeated_instances` p95=0、max=1），所以这道门不会碰到正常文本。
+7366: 
+7367:         近似重复（编辑距离/向量相似）明确不做，留 P3——精确重复已能抓住绝大多数灌水。
+7368:         """
+7369:         normalized: List[str] = []
+7370:         for paragraph in paragraphs:
+7371:             plain = re.sub(r"\s+", "", str(paragraph or ""))
+7372:             if len(plain) >= 30:
+7373:                 normalized.append(plain)
+7374:         counts: Dict[str, int] = {}
+7375:         for paragraph in normalized:
+7376:             counts[paragraph] = counts.get(paragraph, 0) + 1
+7377:         repeated = [(text, count) for text, count in counts.items() if count > 1]
+7378:         repeated_instances = sum(count - 1 for _text, count in repeated)
+7379:         max_repeat = max((count for _text, count in repeated), default=1)
+7380:         longest_repeated = max((len(text) for text, _count in repeated), default=0)
+7381:         repeated_ratio = round(repeated_instances / max(1, len(normalized)), 4)
+7382:         risk = bool(
+7383:             word_count >= 800
+7384:             and repeated
+7385:             and (
+7386:                 (max_repeat >= 3 and longest_repeated >= 30)
+7387:                 or (repeated_instances >= 2 and repeated_ratio >= 0.3 and longest_repeated >= 80)
+7388:             )
+7389:         )
+7390:         return {
+7391:             "repetition_risk": risk,
+7392:             "repeated_paragraph_count": len(repeated),
+7393:             "repeated_paragraph_instances": repeated_instances,
+7394:             "max_repeated_paragraph_count": max_repeat,
+7395:             "repeated_paragraph_ratio": repeated_ratio,
+7396:             "longest_repeated_paragraph_chars": longest_repeated,
+7397:             "repeated_paragraph_examples": [text[:120] for text, _count in repeated[:3]],
+7398:         }
+7399: 
+7400:     @staticmethod
+7401:     def _detect_chapter_artifact_markers(text):
+7402:         """Detect chapter artifact markers in content."""
+7403:         if not text:
+7404:             return {"chapter_artifact_markers": False, "chapter_artifact_marker_count": 0, "chapter_artifact_marker_examples": []}
+7405:         
+7406:         import re
+7407:         patterns = [
+7408:             re.compile(r'^\s*#{1,6}\s*(?:场景|scene|扩写|修订|完整章节正文|本章正文|章节大纲|章节导演)\s*\d*\s*[|\uff5c:\uff1a\u3011]?\s*\S*', re.IGNORECASE | re.MULTILINE),
+7409:             re.compile(r'^\s*(?:【|\*\*【)?\s*场景\s*\d+\s*(?:[|\uff5c:\uff1a\u3011]|$)', re.MULTILINE),
+7410:             re.compile(r'^\s*(?:【|\*\*【)?\s*扩写部分\s*\d*\s*(?:[|\uff5c:\uff1a\u3011]|$)', re.MULTILINE),
+7411:             re.compile(r'^\s*(?:修改说明|修订说明|以下是|本章正文|完整章节正文)\s*[:\uff1a]', re.MULTILINE),
+7412:             re.compile(r'(?:写作指令|写作要求|质量方向|基础质量底线|首稿执行要求)\s*[:\uff1a]'),
+7413:             re.compile(r'约\s*\d+\s*字'),
+7414:         ]
+7415:         
+7416:         examples = []
+7417:         for p in patterns:
+7418:             for m in p.finditer(text):
+7419:                 example = m.group(0).strip()
+7420:                 if example and len(example) <= 100:
+7421:                     examples.append(example)
+7422:                     if len(examples) >= 5:
+7423:                         break
+7424:             if len(examples) >= 5:
+7425:                 break
+7426:         
+7427:         # Also check for structural bold headings
+7428:         for m in re.finditer(r'\*\*(.+?)\*\*', text):
+7429:             s = m.group(1)
+7430:             if any(kw in s for kw in ['场景', '章节', '扩写', '修订']):
+7431:                 examples.append(m.group(0).strip())
+7432:                 if len(examples) >= 5:
+7433:                     break
+7434:         
+7435:         return {"chapter_artifact_markers": len(examples) > 0, "chapter_artifact_marker_count": len(examples), "chapter_artifact_marker_examples": examples[:5]}
+7436: 
+7437:     @staticmethod
+7438:     def _evaluate_reversal_quality(text: str) -> Dict[str, Any]:
+7439:         value = str(text or "")
+7440:         signals = ("原来", "却", "反而", "竟然", "发现", "真相", "伪造", "反转", "没想到")
+7441:         hits = [signal for signal in signals if signal in value]
+7442:         late = value[int(len(value) * 0.6):]
+7443:         return {"reversal_signal_count": len(hits), "reversal_signals": hits, "reversal_in_late_section": any(signal in late for signal in hits)}
+7444: 
+7445:     @staticmethod
+7446:     def _evaluate_content_balance(paragraphs: List[str], *, word_count: int) -> Dict[str, Any]:
+7447:         text = "\n".join(paragraphs or [])
+7448:         dialogue_chars = sum(len(item) for item in re.findall(r"[“\"].*?[”\"]", text))
+7449:         ratio = round(dialogue_chars / max(1, len(text)), 4)
+7450:         dialogue_turns = len(re.findall(r"[“\"]", text))
+7451:         penalty = 0
+7452:         if word_count >= 1000 and dialogue_turns >= 15:
+7453:             penalty = 240 if ratio > 0.8 else 120
+7454:         return {"dialogue_ratio": ratio, "content_balance_penalty": penalty}
+7455: 
+7456:     @staticmethod
+7457:     def _evaluate_mission_quality(chapter_mission: Optional[dict], target_word_count: int, *, chapter_number: int = 2) -> Dict[str, Any]:
+7458:         mission = chapter_mission or {}
+7459:         codes: List[str] = []
+7460:         scenes = mission.get("scene_list") if isinstance(mission, dict) else []
+7461:         if not isinstance(scenes, list) or not scenes:
+7462:             codes.append("mission_scene_too_few")
+7463:             codes.append("mission_turn_placeholder")
+7464:         elif any(not str((item or {}).get("turn") or "").strip() or "变化" in str((item or {}).get("turn") or "") for item in scenes if isinstance(item, dict)):
+7465:             codes.append("mission_turn_placeholder")
+7466:         inherit = ((mission.get("continuity_anchor") or {}).get("inherit_from_previous") if isinstance(mission, dict) else [])
+7467:         if chapter_number > 1 and not inherit:
+7468:             codes.append("mission_inherit_empty")
+7469:         if not ((mission.get("dialogue_strategy") or {}).get("purpose") if isinstance(mission, dict) else None):
+7470:             codes.append("mission_dialogue_strategy_empty")
+7471:         if not (mission.get("focus_characters") or mission.get("character_focus") if isinstance(mission, dict) else None):
+7472:             codes.append("mission_focus_placeholder")
+7473:         return {"mission_quality_codes": codes, "target_word_count": int(target_word_count or 0)}
+7474: 
+7475:     @staticmethod
+7476:     def _evaluate_dialogue_speaker_distribution(text: str) -> Dict[str, Any]:
+7477:         speakers = re.findall(r"[“\"][^”\"]+[”\"]\s*([\u4e00-\u9fff]{2,4})\s*(?:说|道|问|答)", str(text or ""))
+7478:         counts: Dict[str, int] = {}
+7479:         for speaker in speakers:
+7480:             counts[speaker] = counts.get(speaker, 0) + 1
+7481:         total = sum(counts.values())
+7482:         dominant = max(counts.values(), default=0) / max(1, total)
+7483:         return {"speaker_count": len(counts), "speaker_counts": counts, "dominant_speaker_ratio": round(dominant, 4)}
+7484: 
+7485:     @staticmethod
+7486:     def _evaluate_scene_transition_clarity(paragraphs: List[str]) -> Dict[str, Any]:
+7487:         hard = 0
+7488:         summary = 0
+7489:         for previous, current in zip(paragraphs or [], (paragraphs or [])[1:]):
+7490:             previous_text = str(previous or "")
+7491:             current_text = str(current or "")
+7492:             if re.search(r"(?:第二天|翌日|次日|来到|转眼|片刻后)", current_text):
+7493:                 hard += 1
+7494:             if re.search(r"(?:平静下来|安静下来|谁也没有|一切结束|再没有开口)", previous_text):
+7495:                 summary += 1
+7496:         return {"hard_scene_cut_count": hard, "summary_scene_cut_count": summary, "scene_transition_warning": bool(hard or summary)}
+7497: 
+7498:     @staticmethod
+7499:     def _evaluate_continuity_inherit(text: str, chapter_mission: Optional[dict]) -> Dict[str, Any]:
+7500:         anchors = ((chapter_mission or {}).get("continuity_anchor") or {}).get("inherit_from_previous") if isinstance(chapter_mission, dict) else []
+7501:         anchors = [str(item).strip() for item in (anchors or []) if str(item).strip()]
+7502:         if not anchors:
+7503:             return {"continuity_inherit_missing": False, "continuity_inherit_late": False, "continuity_inherit_hit_count": 0, "inherit_hit_count": 0}
+7504:         full = str(text or "")
+7505:         opening = full[: max(240, int(len(full) * 0.28))]
+7506:         hits = sum(1 for anchor in anchors if anchor in full)
+7507:         opening_hits = sum(1 for anchor in anchors if anchor in opening)
+7508:         return {
+7509:             "continuity_inherit_missing": hits == 0,
+7510:             "continuity_inherit_late": hits > 0 and opening_hits == 0,
+7511:             "continuity_inherit_hit_count": opening_hits,
+7512:             "inherit_hit_count": opening_hits,
+7513:             "continuity_inherit_total_hit_count": hits,
+7514:         }
+7515: 
+7516:     @classmethod
+7517:     def _score_story_quality_candidate(
+7518:         cls,
+7519:         *,
+7520:         content: str,
+7521:         violations: List[Dict[str, Any]],
+7522:         chapter_mission: Optional[dict],
+7523:         target_word_count: Optional[int] = None,
+7524:         min_word_count: Optional[int] = None,
+7525:     ) -> Dict[str, Any]:
+7526:         text = str(content or "")
+7527:         condensed = "".join(text.split())
+7528:         word_count = len(condensed)
+7529:         # T-12 第 1 层：在这之前，target_word_count / min_word_count 只出现在签名里，
+7530:         # 函数体零引用——字数是 CLAUDE.md 的第一目标，却完全没进候选评分。
+7531:         #
+7532:         # preferred_floor 的 0.92 在生产里是个**死参数**：`_resolve_config` 与
+7533:         # `_resolve_chapter_draft_contract` 都按 min = target * 0.9 推导，于是
+7534:         # max(min_floor, 0.92*target) 恒等于 0.92*target。真实语料实测（n=82）把
+7535:         # 比例从 0.92 一路降到 0.70，far_below 只从 0.244 动到 0.220。保留 0.92
+7536:         # 是为了让「调用方显式传了更低的 min」这种情形仍然有意义，不是为了调参。
+7537:         target_floor = max(0, int(target_word_count or 0))
+7538:         minimum_floor = max(0, int(min_word_count or 0))
+7539:         if target_floor and minimum_floor > target_floor:
+7540:             minimum_floor = target_floor
+7541:         preferred_floor = max(minimum_floor, int(target_floor * 0.92)) if target_floor else minimum_floor
+7542:         word_count_below_min = bool(minimum_floor and word_count < minimum_floor)
+7543:         word_count_far_below_target = bool(preferred_floor and word_count < preferred_floor)
+7544:         # upper_target 的 2.0 / 1.6 来自孤儿版，**不要换成死代码 _score_fallback_candidate
+7545:         # 里的 1.25**。真实语料敏感性实测（n=82，历史通过池）：2.0/1.6 → 0.012、
+7546:         # 1.6/1.4 → 0.134、1.25/1.25 → 0.305。1.25 会把三成正常章节判成「字数远超目标」，
+7547:         # 是 25 倍的误杀差距。
+7548:         # 已知不单调：target=2500 时 upper=5000，target=2501 时 upper=4001。这是孤儿版
+7549:         # 的原始行为，保留是因为 2500 是短章/长章的分界，两侧的「超长」含义本就不同。
+7550:         if target_floor:
+7551:             upper_target = int(target_floor * 2.0) if target_floor <= 2500 else int(target_floor * 1.6)
+7552:         else:
+7553:             upper_target = 0
+7554:         word_count_far_above_target = bool(upper_target and word_count > upper_target)
+7555:         paragraphs = [segment for segment in text.splitlines() if segment.strip()]
+7556:         paragraph_count = len(paragraphs)
+7557:         reversal_quality = cls._evaluate_reversal_quality(text)
+7558:         content_balance = cls._evaluate_content_balance(paragraphs, word_count=word_count)
+7559:         mission_quality = cls._evaluate_mission_quality(chapter_mission, target_floor, chapter_number=2)
+7560:         speaker_distribution = cls._evaluate_dialogue_speaker_distribution(text)
+7561:         scene_transition = cls._evaluate_scene_transition_clarity(paragraphs)
+7562:         continuity_inherit = cls._evaluate_continuity_inherit(text, chapter_mission)
+7563:         dialogue_markers = sum(text.count(marker) for marker in ("“", "”", "「", "」", "『", "』", '"'))
+7564:         mission_keywords = cls._collect_fallback_mission_keywords(chapter_mission)
+7565:         mission_hits = [keyword for keyword in mission_keywords if keyword and keyword in condensed]
+7566:         # T-11：焦点人物缺席。判罚条件是「一个都没出现」而不是「有人没出现」——
+7567:         # 配角某章不出场是正常叙事，只有全员缺席才说明这一章写偏了任务书。
+7568:         focus_character_names = cls._collect_focus_character_names(chapter_mission)
+7569:         focus_character_hits = [name for name in focus_character_names if name and name in condensed]
+7570:         focus_character_missing = bool(
+7571:             focus_character_names and not focus_character_hits and word_count >= 1200
+7572:         )
+7573:         expected_dialogue = cls._chapter_mission_expects_dialogue(chapter_mission)
+7574:         scene_fulfillment = cls._evaluate_scene_fulfillment(chapter_mission, condensed)
+7575:         dialogue_state = cls._evaluate_dialogue_changes_state(
+7576:             text,
+7577:             expected_dialogue=expected_dialogue,
+7578:             dialogue_markers=dialogue_markers,
+7579:         )
+7580:         # raw_text 必须传原文：D-24 的末段判定要靠换行切段，condensed 已经没有换行了。
+7581:         ending_pressure = cls._evaluate_ending_pressure(condensed, chapter_mission, raw_text=text)
+7582:         ending_hook = bool(ending_pressure.get("ending_pressure_passed"))
+7583:         static_runs = cls._estimate_static_description_runs(paragraphs)
+7584:         event_density = cls._evaluate_event_density(text, word_count=word_count)
+7585:         repetition = cls._evaluate_repetition_risk(paragraphs, word_count=word_count)
+7586:         artifact_markers = cls._detect_chapter_artifact_markers(text)
+7587:         # 静态描写风险的四条 or（T-08）。阈值来自孤儿版 story_quality_scoring.py，
+7588:         # 但**第 2 条的 max_static_run 门槛保持 >= 3 而不是照抄孤儿版的 >= 2**：
+7589:         # T-09 收紧 STATIC_ACTION_MARKERS 后，真实语料（n=136，§11.2.1 分位表见
+7590:         # 交接文档第 7 节批 6 记录）的 max_static_run 分布整体右移（p50 0→1），
+7591:         # 孤儿版原样触发 4.4%，而 >= 3 只触发 2.9%，都在底线门可接受范围内，
+7592:         # 但 >= 3 对「零星长段」更宽容，符合「宁可漏判不要误杀」。
+7593:         # 第 4 条是唯一能抓「插几句寒暄对话掩护大段描写」的判定，前三条一有对话就放过。
+7594:         static_paragraph_count = int(static_runs.get("static_paragraph_count") or 0)
+7595:         max_static_run = int(static_runs.get("max_static_run") or 0)
+7596:         static_description_risk = bool(
+7597:             (dialogue_markers == 0 and paragraph_count <= 4 and word_count >= 1200)
+7598:             or (word_count >= 1200 and max_static_run >= 3)
+7599:             or (word_count >= 2000 and event_density.get("event_density_passed") is False and max_static_run >= 2)
+7600:             or (
+7601:                 word_count >= 1600
+7602:                 and dialogue_markers > 0
+7603:                 and max_static_run >= 2
+7604:                 and static_paragraph_count >= 3
+7605:             )
+7606:         )
+7607:         scene_rate = float(scene_fulfillment.get("scene_fulfillment_rate", 1.0) or 0)
+7608:         scene_structure_rate = float(scene_fulfillment.get("scene_structure_rate", 1.0) or 0)
+7609:         scene_count = int(scene_fulfillment.get("scene_count") or 0)
+7610: 
+7611:         score = 0
+7612:         score += len(mission_hits) * 180
+7613:         score += min(paragraph_count, 12) * 18
+7614:         score += min(dialogue_markers, 10) * 12
+7615:         score += int(scene_rate * 280) if scene_count else 80
+7616:         score += int(scene_structure_rate * 140) if scene_count else 40
+7617:         # T-13：三态评分。`None`（该维度不适用）既不加分也不减分——原来的
+7618:         # `if ... else -140` 会把 None 当假值扣 140，比改造前的「白给 +140」错得更远
+7619:         # （280 分的摆动幅度，占好样本总分 11%）。**必须显式写三分支，不能用真假判断。**
+7620:         dialogue_changes_state = dialogue_state.get("dialogue_changes_state")
+7621:         if dialogue_changes_state is True:
+7622:             score += 140
+7623:         elif dialogue_changes_state is False:
+7624:             score -= 140
+7625:         score += 140 if ending_hook else -460
+7626:         score += min(int(event_density.get("progression_unit_count") or 0), 18) * 16
+7627:         # T-14：三个密度判定现在是三态。None（样本过短未评估）既不加也不减——
+7628:         # 原写法 `if ... else -负分` 会把 None 当失败，三项合计倒扣 490 分，
+7629:         # 等于凭「章节短到测不了」判它密度不合格。**必须显式三分支。**
+7630:         for _metric_key, _bonus, _penalty in (
+7631:             ("event_density_passed", 80, 180),
+7632:             ("state_change_interval_passed", 60, 130),
+7633:             ("long_chapter_density_passed", 90, 180),
+7634:         ):
+7635:             _metric_value = event_density.get(_metric_key)
+7636:             if _metric_value is True:
+7637:                 score += _bonus
+7638:             elif _metric_value is False:
+7639:                 score -= _penalty
+7640:         score += min(word_count, 2400) // 50
+7641:         if target_floor and target_floor <= 2500 and word_count < target_floor and not word_count_below_min:
+7642:             score += 25
+7643:         score -= len(violations) * 500
+7644:         score -= 260 if static_description_risk else 0
+7645:         # 判罚必须大于重复段落自身能刷到的正分，否则复制粘贴仍然划算。
+7646:         score -= 420 if repetition.get("repetition_risk") else 0

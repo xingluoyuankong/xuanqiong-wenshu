@@ -1,0 +1,494 @@
+backend\app\api\routers\foreshadowing.py:88:def _normalize_optional_string_list(value: object) -> Optional[List[str]]:
+backend\app\api\routers\foreshadowing.py:101:def _serialize_foreshadowing(item: Foreshadowing) -> dict:
+backend\app\api\routers\foreshadowing.py:126:@router.post("/{project_id}/foreshadowings", response_model=ForeshadowingResponse)
+backend\app\api\routers\foreshadowing.py:127:async def create_foreshadowing(
+backend\app\api\routers\foreshadowing.py:163:@router.get("/{project_id}/foreshadowings")
+backend\app\api\routers\foreshadowing.py:164:async def list_foreshadowings(
+backend\app\api\routers\foreshadowing.py:199:@router.post("/{project_id}/foreshadowings/{foreshadowing_id}/resolve")
+backend\app\api\routers\foreshadowing.py:200:async def resolve_foreshadowing(
+backend\app\api\routers\foreshadowing.py:241:@router.get("/{project_id}/foreshadowings/reminders")
+backend\app\api\routers\foreshadowing.py:242:async def get_reminders(
+backend\app\api\routers\foreshadowing.py:277:@router.post("/{project_id}/foreshadowings/reminders/{reminder_id}/dismiss")
+backend\app\api\routers\foreshadowing.py:278:async def dismiss_reminder(
+backend\app\api\routers\foreshadowing.py:308:@router.get("/{project_id}/foreshadowings/analysis")
+backend\app\api\routers\foreshadowing.py:309:async def get_analysis(
+backend\app\api\routers\knowledge_graph.py:170:def _node_response_from_payload(node: dict) -> CharacterNodeResponse:
+backend\app\api\routers\knowledge_graph.py:198:def _edge_response_from_payload(project_id: str, edge: dict) -> EventEdgeResponse:
+backend\app\api\routers\knowledge_graph.py:227:@router.post("/{project_id}/knowledge-graph/nodes", response_model=CharacterNodeResponse)
+backend\app\api\routers\knowledge_graph.py:228:async def create_graph_node(
+backend\app\api\routers\knowledge_graph.py:269:@router.get("/{project_id}/knowledge-graph/nodes", response_model=List[CharacterNodeResponse])
+backend\app\api\routers\knowledge_graph.py:270:async def get_graph_nodes(
+backend\app\api\routers\knowledge_graph.py:290:@router.put("/{project_id}/knowledge-graph/nodes/{node_id}", response_model=CharacterNodeResponse)
+backend\app\api\routers\knowledge_graph.py:291:async def update_graph_node(
+backend\app\api\routers\knowledge_graph.py:334:@router.delete("/{project_id}/knowledge-graph/nodes/{node_id}")
+backend\app\api\routers\knowledge_graph.py:335:async def delete_graph_node(
+backend\app\api\routers\knowledge_graph.py:360:@router.post("/{project_id}/knowledge-graph/edges", response_model=EventEdgeResponse)
+backend\app\api\routers\knowledge_graph.py:361:async def create_graph_edge(
+backend\app\api\routers\knowledge_graph.py:415:@router.get("/{project_id}/knowledge-graph/edges", response_model=List[EventEdgeResponse])
+backend\app\api\routers\knowledge_graph.py:416:async def get_graph_edges(
+backend\app\api\routers\knowledge_graph.py:436:@router.delete("/{project_id}/knowledge-graph/edges/{edge_id}")
+backend\app\api\routers\knowledge_graph.py:437:async def delete_graph_edge(
+backend\app\api\routers\knowledge_graph.py:461:@router.get("/{project_id}/knowledge-graph/overview")
+backend\app\api\routers\knowledge_graph.py:462:async def get_knowledge_graph_overview(
+backend\app\api\routers\knowledge_graph.py:483:@router.get("/{project_id}/knowledge-graph", response_model=KnowledgeGraphResponse)
+backend\app\api\routers\knowledge_graph.py:484:async def get_full_graph(
+backend\app\api\routers\knowledge_graph.py:514:@router.get("/{project_id}/knowledge-graph/character/{character_id}/timeline")
+backend\app\api\routers\knowledge_graph.py:515:async def get_character_timeline(
+backend\app\api\routers\knowledge_graph.py:544:@router.get("/{project_id}/knowledge-graph/connected/{character_id}")
+backend\app\api\routers\knowledge_graph.py:545:async def get_connected_characters(
+backend\app\api\routers\knowledge_graph.py:574:@router.get("/{project_id}/knowledge-graph/threads")
+backend\app\api\routers\knowledge_graph.py:575:async def analyze_plot_threads(
+backend\app\api\routers\knowledge_graph.py:601:@router.get("/{project_id}/knowledge-graph/export")
+backend\app\api\routers\knowledge_graph.py:602:async def export_graph(
+backend\app\api\routers\style.py:58:def _style_upload_path(project_id: str, run_id: str) -> Path:
+backend\app\api\routers\style.py:62:def _validated_style_upload_path(
+backend\app\api\routers\style.py:102:def _style_runtime_matches(task: Any, project_id: str, domain: str) -> bool:
+backend\app\api\routers\style.py:109:async def _claim_style_runtime(
+backend\app\api\routers\style.py:131:async def _style_runtime_cancelled(
+backend\app\api\routers\style.py:167:async def _request_style_runtime_cancel(
+backend\app\api\routers\style.py:196:async def _style_runtime_heartbeat(
+backend\app\api\routers\style.py:328:def _style_job_now_iso() -> str:
+backend\app\api\routers\style.py:332:def _style_job_error(code: str, message: str, *, detail: Any = None, retryable: bool = True) -> Dict[str, Any]:
+backend\app\api\routers\style.py:345:def _serialize_style_profile_job(job: Dict[str, Any]) -> StyleProfileJobResponse:
+backend\app\api\routers\style.py:359:def _serialize_style_source_upload_job(job: Dict[str, Any]) -> StyleSourceUploadJobResponse:
+backend\app\api\routers\style.py:375:def _style_runtime_job_snapshot(job: Dict[str, Any], *, domain: str) -> Dict[str, Any]:
+backend\app\api\routers\style.py:387:def _style_runtime_datetime(value: Any) -> Optional[str]:
+backend\app\api\routers\style.py:393:def _rebuild_style_job_from_runtime(task: Any, events: List[Any], *, domain: str) -> Dict[str, Any]:
+backend\app\api\routers\style.py:453:async def _load_persisted_style_job(
+backend\app\api\routers\style.py:478:async def _load_active_persisted_style_job(
+backend\app\api\routers\style.py:494:async def _append_style_task_runtime_event(
+backend\app\api\routers\style.py:591:async def _set_style_profile_job_state(
+backend\app\api\routers\style.py:619:async def _set_style_source_upload_job_state(
+backend\app\api\routers\style.py:647:async def _launch_style_source_upload_task(
+backend\app\api\routers\style.py:678:async def _launch_style_profile_task(
+backend\app\api\routers\style.py:695:async def _style_worker_checkpoint(
+backend\app\api\routers\style.py:702:async def _mark_style_worker_detached(
+backend\app\api\routers\style.py:725:async def _compensate_style_source(user_id: int, source_id: Optional[str]) -> None:
+backend\app\api\routers\style.py:737:async def _compensate_style_profile(
+backend\app\api\routers\style.py:774:async def _run_style_source_upload_job(
+backend\app\api\routers\style.py:995:async def _run_style_profile_job(
+backend\app\api\routers\style.py:1175:@router.get("/sources", response_model=dict)
+backend\app\api\routers\style.py:1176:async def list_style_sources(
+backend\app\api\routers\style.py:1189:@router.get("/library", response_model=dict)
+backend\app\api\routers\style.py:1190:async def get_style_library(
+backend\app\api\routers\style.py:1211:@router.post("/sources", response_model=dict)
+backend\app\api\routers\style.py:1212:async def create_style_source(
+backend\app\api\routers\style.py:1235:@router.delete("/sources/{source_id}", response_model=dict)
+backend\app\api\routers\style.py:1236:async def delete_style_source(
+backend\app\api\routers\style.py:1252:@router.post("/sources/upload/start", response_model=StyleSourceUploadJobResponse, status_code=status.HTTP_202_ACCEPTED)
+backend\app\api\routers\style.py:1253:async def start_style_source_upload(
+backend\app\api\routers\style.py:1353:@router.get("/sources/upload/status", response_model=StyleSourceUploadJobResponse)
+backend\app\api\routers\style.py:1354:async def get_style_source_upload_status(
+backend\app\api\routers\style.py:1410:@router.post("/sources/upload/{run_id}/cancel", response_model=StyleSourceUploadJobResponse)
+backend\app\api\routers\style.py:1411:async def cancel_style_source_upload(
+backend\app\api\routers\style.py:1508:@router.post("/sources/upload", response_model=dict, deprecated=True)
+backend\app\api\routers\style.py:1509:async def upload_style_source(
+backend\app\api\routers\style.py:1547:@router.get("/profiles", response_model=dict)
+backend\app\api\routers\style.py:1548:async def list_style_profiles(
+backend\app\api\routers\style.py:1561:@router.post("/profiles/start", response_model=StyleProfileJobResponse)
+backend\app\api\routers\style.py:1562:async def start_style_profile_generation(
+backend\app\api\routers\style.py:1637:@router.get("/profiles/status", response_model=StyleProfileJobResponse)
+backend\app\api\routers\style.py:1638:async def get_style_profile_generation_status(
+backend\app\api\routers\style.py:1685:@router.post("/profiles/cancel", response_model=StyleProfileJobResponse)
+backend\app\api\routers\style.py:1686:async def cancel_style_profile_generation(
+backend\app\api\routers\style.py:1781:@router.post("/profiles", response_model=dict, deprecated=True)
+backend\app\api\routers\style.py:1782:async def create_style_profile(
+backend\app\api\routers\style.py:1804:@router.patch("/profiles/{profile_id}", response_model=dict)
+backend\app\api\routers\style.py:1805:async def update_style_profile(
+backend\app\api\routers\style.py:1829:@router.get("/active", response_model=dict)
+backend\app\api\routers\style.py:1830:async def get_active_style_profile(
+backend\app\api\routers\style.py:1849:@router.post("/apply", response_model=dict)
+backend\app\api\routers\style.py:1850:async def apply_style_profile(
+backend\app\api\routers\style.py:1872:@router.delete("/active", response_model=dict)
+backend\app\api\routers\style.py:1873:async def clear_active_style_profile(
+backend\app\api\routers\style.py:1891:@router.post("/extract", response_model=ExtractStyleResponse)
+backend\app\api\routers\style.py:1892:async def extract_style_from_chapters(
+backend\app\api\routers\style.py:1927:@router.get("", response_model=StyleSummaryResponse)
+backend\app\api\routers\style.py:1928:async def get_project_style(
+backend\app\api\routers\style.py:1949:@router.delete("", response_model=dict)
+backend\app\api\routers\style.py:1950:async def clear_project_style(
+backend\app\api\routers\style.py:1967:@router.post("/generate", response_model=StyleGenerateResponse)
+backend\app\api\routers\style.py:1968:async def generate_with_style(
+backend\app\api\routers\review.py:39:@router.post("/six-dimension")
+backend\app\api\routers\review.py:40:async def review_six_dimension(
+backend\app\api\routers\review.py:73:@router.post("/consistency")
+backend\app\api\routers\review.py:74:async def review_consistency(
+backend\app\api\routers\research.py:36:def _runtime_matches_research(task: Any, project_id: str) -> bool:
+backend\app\api\routers\research.py:43:async def _runtime_event(session: AsyncSession, run_id: str, *, event_type: str, status: str | None = None, stage: str | None = None, progress: float | None = None, message: str | None = None) -> bool:
+backend\app\api\routers\research.py:62:async def _claim_research_runtime(
+backend\app\api\routers\research.py:82:async def _research_is_cancelled(
+backend\app\api\routers\research.py:105:async def _research_heartbeat(
+backend\app\api\routers\research.py:128:async def _schedule_research_recovery_now(
+backend\app\api\routers\research.py:138:async def _run_research_job(run_id: str, project_id: str, user_id: int, payload: ResearchRunRequest) -> None:
+backend\app\api\routers\research.py:278:def _job_read(job: Dict[str, Any]) -> ResearchJobRead:
+backend\app\api\routers\research.py:288:async def _ensure_owner(project_id: str, session: AsyncSession, current_user: UserInDB) -> None:
+backend\app\api\routers\research.py:292:@router.get("/config", response_model=ResearchConfigRead)
+backend\app\api\routers\research.py:293:async def get_research_config(
+backend\app\api\routers\research.py:302:@router.put("/config", response_model=ResearchConfigRead)
+backend\app\api\routers\research.py:303:async def update_research_config(
+backend\app\api\routers\research.py:313:@router.get("/artifacts", response_model=List[ResearchArtifactRead])
+backend\app\api\routers\research.py:314:async def list_research_artifacts(
+backend\app\api\routers\research.py:329:@router.post("/run", response_model=ResearchArtifactRead)
+backend\app\api\routers\research.py:330:async def run_research(
+backend\app\api\routers\research.py:358:@router.post("/run/start", response_model=ResearchJobRead)
+backend\app\api\routers\research.py:359:async def start_research_job(
+backend\app\api\routers\research.py:415:@router.get("/run/{run_id}/status", response_model=ResearchJobRead)
+backend\app\api\routers\research.py:416:async def get_research_job_status(
+backend\app\api\routers\research.py:487:@router.post("/run/{run_id}/cancel", response_model=ResearchJobRead)
+backend\app\api\routers\research.py:488:async def cancel_research_job(
+backend\app\api\routers\writer.py:119:def _clamp_generated_version_count(value: int) -> int:
+backend\app\api\routers\writer.py:125:def _normalize_datetime_to_utc(value: Optional[datetime]) -> Optional[datetime]:
+backend\app\api\routers\writer.py:132:def _build_busy_progress_message(status_value: str) -> str:
+backend\app\api\routers\writer.py:139:def _build_busy_progress_stage(status_value: str) -> str:
+backend\app\api\routers\writer.py:146:def _review_context_value(item: Any, key: str, default: Any = None) -> Any:
+backend\app\api\routers\writer.py:151:def _review_context_text(value: Any, *, limit: int = 360) -> str:
+backend\app\api\routers\writer.py:170:def _review_content_text(value: Any, *, limit: int = 50000) -> str:
+backend\app\api\routers\writer.py:178:def _review_context_real_summary(value: Any) -> str:
+backend\app\api\routers\writer.py:186:def _build_completed_chapter_review_context(
+backend\app\api\routers\writer.py:235:def _review_context_list(value: Any, *, limit: int = 8) -> List[Any]:
+backend\app\api\routers\writer.py:250:def _review_context_dict(value: Any) -> Dict[str, Any]:
+backend\app\api\routers\writer.py:267:def _build_outline_review_payload(outline: Any) -> Dict[str, Any]:
+backend\app\api\routers\writer.py:291:def _build_blueprint_review_context(
+backend\app\api\routers\writer.py:349:def _build_version_review_content_payload(version: Any, *, long_threshold: int = 5200) -> Dict[str, Any]:
+backend\app\api\routers\writer.py:380:def _build_single_chapter_evaluation_input(
+backend\app\api\routers\writer.py:415:def _resolve_outline_generation_goal(
+backend\app\api\routers\writer.py:455:async def _resolve_chapter_version(
+backend\app\api\routers\writer.py:493:def _extract_runtime_heartbeat_at(chapter: Optional[Chapter]) -> Optional[datetime]:
+backend\app\api\routers\writer.py:506:def _is_busy_chapter_stale(chapter: Chapter) -> bool:
+backend\app\api\routers\writer.py:515:def _load_generation_runtime_state(chapter: Optional[Chapter]) -> Dict[str, Any]:
+backend\app\api\routers\writer.py:525:def _build_generation_runtime_state(
+backend\app\api\routers\writer.py:545:def _build_failed_generation_runtime_state(
+backend\app\api\routers\writer.py:585:def _truncate_runtime_text(value: Any, limit: int = 420) -> str:
+backend\app\api\routers\writer.py:591:def _append_generation_runtime_event(
+backend\app\api\routers\writer.py:642:def _build_memory_layer_runtime_summary(memory_result: Dict[str, Any]) -> str:
+backend\app\api\routers\writer.py:672:def _build_ledger_sync_runtime_summary(clue_result: Dict[str, Any], graph_result: Dict[str, Any]) -> str:
+backend\app\api\routers\writer.py:698:def _build_finalized_runtime_summary(result: Dict[str, Any]) -> str:
+backend\app\api\routers\writer.py:712:def _get_generation_run_id(chapter: Optional[Chapter]) -> Optional[str]:
+backend\app\api\routers\writer.py:719:def _is_generation_cancel_requested(chapter: Optional[Chapter], run_id: Optional[str] = None) -> bool:
+backend\app\api\routers\writer.py:727:async def _register_longform_generation_plan(
+backend\app\api\routers\writer.py:837:def _build_longform_generation_start_payload(flow_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+backend\app\api\routers\writer.py:843:async def _persist_generation_execution_spec(
+backend\app\api\routers\writer.py:878:def _restore_generation_execution_spec(task: TaskRuntime) -> tuple[str, Dict[str, Any]]:
+backend\app\api\routers\writer.py:895:def _build_resumed_generation_runtime_state(chapter: Chapter, *, run_id: str) -> str:
+backend\app\api\routers\writer.py:927:async def _try_claim_chapter_generation(
+backend\app\api\routers\writer.py:982:async def _append_chapter_task_event(
+backend\app\api\routers\writer.py:1035:async def _mark_busy_chapter_failed(
+backend\app\api\routers\writer.py:1069:async def _mark_busy_chapter_evaluation_failed(
+backend\app\api\routers\writer.py:1123:def _coerce_positive_int(value: Optional[Any], default: int) -> int:
+backend\app\api\routers\writer.py:1133:async def _bounded_task_slot(semaphore: asyncio.Semaphore):
+backend\app\api\routers\writer.py:1137:def _resolve_quality_candidate_version_count(*, preset: str, target_word_count: int) -> int:
+backend\app\api\routers\writer.py:1165:def _compose_generation_writing_notes(
+backend\app\api\routers\writer.py:1183:def _calculate_generation_timeout_seconds(flow_config: Dict[str, Any]) -> int:
+backend\app\api\routers\writer.py:1217:def _build_advanced_background_flow_config(request: AdvancedGenerateRequest) -> Dict[str, Any]:
+backend\app\api\routers\writer.py:1283:def _build_compat_generate_flow_config(request: GenerateChapterRequest) -> Dict[str, Any]:
+backend\app\api\routers\writer.py:1430:async def _load_project_schema(
+backend\app\api\routers\writer.py:1441:def _outline_job_now_iso() -> str:
+backend\app\api\routers\writer.py:1444:def _outline_job_error(
+backend\app\api\routers\writer.py:1467:def _outline_stage_title(stage: str) -> str:
+backend\app\api\routers\writer.py:1480:def _outline_runtime_event(
+backend\app\api\routers\writer.py:1501:def _merge_metrics_update(job, updates):
+backend\app\api\routers\writer.py:1516:def _normalize_outline_job_payload(job: Dict[str, Any]) -> Dict[str, Any]:
+backend\app\api\routers\writer.py:1538:def _serialize_outline_job(job: Dict[str, Any]) -> OutlineGenerationJobResponse:
+backend\app\api\routers\writer.py:1541:def _outline_public_payload(job: Dict[str, Any]) -> Dict[str, Any]:
+backend\app\api\routers\writer.py:1548:async def _upsert_outline_job_record(job: Dict[str, Any]) -> None:
+backend\app\api\routers\writer.py:1567:async def _append_outline_task_runtime_event(job: Dict[str, Any]) -> None:
+backend\app\api\routers\writer.py:1619:async def _persist_outline_job_state(job: Dict[str, Any]) -> None:
+backend\app\api\routers\writer.py:1626:async def _load_active_outline_job_from_db(project_id: str, user_id: int) -> Dict[str, Any] | None:
+backend\app\api\routers\writer.py:1650:def _outline_runtime_datetime(value: Any) -> Optional[str]:
+backend\app\api\routers\writer.py:1656:def _outline_legacy_status_from_runtime(task: Any) -> str:
+backend\app\api\routers\writer.py:1671:def _rebuild_outline_job_from_runtime(task: Any, events: List[Any]) -> Dict[str, Any]:
+backend\app\api\routers\writer.py:1726:async def _load_active_outline_job_from_runtime(
+backend\app\api\routers\writer.py:1762:async def _set_outline_job_state(run_id: str, **updates: Any) -> Dict[str, Any]:
+backend\app\api\routers\writer.py:1785:async def _outline_runtime_task(run_id: str, user_id: int) -> Any | None:
+backend\app\api\routers\writer.py:1792:async def _claim_outline_runtime(run_id: str, user_id: int) -> bool:
+backend\app\api\routers\writer.py:1805:async def _outline_runtime_should_stop(run_id: str, user_id: int) -> bool:
+backend\app\api\routers\writer.py:1814:async def _outline_runtime_heartbeat(run_id: str, user_id: int, stage: str, message: str) -> None:
+backend\app\api\routers\writer.py:1834:async def _finish_outline_runtime(
+backend\app\api\routers\writer.py:1860:async def _schedule_outline_recovery(
+backend\app\api\routers\writer.py:1881:async def _run_outline_generation_job(
+backend\app\api\routers\writer.py:2030:async def _run_outline_rewrite_job(
+backend\app\api\routers\writer.py:2151:def _extract_tail_excerpt(text: Optional[str], limit: int = 500) -> str:
+backend\app\api\routers\writer.py:2160:def _count_non_whitespace_chars(text: Optional[str]) -> int:
+backend\app\api\routers\writer.py:2165:def _normalize_outline_string_list(value: Any, *, limit: int = 5) -> List[str]:
+backend\app\api\routers\writer.py:2182:def _outline_contains_any(text: str, keywords: Tuple[str, ...]) -> bool:
+backend\app\api\routers\writer.py:2185:def _validate_outline_item_executability(
+backend\app\api\routers\writer.py:2274:def _outline_item_json_schema(*, require_chapter_number: bool = False) -> Dict[str, Any]:
+backend\app\api\routers\writer.py:2339:def _outline_batch_json_schema() -> Dict[str, Any]:
+backend\app\api\routers\writer.py:2351:def _unwrap_outline_payload_root(payload: Dict[str, Any]) -> Dict[str, Any]:
+backend\app\api\routers\writer.py:2359:def _build_rewritten_outline_metadata(
+backend\app\api\routers\writer.py:2408:def _truncate_text(text: Optional[str], limit: int) -> str:
+backend\app\api\routers\writer.py:2416:def _looks_like_ending_signal(text: Optional[str]) -> bool:
+backend\app\api\routers\writer.py:2435:def _build_recent_chapter_track(
+backend\app\api\routers\writer.py:2459:def _format_plot_arc_digest(plot_arcs: Optional[Dict[str, Any]], *, max_items: int = 4) -> str:
+backend\app\api\routers\writer.py:2511:async def _refresh_edit_summary_and_ingest(
+backend\app\api\routers\writer.py:2569:async def _finalize_chapter_async(
+backend\app\api\routers\writer.py:2626:async def _record_background_finalize_failure(
+backend\app\api\routers\writer.py:2663:async def _refresh_chapter_runtime_state(session: AsyncSession, chapter: Optional[Chapter]) -> None:
+backend\app\api\routers\writer.py:2676:async def _run_finalize_pipeline(
+backend\app\api\routers\writer.py:2979:async def _schedule_finalize_task(
+backend\app\api\routers\writer.py:2995:async def _collect_foreshadowing_async(
+backend\app\api\routers\writer.py:3021:async def _generate_chapter_async(
+backend\app\api\routers\writer.py:3363:async def _schedule_generate_task(
+backend\app\api\routers\writer.py:3380:@router.post("/advanced/generate", response_model=NovelProjectSchema)
+backend\app\api\routers\writer.py:3381:async def advanced_generate_chapter(
+backend\app\api\routers\writer.py:3574:@router.post("/chapters/{chapter_number}/finalize", response_model=FinalizeChapterResponse)
+backend\app\api\routers\writer.py:3575:async def finalize_chapter(
+backend\app\api\routers\writer.py:3664:@router.post("/novels/{project_id}/chapters/generate", response_model=NovelProjectSchema)
+backend\app\api\routers\writer.py:3665:async def generate_chapter(
+backend\app\api\routers\writer.py:3889:@router.post("/novels/{project_id}/chapters/cancel", response_model=NovelProjectSchema)
+backend\app\api\routers\writer.py:3890:async def cancel_chapter_generation(
+backend\app\api\routers\writer.py:3951:@router.post("/novels/{project_id}/chapters/resume", response_model=NovelProjectSchema)
+backend\app\api\routers\writer.py:3952:async def resume_chapter_generation(
+backend\app\api\routers\writer.py:4037:async def _close_claimed_chapter_after_startup_failure(
+backend\app\api\routers\writer.py:4101:@router.get("/novels/{project_id}/chapters/{chapter_number}/status", response_model=ChapterSchema)
+backend\app\api\routers\writer.py:4102:async def get_chapter_generation_status(
+backend\app\api\routers\writer.py:4112:@router.post("/novels/{project_id}/chapters/select", response_model=NovelProjectSchema)
+backend\app\api\routers\writer.py:4113:async def select_chapter_version(
+backend\app\api\routers\writer.py:4162:@router.post("/novels/{project_id}/chapters/delete-version", response_model=NovelProjectSchema)
+backend\app\api\routers\writer.py:4163:async def delete_chapter_version(
+backend\app\api\routers\writer.py:4211:@router.post("/novels/{project_id}/chapters/evaluate", response_model=NovelProjectSchema)
+backend\app\api\routers\writer.py:4212:async def evaluate_chapter(
+backend\app\api\routers\writer.py:4375:async def _evaluate_all_versions(
+backend\app\api\routers\writer.py:4593:@router.post("/novels/{project_id}/chapters/update-outline", response_model=NovelProjectSchema)
+backend\app\api\routers\writer.py:4594:async def update_chapter_outline(
+backend\app\api\routers\writer.py:4613:@router.post("/novels/{project_id}/chapters/rewrite-outline", response_model=NovelProjectSchema)
+backend\app\api\routers\writer.py:4614:async def rewrite_chapter_outline(
+backend\app\api\routers\writer.py:4738:async def _create_outline_runtime_task(
+backend\app\api\routers\writer.py:4758:@router.post("/novels/{project_id}/chapters/rewrite-outline/start", response_model=OutlineGenerationJobResponse)
+backend\app\api\routers\writer.py:4759:async def start_chapter_outline_rewrite(
+backend\app\api\routers\writer.py:4824:@router.get("/novels/{project_id}/chapters/rewrite-outline/status", response_model=OutlineGenerationJobResponse)
+backend\app\api\routers\writer.py:4825:async def get_chapter_outline_rewrite_status(
+backend\app\api\routers\writer.py:4834:@router.post("/novels/{project_id}/chapters/rewrite-outline/cancel", response_model=OutlineGenerationJobResponse)
+backend\app\api\routers\writer.py:4835:async def cancel_chapter_outline_rewrite(
+backend\app\api\routers\writer.py:4844:@router.post("/novels/{project_id}/chapters/delete", response_model=NovelProjectSchema)
+backend\app\api\routers\writer.py:4845:async def delete_chapters(
+backend\app\api\routers\writer.py:4860:@router.post("/novels/{project_id}/chapters/outline/start", response_model=OutlineGenerationJobResponse)
+backend\app\api\routers\writer.py:4861:async def start_chapters_outline_generation(
+backend\app\api\routers\writer.py:4926:@router.get("/novels/{project_id}/chapters/outline/status", response_model=OutlineGenerationJobResponse)
+backend\app\api\routers\writer.py:4927:async def get_chapters_outline_generation_status(
+backend\app\api\routers\writer.py:5021:@router.post("/novels/{project_id}/chapters/outline/cancel", response_model=OutlineGenerationJobResponse)
+backend\app\api\routers\writer.py:5022:async def cancel_chapters_outline_generation(
+backend\app\api\routers\writer.py:5136:@router.post("/novels/{project_id}/chapters/outline", response_model=NovelProjectSchema, deprecated=True)
+backend\app\api\routers\writer.py:5137:async def generate_chapters_outline(
+backend\app\api\routers\writer.py:5419:@router.post("/novels/{project_id}/chapters/edit", response_model=NovelProjectSchema)
+backend\app\api\routers\writer.py:5420:async def edit_chapter_content(
+backend\app\api\routers\writer.py:5480:@router.post("/novels/{project_id}/chapters/edit-fast", response_model=ChapterSchema)
+backend\app\api\routers\writer.py:5481:async def edit_chapter_content_fast(
+backend\app\api\routers\writer.py:5555:def _stream_cursor(after_event_id: int = 0, last_event_id: Optional[int] = None) -> int:
+backend\app\api\routers\writer.py:5559:def _sse_frame(event: str, data: Dict[str, Any], *, event_id: Optional[int] = None) -> str:
+backend\app\api\routers\writer.py:5568:def _task_runtime_event_payload(
+backend\app\api\routers\writer.py:5615:def _runtime_event_is_terminal(event: Any, task: Optional[TaskRuntime] = None) -> bool:
+backend\app\api\routers\writer.py:5625:def _runtime_stream_should_stop(task: Any, terminal_event_seen: bool) -> bool:
+backend\app\api\routers\writer.py:5629:async def _find_chapter_runtime_task(
+backend\app\api\routers\writer.py:5681:@router.get("/novels/{project_id}/chapters/{chapter_number}/stream")
+backend\app\api\routers\writer.py:5682:async def stream_chapter_progress(
+backend\app\api\routers\novels.py:137:def _ensure_prompt(prompt: str | None, name: str) -> str:
+backend\app\api\routers\novels.py:143:def _canonical_key(value: str) -> str:
+backend\app\api\routers\novels.py:147:def _stringify_payload(value: Any, *, fallback: str = "") -> str:
+backend\app\api\routers\novels.py:171:def _normalize_ui_control(raw_control: Any) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:206:def _normalize_converse_response_payload(parsed: Any, raw_response: str) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:257:def _extract_latest_conversation_state(structured_dialogue: List[Dict[str, Any]]) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:267:def _build_compact_blueprint_context(
+backend\app\api\routers\novels.py:287:def _build_story_constraint_profile(
+backend\app\api\routers\novels.py:355:def _walk_text_fragments(value: Any) -> List[str]:
+backend\app\api\routers\novels.py:379:def _extract_requested_chapter_count(text: str) -> Optional[int]:
+backend\app\api\routers\novels.py:401:def _extract_requested_total_word_count(text: str) -> Optional[int]:
+backend\app\api\routers\novels.py:427:def _infer_target_chapter_count_from_fragments(fragments: List[str]) -> Optional[int]:
+backend\app\api\routers\novels.py:459:def _resolve_length_contract_defaults(target_chapter_count: int) -> Dict[str, int]:
+backend\app\api\routers\novels.py:495:def _make_length_contract(target_chapter_count: int, *, source: str) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:508:def _normalize_length_contract_candidate(candidate: Any, *, source: str) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:537:def _extract_stored_length_contract(existing_blueprint: Blueprint | None) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:565:def _build_length_contract(
+backend\app\api\routers\novels.py:603:def _attach_length_contract_to_blueprint(
+backend\app\api\routers\novels.py:622:def _resolve_blueprint_length_contract(blueprint_data: Dict[str, Any]) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:643:def _format_length_contract_instruction(length_contract: Dict[str, Any]) -> str:
+backend\app\api\routers\novels.py:660:def _outline_exceeds_length_contract(outline: List[Dict[str, Any]], length_contract: Dict[str, Any]) -> bool:
+backend\app\api\routers\novels.py:674:def _remap_outline_ranges_to_length_contract(
+backend\app\api\routers\novels.py:703:def _resolve_blueprint_chapter_outline_count(blueprint_data: Dict[str, Any]) -> int:
+backend\app\api\routers\novels.py:716:def _resolve_novel_outline_min_stage_count(blueprint_data: Dict[str, Any]) -> int:
+backend\app\api\routers\novels.py:726:def _build_chapter_batches(total_chapters: int, *, batch_size: int = 4) -> List[tuple[int, int]]:
+backend\app\api\routers\novels.py:732:def _has_substantive_value(value: Any) -> bool:
+backend\app\api\routers\novels.py:744:def _is_recoverable_blueprint_schema(blueprint: Blueprint | None) -> bool:
+backend\app\api\routers\novels.py:759:def _is_recoverable_for_requested_blueprint_stage(
+backend\app\api\routers\novels.py:778:def _scan_longform_structure_gaps(blueprint_data: Dict[str, Any]) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:831:def _normalize_character_name_token(value: Any) -> str:
+backend\app\api\routers\novels.py:835:def _is_placeholder_character_name(value: Any) -> bool:
+backend\app\api\routers\novels.py:846:def _blueprint_has_valid_character_names(blueprint_data: Dict[str, Any]) -> bool:
+backend\app\api\routers\novels.py:875:def _build_character_naming_profile(blueprint_data: Dict[str, Any], project_title: str) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:919:def _truncate_text(value: Any, limit: int = 320) -> str:
+backend\app\api\routers\novels.py:926:def _compact_named_entries(items: Any, *, max_items: int, summary_keys: List[str]) -> List[Dict[str, Any]]:
+backend\app\api\routers\novels.py:954:def _build_outline_source_context(blueprint_data: Dict[str, Any]) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:1009:def _build_chapter_outline_source_context(blueprint_data: Dict[str, Any]) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:1034:def _estimate_longform_complexity(blueprint_data: Dict[str, Any]) -> int:
+backend\app\api\routers\novels.py:1048:def _resolve_novel_outline_timeout_seconds(blueprint_data: Dict[str, Any]) -> float:
+backend\app\api\routers\novels.py:1061:def _resolve_world_bible_timeout_seconds(blueprint_data: Dict[str, Any]) -> float:
+backend\app\api\routers\novels.py:1078:def _resolve_outline_chunk_timeout_seconds(blueprint_data: Dict[str, Any], chunk_size: int) -> float:
+backend\app\api\routers\novels.py:1090:def _resolve_chapter_batch_timeout_seconds(blueprint_data: Dict[str, Any], batch_size: int) -> float:
+backend\app\api\routers\novels.py:1102:def _is_retryable_http_exception(exc: HTTPException) -> bool:
+backend\app\api\routers\novels.py:1106:async def _call_llm_with_stage_retries(
+backend\app\api\routers\novels.py:1148:async def _call_llm_json_with_stage_retries(
+backend\app\api\routers\novels.py:1228:def _compact_system_payload(world_setting: Dict[str, Any]) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:1260:def _select_world_system_payload(world_setting: Dict[str, Any], fields: List[str]) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:1266:def _resolve_world_bible_segment_timeout_seconds(blueprint_data: Dict[str, Any], field_count: int) -> float:
+backend\app\api\routers\novels.py:1273:def _merge_world_system_blueprint(world_setting: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:1296:def _outline_stage_has_depth(item: Dict[str, Any]) -> bool:
+backend\app\api\routers\novels.py:1308:def _is_chapter_outline_batch_complete(chapters: List[Dict[str, Any]], start_chapter: int, end_chapter: int) -> bool:
+backend\app\api\routers\novels.py:1324:def _has_complete_chapter_outline(chapters: List[Dict[str, Any]], expected_count: Optional[int] = None) -> bool:
+backend\app\api\routers\novels.py:1350:def _build_blueprint_checkpoint_patch(blueprint_data: Dict[str, Any]) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:1369:async def _checkpoint_blueprint_progress(
+backend\app\api\routers\novels.py:1386:def _parse_expected_chapter_range(value: Any) -> tuple[int, int] | None:
+backend\app\api\routers\novels.py:1404:def _validate_novel_outline_coherence(outline: List[Dict[str, Any]], *, min_stage_count: int = 4) -> None:
+backend\app\api\routers\novels.py:1441:def _validate_novel_outline_depth(outline: List[Dict[str, Any]]) -> None:
+backend\app\api\routers\novels.py:1461:def _normalize_novel_outline_stage(item: Dict[str, Any], index: int) -> Dict[str, Any] | None:
+backend\app\api\routers\novels.py:1531:async def _generate_novel_world_bible(
+backend\app\api\routers\novels.py:1631:async def _enrich_novel_outline_in_chunks(
+backend\app\api\routers\novels.py:1783:async def _repair_blueprint_character_names(
+backend\app\api\routers\novels.py:1855:async def _generate_novel_outline(
+backend\app\api\routers\novels.py:2096:async def _generate_executable_chapter_outline(
+backend\app\api\routers\novels.py:2248:async def _polish_chapter_outline_quality(
+backend\app\api\routers\novels.py:2482:def _import_job_now_iso() -> str:
+backend\app\api\routers\novels.py:2486:def _import_job_error(code: str, message: str, *, detail: Any = None, retryable: bool = True) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:2499:def _import_storage_path(user_id: int, run_id: str) -> Path:
+backend\app\api\routers\novels.py:2503:def _validated_import_storage_path(user_id: int, run_id: str, storage_value: Any) -> Optional[Path]:
+backend\app\api\routers\novels.py:2517:def _serialize_import_job(job: Dict[str, Any]) -> ImportNovelJobResponse:
+backend\app\api\routers\novels.py:2532:def _import_runtime_job_snapshot(job: Dict[str, Any]) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:2553:def _import_runtime_datetime(value: Any) -> Optional[str]:
+backend\app\api\routers\novels.py:2559:def _rebuild_import_job_from_runtime(task: Any, events: List[Any]) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:2631:async def _claim_import_runtime(run_id: str, user_id: int) -> bool:
+backend\app\api\routers\novels.py:2651:def _schedule_import_recovery(job: Dict[str, Any]) -> bool:
+backend\app\api\routers\novels.py:2676:def _import_job_has_active_runtime(job: Dict[str, Any]) -> bool:
+backend\app\api\routers\novels.py:2683:async def _load_persisted_import_job(
+backend\app\api\routers\novels.py:2713:async def _append_import_task_runtime_event(
+backend\app\api\routers\novels.py:2789:async def _set_import_job_state(
+backend\app\api\routers\novels.py:2833:async def _is_import_job_cancelled(run_id: str, user_id: Optional[int] = None) -> bool:
+backend\app\api\routers\novels.py:2858:async def _run_import_novel_job(
+backend\app\api\routers\novels.py:2943:@router.post("", response_model=NovelProjectSchema, status_code=status.HTTP_201_CREATED)
+backend\app\api\routers\novels.py:2944:async def create_novel(
+backend\app\api\routers\novels.py:2958:@router.post("/import/start", response_model=ImportNovelJobResponse, status_code=status.HTTP_202_ACCEPTED)
+backend\app\api\routers\novels.py:2959:async def start_import_novel(
+backend\app\api\routers\novels.py:3028:@router.get("/import/status", response_model=ImportNovelJobResponse)
+backend\app\api\routers\novels.py:3029:async def get_import_novel_status(
+backend\app\api\routers\novels.py:3065:@router.post("/import/cancel", response_model=ImportNovelJobResponse)
+backend\app\api\routers\novels.py:3066:async def cancel_import_novel(
+backend\app\api\routers\novels.py:3155:@router.post("/import", response_model=Dict[str, str], status_code=status.HTTP_201_CREATED, deprecated=True)
+backend\app\api\routers\novels.py:3156:async def import_novel(
+backend\app\api\routers\novels.py:3170:@router.get("", response_model=List[NovelProjectSummary])
+backend\app\api\routers\novels.py:3171:async def list_novels(
+backend\app\api\routers\novels.py:3183:@router.get("/current-user", response_model=UserSchema)
+backend\app\api\routers\novels.py:3184:async def get_current_user_profile(
+backend\app\api\routers\novels.py:3193:@router.get("/{project_id}", response_model=NovelProjectSchema)
+backend\app\api\routers\novels.py:3194:async def get_novel(
+backend\app\api\routers\novels.py:3205:@router.get("/{project_id}/sections/{section}", response_model=NovelSectionResponse)
+backend\app\api\routers\novels.py:3206:async def get_novel_section(
+backend\app\api\routers\novels.py:3218:@router.get("/{project_id}/chapters/{chapter_number}", response_model=ChapterSchema)
+backend\app\api\routers\novels.py:3219:async def get_chapter(
+backend\app\api\routers\novels.py:3231:@router.get("/{project_id}/export/txt")
+backend\app\api\routers\novels.py:3232:async def export_novel_as_txt(
+backend\app\api\routers\novels.py:3254:@router.get("/{project_id}/export/preflight")
+backend\app\api\routers\novels.py:3255:async def preflight_export_novel(
+backend\app\api\routers\novels.py:3269:@router.get("/{project_id}/export/docx")
+backend\app\api\routers\novels.py:3270:async def export_novel_as_docx(
+backend\app\api\routers\novels.py:3295:@router.delete("", status_code=status.HTTP_200_OK)
+backend\app\api\routers\novels.py:3296:async def delete_novels(
+backend\app\api\routers\novels.py:3308:@router.post("/{project_id}/concept/converse", response_model=ConverseResponse)
+backend\app\api\routers\novels.py:3309:async def converse_with_concept(
+backend\app\api\routers\novels.py:3392:def _utc_now_iso() -> str:
+backend\app\api\routers\novels.py:3396:def _parse_blueprint_job_time(value: Any) -> datetime | None:
+backend\app\api\routers\novels.py:3412:def _normalize_blueprint_error_detail(detail: Any) -> tuple[str | None, str | None, bool | None]:
+backend\app\api\routers\novels.py:3432:def _blueprint_error(
+backend\app\api\routers\novels.py:3448:def _merge_metrics_update(job, updates):
+backend\app\api\routers\novels.py:3463:def _normalize_blueprint_job_payload(job: Dict[str, Any]) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:3480:def _recover_stale_blueprint_job(job: Dict[str, Any]) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:3505:def _fail_orphaned_blueprint_job(job: Dict[str, Any]) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:3523:def _serialize_blueprint_job(job: Dict[str, Any]) -> BlueprintGenerationJobResponse:
+backend\app\api\routers\novels.py:3527:def _job_public_payload(job: Dict[str, Any]) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:3535:def _db_blueprint_job_to_payload(record: BlueprintGenerationJob) -> Dict[str, Any]:
+backend\app\api\routers\novels.py:3553:async def _load_latest_blueprint_job_from_db(
+backend\app\api\routers\novels.py:3569:async def _upsert_blueprint_job_record(session: AsyncSession, job: Dict[str, Any]) -> None:
+backend\app\api\routers\novels.py:3612:async def _append_blueprint_job_history(job: Dict[str, Any]) -> None:
+backend\app\api\routers\novels.py:3629:async def _append_blueprint_task_runtime_event(job: Dict[str, Any]) -> None:
+backend\app\api\routers\novels.py:3667:async def _persist_blueprint_job_state(job: Dict[str, Any]) -> None:
+backend\app\api\routers\novels.py:3677:async def _load_latest_blueprint_job_from_history(
+backend\app\api\routers\novels.py:3696:async def _load_latest_blueprint_job(
+backend\app\api\routers\novels.py:3706:async def _recover_finished_blueprint_job_from_project(
+backend\app\api\routers\novels.py:3733:async def _load_active_blueprint_job_from_db(
+backend\app\api\routers\novels.py:3752:async def _set_blueprint_job_state(run_id: str, **updates: Any) -> None:
+backend\app\api\routers\novels.py:3767:async def _blueprint_runtime_task(run_id: str, user_id: int) -> Any | None:
+backend\app\api\routers\novels.py:3776:async def _blueprint_is_cancelled(run_id: str, user_id: int) -> bool:
+backend\app\api\routers\novels.py:3784:async def _claim_blueprint_runtime(run_id: str, user_id: int) -> bool:
+backend\app\api\routers\novels.py:3799:async def _blueprint_heartbeat(run_id: str, user_id: int, stage: str, message: str) -> None:
+backend\app\api\routers\novels.py:3819:async def _finish_blueprint_runtime(
+backend\app\api\routers\novels.py:3846:async def _schedule_blueprint_recovery(
+backend\app\api\routers\novels.py:3862:async def _schedule_persisted_blueprint_recovery_if_needed(
+backend\app\api\routers\novels.py:3889:async def _run_blueprint_generation_job(
+backend\app\api\routers\novels.py:4024:@router.post("/{project_id}/blueprint/generate/start", response_model=BlueprintGenerationJobResponse)
+backend\app\api\routers\novels.py:4025:async def start_blueprint_generation(
+backend\app\api\routers\novels.py:4127:@router.get("/{project_id}/blueprint/generate/status", response_model=BlueprintGenerationJobResponse)
+backend\app\api\routers\novels.py:4128:async def get_blueprint_generation_status(
+backend\app\api\routers\novels.py:4243:@router.post("/{project_id}/blueprint/generate/cancel", response_model=BlueprintGenerationJobResponse)
+backend\app\api\routers\novels.py:4244:async def cancel_blueprint_generation(
+backend\app\api\routers\novels.py:4315:async def _generate_blueprint_impl(
+backend\app\api\routers\novels.py:4597:@router.post(
+backend\app\api\routers\novels.py:4603:async def generate_blueprint(
+backend\app\api\routers\novels.py:4628:@router.post("/{project_id}/blueprint/save", response_model=NovelProjectSchema)
+backend\app\api\routers\novels.py:4629:async def save_blueprint(
+backend\app\api\routers\novels.py:4653:@router.patch("/{project_id}/blueprint", response_model=NovelProjectSchema)
+backend\app\api\routers\novels.py:4654:async def patch_blueprint(
+backend\app\api\routers\outline.py:105:@router.post("/evolve", response_model=EvolveResponse)
+backend\app\api\routers\outline.py:106:async def evolve_outline(
+backend\app\api\routers\outline.py:168:@router.post("/next", response_model=SelectAlternativeResponse)
+backend\app\api\routers\outline.py:169:async def select_alternative(
+backend\app\api\routers\outline.py:208:@router.get("/alternatives", response_model=AlternativesResponse)
+backend\app\api\routers\outline.py:209:async def get_alternatives(
+backend\app\api\routers\outline.py:260:@router.post("/generate-long", response_model=LongNovelOutlineResponse)
+backend\app\api\routers\outline.py:261:async def generate_long_novel_outline(
+backend\app\api\routers\outline.py:392:@router.get("/structure")
+backend\app\api\routers\outline.py:393:async def get_outline_structure(
+backend\app\api\routers\outline.py:437:@router.get("/history")
+backend\app\api\routers\outline.py:438:async def get_evolution_history(
+backend\app\api\routers\patch_diff.py:101:def diff_result_to_schema(diff: DiffLineResult) -> DiffLineSchema:
+backend\app\api\routers\patch_diff.py:110:def calculate_diff_summary(diff_lines: List[DiffLineResult]) -> dict:
+backend\app\api\routers\patch_diff.py:128:@router.post(
+backend\app\api\routers\patch_diff.py:133:async def apply_patch(
+backend\app\api\routers\patch_diff.py:176:@router.post(
+backend\app\api\routers\patch_diff.py:180:async def get_diff(
+backend\app\api\routers\patch_diff.py:218:@router.get(
+backend\app\api\routers\patch_diff.py:222:async def get_version_diff(
+backend\app\api\routers\patch_diff.py:264:@router.get(
+backend\app\api\routers\patch_diff.py:268:async def get_patch_history(
+backend\app\api\routers\patch_diff.py:318:@router.post(
+backend\app\api\routers\patch_diff.py:322:async def revert_patch(
+backend\app\api\routers\optimizer.py:112:def _compact_len(text: str) -> int:
+backend\app\api\routers\optimizer.py:116:def _optimizer_response_schema() -> Dict[str, Any]:
+backend\app\api\routers\optimizer.py:127:def _anchor_overlap_count(original_sample: str, optimized_content: str, *, chunk_size: int = 16) -> int:
+backend\app\api\routers\optimizer.py:156:def _extract_required_motif_groups(text: str) -> list[Dict[str, Any]]:
+backend\app\api\routers\optimizer.py:166:def _build_nearby_outline_context(project: Any, chapter_number: int, *, radius: int = 2) -> list[Dict[str, Any]]:
+backend\app\api\routers\optimizer.py:184:def _build_nearby_chapter_state(project: Any, chapter_number: int, *, radius: int = 1) -> list[Dict[str, Any]]:
+backend\app\api\routers\optimizer.py:203:def _build_continuity_contract(project: Any, request: OptimizeRequest, original_content: str) -> Dict[str, Any]:
+backend\app\api\routers\optimizer.py:223:def _continuity_guard_failure(
+backend\app\api\routers\optimizer.py:266:@router.post("/optimize", response_model=OptimizeResponse)
+backend\app\api\routers\optimizer.py:267:async def optimize_chapter(
+backend\app\api\routers\optimizer.py:471:@router.post("/apply-optimization", response_model=ApplyOptimizationResponse)
+backend\app\api\routers\optimizer.py:472:async def apply_optimization(
+backend\app\api\routers\clue_tracker.py:107:@router.post("/{project_id}/clues", response_model=ClueResponse)
+backend\app\api\routers\clue_tracker.py:108:async def create_clue(
+backend\app\api\routers\clue_tracker.py:151:@router.get("/{project_id}/clues", response_model=List[ClueResponse])
+backend\app\api\routers\clue_tracker.py:152:async def get_project_clues(
+backend\app\api\routers\clue_tracker.py:194:@router.get("/{project_id}/clues/overview")
+backend\app\api\routers\clue_tracker.py:195:async def get_clue_overview(
+backend\app\api\routers\clue_tracker.py:243:@router.get("/{project_id}/clues/threads", response_model=ClueThreadAnalysisResponse)
+backend\app\api\routers\clue_tracker.py:244:async def analyze_clue_threads(
+backend\app\api\routers\clue_tracker.py:258:@router.get("/{project_id}/clues/red-herring", response_model=List[dict])
+backend\app\api\routers\clue_tracker.py:259:async def get_red_herrings(
+backend\app\api\routers\clue_tracker.py:272:@router.get("/{project_id}/clues/unresolved", response_model=List[dict])
+backend\app\api\routers\clue_tracker.py:273:async def get_unresolved_clues(
+backend\app\api\routers\clue_tracker.py:286:@router.get("/{project_id}/clues/{clue_id}", response_model=ClueResponse)
+backend\app\api\routers\clue_tracker.py:287:async def get_clue(
+backend\app\api\routers\clue_tracker.py:325:@router.put("/{project_id}/clues/{clue_id}", response_model=ClueResponse)
+backend\app\api\routers\clue_tracker.py:326:async def update_clue(
+backend\app\api\routers\clue_tracker.py:365:@router.delete("/{project_id}/clues/{clue_id}")
+backend\app\api\routers\clue_tracker.py:366:async def delete_clue(
+backend\app\api\routers\clue_tracker.py:387:@router.post("/{project_id}/clues/{clue_id}/link-chapter")
+backend\app\api\routers\clue_tracker.py:388:async def link_clue_to_chapter(
+backend\app\api\routers\clue_tracker.py:428:@router.get("/{project_id}/clues/{clue_id}/timeline", response_model=ClueTimelineResponse)
+backend\app\api\routers\clue_tracker.py:429:async def get_clue_timeline(

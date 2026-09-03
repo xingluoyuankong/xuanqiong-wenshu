@@ -1,0 +1,396 @@
+ M .github/workflows/xuanqiong-wenshu-quick-smoke.yml
+ M CLAUDE.md
+ M TASK_HANDOFF_NOVEL_QUALITY.md
+ M backend/app/api/routers/__init__.py
+ M backend/app/api/routers/knowledge_graph.py
+ M backend/app/api/routers/novels.py
+ M backend/app/api/routers/test_blueprint_job_metrics.py
+ M backend/app/api/routers/test_chapter_version_editing.py
+ M backend/app/api/routers/test_clue_tracker_route.py
+ M backend/app/api/routers/test_knowledge_graph_route.py
+ M backend/app/api/routers/test_longform_plan_registration.py
+ M backend/app/api/routers/test_outline_job_metrics.py
+ M backend/app/api/routers/test_outline_job_restart_recovery.py
+ M backend/app/api/routers/test_research_job.py
+ M backend/app/api/routers/test_task_runtime_route.py
+ M backend/app/api/routers/writer.py
+ M backend/app/core/config.py
+ M backend/app/db/init_db.py
+ M backend/app/db/test_init_db_idempotency.py
+ M backend/app/main.py
+ M backend/app/models/__init__.py
+ M backend/app/models/task_runtime.py
+ M backend/app/services/ai_review_service.py
+ M backend/app/services/llm_service.py
+ M backend/app/services/longform_generation_service.py
+ M backend/app/services/novel_service.py
+ M backend/app/services/pipeline_orchestrator.py
+ D backend/app/services/story_quality_scoring.py
+ M backend/app/services/task_runtime.py
+ M backend/app/services/test_ai_review_service.py
+ M backend/app/services/test_alembic_migrations.py
+ M backend/app/services/test_blueprint_observability.py
+ M backend/app/services/test_compat_generation_config.py
+ M backend/app/services/test_daily_limit_scopes.py
+ M backend/app/services/test_finalize_session_safety.py
+ M backend/app/services/test_foreshadowing_runtime_events.py
+ M backend/app/services/test_generation_call_service.py
+ M backend/app/services/test_generation_log_service.py
+ M backend/app/services/test_generation_quality_guards.py
+ M backend/app/services/test_generation_run_rebind.py
+ M backend/app/services/test_import_service.py
+ M backend/app/services/test_knowledge_graph_causal_chain.py
+ M backend/app/services/test_llm_config_persistence.py
+ M backend/app/services/test_llm_stream_reasoning_fallback.py
+ M backend/app/services/test_longform_context_service.py
+ M backend/app/services/test_longform_generation_service.py
+ M backend/app/services/test_longform_package_e2e.py
+ M backend/app/services/test_longform_segment_streaming.py
+ M backend/app/services/test_multi_chapter_continuity_production.py
+ M backend/app/services/test_persistent_generation_log_service.py
+ M backend/app/services/test_project_ledger_lease_service.py
+ M backend/app/services/test_project_research_service.py
+ M backend/app/services/test_prompt_cache_key_skip.py
+ M backend/app/services/test_provider_cancel_no_hang.py
+ M backend/app/services/test_regen_preserves_summary.py
+ M backend/app/services/test_task_reconciliation.py
+ M backend/app/services/test_task_runtime.py
+ M backend/app/services/test_writer_persona_service.py
+ M backend/app/services/test_writer_route_regressions.py
+ M backend/app/services/test_writer_stream.py
+ M backend/app/utils/llm_tool.py
+ M backend/env.example
+ M backend/prompts/editor_review.md
+ M backend/pytest.ini
+ M backend/scripts/real_asgi_concurrent_generation_smoke.py
+ M backend/scripts/real_asgi_generation_smoke.py
+ M backend/scripts/real_asgi_longform_generation_smoke.py
+ M deploy/.env.example
+ M deploy/Dockerfile
+ M deploy/docker-compose.yml
+ M deploy/scripts/run_migrations.sh
+ M deploy/scripts/verify_migration.sh
+ M frontend/package-lock.json
+ M frontend/package.json
+ M frontend/src/api/novel-client.ts
+ M frontend/src/api/types/novel.ts
+ M frontend/src/components.d.ts
+ M frontend/src/components/BlueprintConfirmation.spec.ts
+ M frontend/src/components/admin/RuntimeLogManagement.spec.ts
+ M frontend/src/components/admin/RuntimeLogManagement.vue
+ M frontend/src/components/writing-desk/dialogs/WDVersionDetailModal.spec.ts
+ M frontend/src/components/writing-desk/dialogs/WDVersionDetailModal.vue
+ M frontend/src/components/writing-desk/layout/WDWorkspace.spec.ts
+ M frontend/src/components/writing-desk/layout/WDWorkspace.vue
+ A frontend/src/components/writing-desk/widgets/QualityTrendPanel.spec.ts
+ M frontend/src/components/writing-desk/workspace/states/ChapterGenerating.spec.ts
+ M frontend/src/components/writing-desk/workspace/states/ChapterGenerating.vue
+ M frontend/src/router/index.ts
+ M frontend/src/shared/ui/XqButton.vue
+ M frontend/src/utils/chapterGeneration.spec.ts
+ M frontend/src/utils/chapterGeneration.ts
+ M frontend/src/utils/chapterQuality.spec.ts
+ M frontend/src/utils/chapterQuality.ts
+ M frontend/src/utils/sseStream.spec.ts
+ M frontend/src/utils/sseStream.ts
+ M frontend/src/views/WorkspaceEntry.vue
+ M frontend/src/views/WritingDesk.spec.ts
+ M frontend/src/views/WritingDesk.vue
+ M frontend/vite.config.ts
+?? .audit-frontend-inventory.txt
+?? .audit-model-inventory.txt
+?? .audit-production-baseline.json
+?? .audit-router-inventory.txt
+?? .audit-sabotage-frontend-global-nav.json
+?? .claude/
+?? .current-git-status.txt
+?? .zcode/
+?? audit/
+?? backend/_audit_t06_t13_pipeline.txt
+?? backend/_extract__generate_single_version.txt
+?? backend/_extract__update_generation_runtime.txt
+?? backend/_extract_generate_chapter.txt
+?? backend/_full_backend_test_run.txt
+?? backend/_head_po.py.tmp
+?? backend/_head_test.py.tmp
+?? backend/_pipeline_orchestrator_corrupted_20260821.py
+?? backend/_pipeline_orchestrator_head_restore_20260822.py
+?? backend/_pipeline_recovered_candidate.py
+?? backend/_po_head_backup.py.tmp
+?? backend/_probe_b8_corpus.py
+?? backend/_probe_b8_keys.py
+?? backend/_probe_b8_order.py
+?? backend/_probe_b8_x.py
+?? backend/_probe_b8e_calib.py
+?? backend/_probe_b8e_tests.py
+?? backend/_rec_14_new.txt
+?? backend/_rec_14_old.txt
+?? backend/_rec_15_new.txt
+?? backend/_rec_15_old.txt
+?? backend/_rec_1_new.txt
+?? backend/_rec_1_old.txt
+?? backend/_rec_29_new.txt
+?? backend/_rec_29_old.txt
+?? backend/_rec_45_new.txt
+?? backend/_rec_45_old.txt
+?? backend/_rec_4_new.txt
+?? backend/_rec_4_old.txt
+?? backend/_rec_61_new.txt
+?? backend/_rec_61_old.txt
+?? backend/_recover_edits.json
+?? backend/_recover_replay.py
+?? backend/_recover_scan.py
+?? backend/_recover_show.py
+?? backend/_story_quality_scoring_head.py.tmp
+?? backend/alembic/versions/005_agent_runtime.py
+?? backend/alembic/versions/006_agent_approval_payload.py
+?? backend/alembic/versions/007_agent_run_context.py
+?? backend/alembic/versions/008_agent_run_lease.py
+?? backend/alembic/versions/009_agent_run_steps.py
+?? backend/alembic/versions/010_agent_step_lease.py
+?? backend/alembic/versions/011_agent_approval_step.py
+?? backend/alembic/versions/012_agent_durable_control.py
+?? backend/alembic/versions/013_agent_job_contract.py
+?? backend/alembic/versions/014_agent_correlation_state_bus.py
+?? backend/alembic/versions/015_agent_progress_sequence.py
+?? backend/alembic/versions/016_agent_public_summary_checkpoint.py
+?? backend/alembic/versions/017_agent_run_commands.py
+?? backend/alembic/versions/018_agent_run_command_fences.py
+?? backend/alembic/versions/019_agent_lease_generation.py
+?? backend/alembic/versions/020_agent_catalog_relational.py
+?? backend/alembic/versions/021_agent_transaction_ids.py
+?? backend/alembic/versions/022_agent_catalog_transaction_ids.py
+?? backend/app/agent/
+?? backend/app/api/routers/.research.patch
+?? backend/app/api/routers/agent.py
+?? backend/app/api/routers/test_agent.py
+?? backend/app/api/routers/test_agent_approval_decision_http.py
+?? backend/app/api/routers/test_agent_runtime_route.py
+?? backend/app/api/routers/test_agent_timeline.py
+?? backend/app/api/routers/test_agent_write_handler_route.py
+?? backend/app/api/routers/test_quality_trend.py
+?? backend/app/core/test_agent_provider_config.py
+?? backend/app/core/test_config_security.py
+?? backend/app/db/seeds/
+?? backend/app/models/agent.py
+?? backend/app/models/agent_catalog.py
+?? backend/app/scripts_t15_loader.py
+?? backend/app/services/agent_runtime.py
+?? backend/app/services/chapter_writing_contract_snapshot.py
+?? backend/app/services/longform_evidence.py
+?? backend/app/services/task_runtime.py.orig
+?? backend/app/services/test_agent_approval_rollback_recovery.py
+?? backend/app/services/test_agent_cancellation_convergence.py
+?? backend/app/services/test_agent_run_claim_gates.py
+?? backend/app/services/test_agent_run_command_transactions.py
+?? backend/app/services/test_agent_runtime.py
+?? backend/app/services/test_agent_visible_stream.py
+?? backend/app/services/test_audit_e11_repair_gain.py
+?? backend/app/services/test_bad_sample_regression_sabotage.py
+?? backend/app/services/test_candidate_style_diversity.py
+?? backend/app/services/test_chapter_writing_contract_snapshot.py
+?? backend/app/services/test_chinese_mission_keyword_matching.py
+?? backend/app/services/test_continuity_inherit_quality.py
+?? backend/app/services/test_deployment_contract.py
+?? backend/app/services/test_deterministic_cleanup.py
+?? backend/app/services/test_deterministic_cleanup_integration.py
+?? backend/app/services/test_dialogue_state_marker_audit.py
+?? backend/app/services/test_dialogue_state_marker_categories.py
+?? backend/app/services/test_e06_three_candidate_audit.py
+?? backend/app/services/test_event_density_calibration_sabotage.py
+?? backend/app/services/test_frozen_selector_simulation.py
+?? backend/app/services/test_historical_scorer_delta.py
+?? backend/app/services/test_longform_evidence.py
+?? backend/app/services/test_multichapter_asgi_evidence.py
+?? backend/app/services/test_multichapter_smoke_audit.py
+?? backend/app/services/test_novel_quality_completion.py
+?? backend/app/services/test_orphan_scoring_module.py
+?? backend/app/services/test_pipeline_runtime_event_callback.py
+?? backend/app/services/test_pytest_runner_config.py
+?? backend/app/services/test_quality_annotation_bundle.py
+?? backend/app/services/test_quality_annotation_merge.py
+?? backend/app/services/test_quality_bench.py
+?? backend/app/services/test_quality_bench_comparability.py
+?? backend/app/services/test_quality_bench_prompt_ab_audit.py
+?? backend/app/services/test_quality_early_batches_sabotage.py
+?? backend/app/services/test_quality_enhancements.py
+?? backend/app/services/test_quality_gate_repair_sabotage.py
+?? backend/app/services/test_quality_gate_severity.py
+?? backend/app/services/test_quality_metric_corpus_calibration.py
+?? backend/app/services/test_quality_observability.py
+?? backend/app/services/test_quality_score_eligibility.py
+?? backend/app/services/test_quality_score_sabotage.py
+?? backend/app/services/test_quality_trend_audit.py
+?? backend/app/services/test_smoke_timeout.py
+?? backend/app/services/test_static_action_focus_name_regression.py
+?? backend/app/services/test_static_repetition_sabotage.py
+?? backend/app/services/test_t15_cross_genre_marker_audit.py
+?? backend/app/services/test_t16_corrected_acceptance.py
+?? backend/app/services/test_t24_helper_adoption.py
+?? backend/app/services/test_t25_stable_retry_boundary.py
+?? backend/app/test_error_contract.py
+?? backend/app/utils/smoke_timeout.py
+?? backend/backend/
+?? backend/prompts/contracts/
+?? backend/scripts/QUALITY_BENCH.md
+?? backend/scripts/agent_command_worker.py
+?? backend/scripts/agent_worker.py
+?? backend/scripts/audit_dialogue_state_marker_categories.py
+?? backend/scripts/audit_dialogue_state_markers.py
+?? backend/scripts/audit_e11_repair_gain.py
+?? backend/scripts/audit_event_density_corpus.py
+?? backend/scripts/audit_frozen_selector_simulation.py
+?? backend/scripts/audit_historical_scorer_delta.py
+?? backend/scripts/audit_longform_failure_evidence.py
+?? backend/scripts/audit_multichapter_asgi_evidence.py
+?? backend/scripts/audit_novel_quality_completion.py
+?? backend/scripts/audit_quality_bench_comparability.py
+?? backend/scripts/audit_quality_bench_prompt_ab.py
+?? backend/scripts/audit_quality_trend.py
+?? backend/scripts/audit_t06_standardized_rate.py
+?? backend/scripts/audit_t16_corrected_acceptance.py
+?? backend/scripts/bench_missions/
+?? backend/scripts/export_agent_catalog_contract.py
+?? backend/scripts/export_quality_annotation_bundle.py
+?? backend/scripts/merge_quality_annotations.py
+?? backend/scripts/quality_bench.py
+?? backend/scripts/quality_metric_corpus_calibration.py
+?? backend/scripts/real_asgi_agent_provider_smoke.py
+?? backend/scripts/real_asgi_agent_provider_worker_smoke.py
+?? backend/scripts/real_asgi_agent_worker_recovery_smoke.py
+?? backend/scripts/real_asgi_multichapter_trend_smoke.py
+?? backend/scripts/real_asgi_three_candidate_smoke.py
+?? backend/scripts/static_action_calibration.py
+?? backend/scripts/t15_cross_genre_marker_audit.py
+?? backend/scripts/test_audit_t06_standardized_rate.py
+?? backend/smoke-validation.db-shm
+?? backend/smoke-validation.db-wal
+?? backend/storage/.real-asgi-1786604450.db.migration.lock
+?? backend/storage/.real-asgi-1786604512585449100.db.migration.lock
+?? backend/storage/.real-asgi-1786606026231263500.db.migration.lock
+?? backend/storage/.real-asgi-1786606026232260200.db.migration.lock
+?? backend/storage/.real-asgi-1786606451613049000.db.migration.lock
+?? backend/storage/.real-asgi-1786608560664303200.db.migration.lock
+?? backend/storage/.real-asgi-1786609798425792600.db.migration.lock
+?? backend/storage/.real-asgi-1786613843489287700.db.migration.lock
+?? backend/storage/.real-asgi-1786615962806298800.db.migration.lock
+?? backend/storage/.real-asgi-1786616617073696900.db.migration.lock
+?? backend/storage/.real-asgi-1786617129845106600.db.migration.lock
+?? backend/storage/.real-asgi-1786617508743957300.db.migration.lock
+?? backend/storage/.real-asgi-1786617979117556400.db.migration.lock
+?? backend/storage/.real-asgi-1786618314405492300.db.migration.lock
+?? backend/storage/.real-asgi-1786618706103314000.db.migration.lock
+?? backend/storage/.real-asgi-1786619340789338600.db.migration.lock
+?? backend/storage/.real-asgi-1786631214130513000.db.migration.lock
+?? backend/storage/.real-asgi-1786632094163490500.db.migration.lock
+?? backend/storage/.real-asgi-1786632094179312600.db.migration.lock
+?? backend/storage/.real-asgi-1786632404475644400.db.migration.lock
+?? backend/storage/.real-asgi-1786632404477647700.db.migration.lock
+?? backend/storage/.real-asgi-1786632960872449700.db.migration.lock
+?? backend/storage/.real-asgi-1786634062886371600.db.migration.lock
+?? backend/storage/.real-asgi-1786634062897735800.db.migration.lock
+?? backend/storage/.real-asgi-1786634885361101300.db.migration.lock
+?? backend/storage/.real-asgi-1786635394512568700.db.migration.lock
+?? backend/storage/.real-asgi-1786635395083920200.db.migration.lock
+?? backend/storage/.real-asgi-1786636006895043000.db.migration.lock
+?? backend/storage/.real-asgi-1786636474177709300.db.migration.lock
+?? backend/storage/.real-asgi-1786636474194391500.db.migration.lock
+?? backend/storage/.real-asgi-1786636839469903400.db.migration.lock
+?? backend/storage/.real-asgi-1786636839485041800.db.migration.lock
+?? backend/storage/.real-asgi-1786637378163565500.db.migration.lock
+?? backend/storage/.real-asgi-1786637378168563200.db.migration.lock
+?? backend/storage/.real-asgi-1786637812571338600.db.migration.lock
+?? backend/storage/.real-asgi-1786704178722837000.db.migration.lock
+?? backend/storage/.real-asgi-1786704235822228600.db.migration.lock
+?? backend/storage/.real-asgi-1786705526967705800.db.migration.lock
+?? backend/storage/.real-asgi-1786705844585284500.db.migration.lock
+?? backend/storage/.real-asgi-1786706248193052500.db.migration.lock
+?? backend/storage/.real-asgi-1787338482813237100.db.migration.lock
+?? backend/storage/.real-asgi-1787338767750430000.db.migration.lock
+?? backend/storage/.real-asgi-1787339238997553500.db.migration.lock
+?? backend/storage/.real-asgi-1787339345322881400.db.migration.lock
+?? backend/storage/.real-asgi-1787339980046848600.db.migration.lock
+?? backend/storage/.real-asgi-1787340827595371600.db.migration.lock
+?? backend/storage/.real-asgi-1787341179516869100.db.migration.lock
+?? backend/storage/.real-asgi-1787341325378534100.db.migration.lock
+?? backend/storage/.real-asgi-1787341619797568300.db.migration.lock
+?? backend/storage/.real-asgi-1787341729968887600.db.migration.lock
+?? backend/storage/.real-asgi-1787372247300197300.db.migration.lock
+?? backend/storage/.real-asgi-1787439711798466400.db.migration.lock
+?? backend/storage/.real-asgi-1787440094145467900.db.migration.lock
+?? backend/storage/.real-asgi-1787446068769289100.db.migration.lock
+?? backend/storage/.real-asgi-1787448538139816000.db.migration.lock
+?? backend/storage/.real-asgi-1787448945833891500.db.migration.lock
+?? backend/storage/.real-asgi-20260813145316.db.migration.lock
+?? backend/storage/.real-asgi-concurrent-1786620954731573100.db.migration.lock
+?? backend/storage/.real-asgi-e06-1787346572918593400.db.migration.lock
+?? backend/storage/.real-asgi-e06-1787352019909343900.db.migration.lock
+?? backend/storage/.real-asgi-e06-1787352263066133100.db.migration.lock
+?? backend/storage/.real-asgi-e06-1787353138532038400.db.migration.lock
+?? backend/storage/.real-asgi-e06-1787368371000787900.db.migration.lock
+?? backend/storage/.real-asgi-e06-1787373547884532500.db.migration.lock
+?? backend/storage/.real-asgi-e06-1787395930337170400.db.migration.lock
+?? backend/storage/.real-asgi-e06-1787446068832055700.db.migration.lock
+?? backend/storage/.real-asgi-longform-1786626661999152800.db.migration.lock
+?? backend/storage/.real-asgi-longform-1786626888365851300.db.migration.lock
+?? backend/storage/.real-asgi-longform-1786626992491415900.db.migration.lock
+?? backend/storage/.real-asgi-longform-1786627549634760300.db.migration.lock
+?? backend/storage/.real-asgi-longform-1786628576887886800.db.migration.lock
+?? backend/storage/.real-asgi-longform-1786629791944168100.db.migration.lock
+?? backend/storage/.real-asgi-longform-1786633608344133800.db.migration.lock
+?? backend/storage/.real-asgi-longform-1786633608346134000.db.migration.lock
+?? backend/storage/.real-asgi-longform-1786633782254923000.db.migration.lock
+?? backend/storage/.real-asgi-longform-1787412666685958300.db.migration.lock
+?? backend/storage/.real-asgi-longform-1787414984452685300.db.migration.lock
+?? backend/storage/.real-asgi-longform-1787417093607929600.db.migration.lock
+?? backend/storage/.real-asgi-longform-1787419196124132700.db.migration.lock
+?? backend/storage/.real-asgi-longform-1787439860549631800.db.migration.lock
+?? backend/storage/.real-asgi-longform-1787440403688353800.db.migration.lock
+?? backend/storage/.real-asgi-longform-1787446069217795400.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787342244469457000.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787343126906073700.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787343627471400000.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787343892364489200.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787368482851705200.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787443458579030800.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787444173920494800.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787444669304579300.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787449511869311600.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787450290555731900.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787451315510674800.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787451916837687700.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787456322260135300.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787459839313362500.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787463678853256700.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787465584581351700.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787467165954920200.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787476885290844500.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787479204636248300.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787480105900811500.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787481417952733600.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787481870208787500.db.migration.lock
+?? backend/storage/.real-asgi-multichapter-1787501643612040700.db.migration.lock
+?? backend/storage/.xuanqiong_wenshu.db.migration.lock
+?? backend/storage/novel_imports/
+?? backend/storage/style_uploads/
+?? backend/storage/xuanqiong_wenshu.db.before-deepseek.bak-shm
+?? backend/storage/xuanqiong_wenshu.db.before-deepseek.bak-wal
+?? frontend/.audit-diff-stat-before.txt
+?? frontend/.audit-status-before.txt
+?? frontend/e2e/
+?? frontend/playwright.config.ts
+?? frontend/playwright.real.config.ts
+?? frontend/scripts/
+?? frontend/src/api/agent.spec.ts
+?? frontend/src/api/agent.ts
+?? frontend/src/api/novel-quality-trend.spec.ts
+?? frontend/src/build/
+?? frontend/src/components/writing-desk/widgets/QualityTrendPanel.vue
+?? frontend/src/features/
+?? frontend/src/utils/agentEventSafety.spec.ts
+?? frontend/src/utils/agentEventSafety.ts
+?? frontend/src/views/AgentWorkspace.spec.ts
+?? frontend/src/views/AgentWorkspace.vue
+?? frontend/test-results/
+?? node_modules/
+?? storage/

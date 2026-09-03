@@ -1,0 +1,309 @@
+ M ../.gitignore
+ M ../OPTIMIZATION_FINAL_REPORT.md
+ M ../backend/app/api/routers/__init__.py
+ M ../backend/app/api/routers/auth.py
+ M ../backend/app/api/routers/clue_tracker.py
+ M ../backend/app/api/routers/knowledge_graph.py
+ M ../backend/app/api/routers/llm_config.py
+ M ../backend/app/api/routers/novels.py
+ M ../backend/app/api/routers/research.py
+ M ../backend/app/api/routers/style.py
+ M ../backend/app/api/routers/test_clue_tracker_route.py
+ M ../backend/app/api/routers/test_import_novel_job.py
+ M ../backend/app/api/routers/test_knowledge_graph_route.py
+ M ../backend/app/api/routers/test_research_job.py
+ M ../backend/app/api/routers/test_style_profile_job.py
+ M ../backend/app/api/routers/updates.py
+ M ../backend/app/api/routers/writer.py
+ M ../backend/app/core/config.py
+ M ../backend/app/core/dependencies.py
+ M ../backend/app/db/init_db.py
+ M ../backend/app/db/session.py
+ M ../backend/app/main.py
+ M ../backend/app/models/__init__.py
+ M ../backend/app/models/novel.py
+ M ../backend/app/schemas/llm_config.py
+ M ../backend/app/schemas/novel.py
+ M ../backend/app/services/config_sync_manager.py
+ M ../backend/app/services/export_service.py
+ M ../backend/app/services/finalize_service.py
+ M ../backend/app/services/generation_call_service.py
+ M ../backend/app/services/generation_log_service.py
+ M ../backend/app/services/import_service.py
+ M ../backend/app/services/llm_config_service.py
+ M ../backend/app/services/llm_service.py
+ M ../backend/app/services/long_novel_outline_generator.py
+ M ../backend/app/services/longform_context_service.py
+ M ../backend/app/services/pipeline_orchestrator.py
+ M ../backend/app/services/research_service.py
+ M ../backend/app/services/self_critique_service.py
+ M ../backend/app/services/test_blueprint_observability.py
+ M ../backend/app/services/test_cloud_provider_resilience.py
+ M ../backend/app/services/test_compat_generation_config.py
+ M ../backend/app/services/test_config_sync_manager.py
+ M ../backend/app/services/test_finalize_session_safety.py
+ M ../backend/app/services/test_generation_call_service.py
+ M ../backend/app/services/test_generation_quality_guards.py
+ M ../backend/app/services/test_generation_run_rebind.py
+ M ../backend/app/services/test_import_service.py
+ M ../backend/app/services/test_llm_stream_reasoning_fallback.py
+ M ../backend/app/services/test_multi_chapter_continuity_production.py
+ M ../backend/app/services/test_project_ledger_lease_service.py
+ M ../backend/app/services/test_project_research_service.py
+ M ../backend/app/services/test_prompt_cache_key_skip.py
+ M ../backend/app/services/test_provider_cancel_no_hang.py
+ M ../backend/app/services/test_writer_route_regressions.py
+ M ../backend/app/tasks/emotion_tasks.py
+ M ../backend/app/tasks/foreshadowing_tasks.py
+ M ../backend/app/utils/llm_tool.py
+ M ../backend/conftest.py
+ M ../backend/launch.py
+ M ../backend/pytest.ini
+ M ../backend/requirements-dev.txt
+ M index.html
+ M package.json
+ M src/api/admin.ts
+ M src/api/llm.ts
+ M src/api/modules/chapterDiff.ts
+ M src/api/modules/chapterEditing.ts
+ M src/api/modules/chapterWorkflow.spec.ts
+ M src/api/modules/chapterWorkflow.ts
+ M src/api/novel-client.ts
+ M src/api/novel.ts
+ M src/api/types/novel.ts
+ M src/api/updates.ts
+D  src/assets/base.css
+ M src/assets/main.css
+ M src/components/BlueprintConfirmation.vue
+ M src/components/BlueprintDisplay.vue
+ M src/components/BlueprintEditModal.vue
+ M src/components/ChapterList.vue
+ M src/components/ChapterOutlineEditor.vue
+ M src/components/CharactersEditor.vue
+ M src/components/CharactersEditorEnhanced.vue
+ M src/components/ConversationInput.vue
+ M src/components/CustomAlert.vue
+ M src/components/FactionsEditor.vue
+ M src/components/GlobalNavBar.vue
+ M src/components/InspirationLoading.vue
+ M src/components/KeyLocationsEditor.vue
+ M src/components/LLMSettings.vue
+ M src/components/RelationshipsEditor.vue
+ M src/components/TheWelcome.vue
+ M src/components/_deprecated/EmotionBeatSelector.vue
+ M src/components/_deprecated/LayeredOptimizer.vue
+ M src/components/admin/LLMSettingsPanel.vue
+ M src/components/admin/NovelManagement.vue
+ M src/components/admin/PromptManagement.vue
+ M src/components/admin/RootCauseDiagnostics.vue
+ M src/components/admin/RuntimeLogManagement.vue
+ M src/components/admin/SettingsManagement.vue
+ M src/components/admin/Statistics.vue
+ M src/components/admin/SystemSettingsPanel.vue
+ M src/components/admin/UpdateLogManagement.vue
+ M src/components/admin/adminI18n.ts
+ M src/components/admin/novels/NovelMobileList.vue
+ M src/components/admin/prompts/PromptCreateModal.vue
+ M src/components/admin/prompts/PromptListSidebar.vue
+ M src/components/admin/settings/DailyLimitCard.vue
+ M src/components/admin/settings/SystemConfigModal.vue
+ M src/components/admin/settings/SystemConfigTable.vue
+ M src/components/admin/settings/systemConfigMeta.ts
+ M src/components/clue-tracker/ClueTrackerView.spec.ts
+ M src/components/clue-tracker/ClueTrackerView.vue
+ M src/components/knowledge-graph/KnowledgeGraphView.spec.ts
+ M src/components/knowledge-graph/KnowledgeGraphView.vue
+ M src/components/novel-detail/AnalysisWorkbench.vue
+ M src/components/novel-detail/ChapterOutlineSection.vue
+ M src/components/novel-detail/ChaptersSection.vue
+ M src/components/novel-detail/CharactersSection.vue
+ M src/components/novel-detail/EmotionCurveSection.vue
+ M src/components/novel-detail/ForeshadowingSection.vue
+ M src/components/novel-detail/NovelOutlineSection.vue
+ M src/components/novel-detail/OverviewSection.vue
+ M src/components/novel-detail/RelationshipsSection.vue
+ M src/components/novel-detail/ResearchCenterSection.vue
+ M src/components/novel-detail/WorldSettingSection.vue
+ M src/components/shared/GlobalNotification.vue
+ M src/components/shared/NovelDetailShell.vue
+ M src/components/writing-desk/dialogs/WDEditChapterModal.vue
+ M src/components/writing-desk/dialogs/WDEvaluationDetailModal.vue
+ M src/components/writing-desk/dialogs/WDEvolveOutlineModal.vue
+ M src/components/writing-desk/dialogs/WDGenerateChapterModal.vue
+ M src/components/writing-desk/dialogs/WDGenerateOutlineModal.vue
+ M src/components/writing-desk/dialogs/WDMemoryManageModal.vue
+ M src/components/writing-desk/dialogs/WDPatchDiffModal.vue
+ M src/components/writing-desk/dialogs/WDSkillSelectorModal.vue
+ M src/components/writing-desk/dialogs/WDStyleExtractModal.vue
+ M src/components/writing-desk/dialogs/WDTextReaderModal.vue
+ M src/components/writing-desk/dialogs/WDTokenBudgetModal.vue
+ M src/components/writing-desk/dialogs/WDVersionDetailModal.vue
+ M src/components/writing-desk/dialogs/WDVersionDiffModal.vue
+ M src/components/writing-desk/layout/WDHeader.vue
+ M src/components/writing-desk/layout/WDSidebar.spec.ts
+ M src/components/writing-desk/layout/WDSidebar.vue
+ M src/components/writing-desk/layout/WDWorkspace.vue
+ M src/components/writing-desk/widgets/FloatingProgressCard.spec.ts
+ M src/components/writing-desk/widgets/FloatingProgressCard.vue
+ M src/components/writing-desk/workspace/content/ChapterContent.vue
+ M src/components/writing-desk/workspace/review/VersionSelector.vue
+ M src/components/writing-desk/workspace/states/ChapterEmpty.vue
+ M src/components/writing-desk/workspace/states/ChapterFailed.vue
+ M src/components/writing-desk/workspace/states/ChapterGenerating.spec.ts
+ M src/components/writing-desk/workspace/states/ChapterGenerating.vue
+ M src/components/writing-desk/workspace/states/WorkspaceInitial.vue
+ M src/composables/admin/useAdminSettings.ts
+ M src/composables/admin/useNovelManagement.ts
+ M src/composables/admin/usePromptManagement.ts
+ M src/composables/useAlert.ts
+ M src/composables/useLocale.ts
+ M src/shared/styles/tokens.css
+ M src/shared/ui/XqButton.vue
+ M src/shared/ui/XqPanel.vue
+ M src/shared/ui/XqProgress.vue
+ M src/stores/auth.ts
+ M src/stores/novel.ts
+ M src/utils/chapterGeneration.spec.ts
+ M src/utils/chapterGeneration.ts
+ M src/utils/chapterQuality.ts
+ M src/utils/date.ts
+D  src/utils/progressMessages.ts
+ M src/utils/sseStream.ts
+ M src/views/AdminView.spec.ts
+ M src/views/AdminView.vue
+ M src/views/InspirationMode.vue
+ M src/views/NovelFullReaderView.vue
+ M src/views/NovelWorkspace.vue
+ M src/views/SettingsView.vue
+ M src/views/StyleCenterView.vue
+ M src/views/SystemSettingsView.vue
+ M src/views/WorkspaceEntry.vue
+ M src/views/WritingDesk.vue
+ M vite.config.ts
+?? ../.audit-frontend-inventory.txt
+?? ../.audit-model-inventory.txt
+?? ../.audit-router-inventory.txt
+?? ../.claude/
+?? ../.zcode/
+?? ../AGENTS.md
+?? ../OPTIMIZATION_REPORT.md
+?? ../PRODUCTION_MASTER_OPTIMIZATION_PLAN.md
+?? ../PRODUCTION_PLAN_AGENT_BUSINESS.md
+?? ../PRODUCTION_PLAN_AGENT_FRONTEND.md
+?? ../PRODUCTION_PLAN_AGENT_GENERATION.md
+?? ../PRODUCTION_PLAN_AGENT_RELEASE.md
+?? ../PRODUCTION_PLAN_AGENT_TASK_RUNTIME.md
+?? ../PRODUCTION_RECONSTRUCTION_AUDIT.md
+?? ../backend/README.md
+?? ../backend/alembic.ini
+?? ../backend/alembic/
+?? ../backend/app/api/routers/.research.patch
+?? ../backend/app/api/routers/task_runtime.py
+?? ../backend/app/api/routers/test_auth_route.py
+?? ../backend/app/api/routers/test_longform_plan_registration.py
+?? ../backend/app/api/routers/test_outline_job_restart_recovery.py
+?? ../backend/app/api/routers/test_task_runtime_route.py
+?? ../backend/app/api/routers/test_updates.py
+?? ../backend/app/core/test_dependencies_auth.py
+?? ../backend/app/db/test_init_db_idempotency.py
+?? ../backend/app/models/task_runtime.py
+?? ../backend/app/schemas/task_runtime.py
+?? ../backend/app/services/longform_generation_service.py
+?? ../backend/app/services/novel_text_format.py
+?? ../backend/app/services/persistent_generation_log_service.py
+?? ../backend/app/services/task_reconciliation.py
+?? ../backend/app/services/task_runtime.py
+?? ../backend/app/services/task_runtime.py.orig
+?? ../backend/app/services/test_alembic_migrations.py
+?? ../backend/app/services/test_generation_log_service.py
+?? ../backend/app/services/test_llm_config_persistence.py
+?? ../backend/app/services/test_longform_generation_service.py
+?? ../backend/app/services/test_longform_segment_streaming.py
+?? ../backend/app/services/test_novel_export_import_roundtrip.py
+?? ../backend/app/services/test_persistent_generation_log_service.py
+?? ../backend/app/services/test_task_reconciliation.py
+?? ../backend/app/services/test_task_runtime.py
+?? ../backend/app/services/test_writer_stream.py
+?? ../backend/scripts/gen_ch11_20.py
+?? ../backend/scripts/gen_ch21_30.py
+?? ../backend/scripts/gen_continue.py
+?? ../backend/scripts/gen_final.py
+?? ../backend/scripts/gen_v2.py
+?? ../backend/scripts/gen_v3.py
+?? ../backend/scripts/generate_200k_novel.py
+?? ../backend/scripts/real_asgi_concurrent_generation_smoke.py
+?? ../backend/scripts/real_asgi_generation_smoke.py
+?? ../backend/scripts/real_asgi_longform_generation_smoke.py
+?? ../backend/storage/.real-asgi-1786604450.db.migration.lock
+?? ../backend/storage/.real-asgi-1786604512585449100.db.migration.lock
+?? ../backend/storage/.real-asgi-1786606026231263500.db.migration.lock
+?? ../backend/storage/.real-asgi-1786606026232260200.db.migration.lock
+?? ../backend/storage/.real-asgi-1786606451613049000.db.migration.lock
+?? ../backend/storage/.real-asgi-1786608560664303200.db.migration.lock
+?? ../backend/storage/.real-asgi-1786609798425792600.db.migration.lock
+?? ../backend/storage/.real-asgi-1786613843489287700.db.migration.lock
+?? ../backend/storage/.real-asgi-1786615962806298800.db.migration.lock
+?? ../backend/storage/.real-asgi-1786616617073696900.db.migration.lock
+?? ../backend/storage/.real-asgi-1786617129845106600.db.migration.lock
+?? ../backend/storage/.real-asgi-1786617508743957300.db.migration.lock
+?? ../backend/storage/.real-asgi-1786617979117556400.db.migration.lock
+?? ../backend/storage/.real-asgi-1786618314405492300.db.migration.lock
+?? ../backend/storage/.real-asgi-1786618706103314000.db.migration.lock
+?? ../backend/storage/.real-asgi-1786619340789338600.db.migration.lock
+?? ../backend/storage/.real-asgi-1786631214130513000.db.migration.lock
+?? ../backend/storage/.real-asgi-1786632094163490500.db.migration.lock
+?? ../backend/storage/.real-asgi-1786632094179312600.db.migration.lock
+?? ../backend/storage/.real-asgi-1786632404475644400.db.migration.lock
+?? ../backend/storage/.real-asgi-1786632404477647700.db.migration.lock
+?? ../backend/storage/.real-asgi-1786632960872449700.db.migration.lock
+?? ../backend/storage/.real-asgi-1786634062886371600.db.migration.lock
+?? ../backend/storage/.real-asgi-1786634062897735800.db.migration.lock
+?? ../backend/storage/.real-asgi-1786634885361101300.db.migration.lock
+?? ../backend/storage/.real-asgi-1786635394512568700.db.migration.lock
+?? ../backend/storage/.real-asgi-1786635395083920200.db.migration.lock
+?? ../backend/storage/.real-asgi-1786636006895043000.db.migration.lock
+?? ../backend/storage/.real-asgi-1786636474177709300.db.migration.lock
+?? ../backend/storage/.real-asgi-1786636474194391500.db.migration.lock
+?? ../backend/storage/.real-asgi-1786636839469903400.db.migration.lock
+?? ../backend/storage/.real-asgi-1786636839485041800.db.migration.lock
+?? ../backend/storage/.real-asgi-1786637378163565500.db.migration.lock
+?? ../backend/storage/.real-asgi-1786637378168563200.db.migration.lock
+?? ../backend/storage/.real-asgi-1786637812571338600.db.migration.lock
+?? ../backend/storage/.real-asgi-1786704178722837000.db.migration.lock
+?? ../backend/storage/.real-asgi-1786704235822228600.db.migration.lock
+?? ../backend/storage/.real-asgi-1786705526967705800.db.migration.lock
+?? ../backend/storage/.real-asgi-1786705844585284500.db.migration.lock
+?? ../backend/storage/.real-asgi-1786706248193052500.db.migration.lock
+?? ../backend/storage/.real-asgi-20260813145316.db.migration.lock
+?? ../backend/storage/.real-asgi-concurrent-1786620954731573100.db.migration.lock
+?? ../backend/storage/.real-asgi-longform-1786626661999152800.db.migration.lock
+?? ../backend/storage/.real-asgi-longform-1786626888365851300.db.migration.lock
+?? ../backend/storage/.real-asgi-longform-1786626992491415900.db.migration.lock
+?? ../backend/storage/.real-asgi-longform-1786627549634760300.db.migration.lock
+?? ../backend/storage/.real-asgi-longform-1786628576887886800.db.migration.lock
+?? ../backend/storage/.real-asgi-longform-1786629791944168100.db.migration.lock
+?? ../backend/storage/.real-asgi-longform-1786633608344133800.db.migration.lock
+?? ../backend/storage/.real-asgi-longform-1786633608346134000.db.migration.lock
+?? ../backend/storage/.real-asgi-longform-1786633782254923000.db.migration.lock
+?? ../backend/storage/.xuanqiong_wenshu.db.migration.lock
+?? ../backend/storage/novel_imports/
+?? ../backend/storage/style_uploads/
+?? .audit-status-before.txt
+?? scripts/
+?? src/api/task-runtime.spec.ts
+?? src/api/task-runtime.ts
+?? src/api/task-stream.spec.ts
+?? src/components.d.ts
+?? src/components/GlobalNavBar.spec.ts
+?? src/components/novel-detail/ChaptersSection.spec.ts
+?? src/components/shared/PixelMascot.spec.ts
+?? src/components/shared/PixelMascot.vue
+?? src/components/shared/PixelMascotPicker.vue
+?? src/composables/useLocale.spec.ts
+?? src/composables/usePixelMascot.ts
+?? src/composables/useSmoothProgress.spec.ts
+?? src/composables/useSmoothProgress.ts
+?? src/stores/auth.spec.ts
+?? src/utils/sseStream.spec.ts
+?? src/views/WorkspaceEntry.spec.ts
+?? ../node_modules/

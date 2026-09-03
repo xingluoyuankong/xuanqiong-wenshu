@@ -1,0 +1,1979 @@
+    async def generate_chapter(
+        self,
+        *,
+        project_id: str,
+        chapter_number: int,
+        user_id: int,
+        writing_notes: Optional[str] = None,
+        flow_config: Optional[Dict[str, Any]] = None,
+        generation_run_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        stage_timings: Dict[str, float] = {}
+
+        async def mark_stage(stage_name: str, started_at: float, *, detail: Optional[str] = None) -> None:
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+            stage_timings[stage_name] = duration_ms
+            logger.info(
+                "Pipeline stage completed: project=%s chapter=%s stage=%s duration_ms=%s",
+                project_id,
+                chapter_number,
+                stage_name,
+                duration_ms,
+            )
+            runtime_detail = detail or f"阶段 {stage_name} 完成，用时 {round(duration_ms / 1000, 2)} 秒"
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage=stage_name,
+                message=runtime_detail,
+                progress_percent=self._infer_stage_progress_percent(stage_name),
+                event_kind="progress",
+                title=f"{stage_name} 完成",
+                summary=runtime_detail,
+                extra={
+                    "stage_duration_ms": duration_ms,
+                    "stage_duration_seconds": round(duration_ms / 1000, 2),
+                    "stage_timings": dict(stage_timings),
+                },
+            )
+
+        pipeline_started_at = time.perf_counter()
+        config = await self._resolve_config(flow_config)
+        requested_preset = str((flow_config or {}).get("preset", "") or "").strip() or config.preset
+        runtime_metadata: Dict[str, Any] = {
+            "provider_preflight": {},
+            "degraded_stages": [],
+            "generation_mode": "quality",
+            "stable_retry_used": False,
+            "requested_preset": requested_preset,
+            "actual_preset": config.preset,
+            "preset_downgraded": False,
+            "downgraded_capabilities": [],
+            "target_word_count": 0,
+            "min_word_count": 0,
+            "actual_word_count": 0,
+            "enrichment_triggered": False,
+            "word_requirement_met": False,
+            "word_requirement_reason": None,
+            "generation_attempts": [],
+            "candidate_generation": {},
+            "quality_gates": {},
+            "review_status": "skipped",
+            "consistency_status": "skipped",
+        }
+        runtime_metadata["provider_preflight"] = await self._ensure_provider_ready(user_id)
+        runtime_metadata["target_word_count"] = config.target_word_count
+        runtime_metadata["min_word_count"] = config.min_word_count
+        runtime_metadata["chapter_draft_contract"] = self._resolve_chapter_draft_contract(
+            config.target_word_count,
+            config.min_word_count,
+        )
+        runtime_metadata["chapter_generation_limits"] = {
+            "timeout_seconds": self._resolve_chapter_generation_timeout(config.target_word_count),
+            "soft_timeout_seconds": self._resolve_chapter_generation_soft_timeout(config.target_word_count),
+            "max_tokens": self._resolve_chapter_generation_max_tokens(config.target_word_count),
+            "mission_timeout_seconds": self._resolve_chapter_mission_timeout(config.target_word_count),
+            "mission_max_tokens": self._resolve_chapter_mission_max_tokens(config.target_word_count),
+        }
+        project = await self.novel_service.ensure_project_owner(project_id, user_id)
+
+        token_budget_warning = await self._check_token_budget_before_generation(project_id)
+        if token_budget_warning:
+            runtime_metadata["token_budget_warning"] = token_budget_warning
+
+        # 长篇项目（大纲超过 10 章）自动启用 memory，保障跨章连续性
+        # 仅在 preset 非 basic 且 memory 尚未显式启用时自动开启
+        outline_count = len(project.outlines) if hasattr(project, "outlines") and project.outlines else 0
+        if outline_count > 10 and config.preset != "basic" and not config.enable_memory:
+            config.enable_memory = True
+            logger.info(
+                "Auto-enabled memory layer for long-form project: project=%s outlines=%s preset=%s",
+                project_id,
+                outline_count,
+                config.preset,
+            )
+
+        outline = await self.novel_service.get_outline(project_id, chapter_number)
+        if not outline:
+            raise HTTPException(status_code=404, detail="蓝图中未找到对应章节纲要")
+
+        chapter = await self.novel_service.get_or_create_chapter(project_id, chapter_number)
+        if chapter.status != "generating":
+            chapter.real_summary = None
+            chapter.selected_version_id = None
+            chapter.status = "generating"
+            await self.session.commit()
+
+        await self._update_generation_runtime(
+            chapter,
+            generation_run_id=generation_run_id,
+            stage="prepare_context",
+            message="正在整理章节上下文、历史摘要和写作约束",
+            progress_percent=8,
+            extra={
+                "target_word_count": config.target_word_count,
+                "min_word_count": config.min_word_count,
+                "generation_mode": config.preset,
+                "chapter_draft_contract": runtime_metadata["chapter_draft_contract"],
+                "chapter_generation_limits": runtime_metadata["chapter_generation_limits"],
+            },
+        )
+        await self._assert_generation_active(
+            chapter,
+            generation_run_id=generation_run_id,
+            stage="prepare_context",
+        )
+
+        outlines_map = {item.chapter_number: item for item in project.outlines}
+        prepare_context_started_at = time.perf_counter()
+        history_context = await self._collect_history_context(
+            project_id=project_id,
+            chapter_number=chapter_number,
+            outlines_map=outlines_map,
+            chapters=project.chapters,
+            user_id=user_id,
+        )
+
+        blueprint_dict = await self._get_writer_blueprint(project)
+
+        outline_title = outline.title or f"第{outline.chapter_number}章"
+        outline_summary = outline.summary or "暂无摘要"
+        writing_notes = writing_notes or "无额外写作指令"
+
+        pre_mission_scope = self.context_builder.analyze_character_scope(
+            blueprint=blueprint_dict,
+            completed_summaries=history_context["completed_summaries"],
+            previous_tail=history_context["previous_tail"],
+            outline_title=outline_title,
+            outline_summary=outline_summary,
+            writing_notes=writing_notes,
+        )
+        all_characters = pre_mission_scope["all_names"]
+        introduced_characters = pre_mission_scope["introduced_characters"]
+        planned_characters = pre_mission_scope["planned_characters"]
+
+        mission_started_at = time.perf_counter()
+        chapter_mission = await self._generate_chapter_mission(
+            blueprint_dict=blueprint_dict,
+            previous_summary=history_context["previous_summary"],
+            previous_tail=history_context["previous_tail"],
+            recent_track=history_context.get("recent_track", ""),
+            plot_arc_digest=history_context.get("plot_arc_digest", ""),
+            outline_title=outline_title,
+            outline_summary=outline_summary,
+            writing_notes=writing_notes,
+            introduced_characters=introduced_characters,
+            planned_characters=planned_characters,
+            all_characters=all_characters,
+            target_word_count=config.target_word_count,
+            user_id=user_id,
+        )
+        await mark_stage("generate_mission", mission_started_at, detail="章节导演脚本阶段完成")
+
+        allowed_new_characters = chapter_mission.get("allowed_new_characters", []) if chapter_mission else []
+
+        visibility_context = self.context_builder.build_visibility_context(
+            blueprint=blueprint_dict,
+            completed_summaries=history_context["completed_summaries"],
+            previous_tail=history_context["previous_tail"],
+            outline_title=outline_title,
+            outline_summary=outline_summary,
+            writing_notes=writing_notes,
+            allowed_new_characters=allowed_new_characters,
+        )
+
+        writer_blueprint = visibility_context["writer_blueprint"]
+        forbidden_characters = visibility_context["forbidden_characters"]
+        introduced_characters = visibility_context["introduced_characters"]
+        macro_continuity_context = visibility_context.get("macro_continuity_context")
+
+        logger.info(
+            "Pipeline context: project=%s chapter=%s introduced=%d allowed_new=%d forbidden=%d",
+            project_id,
+            chapter_number,
+            len(introduced_characters),
+            len(allowed_new_characters),
+            len(forbidden_characters),
+        )
+
+        longform_context: Optional[LongformContextPackage] = None
+        longform_context_started_at = time.perf_counter()
+        try:
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="audit_context",
+                message="正在审计长期记忆、章节快照、时间线与知识图谱",
+                progress_percent=11,
+                extra={
+                    "context_stage": "audit_context",
+                    "context_stage_label": "长期上下文审计",
+                },
+            )
+            await self._assert_generation_active(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="audit_context",
+            )
+            longform_context = await self.longform_context_service.build_context_package(
+                project=project,
+                outline=outline,
+                chapter_number=chapter_number,
+                writing_notes=writing_notes,
+                chapter_mission=chapter_mission,
+                allowed_new_characters=allowed_new_characters,
+            )
+            runtime_metadata["longform_context"] = longform_context.to_metadata()
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="cast_plan",
+                message="正在装配角色规模、登场层级、势力归属和动态角色规则",
+                progress_percent=14,
+                extra={
+                    "target_character_count": longform_context.cast_plan.target_character_count,
+                    "planned_character_count": longform_context.cast_plan.planned_character_count,
+                    "chapter_focus_names": longform_context.cast_plan.chapter_focus_names,
+                },
+            )
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="foreshadowing_plan",
+                message="正在规划本章伏笔回收、强化、禁忘和可新增线索",
+                progress_percent=17,
+                extra={
+                    "must_resolve_count": len(longform_context.foreshadowing_task.must_resolve),
+                    "should_reinforce_count": len(longform_context.foreshadowing_task.should_reinforce),
+                    "avoid_forgetting_count": len(longform_context.foreshadowing_task.avoid_forgetting),
+                    "active_clue_count": len(longform_context.foreshadowing_task.active_clues),
+                },
+            )
+            await mark_stage("longform_context", longform_context_started_at, detail="长篇上下文包装配完成")
+        except Exception as exc:  # noqa: BLE001 - longform context should improve generation, not take the writer down.
+            runtime_metadata["degraded_stages"].append({"stage": "longform_context", "reason": str(exc)})
+            if isinstance(exc, SQLAlchemyError):
+                await self._safe_session_rollback("longform_context")
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="audit_context",
+                message="长篇上下文装配已降级跳过，继续使用基础上下文生成",
+                progress_percent=17,
+                level="warning",
+                extra={
+                    "degraded_stage": "longform_context",
+                    "degraded_reason": self._truncate_runtime_text(exc),
+                },
+            )
+            logger.warning("长篇上下文装配已降级：project=%s chapter=%s error=%s", project_id, chapter_number, exc)
+
+        enhanced_flow = None
+        enhanced_context = None
+        if config.enable_constitution or config.enable_persona or config.enable_foreshadowing or config.enable_faction:
+            enhanced_flow = EnhancedWritingFlow(self.session, self.llm_service, self.prompt_service)
+
+            async def report_enhanced_context_progress(stage: str, message: str) -> None:
+                await self._update_generation_runtime(
+                    chapter,
+                    generation_run_id=generation_run_id,
+                    stage=stage,
+                    message=message,
+                    progress_percent=self._infer_stage_progress_percent(stage),
+                    event_kind="progress",
+                    title="写前账本等待中",
+                    summary=message,
+                    extra={
+                        "provider_waiting": True,
+                        "context_stage": stage,
+                        "context_stage_label": "写前增强上下文",
+                        "target_word_count": config.target_word_count,
+                        "min_word_count": config.min_word_count,
+                    },
+                )
+                await self._assert_generation_active(
+                    chapter,
+                    generation_run_id=generation_run_id,
+                    stage=f"{stage}_provider_wait",
+                )
+
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="enhanced_context",
+                message="正在装配小说宪法、文风、伏笔提醒和势力关系",
+                progress_percent=18,
+                extra={
+                    "context_stage": "enhanced_context",
+                    "context_stage_label": "写前增强上下文",
+                    "enable_constitution": config.enable_constitution,
+                    "enable_persona": config.enable_persona,
+                    "enable_foreshadowing": config.enable_foreshadowing,
+                    "enable_faction": config.enable_faction,
+                },
+            )
+            await self._assert_generation_active(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="enhanced_context",
+            )
+            enhanced_context = await enhanced_flow.prepare_writing_context(
+                project_id=project_id,
+                chapter_number=chapter_number,
+                chapter_outline=outline_summary,
+                user_id=user_id,
+                progress_callback=report_enhanced_context_progress,
+            )
+
+        memory_context = None
+        if config.enable_memory:
+            memory_context = await self._get_memory_context(
+                project_id=project_id,
+                chapter_number=chapter_number,
+                involved_characters=introduced_characters,
+            )
+
+        project_memory_text = await self._get_project_memory_text(project_id)
+        style_context = await self._get_style_context(project_id, user_id)
+        analysis_guidance_context = await self._build_story_guidance_context(
+            project_id=project_id,
+            chapter_number=chapter_number,
+        )
+
+        rag_context = None
+        knowledge_context = None
+        rag_stats = None
+        if config.enable_rag:
+            if config.rag_mode == "two_stage":
+                knowledge_context, rag_stats = await self._get_two_stage_rag_context(
+                    project_id=project_id,
+                    chapter_number=chapter_number,
+                    writing_notes=writing_notes,
+                    pov_character=self._resolve_pov_character(chapter_mission),
+                    user_id=user_id,
+                )
+                continuity_injection = self._build_continuity_retrieval_injection(history_context)
+                if continuity_injection:
+                    knowledge_context = "\n\n".join(part for part in [continuity_injection, knowledge_context] if part)
+                    if isinstance(rag_stats, dict):
+                        rag_stats["continuity_injection"] = True
+            else:
+                rag_context = await self._get_rag_context(
+                    project_id=project_id,
+                    outline_title=outline_title,
+                    outline_summary=outline_summary,
+                    writing_notes="\n".join(filter(None, [writing_notes, history_context.get("plot_arc_digest", ""), history_context.get("recent_track", "")])),
+                    user_id=user_id,
+                )
+                rag_context = self._inject_continuity_into_rag(rag_context, history_context)
+                rag_stats = {
+                    "mode": "simple",
+                    "chunks": len(rag_context.get("chunks", [])) if rag_context else 0,
+                    "summaries": len(rag_context.get("summaries", [])) if rag_context else 0,
+                    "continuity_injection": bool((rag_context or {}).get("continuity_injection")),
+                }
+        await mark_stage("prepare_context", prepare_context_started_at, detail="上下文准备阶段完成")
+
+        writer_prompt = await self.prompt_service.get_prompt("writing_v2")
+        if not writer_prompt:
+            writer_prompt = await self.prompt_service.get_prompt("writing")
+        if not writer_prompt:
+            raise HTTPException(status_code=500, detail="缺少写作提示词，请联系管理员配置")
+
+        prompt_sections = self._build_prompt_sections(
+            preset=requested_preset,
+            writer_blueprint=writer_blueprint,
+            previous_summary=history_context["previous_summary"],
+            previous_tail=history_context["previous_tail"],
+            chapter_mission=chapter_mission,
+            macro_continuity_context=macro_continuity_context,
+            longform_context_text=longform_context.prompt_text if longform_context else None,
+            rag_context=rag_context,
+            knowledge_context=knowledge_context,
+            outline_title=outline_title,
+            outline_summary=outline_summary,
+            writing_notes=writing_notes,
+            forbidden_characters=forbidden_characters,
+            project_memory_text=project_memory_text,
+            memory_context=memory_context,
+            analysis_guidance_context=analysis_guidance_context,
+            style_context=style_context,
+            target_word_count=config.target_word_count,
+            min_word_count=config.min_word_count,
+        )
+
+        if enhanced_flow and enhanced_context:
+            prompt_sections = enhanced_flow.build_enhanced_prompt_sections(prompt_sections, enhanced_context)
+
+        prompt_sections = self._apply_prompt_budget(prompt_sections)
+        runtime_metadata["quality_gates"]["prompt_section_count"] = len(prompt_sections)
+        runtime_metadata["quality_gates"]["prompt_estimated_tokens"] = sum(
+            self._estimate_tokens(content) for _, content in prompt_sections if content
+        )
+
+        prompt_input = "\n\n".join(f"{title}\n{content}" for title, content in prompt_sections if content)
+        logger.debug("Pipeline prompt length: %s chars", len(prompt_input))
+        await self.session.commit()
+        await self._update_generation_runtime(
+            chapter,
+            generation_run_id=generation_run_id,
+            stage="generate_mission",
+            message="上下文已就绪，正在生成正文任务与候选草稿",
+            progress_percent=18,
+            extra={
+                "introduced_character_count": len(introduced_characters),
+                "allowed_new_character_count": len(allowed_new_characters),
+            },
+        )
+        await self._assert_generation_active(
+            chapter,
+            generation_run_id=generation_run_id,
+            stage="before_generation",
+        )
+
+        active_config = config
+        attempt_configs: List[PipelineConfig] = [config]
+        stable_retry_config = self._build_stable_retry_config(config)
+        if stable_retry_config is not None:
+            attempt_configs.append(stable_retry_config)
+
+        required_success_count = self._required_success_count(config.version_count)
+        runtime_metadata["quality_gates"]["required_success_count"] = required_success_count
+        runtime_metadata["quality_gates"]["requested_version_count"] = config.version_count
+
+        versions: List[Dict[str, Any]] = []
+        generation_errors: List[Exception] = []
+        best_partial_versions: List[Dict[str, Any]] = []
+        best_partial_errors: List[Exception] = []
+        best_partial_config: PipelineConfig = config
+        best_partial_required_success_count = required_success_count
+        await self._update_generation_runtime(
+            chapter,
+            generation_run_id=generation_run_id,
+            stage="generate_variants",
+            message="正在调用模型生成候选版本",
+            progress_percent=34,
+            extra={
+                "attempt_count": len(attempt_configs),
+                "version_count": config.version_count,
+            },
+        )
+        generation_variants_started_at = time.perf_counter()
+
+        async def report_generation_call_progress(stage: str, message: str) -> None:
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage=stage,
+                message=message,
+                progress_percent=self._infer_stage_progress_percent(stage),
+                event_kind="progress",
+                title="Provider 等待中",
+                summary=message,
+                extra={
+                    "provider_waiting": True,
+                    "target_word_count": config.target_word_count,
+                    "min_word_count": config.min_word_count,
+                    "soft_timeout_seconds": self._resolve_chapter_generation_soft_timeout(config.target_word_count),
+                },
+            )
+            await self._assert_generation_active(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage=f"{stage}_provider_wait",
+            )
+
+        for attempt_idx, attempt_config in enumerate(attempt_configs):
+            version_count = attempt_config.version_count
+            attempt_required_success_count = self._attempt_required_success_count(
+                required_success_count=required_success_count,
+                requested_count=version_count,
+            )
+            version_style_hints = self._resolve_style_hints(enhanced_context, version_count)
+
+            generation_tasks: List[asyncio.Task] = []
+            generation_attempt_started_at = time.perf_counter()
+            for idx in range(version_count):
+                style_hint = version_style_hints[idx] if idx < len(version_style_hints) else None
+                generation_tasks.append(
+                    asyncio.create_task(
+                        self._generate_single_version(
+                            index=idx,
+                            prompt_input=prompt_input,
+                            writer_prompt=writer_prompt,
+                            style_hint=style_hint,
+                            project_id=project_id,
+                            chapter_number=chapter_number,
+                            outline_title=outline_title,
+                            outline_summary=outline_summary,
+                            chapter_mission=chapter_mission,
+                            forbidden_characters=forbidden_characters,
+                            allowed_new_characters=allowed_new_characters,
+                            user_id=user_id,
+                            writer_blueprint=writer_blueprint,
+                            memory_context=memory_context,
+                            analysis_guidance_context=analysis_guidance_context,
+                            enhanced_context=enhanced_context,
+                            config=attempt_config,
+                            progress_callback=report_generation_call_progress,
+                        )
+                    )
+                )
+
+            # 在LLM调用前强制提交并释放数据库session锁，允许其他请求在生成期间读取
+            await self.session.commit()
+            await self.session.flush()
+            self.session.expire_all()
+            generation_results = await asyncio.gather(*generation_tasks, return_exceptions=True)
+            generation_attempt_duration_ms = round((time.perf_counter() - generation_attempt_started_at) * 1000, 2)
+            await self._assert_generation_active(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage=f"generation_attempt_{attempt_idx + 1}",
+            )
+            attempt_versions: List[Dict[str, Any]] = []
+            attempt_errors: List[Exception] = []
+            for result in generation_results:
+                if isinstance(result, Exception):
+                    attempt_errors.append(result)
+                    logger.warning(
+                        "Single version generation candidate failed: project=%s chapter=%s mode=%s error=%s",
+                        project_id,
+                        chapter_number,
+                        attempt_config.preset,
+                        result,
+                    )
+                else:
+                    attempt_versions.append(result)
+
+            success_count = len(attempt_versions)
+            generated_version_timings = [
+                dict((item.get("metadata") or {}).get("timings") or {})
+                for item in attempt_versions
+                if isinstance(item, dict)
+            ]
+            generation_phase_total_ms = round(sum(float(timing.get("generation_ms", 0) or 0) for timing in generated_version_timings), 2)
+            guardrail_check_total_ms = round(sum(float(timing.get("guardrail_check_ms", 0) or 0) for timing in generated_version_timings), 2)
+            guardrail_rewrite_total_ms = round(sum(float(timing.get("guardrail_rewrite_ms", 0) or 0) for timing in generated_version_timings), 2)
+            version_total_ms = round(sum(float(timing.get("total_ms", 0) or 0) for timing in generated_version_timings), 2)
+            runtime_metadata["generation_attempts"].append(
+                {
+                    "attempt_index": attempt_idx + 1,
+                    "mode": attempt_config.preset,
+                    "requested_version_count": version_count,
+                    "successful_versions": success_count,
+                    "failed_versions": len(attempt_errors),
+                    "required_success_count": attempt_required_success_count,
+                    "original_required_success_count": required_success_count,
+                    "meets_success_threshold": success_count >= attempt_required_success_count,
+                    "duration_ms": generation_attempt_duration_ms,
+                    "generation_phase_total_ms": generation_phase_total_ms,
+                    "guardrail_check_total_ms": guardrail_check_total_ms,
+                    "guardrail_rewrite_total_ms": guardrail_rewrite_total_ms,
+                    "version_total_ms": version_total_ms,
+                }
+            )
+
+            if success_count > 0 and (
+                not best_partial_versions
+                or success_count > len(best_partial_versions)
+                or (
+                    success_count == len(best_partial_versions)
+                    and attempt_config.preset == "stable"
+                )
+            ):
+                best_partial_versions = attempt_versions
+                best_partial_errors = attempt_errors
+                best_partial_config = attempt_config
+                best_partial_required_success_count = attempt_required_success_count
+
+            if success_count >= attempt_required_success_count:
+                versions = attempt_versions
+                generation_errors = attempt_errors
+                active_config = attempt_config
+                runtime_metadata["candidate_generation"] = {
+                    "requested_version_count": version_count,
+                    "successful_versions": success_count,
+                    "failed_versions": len(attempt_errors),
+                    "required_success_count": attempt_required_success_count,
+                    "original_required_success_count": required_success_count,
+                }
+                if attempt_idx > 0:
+                    runtime_metadata["stable_retry_used"] = True
+                    runtime_metadata["generation_mode"] = "stable"
+                await self._update_generation_runtime(
+                    chapter,
+                    generation_run_id=generation_run_id,
+                    stage="review",
+                    message="候选草稿已生成，正在执行 AI 评审与最佳版本筛选",
+                    progress_percent=62,
+                    event_kind="content",
+                    title="候选草稿已生成",
+                    summary=f"本轮生成 {len(attempt_versions)} 个候选版本，开始评审筛选。",
+                    content_preview=self._truncate_runtime_text(
+                        (attempt_versions[0].get("content") or "") if attempt_versions else "",
+                        420,
+                    ),
+                    metrics={
+                        "generated_version_count": len(attempt_versions),
+                        "failed_versions": len(attempt_errors),
+                        "target_word_count": config.target_word_count,
+                    },
+                    extra={
+                        "generated_version_count": len(attempt_versions),
+                        "stable_retry_used": runtime_metadata["stable_retry_used"],
+                        "generation_mode": runtime_metadata["generation_mode"],
+                        "generation_attempt_duration_ms": generation_attempt_duration_ms,
+                        "generation_attempt_duration_seconds": round(generation_attempt_duration_ms / 1000, 2),
+                        "generation_phase_total_ms": generation_phase_total_ms,
+                        "guardrail_check_total_ms": guardrail_check_total_ms,
+                        "guardrail_rewrite_total_ms": guardrail_rewrite_total_ms,
+                        "version_total_ms": version_total_ms,
+                    },
+                )
+                break
+
+            generation_errors = attempt_errors
+            should_stable_retry = (
+                attempt_idx == 0
+                and len(attempt_configs) > 1
+                and (
+                    self._should_retry_with_stable_config(attempt_errors)
+                    or self._should_retry_due_to_low_success_rate(
+                        success_count=success_count,
+                        requested_count=version_count,
+                        required_success_count=required_success_count,
+                    )
+                )
+            )
+            if should_stable_retry:
+                runtime_metadata["stable_retry_used"] = True
+                runtime_metadata["generation_mode"] = "stable"
+                runtime_metadata["actual_preset"] = "stable"
+                runtime_metadata["preset_downgraded"] = True
+                # 记录降级时被关闭的高级能力，让前端可见
+                downgraded = []
+                if config.enable_preview:
+                    downgraded.append("preview")
+                if config.enable_optimizer:
+                    downgraded.append("optimizer")
+                if config.enable_consistency:
+                    downgraded.append("consistency")
+                if config.enable_enrichment:
+                    downgraded.append("enrichment")
+                if config.enable_reader_sim:
+                    downgraded.append("reader_sim")
+                if config.enable_self_critique:
+                    downgraded.append("self_critique")
+                if config.enable_six_dimension:
+                    downgraded.append("six_dimension")
+                if config.enable_memory:
+                    downgraded.append("memory")
+                if config.enable_constitution:
+                    downgraded.append("constitution")
+                if config.enable_persona:
+                    downgraded.append("persona")
+                if config.enable_foreshadowing:
+                    downgraded.append("foreshadowing")
+                if config.enable_faction:
+                    downgraded.append("faction")
+                runtime_metadata["downgraded_capabilities"] = downgraded
+                runtime_metadata["quality_gates"]["stable_retry_reason"] = (
+                    "transient_failures" if self._should_retry_with_stable_config(attempt_errors) else "insufficient_successful_candidates"
+                )
+                await self._update_generation_runtime(
+                    chapter,
+                    generation_run_id=generation_run_id,
+                    stage="generate_variants",
+                    message="主流程生成结果不足，正在切换稳定模式重试",
+                    progress_percent=42,
+                    level="warning",
+                    extra={
+                        "stable_retry_used": True,
+                        "generation_mode": "stable",
+                        "preset_downgraded": True,
+                        "downgraded_capabilities": downgraded,
+                        "successful_versions": success_count,
+                        "required_success_count": attempt_required_success_count,
+                        "original_required_success_count": required_success_count,
+                    },
+                )
+                logger.warning(
+                    "Primary generation insufficient, retrying once with stable mode: project=%s chapter=%s success=%s required=%s",
+                    project_id,
+                    chapter_number,
+                    success_count,
+                    attempt_required_success_count,
+                )
+                continue
+            break
+
+        if not versions and best_partial_versions:
+            versions = best_partial_versions
+            generation_errors = best_partial_errors
+            active_config = best_partial_config
+            runtime_metadata["stable_retry_used"] = bool(active_config.preset == "stable" or runtime_metadata.get("stable_retry_used"))
+            runtime_metadata["generation_mode"] = active_config.preset
+            runtime_metadata["quality_gates"]["partial_candidate_salvage_used"] = True
+            runtime_metadata["candidate_generation"] = {
+                "requested_version_count": active_config.version_count,
+                "successful_versions": len(best_partial_versions),
+                "failed_versions": len(best_partial_errors),
+                "required_success_count": best_partial_required_success_count,
+                "original_required_success_count": required_success_count,
+                "salvaged_partial_success": True,
+            }
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="review",
+                message="Provider 抖动导致候选不足，已保留合格候选并进入评审",
+                progress_percent=62,
+                level="warning",
+                event_kind="content",
+                title="保留合格候选",
+                summary="多候选生成未完全达标，但已有候选通过首稿底线，系统继续评审而不是直接失败。",
+                content_preview=self._truncate_runtime_text(
+                    (best_partial_versions[0].get("content") or "") if best_partial_versions else "",
+                    420,
+                ),
+                metrics={
+                    "generated_version_count": len(best_partial_versions),
+                    "failed_versions": len(best_partial_errors),
+                    "required_success_count": best_partial_required_success_count,
+                    "original_required_success_count": required_success_count,
+                    "target_word_count": config.target_word_count,
+                    "salvaged_partial_success": True,
+                },
+                extra={
+                    "generated_version_count": len(best_partial_versions),
+                    "stable_retry_used": runtime_metadata["stable_retry_used"],
+                    "generation_mode": runtime_metadata["generation_mode"],
+                    "salvaged_partial_success": True,
+                },
+            )
+
+        version_count = active_config.version_count
+        await self._assert_generation_active(
+            chapter,
+            generation_run_id=generation_run_id,
+            stage="before_review",
+        )
+
+        await mark_stage("generate_variants", generation_variants_started_at, detail="候选正文生成阶段完成")
+
+        if not versions:
+            await self._assert_generation_active(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="generation_failed",
+            )
+            chapter.status = "failed"
+            await self.session.commit()
+            first_http_error = next(
+                (err for err in generation_errors if isinstance(err, HTTPException)),
+                None,
+            )
+            if first_http_error:
+                raise first_http_error
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "GENERATION_ALL_CANDIDATES_FAILED",
+                    "message": "章节生成失败：候选版本未达到最低成功阈值。",
+                    "hint": "请在设置页执行健康检查和自动切换后重试，或降低候选版本数以提升稳定性。",
+                    "retryable": True,
+                    "required_success_count": required_success_count,
+                    "attempts": runtime_metadata.get("generation_attempts", []),
+                },
+            )
+
+        # ── Multi-round continuation for long chapters (free API workaround) ──
+        if config.enable_multi_round_fallback and versions:
+            best_initial = max(
+                versions,
+                key=lambda v: len(v.get("content") or ""),
+            )
+            best_content_initial = best_initial.get("content") or ""
+            initial_words = len(best_content_initial.replace(chr(10), ""))
+            target_words = config.target_word_count
+
+            continuation_rounds = 0
+            while (initial_words < target_words * 0.6
+                   and continuation_rounds < config.multi_round_max_rounds):
+                continuation_rounds += 1
+                await self._update_generation_runtime(
+                    chapter,
+                    generation_run_id=generation_run_id,
+                    stage="multi_round_continuation",
+                    message=f"字数不足（{initial_words}/{target_words}），启动第{continuation_rounds}轮续写...",
+                    progress_percent=min(62 + continuation_rounds * 3, 68),
+                    event_kind="progress",
+                    title=f"多轮续写 第{continuation_rounds}轮",
+                )
+
+                continuation_prompt = (
+                    f"【续写指令】请紧接着上面的内容继续写下去，保持同样的风格、视角和节奏。"
+                    f"当前已写{initial_words}字，目标{target_words}字，还需要至少{int(target_words * 0.6) - initial_words}字。"
+                    f"不要重复已写内容，直接接续结尾继续推进剧情。"
+                )
+
+                try:
+                    cont_result = await call_generation_text(
+                        llm_service=self.llm_service,
+                        system_prompt=writer_prompt,
+                        conversation_history=[
+                            {"role": "user", "content": prompt_input},
+                            {"role": "assistant", "content": best_content_initial[-800:]},
+                            {"role": "user", "content": continuation_prompt},
+                        ],
+                        temperature=0.75,
+                        user_id=user_id,
+                        timeout=self._resolve_chapter_generation_timeout(config.target_word_count),
+                        policy=GenerationCallPolicy(
+                            stage_label=f"续写轮{continuation_rounds}",
+                            progress_stage="multi_round_continuation",
+                            retry_attempts=1,
+                            max_tokens=self._resolve_chapter_generation_max_tokens(target_words),
+                            allow_truncated_response=True,
+                        ),
+                    )
+                    if cont_result and cont_result.text:
+                        new_content = best_content_initial + "\n\n" + cont_result.text
+                        best_initial["content"] = new_content
+                        best_initial["word_count"] = len(new_content.replace(chr(10), ""))
+                        best_content_initial = new_content
+                        initial_words = best_initial["word_count"]
+                        logger.info(
+                            "Continuation round %s: words -> %s",
+                            continuation_rounds,
+                            initial_words,
+                        )
+                    else:
+                        logger.warning("Continuation round %s returned empty", continuation_rounds)
+                        break
+                except Exception as exc:
+                    logger.warning("Continuation round %s failed: %s", continuation_rounds, exc)
+                    runtime_metadata["degraded_stages"].append({
+                        "stage": f"multi_round_continuation_{continuation_rounds}",
+                        "reason": str(exc),
+                    })
+                    break
+
+            if continuation_rounds > 0:
+                runtime_metadata["continuation"] = {
+                    "rounds": continuation_rounds,
+                    "final_words": initial_words,
+                    "target_words": target_words,
+                }
+
+        review_started_at = time.perf_counter()
+        review_chapter_mission = self._build_ai_review_mission(
+            chapter_mission=chapter_mission,
+            longform_context=longform_context,
+        )
+        best_version_index, ai_review_result = await self._run_ai_review(
+            versions=versions,
+            chapter_mission=review_chapter_mission,
+            user_id=user_id,
+            target_word_count=active_config.target_word_count,
+            min_word_count=active_config.min_word_count,
+        )
+        await mark_stage("ai_review", review_started_at, detail="AI 评审阶段完成")
+        runtime_metadata["review_status"] = (ai_review_result or {}).get("status", "skipped")
+        await self._update_generation_runtime(
+            chapter,
+            generation_run_id=generation_run_id,
+            stage="review",
+            message="AI 评审完成，正在整理增强处理结果",
+            progress_percent=72,
+            event_kind="review",
+            title="AI 评审完成",
+            summary=f"最佳候选：第 {best_version_index + 1} 版；状态：{runtime_metadata['review_status']}",
+            metrics={
+                "best_version_index": best_version_index,
+                "candidate_count": len(versions),
+                "review_status": runtime_metadata["review_status"],
+            },
+            extra={
+                "best_version_index": best_version_index,
+                "review_status": runtime_metadata["review_status"],
+                "review_skip_reason": (ai_review_result or {}).get("skip_reason"),
+            },
+        )
+        await self._assert_generation_active(
+            chapter,
+            generation_run_id=generation_run_id,
+            stage="after_ai_review",
+        )
+
+        review_summaries: Dict[str, Any] = {}
+        if ai_review_result:
+            review_summaries["ai_review"] = ai_review_result
+
+        if versions:
+            best_version_index = max(0, min(best_version_index, len(versions) - 1))
+        else:
+            best_version_index = 0
+
+        if versions:
+            best_version = versions[best_version_index]
+            best_content = best_version["content"]
+            enhanced_review_issues: List[Dict[str, Any]] = []
+
+            if enhanced_flow and active_config.enable_six_dimension:
+                try:
+                    review_result = await enhanced_flow.post_generation_review(
+                        project_id=project_id,
+                        chapter_number=chapter_number,
+                        chapter_title=outline_title,
+                        chapter_content=best_content,
+                        chapter_plan=json.dumps(chapter_mission, ensure_ascii=False) if chapter_mission else None,
+                        previous_summary=history_context["previous_summary"],
+                    )
+                    review_summaries["enhanced_review"] = review_result
+                    enhanced_review_issues = self._extract_enhanced_review_issues(review_result)
+                except Exception as exc:  # noqa: BLE001 - degraded stage should not fail whole request
+                    runtime_metadata["degraded_stages"].append({"stage": "enhanced_review", "reason": str(exc)})
+                    if isinstance(exc, SQLAlchemyError):
+                        await self._safe_session_rollback("enhanced_review")
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="review",
+                        message="增强评审已降级跳过，继续后续流程",
+                        progress_percent=74,
+                        level="warning",
+                        extra={
+                            "degraded_stage": "enhanced_review",
+                            "degraded_reason": self._truncate_runtime_text(exc),
+                        },
+                    )
+                    logger.warning("增强评审已降级：project=%s chapter=%s error=%s", project_id, chapter_number, exc)
+
+            if active_config.enable_self_critique:
+                try:
+                    self_critique_started_at = time.perf_counter()
+                    pre_critique_content = best_content
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="diagnose_once",
+                        message="AI 评审完成，正在准备单次诊断",
+                        progress_percent=70,
+                        extra={
+                            "diagnosis_stage": "diagnose_once",
+                            "diagnosis_stage_label": "单次诊断",
+                        },
+                    )
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="diagnose_previous_chapter",
+                        message="正在整理前一章依据包，提取摘要、结尾锚点与关键片段",
+                        progress_percent=72,
+                        extra={
+                            "diagnosis_stage": "previous_chapter",
+                            "diagnosis_stage_label": "前一章依据",
+                            "previous_chapter_bundle": history_context.get("previous_chapter_bundle"),
+                        },
+                    )
+                    critique_context = {
+                        "character_profiles": json.dumps(writer_blueprint.get("characters", []), ensure_ascii=False),
+                        "previous_summary": history_context["previous_summary"],
+                        "previous_tail": history_context.get("previous_tail"),
+                        "previous_chapter_bundle": history_context.get("previous_chapter_bundle"),
+                        "recent_track": history_context.get("recent_track"),
+                        "plot_arc_digest": history_context.get("plot_arc_digest"),
+                        "outline_title": outline_title,
+                        "outline_summary": outline_summary,
+                        "chapter_mission": chapter_mission,
+                        "project_memory": project_memory_text,
+                        "style_context": style_context,
+                        "forbidden_characters": forbidden_characters,
+                        "emotion_target": (chapter_mission or {}).get("emotion_target"),
+                        "consistency_issues": [],
+                        "guardrail_issues": (best_version.get("metadata") or {}).get("guardrail", {}).get("violations", []),
+                        "enhanced_review_issues": enhanced_review_issues,
+                    }
+                    chapter_overview_bundle = self._build_chapter_overview_bundle(critique_context)
+                    previous_overview_bundle = None
+                    previous_self_critique_summary = None
+                    previous_version_id: Optional[int] = None
+                    if isinstance(chapter.selected_version, ChapterVersion):
+                        previous_version_id = chapter.selected_version.id
+                        previous_metadata = chapter.selected_version.metadata or {}
+                        previous_overview_bundle = previous_metadata.get("chapter_overview") or None
+                        previous_self_critique_summary = ((previous_metadata.get("review_summaries") or {}).get("self_critique") or None)
+                    change_level, changed_fields = self._resolve_overview_change_level(previous_overview_bundle, chapter_overview_bundle)
+                    reuse_decision = self._build_reuse_decision(change_level, changed_fields)
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="diagnose_context_bundle",
+                        message="正在整理关联上下文，汇总章节目标、长期记忆与剧情线索",
+                        progress_percent=74,
+                        extra={
+                            "diagnosis_stage": "context_bundle",
+                            "diagnosis_stage_label": "关联上下文",
+                            "chapter_overview_hash": chapter_overview_bundle.get("overview_hash"),
+                            "chapter_overview_change_level": change_level,
+                            "chapter_overview_changed_fields": changed_fields,
+                            "chapter_overview_reuse": reuse_decision,
+                        },
+                    )
+                    if reuse_decision.get("skip_self_critique") and previous_self_critique_summary:
+                        critique_summary = self._build_reused_self_critique_summary(
+                            previous_self_critique_summary,
+                            reuse_decision=reuse_decision,
+                            overview_bundle=chapter_overview_bundle,
+                            source_version_id=previous_version_id,
+                        )
+                        await self._update_generation_runtime(
+                            chapter,
+                            generation_run_id=generation_run_id,
+                            stage="optimize_content",
+                            message="总览变更较小，已复用既有诊断结果并跳过重复诊断/优化",
+                            progress_percent=88,
+                            extra={
+                                "optimization_stage": "reuse",
+                                "optimization_stage_label": "复用既有诊断",
+                                "optimization_issue_count": critique_summary.get("major_count", 0),
+                                "optimization_dimensions": critique_summary.get("reuse_decision", {}).get("changed_fields", []),
+                                "chapter_overview_reuse": reuse_decision,
+                            },
+                        )
+                    else:
+                        best_content, critique_summary = await self._run_self_critique(
+                            chapter,
+                            generation_run_id=generation_run_id,
+                            chapter_content=best_content,
+                            user_id=user_id,
+                            context=critique_context,
+                        )
+                        best_content, content_guard = self._preserve_non_regressive_content(
+                            previous_content=pre_critique_content,
+                            candidate_content=best_content,
+                            stage_label="self_critique",
+                            min_word_count=active_config.min_word_count,
+                        )
+                        if content_guard is not None:
+                            critique_summary.setdefault("degraded_stages", []).append(content_guard)
+                        critique_summary["overview_bundle"] = chapter_overview_bundle
+                        critique_summary["reuse_decision"] = reuse_decision
+                        await mark_stage("optimize_content", self_critique_started_at, detail="单次诊断与分阶段优化阶段完成")
+                    review_summaries["self_critique"] = critique_summary
+                except Exception as exc:  # noqa: BLE001 - degraded stage should not fail whole request
+                    runtime_metadata["degraded_stages"].append({"stage": "self_critique", "reason": str(exc)})
+                    if isinstance(exc, SQLAlchemyError):
+                        await self._safe_session_rollback("self_critique")
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="optimize_content",
+                        message="分阶段诊断/优化已降级失败，已跳过该步骤并继续后续流程",
+                        progress_percent=88,
+                        level="warning",
+                        extra={
+                            "degraded_stage": "self_critique",
+                            "degraded_reason": self._truncate_runtime_text(exc),
+                        },
+                    )
+                    logger.warning("自检诊断已降级：project=%s chapter=%s error=%s", project_id, chapter_number, exc)
+
+            if active_config.enable_reader_sim:
+                try:
+                    reader_feedback = await asyncio.wait_for(
+                        self._run_reader_simulation(
+                        best_content,
+                        chapter_number=chapter_number,
+                        previous_summary=history_context["previous_summary"],
+                        user_id=user_id,
+                    ),
+                    timeout=180.0,
+                    )
+                    review_summaries["reader_simulator"] = reader_feedback
+                    reader_fix_issues = self._normalize_reader_issues_for_local_fix(reader_feedback)
+                    reader_structural_guard = self._score_story_quality_candidate(
+                        content=best_content,
+                        violations=(best_version.get("metadata") or {}).get("guardrail", {}).get("violations", []),
+                        chapter_mission=chapter_mission,
+                        target_word_count=active_config.target_word_count,
+                        min_word_count=active_config.min_word_count,
+                    )
+                    structural_reader_issues = self._build_structural_reader_polish_issues(reader_structural_guard)
+                    if structural_reader_issues:
+                        reader_fix_issues = (structural_reader_issues + reader_fix_issues)[:8]
+                        review_summaries["reader_polish_structural_guard"] = reader_structural_guard
+                    reader_stage_decision = reader_feedback.get("reader_stage_decision") or {}
+                    should_reader_polish, reader_polish_decision = self._should_run_reader_polish(
+                        reader_feedback,
+                        reader_fix_issues,
+                    )
+                    review_summaries["reader_polish_decision"] = reader_polish_decision
+                    if should_reader_polish:
+                        await self._update_generation_runtime(
+                            chapter,
+                            generation_run_id=generation_run_id,
+                            stage="review",
+                            message="读者模拟发现明显风险点，正在执行读者视角定向精修",
+                            progress_percent=89,
+                            extra={
+                                "reader_issue_count": len(reader_fix_issues),
+                                "reader_continue_ratio": reader_stage_decision.get("continue_ratio"),
+                            },
+                        )
+                        reader_context = {
+                            "outline_title": outline_title,
+                            "outline_summary": outline_summary,
+                            "chapter_mission": chapter_mission,
+                            "previous_summary": history_context["previous_summary"],
+                            "previous_tail": history_context.get("previous_tail"),
+                            "previous_chapter_bundle": history_context.get("previous_chapter_bundle"),
+                            "recent_track": history_context.get("recent_track"),
+                            "plot_arc_digest": history_context.get("plot_arc_digest"),
+                            "project_memory": project_memory_text,
+                            "style_context": style_context,
+                            "character_profiles": json.dumps(writer_blueprint.get("characters", []), ensure_ascii=False),
+                            "emotion_target": (chapter_mission or {}).get("emotion_target"),
+                            "enhanced_review_issues": enhanced_review_issues,
+                            "reader_feedback_issues": reader_fix_issues,
+                            "reader_polish_hard_rule": (
+                                "本轮 reader polish 必须优先修结构问题：场景兑现、对话改局势、结尾递压、连续性。"
+                                "只有在这些问题解决后才允许做句子润色；禁止把优化变成补景物、补心理、补形容词。"
+                            ),
+                        }
+                        reader_polish_service = SelfCritiqueService(self.session, self.llm_service, self.prompt_service)
+                        previous_best_content = best_content
+                        polished_content = await reader_polish_service.revise_chapter(
+                            chapter_content=best_content,
+                            issues=reader_fix_issues,
+                            context=reader_context,
+                            user_id=user_id,
+                            allow_stagewide=False,
+                        )
+                        if polished_content and polished_content != best_content:
+                            next_content, content_guard = self._preserve_non_regressive_content(
+                                previous_content=previous_best_content,
+                                candidate_content=polished_content,
+                                stage_label="reader_polish",
+                                min_word_count=active_config.min_word_count,
+                            )
+                            best_content = next_content
+                            review_summaries["reader_polish"] = {
+                                "status": "guarded_rejected" if content_guard is not None else "applied",
+                                "issue_count": len(reader_fix_issues),
+                                "continue_ratio": reader_stage_decision.get("continue_ratio"),
+                                "content_guard": content_guard,
+                            }
+                except Exception as exc:  # noqa: BLE001 - degraded stage should not fail whole request
+                    runtime_metadata["degraded_stages"].append({"stage": "reader_simulator", "reason": str(exc)})
+                    if isinstance(exc, SQLAlchemyError):
+                        await self._safe_session_rollback("reader_simulator")
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="review",
+                        message="读者模拟已降级跳过，继续后续流程",
+                        progress_percent=89,
+                        level="warning",
+                        extra={
+                            "degraded_stage": "reader_simulator",
+                            "degraded_reason": self._truncate_runtime_text(exc),
+                        },
+                    )
+                    logger.warning("读者模拟已降级：project=%s chapter=%s error=%s", project_id, chapter_number, exc)
+
+            if active_config.enable_consistency:
+                try:
+                    consistency_started_at = time.perf_counter()
+                    best_content, consistency_report = await self._run_consistency_check(
+                        project_id=project_id,
+                        chapter_text=best_content,
+                        user_id=user_id,
+                    )
+                    consistency_fix_issues = self._normalize_consistency_issues_for_local_fix(consistency_report)
+                    if consistency_fix_issues and not consistency_report.get("auto_fix_accepted", False):
+                        await self._update_generation_runtime(
+                            chapter,
+                            generation_run_id=generation_run_id,
+                            stage="consistency",
+                            message="一致性校验发现关键冲突，正在执行定向局部修复并复检",
+                            progress_percent=90,
+                            extra={
+                                "consistency_issue_count": len(consistency_fix_issues),
+                                "consistency_local_repair": True,
+                            },
+                        )
+                        repair_context = {
+                            "outline_title": outline_title,
+                            "outline_summary": outline_summary,
+                            "chapter_mission": chapter_mission,
+                            "previous_summary": history_context["previous_summary"],
+                            "previous_tail": history_context.get("previous_tail"),
+                            "previous_chapter_bundle": history_context.get("previous_chapter_bundle"),
+                            "recent_track": history_context.get("recent_track"),
+                            "plot_arc_digest": history_context.get("plot_arc_digest"),
+                            "project_memory": project_memory_text,
+                            "style_context": style_context,
+                            "character_profiles": json.dumps(writer_blueprint.get("characters", []), ensure_ascii=False),
+                            "emotion_target": (chapter_mission or {}).get("emotion_target"),
+                            "consistency_issues": consistency_fix_issues,
+                            "guardrail_issues": (best_version.get("metadata") or {}).get("guardrail", {}).get("violations", []),
+                            "enhanced_review_issues": enhanced_review_issues,
+                        }
+                        self_critique_service = SelfCritiqueService(self.session, self.llm_service, self.prompt_service)
+                        repaired_content = await self_critique_service.revise_chapter(
+                            chapter_content=best_content,
+                            issues=consistency_fix_issues,
+                            context=repair_context,
+                            user_id=user_id,
+                            allow_stagewide=False,
+                        )
+                        if repaired_content and repaired_content != best_content:
+                            rechecked_content, repaired_report = await self._run_consistency_check(
+                                project_id=project_id,
+                                chapter_text=repaired_content,
+                                user_id=user_id,
+                            )
+                            repaired_report["repair_strategy"] = "self_critique_local_repair"
+                            improved_repair, repair_reason, before_counts, after_counts = self._should_accept_consistency_improvement(
+                                consistency_report,
+                                repaired_report,
+                            )
+                            repaired_report["repair_comparison"] = {
+                                "accepted": improved_repair,
+                                "acceptance_reason": repair_reason,
+                                "before": before_counts,
+                                "after": after_counts,
+                            }
+                            if repaired_report.get("is_consistent") or repaired_report.get("auto_fix_accepted") or improved_repair:
+                                next_content, content_guard = self._preserve_non_regressive_content(
+                                    previous_content=best_content,
+                                    candidate_content=rechecked_content,
+                                    stage_label="consistency_repair",
+                                    min_word_count=active_config.min_word_count,
+                                )
+                                repaired_report["content_guard"] = content_guard
+                                repaired_report["repair_accepted"] = True
+                                repaired_report["repair_acceptance_reason"] = (
+                                    repaired_report.get("auto_fix_acceptance_reason")
+                                    or repair_reason
+                                )
+                                best_content = next_content
+                                consistency_report = repaired_report
+                            review_summaries["consistency_repair"] = repaired_report
+                    await mark_stage("consistency", consistency_started_at, detail="一致性校验阶段完成")
+                    runtime_metadata["consistency_status"] = consistency_report.get("status", "unknown")
+                    unresolved_for_warning = self._collect_unresolved_consistency_violations(consistency_report)
+                    if unresolved_for_warning:
+                        runtime_metadata["consistency_violation_count"] = len(unresolved_for_warning)
+                        runtime_metadata["consistency_violation_summary"] = [
+                            {
+                                "severity": str(item.get("severity") or "minor"),
+                                "category": str(item.get("category") or ""),
+                                "description": str(item.get("description") or "")[:200],
+                            }
+                            for item in unresolved_for_warning[:5]
+                        ]
+                    review_summaries["consistency"] = consistency_report
+                    repair_attempts = consistency_report.get("repair_attempts")
+                    if not isinstance(repair_attempts, list):
+                        repair_attempts = []
+                    unresolved_consistency_issues = self._normalize_consistency_issues_for_local_fix(consistency_report)
+                    if repair_attempts or unresolved_consistency_issues:
+                        manual_confirmation_required = any(
+                            bool(item.get("manual_confirmation_required"))
+                            for item in repair_attempts
+                            if isinstance(item, dict)
+                        )
+                        await self._update_generation_runtime(
+                            chapter,
+                            generation_run_id=generation_run_id,
+                            stage="consistency",
+                            message=(
+                                "一致性局部修复已完成，仍有问题需按局部补丁处理"
+                                if unresolved_consistency_issues
+                                else "一致性局部修复已完成，未触发整章自动替换"
+                            ),
+                            progress_percent=91,
+                            level="warning" if unresolved_consistency_issues else "info",
+                            event_kind="continuity",
+                            title="一致性局部修复结果",
+                            summary=(
+                                f"局部修复尝试 {len(repair_attempts)} 次，未解决问题 {len(unresolved_consistency_issues)} 项；"
+                                "整章候选需要人工确认。"
+                                if manual_confirmation_required
+                                else f"局部修复尝试 {len(repair_attempts)} 次，未解决问题 {len(unresolved_consistency_issues)} 项。"
+                            ),
+                            metrics={
+                                "repair_attempt_count": len(repair_attempts),
+                                "unresolved_consistency_issues": len(unresolved_consistency_issues),
+                                "auto_fix_accepted": bool(consistency_report.get("auto_fix_accepted")),
+                            },
+                            extra={
+                                "repair_attempts": repair_attempts[:3],
+                                "manual_stagewide_confirmation_required": manual_confirmation_required,
+                                "manual_patch_suggestions": unresolved_consistency_issues[:5],
+                            },
+                        )
+                except Exception as exc:  # noqa: BLE001 - degraded stage should not fail whole request
+                    runtime_metadata["degraded_stages"].append({"stage": "consistency", "reason": str(exc)})
+                    if isinstance(exc, SQLAlchemyError):
+                        await self._safe_session_rollback("consistency")
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="consistency",
+                        message="一致性校验已降级跳过，继续后续流程",
+                        progress_percent=91,
+                        level="warning",
+                        extra={
+                            "degraded_stage": "consistency",
+                            "degraded_reason": self._truncate_runtime_text(exc),
+                        },
+                    )
+                    logger.warning("一致性校验已降级：project=%s chapter=%s error=%s", project_id, chapter_number, exc)
+
+            if active_config.enable_self_critique:
+                try:
+                    post_consistency_context = {
+                        "outline_title": outline_title,
+                        "outline_summary": outline_summary,
+                        "chapter_mission": chapter_mission,
+                        "previous_summary": history_context["previous_summary"],
+                        "previous_tail": history_context.get("previous_tail"),
+                        "previous_chapter_bundle": history_context.get("previous_chapter_bundle"),
+                        "recent_track": history_context.get("recent_track"),
+                        "plot_arc_digest": history_context.get("plot_arc_digest"),
+                        "project_memory": project_memory_text,
+                        "style_context": style_context,
+                        "character_profiles": json.dumps(writer_blueprint.get("characters", []), ensure_ascii=False),
+                        "emotion_target": (chapter_mission or {}).get("emotion_target"),
+                        "consistency_issues": self._normalize_consistency_issues_for_local_fix(
+                            review_summaries.get("consistency_repair") or review_summaries.get("consistency")
+                        ),
+                        "guardrail_issues": (best_version.get("metadata") or {}).get("guardrail", {}).get("violations", []),
+                        "enhanced_review_issues": enhanced_review_issues,
+                    }
+                    review_summaries["self_critique_after_consistency"] = await self._run_post_consistency_self_critique_summary(
+                        chapter_content=best_content,
+                        context=post_consistency_context,
+                        user_id=user_id,
+                        baseline_summary=review_summaries.get("self_critique"),
+                    )
+                except Exception as exc:  # noqa: BLE001 - degraded stage should not fail whole request
+                    runtime_metadata["degraded_stages"].append({"stage": "self_critique_after_consistency", "reason": str(exc)})
+                    if isinstance(exc, SQLAlchemyError):
+                        await self._safe_session_rollback("self_critique_after_consistency")
+                    logger.warning(
+                        "Post-consistency self critique degraded: project=%s chapter=%s error=%s",
+                        project_id,
+                        chapter_number,
+                        exc,
+                    )
+
+            guardrail_violations = ((best_version.get("metadata") or {}).get("guardrail") or {}).get("violations") or []
+            if active_config.enable_enrichment:
+                review_summaries, pre_enrichment_gate = self._evaluate_structural_quality_gate_for_content(
+                    review_summaries=review_summaries,
+                    content=best_content,
+                    violations=guardrail_violations,
+                    chapter_mission=chapter_mission,
+                    story_guard_key="story_progression_guard_pre_enrichment",
+                    target_word_count=active_config.target_word_count,
+                    min_word_count=active_config.min_word_count,
+                )
+                runtime_metadata["quality_gates"]["pre_enrichment_structural_gate"] = pre_enrichment_gate
+            else:
+                review_summaries, structural_quality_gate = self._evaluate_structural_quality_gate_for_content(
+                    review_summaries=review_summaries,
+                    content=best_content,
+                    violations=guardrail_violations,
+                    chapter_mission=chapter_mission,
+                    target_word_count=active_config.target_word_count,
+                    min_word_count=active_config.min_word_count,
+                )
+                if not structural_quality_gate.get("passed", True):
+                    gate_repair_result = await self._attempt_structural_gate_repair(
+                        best_content=best_content,
+                        review_summaries=review_summaries,
+                        structural_quality_gate=structural_quality_gate,
+                        guardrail_violations=guardrail_violations,
+                        chapter_mission=chapter_mission,
+                        repair_context=self._build_structural_gate_repair_context(
+                            outline_title=outline_title,
+                            outline_summary=outline_summary,
+                            chapter_mission=chapter_mission,
+                            history_context=history_context,
+                            project_memory_text=project_memory_text,
+                            style_context=style_context,
+                            writer_blueprint=writer_blueprint,
+                        ),
+                        active_config=active_config,
+                        user_id=user_id,
+                    )
+                    gate_repair_summary = (gate_repair_result or {}).get("repair_summary")
+                    if gate_repair_summary:
+                        # 未采纳也要留诊断，否则用户面对的是一个「无解的 422」
+                        runtime_metadata.setdefault("quality_gate_repairs", []).append(
+                            gate_repair_summary
+                        )
+                    if gate_repair_result and gate_repair_result.get("adopted"):
+                        best_content = gate_repair_result["content"]
+                        review_summaries = gate_repair_result["review_summaries"]
+                        structural_quality_gate = gate_repair_result["structural_quality_gate"]
+                        repair_passed = bool(structural_quality_gate.get("passed", False))
+                        await self._update_generation_runtime(
+                            chapter,
+                            generation_run_id=generation_run_id,
+                            stage="review",
+                            message=(
+                                "结构质量闸门定向修复已生效，章节通过质量门"
+                                if repair_passed
+                                else "结构质量闸门定向修复改善了部分问题，但仍有未达标项"
+                            ),
+                            progress_percent=91,
+                            level="info" if repair_passed else "warning",
+                            event_kind="quality_gate",
+                            title="质量门定向修复通过" if repair_passed else "质量门定向修复部分改善",
+                            summary=(
+                                "按拦截原因做了结构定向修复并重评通过，未走全新随机重试。"
+                                if repair_passed
+                                else "按拦截原因做了结构定向修复，问题已减少但尚未全部消除。"
+                            ),
+                            content_preview=self._truncate_runtime_text(best_content, 520),
+                            metrics={
+                                "actual_word_count": self._count_words(best_content),
+                                "repair_rounds": gate_repair_summary.get("repair_rounds"),
+                                "repair_outcome": gate_repair_summary.get("repair_outcome"),
+                                "issue_codes_before": gate_repair_summary.get("issue_codes_before", []),
+                                "issue_codes_after": gate_repair_summary.get("issue_codes_after", []),
+                            },
+                        )
+                runtime_metadata["quality_gates"]["structural_gate"] = structural_quality_gate
+                if not structural_quality_gate.get("passed", True):
+                    blocked_candidate_refs = await self._persist_quality_gate_blocked_versions(
+                        chapter=chapter,
+                        generation_run_id=generation_run_id,
+                        versions=versions,
+                        best_version_index=best_version_index,
+                        best_content=best_content,
+                        review_summaries=review_summaries,
+                        structural_quality_gate=structural_quality_gate,
+                        longform_context=longform_context,
+                    )
+                    runtime_metadata["quality_gate_blocked_versions"] = blocked_candidate_refs
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="review",
+                        message="结构质量闸门未通过，已阻止低质量章节进入确认阶段",
+                        progress_percent=91,
+                        level="warning",
+                        event_kind="quality_gate",
+                        title="质量门拦截候选稿",
+                        summary="候选稿已保留供查看，但不会静默定稿；请按拦截原因重试或人工确认。",
+                        content_preview=self._truncate_runtime_text(best_content, 520),
+                        metrics={
+                            "actual_word_count": self._count_words(best_content),
+                            "candidate_count": len(versions),
+                            "quality_issue_codes": structural_quality_gate.get("quality_issue_codes", []),
+                            "quality_issue_labels": structural_quality_gate.get("quality_issue_labels", []),
+                        },
+                        artifact_refs=blocked_candidate_refs if blocked_candidate_refs.get("persisted") else None,
+                        extra={
+                            "quality_gate_failed": True,
+                            "quality_gate": structural_quality_gate,
+                            "review_summaries": review_summaries,
+                            "runtime_metadata": runtime_metadata,
+                        },
+                    )
+                    raise HTTPException(
+                        status_code=422,
+                        detail={
+                            "code": "CHAPTER_QUALITY_GATE_FAILED",
+                            "message": "章节仍存在严重结构/一致性问题，已阻止静默成功落库。",
+                            "hint": "请结合 self_critique 与 consistency 结果重试生成，优先消除重复时间线、拼接回卷和关键设定冲突。",
+                            "retryable": True,
+                            "stage": "quality_gate",
+                            "quality_gate": structural_quality_gate,
+                        },
+                    )
+
+            logger.info(
+                "Post-generation extra stages: optimizer=%s enrichment=%s current_words=%s target=%s min=%s",
+                active_config.enable_optimizer,
+                active_config.enable_enrichment,
+                self._count_words(best_content),
+                active_config.target_word_count,
+                active_config.min_word_count,
+            )
+
+            if active_config.enable_enrichment:
+                try:
+                    enrichment_started_at = time.perf_counter()
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="enrichment",
+                        message="正在按目标字数补足章节篇幅",
+                        progress_percent=91,
+                        extra={
+                            "current_word_count": self._count_words(best_content),
+                            "target_word_count": active_config.target_word_count,
+                            "min_word_count": active_config.min_word_count,
+                        },
+                    )
+                    pre_enrichment_content = best_content
+                    enriched_content, enrichment_summary = await self._run_enrichment(
+                        best_content,
+                        user_id=user_id,
+                        target_word_count=active_config.target_word_count,
+                        min_word_count=active_config.min_word_count,
+                        max_iterations=active_config.max_enrich_iterations,
+                        context={
+                            "chapter_mission": chapter_mission,
+                            "previous_summary": history_context["previous_summary"],
+                            "previous_tail": history_context.get("previous_tail"),
+                            "previous_chapter_bundle": history_context.get("previous_chapter_bundle"),
+                            "recent_track": history_context.get("recent_track"),
+                            "plot_arc_digest": history_context.get("plot_arc_digest"),
+                            "project_memory": project_memory_text,
+                            "longform_context": longform_context.to_optimizer_payload(max_prompt_chars=2600) if longform_context else None,
+                        },
+                    )
+                    if enrichment_summary is not None:
+                        best_content, content_guard = self._preserve_non_regressive_content(
+                            previous_content=pre_enrichment_content,
+                            candidate_content=enriched_content,
+                            stage_label="enrichment",
+                            min_word_count=active_config.min_word_count,
+                        )
+                        enrichment_summary["content_guard"] = content_guard
+                        enrichment_summary["applied"] = content_guard is None and best_content != pre_enrichment_content
+                        review_summaries["enrichment"] = enrichment_summary
+                    await mark_stage("enrichment", enrichment_started_at, detail="章节扩写阶段完成")
+                except Exception as exc:  # noqa: BLE001 - degraded stage should not fail whole request
+                    runtime_metadata["degraded_stages"].append({"stage": "enrichment", "reason": str(exc)})
+                    if isinstance(exc, SQLAlchemyError):
+                        await self._safe_session_rollback("enrichment")
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="enrichment",
+                        message="章节扩写已降级跳过，继续后续流程",
+                        progress_percent=91,
+                        level="warning",
+                        extra={
+                            "degraded_stage": "enrichment",
+                            "degraded_reason": self._truncate_runtime_text(exc),
+                        },
+                    )
+                    logger.warning("章节扩写已降级：project=%s chapter=%s error=%s", project_id, chapter_number, exc)
+
+
+            # ============================================================
+            # 知识图谱与线索追踪 — 章节生成后同步（非阻塞、降级容错）
+            # ============================================================
+            if active_config.enable_knowledge_graph:
+                try:
+                    kg_started_at = time.perf_counter()
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="knowledge_graph",
+                        message="正在同步知识图谱 — 提取角色/势力/位置节点",
+                        progress_percent=92,
+                    )
+                    kg_result = await self.knowledge_graph_service.sync_from_story_memory(project_id)
+                    if kg_result:
+                        runtime_metadata["knowledge_graph_sync"] = kg_result
+                        await mark_stage("knowledge_graph", kg_started_at, detail="知识图谱已同步最新章节节点和关系")
+                    else:
+                        runtime_metadata["knowledge_graph_sync"] = {"status": "empty", "note": "无新节点产生"}
+                except Exception as kg_exc:
+                    runtime_metadata.setdefault("degraded_stages", []).append(
+                        {"stage": "knowledge_graph", "reason": str(kg_exc)}
+                    )
+                    logger.warning("知识图谱同步降级：project=%s chapter=%s error=%s", project_id, chapter_number, kg_exc)
+
+            if active_config.enable_foreshadowing:
+                try:
+                    await self._sync_chapter_clues(
+                        project_id=project_id,
+                        chapter_number=chapter_number,
+                        user_id=user_id,
+                        content=best_content,
+                        chapter_mission=chapter_mission,
+                        runtime_metadata=runtime_metadata,
+                    )
+                except Exception as clue_exc:
+                    runtime_metadata.setdefault("degraded_stages", []).append(
+                        {"stage": "clue_tracker_sync", "reason": str(clue_exc)}
+                    )
+                    logger.warning("线索同步失败：project=%s chapter=%s error=%s", project_id, chapter_number, clue_exc)
+
+            review_summaries, structural_quality_gate = self._evaluate_structural_quality_gate_for_content(
+                review_summaries=review_summaries,
+                content=best_content,
+                violations=guardrail_violations,
+                chapter_mission=chapter_mission,
+                target_word_count=active_config.target_word_count,
+                min_word_count=active_config.min_word_count,
+            )
+            if not structural_quality_gate.get("passed", True):
+                gate_repair_result = await self._attempt_structural_gate_repair(
+                    best_content=best_content,
+                    review_summaries=review_summaries,
+                    structural_quality_gate=structural_quality_gate,
+                    guardrail_violations=guardrail_violations,
+                    chapter_mission=chapter_mission,
+                    repair_context=self._build_structural_gate_repair_context(
+                        outline_title=outline_title,
+                        outline_summary=outline_summary,
+                        chapter_mission=chapter_mission,
+                        history_context=history_context,
+                        project_memory_text=project_memory_text,
+                        style_context=style_context,
+                        writer_blueprint=writer_blueprint,
+                    ),
+                    active_config=active_config,
+                    user_id=user_id,
+                )
+                gate_repair_summary = (gate_repair_result or {}).get("repair_summary")
+                if gate_repair_summary:
+                    # 未采纳也要留诊断，否则用户面对的是一个「无解的 422」
+                    runtime_metadata.setdefault("quality_gate_repairs", []).append(
+                        gate_repair_summary
+                    )
+                if gate_repair_result and gate_repair_result.get("adopted"):
+                    best_content = gate_repair_result["content"]
+                    review_summaries = gate_repair_result["review_summaries"]
+                    structural_quality_gate = gate_repair_result["structural_quality_gate"]
+                    repair_passed = bool(structural_quality_gate.get("passed", False))
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="review",
+                        message=(
+                            "结构质量闸门定向修复已生效，章节通过质量门"
+                            if repair_passed
+                            else "结构质量闸门定向修复改善了部分问题，但仍有未达标项"
+                        ),
+                        progress_percent=91,
+                        level="info" if repair_passed else "warning",
+                        event_kind="quality_gate",
+                        title="质量门定向修复通过" if repair_passed else "质量门定向修复部分改善",
+                        summary=(
+                            "按拦截原因做了结构定向修复并重评通过，未走全新随机重试。"
+                            if repair_passed
+                            else "按拦截原因做了结构定向修复，问题已减少但尚未全部消除。"
+                        ),
+                        content_preview=self._truncate_runtime_text(best_content, 520),
+                        metrics={
+                            "actual_word_count": self._count_words(best_content),
+                            "repair_rounds": gate_repair_summary.get("repair_rounds"),
+                            "repair_outcome": gate_repair_summary.get("repair_outcome"),
+                            "issue_codes_before": gate_repair_summary.get("issue_codes_before", []),
+                            "issue_codes_after": gate_repair_summary.get("issue_codes_after", []),
+                        },
+                    )
+            runtime_metadata["quality_gates"]["structural_gate"] = structural_quality_gate
+            if not structural_quality_gate.get("passed", True):
+                blocked_candidate_refs = await self._persist_quality_gate_blocked_versions(
+                    chapter=chapter,
+                    generation_run_id=generation_run_id,
+                    versions=versions,
+                    best_version_index=best_version_index,
+                    best_content=best_content,
+                    review_summaries=review_summaries,
+                    structural_quality_gate=structural_quality_gate,
+                    longform_context=longform_context,
+                )
+                runtime_metadata["quality_gate_blocked_versions"] = blocked_candidate_refs
+                await self._update_generation_runtime(
+                    chapter,
+                    generation_run_id=generation_run_id,
+                    stage="review",
+                    message="结构质量闸门未通过，已阻止低质量章节进入确认阶段",
+                    progress_percent=91,
+                    level="warning",
+                    event_kind="quality_gate",
+                    title="质量门拦截候选稿",
+                    summary="候选稿已保留供查看，但不会静默定稿；请按拦截原因重试或人工确认。",
+                    content_preview=self._truncate_runtime_text(best_content, 520),
+                    metrics={
+                        "actual_word_count": self._count_words(best_content),
+                        "candidate_count": len(versions),
+                        "quality_issue_codes": structural_quality_gate.get("quality_issue_codes", []),
+                        "quality_issue_labels": structural_quality_gate.get("quality_issue_labels", []),
+                    },
+                    artifact_refs=blocked_candidate_refs if blocked_candidate_refs.get("persisted") else None,
+                    extra={
+                        "quality_gate_failed": True,
+                        "quality_gate": structural_quality_gate,
+                        "review_summaries": review_summaries,
+                        "runtime_metadata": runtime_metadata,
+                    },
+                )
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "CHAPTER_QUALITY_GATE_FAILED",
+                        "message": "章节仍存在严重结构/一致性问题，已阻止静默成功落库。",
+                        "hint": "请结合 self_critique 与 consistency 结果重试生成，优先消除重复时间线、拼接回卷和关键设定冲突。",
+                        "retryable": True,
+                        "stage": "quality_gate",
+                        "quality_gate": structural_quality_gate,
+                    },
+                )
+
+            final_word_count = self._count_words(best_content)
+            final_quality_guard = self._score_story_quality_candidate(
+                content=best_content,
+                violations=guardrail_violations,
+                chapter_mission=chapter_mission,
+                target_word_count=active_config.target_word_count,
+                min_word_count=active_config.min_word_count,
+            )
+            final_quality_guard = self._attach_quality_gate_status_to_guard(
+                final_quality_guard,
+                structural_quality_gate,
+            )
+            review_summaries["final_quality_metrics"] = final_quality_guard.get("quality_metric_snapshot", final_quality_guard)
+            continuity_gate_started_at = time.perf_counter()
+            longform_continuity_gate = self.longform_context_service.evaluate_continuity_quality(
+                content=best_content,
+                package=longform_context,
+                chapter_mission=chapter_mission,
+            )
+            longform_continuity_payload = asdict(longform_continuity_gate)
+            review_summaries["longform_continuity_gate"] = longform_continuity_payload
+            runtime_metadata["quality_gates"]["longform_continuity_gate"] = longform_continuity_payload
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="continuity_gate",
+                message=(
+                    "长篇连续性检查完成"
+                    if longform_continuity_gate.passed
+                    else "长篇连续性检查发现需要局部补丁的问题，已写入候选版本报告"
+                ),
+                progress_percent=91,
+                level="info" if longform_continuity_gate.passed else "warning",
+                event_kind="continuity",
+                title="连续性质量门完成",
+                summary=(
+                    "跨章节角色、时间线、伏笔和线索检查通过"
+                    if longform_continuity_gate.passed
+                    else "发现需要局部补丁处理的连续性风险"
+                ),
+                metrics=longform_continuity_gate.metrics,
+                extra={
+                    "longform_gate_passed": longform_continuity_gate.passed,
+                    "longform_gate_blockers": longform_continuity_gate.blockers,
+                    "longform_gate_warnings": longform_continuity_gate.warnings,
+                    "longform_gate_metrics": longform_continuity_gate.metrics,
+                },
+            )
+            await mark_stage("continuity_gate", continuity_gate_started_at, detail="长篇连续性质量门完成")
+            runtime_metadata["actual_word_count"] = final_word_count
+            runtime_metadata["word_requirement_met"] = final_word_count >= active_config.min_word_count
+            if runtime_metadata["word_requirement_met"]:
+                if final_word_count >= active_config.target_word_count:
+                    runtime_metadata["word_requirement_reason"] = "target_met"
+                elif final_word_count >= max(active_config.min_word_count, int(active_config.target_word_count * 0.92)):
+                    runtime_metadata["word_requirement_reason"] = "close_to_target"
+                else:
+                    runtime_metadata["word_requirement_reason"] = "minimum_met_but_below_target"
+            else:
+                runtime_metadata["word_requirement_reason"] = (
+                    f"最终字数 {final_word_count} 低于最低要求 {active_config.min_word_count}，"
+                    f"目标字数为 {active_config.target_word_count}。"
+                )
+                if active_config.enforce_min_word_count:
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="review",
+                        message="章节字数未达到最低要求，已阻止低质量章节进入确认阶段",
+                        progress_percent=91,
+                        level="warning",
+                        extra={
+                            "quality_gate_failed": True,
+                            "review_summaries": review_summaries,
+                            "runtime_metadata": runtime_metadata,
+                            "actual_word_count": final_word_count,
+                            "word_requirement_met": False,
+                            "word_requirement_reason": runtime_metadata["word_requirement_reason"],
+                        },
+                    )
+                    raise HTTPException(
+                        status_code=422,
+                        detail={
+                            "code": "CHAPTER_WORD_COUNT_BELOW_MINIMUM",
+                            "message": "章节生成未达到最低字数要求，已阻止静默成功落库。",
+                            "hint": "请重试，或适当降低最低字数 / 目标字数后再生成。",
+                            "retryable": True,
+                            "current_word_count": final_word_count,
+                            "min_word_count": active_config.min_word_count,
+                            "target_word_count": active_config.target_word_count,
+                            "stage": "enrichment" if active_config.enable_enrichment else "generation",
+                        },
+                    )
+
+            best_version["content"] = best_content
+            best_version_metadata = best_version.setdefault("metadata", {})
+            best_version_metadata["review_summaries"] = review_summaries
+            best_version_metadata["story_progression_guard"] = final_quality_guard
+            best_version_metadata["quality_metrics"] = final_quality_guard.get("quality_metric_snapshot", final_quality_guard)
+            if longform_context:
+                best_version_metadata["longform_context"] = longform_context.to_metadata()
+            if review_summaries.get("self_critique"):
+                self_critique_payload = review_summaries.get("self_critique") or {}
+                best_version_metadata["chapter_overview"] = self_critique_payload.get("overview_bundle")
+                best_version_metadata["chapter_overview_reuse"] = self_critique_payload.get("reuse_decision")
+
+        await self._assert_generation_active(
+            chapter,
+            generation_run_id=generation_run_id,
+            stage="before_persist_versions",
+        )
+        await self._update_generation_runtime(
+            chapter,
+            generation_run_id=generation_run_id,
+            stage="persist_versions",
+            message="正在写入候选版本并准备进入确认阶段",
+            progress_percent=92,
+            event_kind="save",
+            title="正在保存候选版本",
+            summary="正文、评审结果和连续性检查结果正在一起落库。",
+            content_preview=self._truncate_runtime_text(best_content, 420),
+            metrics={
+                "actual_word_count": runtime_metadata["actual_word_count"],
+                "candidate_count": len(versions),
+            },
+            extra={
+                "actual_word_count": runtime_metadata["actual_word_count"],
+                "word_requirement_met": runtime_metadata["word_requirement_met"],
+                "word_requirement_reason": runtime_metadata["word_requirement_reason"],
+            },
+        )
+        contents = [v.get("content", "") for v in versions]
+        metadata = [dict(v.get("metadata") or {}) for v in versions]
+        if generation_run_id:
+            for item in metadata:
+                item.setdefault("generation_run_id", generation_run_id)
+        persist_versions_started_at = time.perf_counter()
+        versions_models = await self.novel_service.append_chapter_versions(
+            chapter,
+            contents,
+            metadata,
+            max_versions=MAX_STORED_CHAPTER_VERSIONS,
+            expected_generation_run_id=generation_run_id,
+        )
+        await mark_stage("persist_versions", persist_versions_started_at, detail="候选版本落库阶段完成")
+        token_budget_usage = await self._record_generation_token_budget_usage(
+            project_id=project_id,
+            chapter=chapter,
+            versions=versions,
+        )
+        runtime_metadata["token_budget_usage"] = token_budget_usage
+
+        variants = []
+        for idx, version_model in enumerate(versions_models):
+            variant = {
+                "index": idx,
+                "version_id": version_model.id,
+                "content": version_model.content or "",
+                "metadata": version_model.metadata,
+            }
+            variants.append(variant)
+
+        generated_count = len(versions)
+        if generated_count and len(variants) >= generated_count:
+            start_index = len(variants) - generated_count
+            best_version_index = start_index + max(
+                0,
+                min(best_version_index, generated_count - 1),
+            )
+
+        runtime_metadata["stage_timings_ms"] = stage_timings
+        runtime_metadata["pipeline_total_duration_ms"] = round((time.perf_counter() - pipeline_started_at) * 1000, 2)
+        logger.info(
+            "Pipeline total duration: project=%s chapter=%s duration_ms=%s stages=%s",
+            project_id,
+            chapter_number,
+            runtime_metadata["pipeline_total_duration_ms"],
+            runtime_metadata["stage_timings_ms"],
+        )
+        self_critique_summary = review_summaries.get("self_critique") or {}
+        post_consistency_summary = review_summaries.get("self_critique_after_consistency") or {}
+        await self._update_generation_runtime(
+            chapter,
+            generation_run_id=generation_run_id,
+            stage="waiting_for_confirm",
+            message="候选版本已准备完成，等待确认最终版本",
+            progress_percent=97,
+            event_kind="content",
+            title="候选版本可确认",
+            summary=f"已生成 {len(variants)} 个候选版本，推荐第 {best_version_index + 1} 版。",
+            content_preview=self._truncate_runtime_text(
+                (variants[best_version_index].get("content") or "") if 0 <= best_version_index < len(variants) else best_content,
+                520,
+            ),
+            metrics={
+                "actual_word_count": runtime_metadata["actual_word_count"],
+                "generated_version_count": len(variants),
+                "best_version_index": best_version_index,
+                "pipeline_total_duration_ms": runtime_metadata["pipeline_total_duration_ms"],
+                "token_budget_records": token_budget_usage.get("record_count"),
+                "estimated_generation_tokens": token_budget_usage.get("total_tokens"),
+            },
+            artifact_refs={
+                "version_ids": [item.get("version_id") for item in variants if item.get("version_id")],
+                "best_version_id": (
+                    variants[best_version_index].get("version_id")
+                    if 0 <= best_version_index < len(variants)
+                    else None
+                ),
+            },
+            extra={
+                "actual_word_count": runtime_metadata["actual_word_count"],
+                "word_requirement_met": runtime_metadata["word_requirement_met"],
+                "word_requirement_reason": runtime_metadata["word_requirement_reason"],
+                "generated_version_count": len(variants),
+                "best_version_index": best_version_index,
+                "allowed_actions": ["confirm_version", "review_versions", "refresh_status"],
+                "stage_timings_ms": runtime_metadata["stage_timings_ms"],
+                "pipeline_total_duration_ms": runtime_metadata["pipeline_total_duration_ms"],
+                "token_budget_usage": token_budget_usage,
+                "degraded_stages": runtime_metadata.get("degraded_stages", []),
+                "self_critique_final_score": self_critique_summary.get("final_score"),
+                "self_critique_improvement": self_critique_summary.get("improvement"),
+                "self_critique_status": self_critique_summary.get("status"),
+                "self_critique_critical_count": self_critique_summary.get("critical_count"),
+                "self_critique_major_count": self_critique_summary.get("major_count"),
+                "self_critique_priority_fixes": self_critique_summary.get("priority_fixes", []),
+                "self_critique_after_consistency_status": post_consistency_summary.get("status"),
+                "self_critique_after_consistency_improvement": post_consistency_summary.get("improvement"),
+                "quality_metrics": review_summaries.get("final_quality_metrics"),
+            },
+        )
+        return {
+            "project_id": project_id,
+            "chapter_number": chapter_number,
+            "preset": active_config.preset,
+            "best_version_index": best_version_index,
+            "variants": variants,
+            "review_summaries": review_summaries,
+            "debug_metadata": {
+                "version_count": version_count,
+                "stages": self._build_stage_flags(active_config),
+                "retrieval_stats": rag_stats,
+                "runtime": runtime_metadata,
+            },
+            "runtime_metadata": runtime_metadata,
+        }
+

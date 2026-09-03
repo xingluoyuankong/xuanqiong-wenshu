@@ -1,0 +1,48 @@
+{
+ "domain": "数据库、迁移与部署",
+ "slug": "domain-11",
+ "nodes": [
+  {
+   "id": "PR-079",
+   "title": "fresh 数据库迁移到 head",
+   "location": "backend/alembic; backend/app/db; backend/app/models",
+   "severity": "P0",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-080",
+   "title": "legacy 数据升级与数据保留",
+   "location": "backend/alembic; backend/app/db; backend/app/models",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-081",
+   "title": "重复升级与降级再升级",
+   "location": "backend/alembic; backend/app/db; backend/app/models",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-082",
+   "title": "并发迁移锁与异常恢复",
+   "location": "backend/alembic; backend/app/db; backend/app/models",
+   "severity": "P0",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-083",
+   "title": "SQLite 关键事务和锁竞争",
+   "location": "backend/alembic; backend/app/db; backend/app/models",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-084",
+   "title": "MySQL CAS 事务索引兼容验证",
+   "location": "backend/alembic; backend/app/db; backend/app/models",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  }
+ ]
+}

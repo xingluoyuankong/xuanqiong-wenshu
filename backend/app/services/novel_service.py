@@ -25,6 +25,8 @@ from ..models import (
     NovelBlueprint,
     NovelConversation,
     NovelProject,
+    ProjectMember,
+    ProjectMemberRole,
 )
 from ..models.memory_layer import CharacterState, TimelineEvent
 from ..services.vector_store_service import VectorStoreService
@@ -1773,6 +1775,16 @@ class NovelService:
             initial_prompt=initial_prompt,
         )
         self.session.add(project)
+        # Materialize the creator as the canonical project owner in the same
+        # transaction as the project row.  Legacy ``NovelProject.user_id`` is
+        # retained for compatibility, while new access checks use membership.
+        self.session.add(
+            ProjectMember(
+                project_id=project.id,
+                user_id=user_id,
+                role=ProjectMemberRole.owner.value,
+            )
+        )
         await self.session.commit()
         await self.session.refresh(project)
         return project

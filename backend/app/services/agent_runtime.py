@@ -352,6 +352,30 @@ class AgentRuntimeService:
             raise AgentNotFound("agent session not found")
         return item
 
+    async def _session_readable(self, session_id: str, user_id: int) -> AgentSession:
+        item = (await self.session.execute(
+            select(AgentSession).where(AgentSession.id == session_id)
+        )).scalar_one_or_none()
+        if item is None:
+            raise AgentNotFound("agent session not found")
+        if item.user_id == user_id:
+            return item
+        if item.project_id:
+            from .project_access_service import ProjectAccessService
+            await ProjectAccessService(self.session).require_project_read(item.project_id, user_id)
+            return item
+        # Projectless sessions retain the historical creator-only privacy
+        # contract and deliberately look absent to other users.
+        raise AgentNotFound("agent session not found")
+
+    async def _session_writable(self, session_id: str, user_id: int) -> AgentSession:
+        item = await self._session_readable(session_id, user_id)
+        if item.user_id == user_id or not item.project_id:
+            return item
+        from .project_access_service import ProjectAccessService
+        await ProjectAccessService(self.session).require_project_write(item.project_id, user_id)
+        return item
+
     async def _run(self, run_id: str, user_id: int) -> AgentRun:
         item = (await self.session.execute(select(AgentRun).where(AgentRun.id == run_id, AgentRun.user_id == user_id))).scalar_one_or_none()
         if item is None:
@@ -408,9 +432,13 @@ class AgentRuntimeService:
     async def verify_project(self, project_id: Optional[str], user_id: int) -> None:
         if not project_id:
             return
-        project = (await self.session.execute(select(NovelProject.id).where(NovelProject.id == project_id, NovelProject.user_id == user_id))).scalar_one_or_none()
-        if project is None:
-            raise AgentScopeViolation("project is not accessible")
+        from .project_access_service import ProjectAccessService
+        try:
+            await ProjectAccessService(self.session).require_project_write(project_id, user_id)
+        except Exception as exc:
+            if isinstance(exc, AgentRuntimeError):
+                raise
+            raise AgentScopeViolation("project is not accessible") from exc
 
     async def create_session(self, *, user_id: int, project_id: Optional[str] = None, title: Optional[str] = None) -> AgentSession:
         await self.verify_project(project_id, user_id)
@@ -426,8 +454,27 @@ class AgentRuntimeService:
             stmt = stmt.where(AgentSession.project_id == project_id)
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def list_sessions_readable(self, *, user_id: int, project_id: Optional[str] = None, limit: int = 50) -> list[AgentSession]:
+        if project_id is None:
+            return await self.list_sessions(user_id=user_id, limit=limit)
+        from .project_access_service import ProjectAccessService
+        await ProjectAccessService(self.session).require_project_read(project_id, user_id)
+        stmt = (select(AgentSession)
+            .where(AgentSession.project_id == project_id)
+            .order_by(AgentSession.updated_at.desc())
+            .limit(min(max(limit, 1), 100)))
+        return list((await self.session.execute(stmt)).scalars().all())
+
     async def get_session(self, session_id: str, user_id: int) -> AgentSession:
         return await self._session(session_id, user_id)
+
+    async def get_session_readable(self, session_id: str, user_id: int) -> AgentSession:
+        # Keep the established creator path (and its instrumentation) intact;
+        # only fall back to project-scope resolution for another member.
+        try:
+            return await self.get_session(session_id, user_id)
+        except AgentNotFound:
+            return await self._session_readable(session_id, user_id)
 
     async def archive_session(self, *, session_id: str, user_id: int) -> AgentSession:
         item = await self._session(session_id, user_id)
@@ -438,7 +485,7 @@ class AgentRuntimeService:
 
 
     async def append_message(self, *, session_id: str, user_id: int, role: str, content: str, commit: bool = True) -> AgentMessage:
-        item = await self._session(session_id, user_id)
+        item = await self._session_writable(session_id, user_id)
         if role not in {"user", "assistant", "system_summary"}:
             raise AgentConflict("unsupported message role")
         if not content.strip() or len(content) > 200000:
@@ -536,6 +583,14 @@ class AgentRuntimeService:
         stmt = select(AgentMessage).where(AgentMessage.session_id == session_id, AgentMessage.user_id == user_id).order_by(AgentMessage.sequence.asc()).limit(min(max(limit, 1), 500))
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def list_messages_readable(self, *, session_id: str, user_id: int, limit: int = 200) -> list[AgentMessage]:
+        await self._session_readable(session_id, user_id)
+        stmt = (select(AgentMessage)
+            .where(AgentMessage.session_id == session_id)
+            .order_by(AgentMessage.sequence.asc())
+            .limit(min(max(limit, 1), 500)))
+        return list((await self.session.execute(stmt)).scalars().all())
+
     async def _build_novel_context_inputs(
         self,
         *,
@@ -621,7 +676,7 @@ class AgentRuntimeService:
         return snapshot_to_agent_context_inputs(selection)
 
     async def create_run(self, *, session_id: str, user_id: int, project_id: Optional[str] = None, context: Optional[dict[str, Any]] = None, commit: bool = True) -> AgentRun:
-        item = await self._session(session_id, user_id)
+        item = await self._session_writable(session_id, user_id)
         if item.project_id != project_id:
             raise AgentScopeViolation("run project does not match session project")
         context_payload = _clean_data(context or {})
@@ -719,6 +774,45 @@ class AgentRuntimeService:
 
     async def get_run(self, run_id: str, user_id: int) -> AgentRun:
         return await self._run(run_id, user_id)
+
+    async def get_readable_run(self, run_id: str, user_id: int) -> AgentRun:
+        """Return a Run readable by its owner, an active project member, or admin."""
+        try:
+            return await self.get_run(run_id, user_id)
+        except AgentNotFound:
+            pass
+        run = (await self.session.execute(select(AgentRun).where(AgentRun.id == run_id))).scalar_one_or_none()
+        if run is None:
+            raise AgentNotFound("agent run not found")
+        if run.user_id == user_id:
+            return run
+        if run.project_id:
+            from .project_access_service import ProjectAccessService
+            await ProjectAccessService(self.session).require_member(run.project_id, user_id)
+            return run
+        # Projectless Runs retain the historical creator-only privacy contract.
+        raise AgentNotFound("agent run not found")
+
+    async def list_reasoning_chunks_readable(
+        self,
+        *,
+        run_id: str,
+        user_id: int,
+        after_sequence: int = 0,
+        before_sequence: int | None = None,
+        limit: int = 100,
+    ) -> list[AgentRunReasoningChunk]:
+        run = await self.get_readable_run(run_id, user_id)
+        page_limit = min(max(limit, 1), 500)
+        conditions = [AgentRunReasoningChunk.run_id == run.id]
+        if before_sequence is not None:
+            conditions.append(AgentRunReasoningChunk.sequence < max(0, before_sequence))
+            order = AgentRunReasoningChunk.sequence.desc()
+        else:
+            conditions.append(AgentRunReasoningChunk.sequence > max(0, after_sequence))
+            order = AgentRunReasoningChunk.sequence.asc()
+        rows = list((await self.session.execute(select(AgentRunReasoningChunk).where(*conditions).order_by(order).limit(page_limit))).scalars().all())
+        return list(reversed(rows)) if before_sequence is not None else rows
 
     async def set_run_context(self, *, run_id: str, user_id: int, context: dict[str, Any], commit: bool = True) -> AgentRun:
         run = await self._run(run_id, user_id)
@@ -1175,6 +1269,31 @@ class AgentRuntimeService:
         stmt = select(AgentRunReasoningChunk).where(*conditions).order_by(order).limit(page_limit)
         rows = list((await self.session.execute(stmt)).scalars().all())
         return list(reversed(rows)) if before_sequence is not None else rows
+
+    async def list_events_readable(
+        self,
+        *,
+        run_id: str,
+        user_id: int,
+        after_sequence: int = 0,
+        limit: int = 500,
+    ) -> list[AgentEventRecord]:
+        run = await self.get_readable_run(run_id, user_id)
+        # Preserve the creator-scoped method as the owner path.  Besides
+        # avoiding an unnecessary second query, this keeps the established
+        # event-stream contract and its instrumentation stable for callers.
+        if run.user_id == user_id:
+            return await self.list_events(
+                run_id=run_id,
+                user_id=user_id,
+                after_sequence=after_sequence,
+                limit=limit,
+            )
+        stmt = select(AgentEventRecord).where(
+            AgentEventRecord.run_id == run.id,
+            AgentEventRecord.sequence > max(0, after_sequence),
+        ).order_by(AgentEventRecord.sequence.asc()).limit(min(max(limit, 1), 500))
+        return [_sanitize_loaded_event(event) for event in (await self.session.execute(stmt)).scalars().all()]
 
     async def append_work_trace_delta(
         self,

@@ -1,0 +1,4 @@
+            "version_count": len(version_models),
+        }
+
+    async def _rebind_generation_run_if_needed(

@@ -1,0 +1,76 @@
+{
+ "domain": "正文生成、版本与质量",
+ "slug": "domain-04",
+ "nodes": [
+  {
+   "id": "PR-027",
+   "title": "短章单候选与调用预算",
+   "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-028",
+   "title": "中长章候选与统一 RetryBudget",
+   "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-029",
+   "title": "生成完成不自动选择最长候选",
+   "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-030",
+   "title": "不可变 ChapterVersion 与父版本图",
+   "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-031",
+   "title": "续写改写局部 patch 基线冲突",
+   "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-032",
+   "title": "正文协议与元文本污染守卫",
+   "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-033",
+   "title": "统一字数口径与测试向量",
+   "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-034",
+   "title": "质量门 blocker warning degraded 契约",
+   "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-035",
+   "title": "20k 分段 artifact 与 checkpoint",
+   "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+   "severity": "P0",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-036",
+   "title": "长章取消、断线、杀进程和续接",
+   "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  }
+ ]
+}

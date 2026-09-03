@@ -1,0 +1,80 @@
+[
+ {
+  "slug": "domain-01",
+  "domain": "身份、权限与资产隔离",
+  "count": 8,
+  "range": "PR-001..PR-008"
+ },
+ {
+  "slug": "domain-02",
+  "domain": "统一任务中心与事件协议",
+  "count": 10,
+  "range": "PR-009..PR-018"
+ },
+ {
+  "slug": "domain-03",
+  "domain": "版本化创作结构资产",
+  "count": 8,
+  "range": "PR-019..PR-026"
+ },
+ {
+  "slug": "domain-04",
+  "domain": "正文生成、版本与质量",
+  "count": 10,
+  "range": "PR-027..PR-036"
+ },
+ {
+  "slug": "domain-05",
+  "domain": "原子定稿与连续性账本",
+  "count": 8,
+  "range": "PR-037..PR-044"
+ },
+ {
+  "slug": "domain-06",
+  "domain": "Provider、配置、成本与资料",
+  "count": 7,
+  "range": "PR-045..PR-051"
+ },
+ {
+  "slug": "domain-07",
+  "domain": "导入导出与工程往返",
+  "count": 6,
+  "range": "PR-052..PR-057"
+ },
+ {
+  "slug": "domain-08",
+  "domain": "前端统一任务与交互",
+  "count": 8,
+  "range": "PR-058..PR-065"
+ },
+ {
+  "slug": "domain-09",
+  "domain": "业务工作台与领域功能",
+  "count": 7,
+  "range": "PR-066..PR-072"
+ },
+ {
+  "slug": "domain-10",
+  "domain": "管理、日志、技能与限额",
+  "count": 6,
+  "range": "PR-073..PR-078"
+ },
+ {
+  "slug": "domain-11",
+  "domain": "数据库、迁移与部署",
+  "count": 6,
+  "range": "PR-079..PR-084"
+ },
+ {
+  "slug": "domain-12",
+  "domain": "可观测性与审计证据",
+  "count": 5,
+  "range": "PR-085..PR-089"
+ },
+ {
+  "slug": "domain-13",
+  "domain": "真实验收与发布门禁",
+  "count": 8,
+  "range": "PR-090..PR-097"
+ }
+]

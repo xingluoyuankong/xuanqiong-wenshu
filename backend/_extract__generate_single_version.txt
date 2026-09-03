@@ -1,0 +1,370 @@
+    async def _generate_single_version(
+        self,
+        *,
+        index: int,
+        prompt_input: str,
+        writer_prompt: str,
+        style_hint: Optional[str],
+        project_id: str,
+        chapter_number: int,
+        outline_title: str,
+        outline_summary: str,
+        chapter_mission: Optional[dict],
+        forbidden_characters: List[str],
+        allowed_new_characters: List[str],
+        user_id: int,
+        writer_blueprint: Dict[str, Any],
+        memory_context: Optional[str],
+        analysis_guidance_context: Optional[str],
+        enhanced_context: Optional[Dict[str, Any]],
+        config: PipelineConfig,
+        progress_callback: Optional[Callable[[str, str], Awaitable[None]]] = None,
+    ) -> Dict[str, Any]:
+        with LLMService.daily_limit_scope(f"writer_version:{project_id}:{chapter_number}:{index}:{user_id}"):
+            version_started_at = time.perf_counter()
+            metadata: Dict[str, Any] = {
+                "chapter_mission": chapter_mission,
+                "style_hint": style_hint,
+                "pipeline": {"preset": config.preset},
+            }
+
+            def record_generation_call_metrics(label: str, text_result: Any) -> None:
+                metrics = {
+                    "label": label,
+                    "attempts": getattr(text_result, "attempts", None),
+                    "provider_error_type": getattr(text_result, "provider_error_type", None),
+                    "effective_max_tokens": getattr(text_result, "effective_max_tokens", None),
+                    "estimated_input_tokens": getattr(text_result, "estimated_input_tokens", None),
+                    "estimated_output_tokens": getattr(text_result, "estimated_output_tokens", None),
+                    "estimated_total_tokens": getattr(text_result, "estimated_total_tokens", None),
+                    "prompt_character_count": getattr(text_result, "prompt_character_count", None),
+                    "output_character_count": getattr(text_result, "output_character_count", None),
+                }
+                metadata.setdefault("generation_call_metrics", []).append(
+                    {key: value for key, value in metrics.items() if value is not None}
+                )
+
+            async def run_writer_pass(
+                *,
+                temperature: float,
+                additional_feedback: Optional[str] = None,
+                prior_excerpt: Optional[str] = None,
+            ) -> str:
+                nonlocal generation_duration_ms
+
+                final_prompt_input = prompt_input
+                final_prompt_input += (
+                    f"\n\n[本次输出红线]\n"
+                    f"- 直接输出完整章节正文，不要解释。\n"
+                    f"- 先保证承接、冲突推进、角色变化、局势反转与章末牵引完整，再追求文气。\n"
+                    f"- {self._format_chapter_draft_contract_for_prompt(config.target_word_count, config.min_word_count)}\n"
+                    f"- 目标字数：{config.target_word_count}；最低字数：{config.min_word_count}。不要刚过底线就提前收束，要把该展开的场景写满。\n"
+                    f"- 字数优先写在场景执行里：对话攻防、动作过程、因果后果、关系变化、短余波，不要写成纯描写补字数。\n"
+                )
+                if additional_feedback:
+                    final_prompt_input += f"\n\n[首稿回炉要求]\n{additional_feedback}"
+                if prior_excerpt:
+                    final_prompt_input += f"\n\n[上一版片段（只用于识别缺陷，不要照抄）]\n{prior_excerpt}"
+                if style_hint:
+                    final_prompt_input += f"\n\n[版本风格提示]\n{style_hint}"
+
+                generation_started_at = time.perf_counter()
+                try:
+                    text_result = await call_generation_text(
+                        llm_service=self.llm_service,
+                        system_prompt=writer_prompt,
+                        conversation_history=[{"role": "user", "content": final_prompt_input}],
+                        temperature=temperature,
+                        user_id=user_id,
+                        timeout=self._resolve_chapter_generation_timeout(config.target_word_count),
+                        policy=GenerationCallPolicy(
+                            stage_label=f"章节正文候选 {index + 1}",
+                            progress_stage="generate_variants",
+                            retry_attempts=2,
+                            response_format=None,
+                            max_tokens=self._resolve_chapter_generation_max_tokens(config.target_word_count),
+                            prompt_cache_key=f"xq:{project_id}:{chapter_number}:draft",
+                            allow_truncated_response=config.allow_truncated_response,
+                            retry_same_model_once=True,
+                            heartbeat_interval_seconds=60.0,
+                            soft_timeout_seconds=self._resolve_chapter_generation_soft_timeout(config.target_word_count),
+                        ),
+                        progress_callback=progress_callback,
+                    )
+                    record_generation_call_metrics(f"draft_candidate_{index + 1}", text_result)
+                    response = text_result.text
+                except HTTPException:
+                    raise
+                except (httpx.HTTPError, APIConnectionError, APITimeoutError, APIError) as exc:
+                    logger.error(
+                        "Chapter generation network transport failed: project=%s chapter=%s version=%s error=%s",
+                        project_id,
+                        chapter_number,
+                        index,
+                        exc,
+                        exc_info=exc,
+                    )
+                    raise HTTPException(
+                        status_code=503,
+                        detail={
+                            "code": "PROVIDER_NETWORK_ERROR",
+                            "message": "生成请求过程中与 AI 服务网络通信失败。",
+                            "hint": "请检查网络连通性、Provider 状态或稍后重试。",
+                            "retryable": True,
+                        },
+                    ) from exc
+
+                generation_duration_ms += round((time.perf_counter() - generation_started_at) * 1000, 2)
+                cleaned = remove_think_tags(response)
+                return unwrap_markdown_json(cleaned)
+
+            async def apply_guardrails(text: str) -> Tuple[str, Dict[str, Any], float, float]:
+                guardrail_check_started_at = time.perf_counter()
+                guardrail_result = self.guardrails.check(
+                    generated_text=text,
+                    forbidden_characters=forbidden_characters,
+                    allowed_new_characters=allowed_new_characters,
+                    pov=chapter_mission.get("pov") if chapter_mission else None,
+                )
+                guardrail_check_ms = round((time.perf_counter() - guardrail_check_started_at) * 1000, 2)
+                guardrail_rewrite_ms = 0.0
+                guardrail_meta = {"passed": guardrail_result.passed, "violations": []}
+
+                if not guardrail_result.passed:
+                    guardrail_meta["violations"] = [
+                        {
+                            "type": violation.type,
+                            "severity": violation.severity,
+                            "description": violation.description,
+                            "location": violation.context,
+                            "context": violation.context,
+                        }
+                        for violation in guardrail_result.violations
+                    ]
+                    violations_text = self.guardrails.format_violations_for_rewrite(guardrail_result)
+                    guardrail_rewrite_started_at = time.perf_counter()
+                    text = await self._rewrite_with_guardrails(
+                        original_text=text,
+                        chapter_mission=chapter_mission,
+                        violations_text=violations_text,
+                        user_id=user_id,
+                    )
+                    guardrail_rewrite_ms = round((time.perf_counter() - guardrail_rewrite_started_at) * 1000, 2)
+
+                return text, guardrail_meta, guardrail_check_ms, guardrail_rewrite_ms
+
+            content = ""
+            generation_duration_ms = 0.0
+            if config.enable_preview:
+                preview_started_at = time.perf_counter()
+                content, preview_meta = await self._generate_with_preview(
+                    project_id=project_id,
+                    chapter_number=chapter_number,
+                    outline_title=outline_title,
+                    outline_summary=outline_summary,
+                    writer_blueprint=writer_blueprint,
+                    memory_context=memory_context,
+                    analysis_guidance_context=analysis_guidance_context,
+                    style_hint=style_hint,
+                    enhanced_context=enhanced_context,
+                    target_word_count=config.target_word_count,
+                    user_id=user_id,
+                )
+                generation_duration_ms = round((time.perf_counter() - preview_started_at) * 1000, 2)
+                metadata["preview"] = preview_meta
+
+            if not content:
+                content = await run_writer_pass(temperature=0.9)
+            if not content:
+                final_prompt_input = prompt_input
+                final_prompt_input += (
+                    f"\n\n[本次输出红线]\n"
+                    f"- 直接输出完整章节正文，不要解释。\n"
+                    f"- 先保证剧情承接、冲突推进、角色变化与章末牵引完整。\n"
+                    f"- {self._format_chapter_draft_contract_for_prompt(config.target_word_count, config.min_word_count)}\n"
+                    f"- 目标字数约 {config.target_word_count}；最低字数：{config.min_word_count}。在保证质量的前提下，必须尽量逼近目标字数，不能写到刚过底线就提前收束。"
+                )
+                if style_hint:
+                    final_prompt_input += f"\n\n[版本风格提示]\n{style_hint}"
+
+                generation_started_at = time.perf_counter()
+                try:
+                    text_result = await call_generation_text(
+                        llm_service=self.llm_service,
+                        system_prompt=writer_prompt,
+                        conversation_history=[{"role": "user", "content": final_prompt_input}],
+                        temperature=0.9,
+                        user_id=user_id,
+                        timeout=self._resolve_chapter_generation_timeout(config.target_word_count),
+                        policy=GenerationCallPolicy(
+                            stage_label=f"章节正文候选 {index + 1} 兜底生成",
+                            progress_stage="generate_variants",
+                            retry_attempts=2,
+                            response_format=None,
+                            max_tokens=self._resolve_chapter_generation_max_tokens(config.target_word_count),
+                            prompt_cache_key=f"xq:{project_id}:{chapter_number}:draft",
+                            allow_truncated_response=config.allow_truncated_response,
+                            retry_same_model_once=True,
+                            heartbeat_interval_seconds=60.0,
+                            soft_timeout_seconds=self._resolve_chapter_generation_soft_timeout(config.target_word_count),
+                        ),
+                        progress_callback=progress_callback,
+                    )
+                    record_generation_call_metrics(f"draft_candidate_{index + 1}_fallback", text_result)
+                    response = text_result.text
+                except HTTPException:
+                    raise
+                except (httpx.HTTPError, APIConnectionError, APITimeoutError, APIError) as exc:
+                    logger.error(
+                        "Chapter generation network transport failed: project=%s chapter=%s version=%s error=%s",
+                        project_id,
+                        chapter_number,
+                        index,
+                        exc,
+                        exc_info=exc,
+                    )
+                    raise HTTPException(
+                        status_code=503,
+                        detail={
+                            "code": "PROVIDER_NETWORK_ERROR",
+                            "message": "生成请求过程中与 AI 服务网络通信失败。",
+                            "hint": "请检查网络连通性、Provider 状态或稍后重试。",
+                            "retryable": True,
+                        },
+                    ) from exc
+                generation_duration_ms = round((time.perf_counter() - generation_started_at) * 1000, 2)
+                cleaned = remove_think_tags(response)
+                content = unwrap_markdown_json(cleaned)
+
+            guardrail_check_started_at = time.perf_counter()
+            guardrail_result = self.guardrails.check(
+                generated_text=content,
+                forbidden_characters=forbidden_characters,
+                allowed_new_characters=allowed_new_characters,
+                pov=chapter_mission.get("pov") if chapter_mission else None,
+            )
+            guardrail_check_duration_ms = round((time.perf_counter() - guardrail_check_started_at) * 1000, 2)
+            guardrail_rewrite_duration_ms = 0.0
+            guardrail_metadata = {"passed": guardrail_result.passed, "violations": []}
+
+            if not guardrail_result.passed:
+                guardrail_metadata["violations"] = [
+                    {
+                        "type": v.type,
+                        "severity": v.severity,
+                        "description": v.description,
+                        "location": v.context,
+                        "context": v.context,
+                    }
+                    for v in guardrail_result.violations
+                ]
+                violations_text = self.guardrails.format_violations_for_rewrite(guardrail_result)
+                guardrail_rewrite_started_at = time.perf_counter()
+                content = await self._rewrite_with_guardrails(
+                    original_text=content,
+                    chapter_mission=chapter_mission,
+                    violations_text=violations_text,
+                    user_id=user_id,
+                )
+                guardrail_rewrite_duration_ms = round((time.perf_counter() - guardrail_rewrite_started_at) * 1000, 2)
+
+            retry_needed, initial_story_guard, retry_reason_codes = self._evaluate_first_draft_retry(
+                content=content,
+                violations=guardrail_metadata.get("violations"),
+                chapter_mission=chapter_mission,
+                target_word_count=config.target_word_count,
+                min_word_count=config.min_word_count,
+            )
+            story_progression_guard = initial_story_guard
+            first_draft_retry_metadata: Dict[str, Any] = {
+                "used": False,
+                "reason_codes": retry_reason_codes,
+                "before": initial_story_guard,
+            }
+            if retry_needed:
+                retry_feedback = self._build_first_draft_retry_feedback(
+                    story_guard=initial_story_guard,
+                    reason_codes=retry_reason_codes,
+                    chapter_mission=chapter_mission,
+                    target_word_count=config.target_word_count,
+                    min_word_count=config.min_word_count,
+                )
+                retry_candidate = await run_writer_pass(
+                    temperature=0.55,
+                    additional_feedback=retry_feedback,
+                    prior_excerpt=self._truncate_text(content, 1800),
+                )
+                retry_candidate, retry_guardrail_metadata, retry_guardrail_check_ms, retry_guardrail_rewrite_ms = await apply_guardrails(retry_candidate)
+                guardrail_check_duration_ms += retry_guardrail_check_ms
+                guardrail_rewrite_duration_ms += retry_guardrail_rewrite_ms
+                retry_story_guard = self._score_story_quality_candidate(
+                    content=retry_candidate,
+                    violations=retry_guardrail_metadata.get("violations") or [],
+                    chapter_mission=chapter_mission,
+                    target_word_count=config.target_word_count,
+                    min_word_count=config.min_word_count,
+                )
+                retry_score = int(retry_story_guard.get("score") or 0)
+                current_score = int(initial_story_guard.get("score") or 0)
+                retry_word_count = int(retry_story_guard.get("word_count") or 0)
+                initial_word_count = int(initial_story_guard.get("word_count") or 0)
+                meaningful_word_gain = max(300, int(config.target_word_count * (0.06 if config.target_word_count >= 7000 else 0.08)))
+                retry_reaches_floor = retry_word_count >= max(config.min_word_count, int(config.target_word_count * 0.9))
+                accept_retry = bool(
+                    retry_score >= current_score + 120
+                    or (
+                        retry_story_guard.get("guardrail_violation_count", 0)
+                        < initial_story_guard.get("guardrail_violation_count", 0)
+                    )
+                    or (
+                        retry_story_guard.get("mission_hit_count", 0) >= initial_story_guard.get("mission_hit_count", 0)
+                        and retry_word_count >= initial_word_count + meaningful_word_gain
+                    )
+                    or (
+                        retry_reaches_floor
+                        and retry_story_guard.get("mission_hit_count", 0) >= initial_story_guard.get("mission_hit_count", 0)
+                        and retry_score >= current_score - 80
+                        and not retry_story_guard.get("static_description_risk")
+                    )
+                )
+                first_draft_retry_metadata.update(
+                    {
+                        "used": True,
+                        "accepted": accept_retry,
+                        "after": retry_story_guard,
+                        "after_guardrail": retry_guardrail_metadata,
+                    }
+                )
+                if accept_retry:
+                    content = retry_candidate
+                    guardrail_metadata = retry_guardrail_metadata
+                    story_progression_guard = retry_story_guard
+
+            parsed_json = None
+            extracted_text = None
+            try:
+                parsed_json = json.loads(content)
+                extracted_text = self._extract_text(parsed_json)
+            except Exception:
+                parsed_json = None
+
+            version_total_duration_ms = round((time.perf_counter() - version_started_at) * 1000, 2)
+            metadata["timings"] = {
+                "generation_ms": generation_duration_ms,
+                "guardrail_check_ms": guardrail_check_duration_ms,
+                "guardrail_rewrite_ms": guardrail_rewrite_duration_ms,
+                "total_ms": version_total_duration_ms,
+            }
+            metadata["guardrail"] = guardrail_metadata
+            metadata["first_draft_retry"] = first_draft_retry_metadata
+            metadata["story_progression_guard"] = story_progression_guard
+            metadata["quality_metrics"] = story_progression_guard.get("quality_metric_snapshot", story_progression_guard)
+            if parsed_json is not None:
+                metadata["parsed_json"] = parsed_json
+
+            return {
+                "index": index,
+                "content": extracted_text or content,
+                "metadata": metadata,
+            }
+

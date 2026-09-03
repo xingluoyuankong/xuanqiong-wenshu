@@ -1,0 +1,62 @@
+{
+ "domain": "真实验收与发布门禁",
+ "slug": "domain-13",
+ "nodes": [
+  {
+   "id": "PR-090",
+   "title": "后端正式全量门禁",
+   "location": "backend/scripts; frontend; backend; audit/production-readiness",
+   "severity": "P0",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-091",
+   "title": "前端类型测试构建三门禁",
+   "location": "backend/scripts; frontend; backend; audit/production-readiness",
+   "severity": "P0",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-092",
+   "title": "真实 Provider 短章串行稳定性",
+   "location": "backend/scripts; frontend; backend; audit/production-readiness",
+   "severity": "P0",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-093",
+   "title": "真实入口连续生成并定稿 1 至 10 章",
+   "location": "backend/scripts; frontend; backend; audit/production-readiness",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-094",
+   "title": "真实 20k 分段恢复",
+   "location": "backend/scripts; frontend; backend; audit/production-readiness",
+   "severity": "P0",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-095",
+   "title": "双用户双项目双 worker 隔离",
+   "location": "backend/scripts; frontend; backend; audit/production-readiness",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-096",
+   "title": "完整浏览器黑盒主流程",
+   "location": "backend/scripts; frontend; backend; audit/production-readiness",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-097",
+   "title": "连续两轮发布证据与签字",
+   "location": "backend/scripts; frontend; backend; audit/production-readiness",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  }
+ ]
+}

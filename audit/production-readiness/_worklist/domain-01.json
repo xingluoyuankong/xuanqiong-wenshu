@@ -1,0 +1,62 @@
+{
+ "domain": "身份、权限与资产隔离",
+ "slug": "domain-01",
+ "nodes": [
+  {
+   "id": "PR-001",
+   "title": "登录与令牌生命周期",
+   "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-002",
+   "title": "生产环境禁用匿名默认用户",
+   "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-003",
+   "title": "项目 owner 权限矩阵",
+   "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-004",
+   "title": "任务 owner 与项目双校验",
+   "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-005",
+   "title": "SSE 持续鉴权与资源隔离",
+   "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+   "severity": "P0",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-006",
+   "title": "上传下载路径与文件授权",
+   "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-007",
+   "title": "管理员显式运维边界与审计",
+   "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-008",
+   "title": "敏感字段统一脱敏与大小限制",
+   "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  }
+ ]
+}

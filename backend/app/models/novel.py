@@ -61,6 +61,9 @@ class NovelProject(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     owner: Mapped["User"] = relationship("User", back_populates="novel_projects")
+    members: Mapped[list["ProjectMember"]] = relationship(
+        "ProjectMember", back_populates="project", cascade="all, delete-orphan"
+    )
     blueprint: Mapped[Optional["NovelBlueprint"]] = relationship(
         back_populates="project", cascade="all, delete-orphan", uselist=False
     )

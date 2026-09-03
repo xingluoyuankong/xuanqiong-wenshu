@@ -1,0 +1,62 @@
+{
+ "domain": "前端统一任务与交互",
+ "slug": "domain-08",
+ "nodes": [
+  {
+   "id": "PR-058",
+   "title": "全局 TaskRuntime store 与任务发现",
+   "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+   "severity": "P0",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-059",
+   "title": "唯一事件 reducer 代际序列去重",
+   "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-060",
+   "title": "蓝图章节纲研究文风导入统一 SSE",
+   "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+   "severity": "P0",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-061",
+   "title": "正文流日志流诊断流严格分区",
+   "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-062",
+   "title": "刷新断网重连取消恢复动作",
+   "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-063",
+   "title": "revision 冲突 diff 与 stale 提示",
+   "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-064",
+   "title": "长正文块缓冲和虚拟化",
+   "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-065",
+   "title": "窄屏键盘与可访问性",
+   "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  }
+ ]
+}

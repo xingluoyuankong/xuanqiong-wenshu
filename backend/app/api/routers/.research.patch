@@ -1,0 +1,34 @@
+*** Begin Patch
+*** Update File: backend/app/api/routers/research.py
+@@
+     job["artifact"] = artifact
+     if hasattr(session, "execute"):
+         await TaskRuntimeService(session).create_task(
+             task_id=run_id,
+             task_type="research",
+             idempotency_key=f"research:{project_id}:{payload.scope}:{payload.chapter_number or 0}:{run_id}",
+             owner_user_id=int(current_user.id),
+             project_id=project_id,
+             chapter_id=str(payload.chapter_number) if payload.chapter_number else None,
+             payload=payload.model_dump(mode="json"),
+         )
++        job["runtime_task_registered"] = True
+@@
+     if in_memory is not None:
+         # 无持久化工件（例如测试替身或工件写入前的瞬间），退回内存快照，
+         # 但仍以 TaskRuntime 状态覆盖，保证不会把 cancelling 误报成终态。
+         snapshot = dict(in_memory)
+         if runtime_task is not None:
+             snapshot["status"] = runtime_task.status
++        elif (
++            hasattr(session, "execute")
++            and snapshot.get("runtime_task_registered")
++            and snapshot.get("status") in {"queued", "running"}
++        ):
++            # 持久化 TaskRuntime 记录已消失：内存热缓存不得继续把任务
++            # 报为“生成中”，按旧记录中断语义收敛为非活动状态。
++            snapshot["status"] = "failed"
++            async with _RESEARCH_TASK_LOCK:
++                _RESEARCH_JOBS[run_id] = dict(snapshot)
+         return _job_read(snapshot)
+*** End Patch

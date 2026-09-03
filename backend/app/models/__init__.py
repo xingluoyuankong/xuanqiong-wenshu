@@ -102,6 +102,8 @@ __all__ = [
     "ChapterVersion",
     "ChapterEvaluation",
     "NovelProject",
+    "ProjectMember",
+    "ProjectMemberRole",
     "ProjectLedgerSyncLease",
     "Prompt",
     "UpdateLog",
@@ -206,3 +208,6 @@ from .agent_lineage import ArtifactLineage
 from .agent_context import ContextSnapshot, ContextSnapshotRef
 from .agent_plan import PlanRevision
 from .agent_conversation import ConversationSummary
+
+# Project membership and access roles
+from .project_member import ProjectMember, ProjectMemberRole

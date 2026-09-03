@@ -1,0 +1,82 @@
+    async def _attempt_structural_gate_repair(
+        self,
+        *,
+        best_content: str,
+        review_summaries: Dict[str, Any],
+        structural_quality_gate: Dict[str, Any],
+        guardrail_violations: Optional[List[Dict[str, Any]]],
+        chapter_mission: Optional[dict],
+        repair_context: Optional[Dict[str, Any]],
+        active_config: "PipelineConfig",
+        user_id: int,
+    ) -> Optional[Dict[str, Any]]:
+        """结构质量门失败后的一次结构定向修复尝试。
+
+        取失败闸门对应的 story guard，转成结构问题清单，交给 revise_chapter 做局部定向
+        修复；用 non-regressive 保护防缩水，再用同一评分口径重评。仅当重评通过时返回采纳
+        结果 {content, review_summaries, structural_quality_gate, repair_summary}；修复不可行
+        （开关关闭 / 无可修结构问题 / 修复无变化 / 缩水回退 / 重评仍不过）时返回 None，由
+        调用方走原有的“落库拒稿 + 422 拦截”逻辑。
+
+        与其把 quality_issue_codes 甩给用户做“全新随机重试”，不如先按拦截原因做一次确定性
+        的定向修复——这是结构质量闸门从“只评分”走向“评分并自愈”的闭环补齐。
+        """
+        if not active_config.enable_self_critique:
+            return None
+
+        story_guard = structural_quality_gate.get("story_progression_guard")
+        if not isinstance(story_guard, dict) and isinstance(review_summaries, dict):
+            story_guard = review_summaries.get("story_progression_guard")
+        if not isinstance(story_guard, dict):
+            return None
+
+        structural_issues = self._build_structural_reader_polish_issues(story_guard)
+        if not structural_issues:
+            # 闸门失败但没有可定向修复的结构问题（例如纯连续性冲突），交回调用方拦截
+            return None
+
+        try:
+            repair_service = SelfCritiqueService(self.session, self.llm_service, self.prompt_service)
+            revised = await repair_service.revise_chapter(
+                chapter_content=best_content,
+                issues=structural_issues[:8],
+                context=repair_context or {},
+                user_id=user_id,
+                allow_stagewide=False,
+            )
+        except Exception as exc:  # noqa: BLE001 - 修复失败不应吞掉原始拦截，降级即可
+            logger.warning("结构质量门定向修复降级：error=%s", exc)
+            return None
+
+        if not revised or revised == best_content:
+            return None
+
+        next_content, content_guard = self._preserve_non_regressive_content(
+            previous_content=best_content,
+            candidate_content=revised,
+            stage_label="self_critique",
+            min_word_count=active_config.min_word_count,
+        )
+        if content_guard is not None:
+            # 修复导致内容缩水被回退，没有实质改善
+            return None
+
+        repaired_summaries, repaired_gate = self._evaluate_structural_quality_gate_for_content(
+            review_summaries=review_summaries,
+            content=next_content,
+            violations=guardrail_violations,
+            chapter_mission=chapter_mission,
+        )
+        if not repaired_gate.get("passed", False):
+            return None
+
+        return {
+            "content": next_content,
+            "review_summaries": repaired_summaries,
+            "structural_quality_gate": repaired_gate,
+            "repair_summary": {
+                "status": "applied",
+                "issue_count": len(structural_issues),
+                "issue_codes_before": list(structural_quality_gate.get("quality_issue_codes") or []),
+            },
+        }

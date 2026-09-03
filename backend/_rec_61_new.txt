@@ -1,0 +1,8 @@
+            repaired_summaries, repaired_gate = self._evaluate_structural_quality_gate_for_content(
+                review_summaries=current_summaries,
+                content=next_content,
+                violations=guardrail_violations,
+                chapter_mission=chapter_mission,
+                target_word_count=active_config.target_word_count,
+                min_word_count=active_config.min_word_count,
+            )

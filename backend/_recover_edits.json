@@ -1,0 +1,1263 @@
+[
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 479,
+  "ts": "2026-08-17T09:34:05.687Z",
+  "uuid": "7d034511-add5-4504-a475-f88c87842b70",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"version_count\": len(version_models),\n        }\n\n    async def _rebind_generation_run_if_needed(",
+   "new_string": "            \"version_count\": len(version_models),\n        }\n\n    async def _attempt_structural_gate_repair(\n        self,\n        *,\n        best_content: str,\n        review_summaries: Dict[str, Any],\n        structural_quality_gate: Dict[str, Any],\n        guardrail_violations: Optional[List[Dict[str, Any]]],\n        chapter_mission: Optional[dict],\n        repair_context: Optional[Dict[str, Any]],\n        active_config: \"PipelineConfig\",\n        user_id: int,\n    ) -> Optional[Dict[str, Any]]:\n        \"\"\"结构质量门失败后的一次结构定向修复尝试。\n\n        取失败闸门对应的 story guard，转成结构问题清单，交给 revise_chapter 做局部定向\n        修复；用 non-regressive 保护防缩水，再用同一评分口径重评。仅当重评通过时返回采纳\n        结果 {content, review_summaries, structural_quality_gate, repair_summary}；修复不可行\n        （开关关闭 / 无可修结构问题 / 修复无变化 / 缩水回退 / 重评仍不过）时返回 None，由\n        调用方走原有的“落库拒稿 + 422 拦截”逻辑。\n\n        与其把 quality_issue_codes 甩给用户做“全新随机重试”，不如先按拦截原因做一次确定性\n        的定向修复——这是结构质量闸门从“只评分”走向“评分并自愈”的闭环补齐。\n        \"\"\"\n        if not active_config.enable_self_critique:\n            return None\n\n        story_guard = structural_quality_gate.get(\"story_progression_guard\")\n        if not isinstance(story_guard, dict) and isinstance(review_summaries, dict):\n            story_guard = review_summaries.get(\"story_progression_guard\")\n        if not isinstance(story_guard, dict):\n            return None\n\n        structural_issues = self._build_structural_reader_polish_issues(story_guard)\n        if not structural_issues:\n            # 闸门失败但没有可定向修复的结构问题（例如纯连续性冲突），交回调用方拦截\n            return None\n\n        try:\n            repair_service = SelfCritiqueService(self.session, self.llm_service, self.prompt_service)\n            revised = await repair_service.revise_chapter(\n                chapter_content=best_content,\n                issues=structural_issues[:8],\n                context=repair_context or {},\n                user_id=user_id,\n                allow_stagewide=False,\n            )\n        except Exception as exc:  # noqa: BLE001 - 修复失败不应吞掉原始拦截，降级即可\n            logger.warning(\"结构质量门定向修复降级：error=%s\", exc)\n            return None\n\n        if not revised or revised == best_content:\n            return None\n\n        next_content, content_guard = self._preserve_non_regressive_content(\n            previous_content=best_content,\n            candidate_content=revised,\n            stage_label=\"self_critique\",\n            min_word_count=active_config.min_word_count,\n        )\n        if content_guard is not None:\n            # 修复导致内容缩水被回退，没有实质改善\n            return None\n\n        repaired_summaries, repaired_gate = self._evaluate_structural_quality_gate_for_content(\n            review_summaries=review_summaries,\n            content=next_content,\n            violations=guardrail_violations,\n            chapter_mission=chapter_mission,\n        )\n        if not repaired_gate.get(\"passed\", False):\n            return None\n\n        return {\n            \"content\": next_content,\n            \"review_summaries\": repaired_summaries,\n            \"structural_quality_gate\": repaired_gate,\n            \"repair_summary\": {\n                \"status\": \"applied\",\n                \"issue_count\": len(structural_issues),\n                \"issue_codes_before\": list(structural_quality_gate.get(\"quality_issue_codes\") or []),\n            },\n        }\n\n    async def _rebind_generation_run_if_needed("
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 501,
+  "ts": "2026-08-17T09:46:57.186Z",
+  "uuid": "808f4bce-829f-4416-a342-28328243d49a",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        if not repaired_gate.get(\"passed\", False):\n            return None",
+   "new_string": "        if False and not repaired_gate.get(\"passed\", False):  # TEMP-BREAK: 协议故意破坏验证\n            return None"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 511,
+  "ts": "2026-08-17T09:47:31.211Z",
+  "uuid": "eed8b355-90bc-4640-b44d-23991d82bde5",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        if False and not repaired_gate.get(\"passed\", False):  # TEMP-BREAK: 协议故意破坏验证\n            return None",
+   "new_string": "        if not repaired_gate.get(\"passed\", False):\n            return None"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 580,
+  "ts": "2026-08-17T09:57:32.548Z",
+  "uuid": "180003d6-81a0-4ff9-b38f-ec95d1ce1fb1",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"repair_summary\": {\n                \"status\": \"applied\",\n                \"issue_count\": len(structural_issues),\n                \"issue_codes_before\": list(structural_quality_gate.get(\"quality_issue_codes\") or []),\n            },\n        }\n\n    async def _rebind_generation_run_if_needed(\n        self,",
+   "new_string": "            \"repair_summary\": {\n                \"status\": \"applied\",\n                \"issue_count\": len(structural_issues),\n                \"issue_codes_before\": list(structural_quality_gate.get(\"quality_issue_codes\") or []),\n            },\n        }\n\n    def _build_structural_gate_repair_context(\n        self,\n        *,\n        outline_title: str,\n        outline_summary: str,\n        chapter_mission: Optional[dict],\n        history_context: Dict[str, Any],\n        project_memory_text: str,\n        style_context: Any,\n        writer_blueprint: Dict[str, Any],\n    ) -> Dict[str, Any]:\n        \"\"\"构造结构质量门定向修复用的上下文。\n\n        与 reader_polish / self_critique 局部修复同源，聚焦“修结构而非补描写”：把大纲目标、\n        章节任务、前情脉络与人物设定交给 revise_chapter，让它按拦截原因做定向修复，而不是脱离\n        上下文重新发挥。只依赖 generate_chapter 主体无条件定义的变量，避免闸门时点取到未定义值。\n        \"\"\"\n        return {\n            \"outline_title\": outline_title,\n            \"outline_summary\": outline_summary,\n            \"chapter_mission\": chapter_mission,\n            \"previous_summary\": history_context.get(\"previous_summary\"),\n            \"previous_tail\": history_context.get(\"previous_tail\"),\n            \"previous_chapter_bundle\": history_context.get(\"previous_chapter_bundle\"),\n            \"recent_track\": history_context.get(\"recent_track\"),\n            \"plot_arc_digest\": history_context.get(\"plot_arc_digest\"),\n            \"project_memory\": project_memory_text,\n            \"style_context\": style_context,\n            \"character_profiles\": json.dumps(writer_blueprint.get(\"characters\", []), ensure_ascii=False),\n            \"emotion_target\": (chapter_mission or {}).get(\"emotion_target\"),\n            \"reader_polish_hard_rule\": (\n                \"本轮修复必须优先修结构问题：场景兑现、对话改局势、结尾递压、连续性；\"\n                \"禁止把修复变成补景物、补心理、补形容词。\"\n            ),\n        }\n\n    async def _rebind_generation_run_if_needed(\n        self,"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 582,
+  "ts": "2026-08-17T09:57:40.517Z",
+  "uuid": "ef7131b5-7f4d-4f5e-93d9-0eed5f8b8faf",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "                    chapter_mission=chapter_mission,\n                )\n                runtime_metadata[\"quality_gates\"][\"structural_gate\"] = structural_quality_gate\n                if not structural_quality_gate.get(\"passed\", True):\n                    blocked_candidate_refs = await self._persist_quality_gate_blocked_versions(",
+   "new_string": "                    chapter_mission=chapter_mission,\n                )\n                if not structural_quality_gate.get(\"passed\", True):\n                    gate_repair_result = await self._attempt_structural_gate_repair(\n                        best_content=best_content,\n                        review_summaries=review_summaries,\n                        structural_quality_gate=structural_quality_gate,\n                        guardrail_violations=guardrail_violations,\n                        chapter_mission=chapter_mission,\n                        repair_context=self._build_structural_gate_repair_context(\n                            outline_title=outline_title,\n                            outline_summary=outline_summary,\n                            chapter_mission=chapter_mission,\n                            history_context=history_context,\n                            project_memory_text=project_memory_text,\n                            style_context=style_context,\n                            writer_blueprint=writer_blueprint,\n                        ),\n                        active_config=active_config,\n                        user_id=user_id,\n                    )\n                    if gate_repair_result is not None:\n                        best_content = gate_repair_result[\"content\"]\n                        review_summaries = gate_repair_result[\"review_summaries\"]\n                        structural_quality_gate = gate_repair_result[\"structural_quality_gate\"]\n                        runtime_metadata.setdefault(\"quality_gate_repairs\", []).append(\n                            gate_repair_result[\"repair_summary\"]\n                        )\n                        await self._update_generation_runtime(\n                            chapter,\n                            generation_run_id=generation_run_id,\n                            stage=\"review\",\n                            message=\"结构质量闸门定向修复已生效，章节通过质量门\",\n                            progress_percent=91,\n                            level=\"info\",\n                            event_kind=\"quality_gate\",\n                            title=\"质量门定向修复通过\",\n                            summary=\"按拦截原因做了一次结构定向修复并重评通过，未走全新随机重试。\",\n                            content_preview=self._truncate_runtime_text(best_content, 520),\n                            metrics={\n                                \"actual_word_count\": self._count_words(best_content),\n                                \"issue_codes_before\": gate_repair_result[\"repair_summary\"].get(\n                                    \"issue_codes_before\", []\n                                ),\n                            },\n                        )\n                runtime_metadata[\"quality_gates\"][\"structural_gate\"] = structural_quality_gate\n                if not structural_quality_gate.get(\"passed\", True):\n                    blocked_candidate_refs = await self._persist_quality_gate_blocked_versions("
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 583,
+  "ts": "2026-08-17T09:57:40.556Z",
+  "uuid": "5116247d-502c-4e22-8a35-746e15fadd19",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "                chapter_mission=chapter_mission,\n            )\n            runtime_metadata[\"quality_gates\"][\"structural_gate\"] = structural_quality_gate\n            if not structural_quality_gate.get(\"passed\", True):\n                blocked_candidate_refs = await self._persist_quality_gate_blocked_versions(",
+   "new_string": "                chapter_mission=chapter_mission,\n            )\n            if not structural_quality_gate.get(\"passed\", True):\n                gate_repair_result = await self._attempt_structural_gate_repair(\n                    best_content=best_content,\n                    review_summaries=review_summaries,\n                    structural_quality_gate=structural_quality_gate,\n                    guardrail_violations=guardrail_violations,\n                    chapter_mission=chapter_mission,\n                    repair_context=self._build_structural_gate_repair_context(\n                        outline_title=outline_title,\n                        outline_summary=outline_summary,\n                        chapter_mission=chapter_mission,\n                        history_context=history_context,\n                        project_memory_text=project_memory_text,\n                        style_context=style_context,\n                        writer_blueprint=writer_blueprint,\n                    ),\n                    active_config=active_config,\n                    user_id=user_id,\n                )\n                if gate_repair_result is not None:\n                    best_content = gate_repair_result[\"content\"]\n                    review_summaries = gate_repair_result[\"review_summaries\"]\n                    structural_quality_gate = gate_repair_result[\"structural_quality_gate\"]\n                    runtime_metadata.setdefault(\"quality_gate_repairs\", []).append(\n                        gate_repair_result[\"repair_summary\"]\n                    )\n                    await self._update_generation_runtime(\n                        chapter,\n                        generation_run_id=generation_run_id,\n                        stage=\"review\",\n                        message=\"结构质量闸门定向修复已生效，章节通过质量门\",\n                        progress_percent=91,\n                        level=\"info\",\n                        event_kind=\"quality_gate\",\n                        title=\"质量门定向修复通过\",\n                        summary=\"按拦截原因做了一次结构定向修复并重评通过，未走全新随机重试。\",\n                        content_preview=self._truncate_runtime_text(best_content, 520),\n                        metrics={\n                            \"actual_word_count\": self._count_words(best_content),\n                            \"issue_codes_before\": gate_repair_result[\"repair_summary\"].get(\n                                \"issue_codes_before\", []\n                            ),\n                        },\n                    )\n            runtime_metadata[\"quality_gates\"][\"structural_gate\"] = structural_quality_gate\n            if not structural_quality_gate.get(\"passed\", True):\n                blocked_candidate_refs = await self._persist_quality_gate_blocked_versions("
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 621,
+  "ts": "2026-08-17T10:01:26.100Z",
+  "uuid": "e24d4ce9-a21d-4152-858c-f2bf15fcce24",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "                if gate_repair_result is not None:\n                    best_content = gate_repair_result[\"content\"]\n                    review_summaries = gate_repair_result[\"review_summaries\"]",
+   "new_string": "                if gate_repair_result is not None:\n                    best_content = gate_repair_result.get(\"content\")  # TEMP-BREAK 协议破坏验证\n                    review_summaries = gate_repair_result[\"review_summaries\"]"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 632,
+  "ts": "2026-08-17T10:01:59.613Z",
+  "uuid": "ca1d35e5-ff92-479d-8783-2cae8da6d68e",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "                if gate_repair_result is not None:\n                    best_content = gate_repair_result.get(\"content\")  # TEMP-BREAK 协议破坏验证\n                    review_summaries = gate_repair_result[\"review_summaries\"]",
+   "new_string": "                if gate_repair_result is not None:\n                    best_content = gate_repair_result[\"content\"]\n                    review_summaries = gate_repair_result[\"review_summaries\"]"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 1803,
+  "ts": "2026-08-17T16:40:14.240Z",
+  "uuid": "a1446afe-387e-4164-9d16-0278c2ee6e87",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "    @classmethod\n    def _score_fallback_candidate(\n        cls,\n        *,\n        content: str,\n        violations: List[Dict[str, Any]],\n        chapter_mission: Optional[dict],\n    ) -> Dict[str, Any]:\n        text = str(content or \"\")\n        condensed = \"\".join(text.split())\n        word_count = len(condensed)\n        target_floor = max(0, int(target_word_count or 0))\n        minimum_floor = max(0, int(min_word_count or 0))\n        if target_floor and minimum_floor > target_floor:\n            minimum_floor = target_floor\n        preferred_floor = max(minimum_floor, int(target_floor * 0.92)) if target_floor else minimum_floor\n        word_count_below_min = bool(minimum_floor and word_count < minimum_floor)\n        word_count_far_below_target = bool(preferred_floor and word_count < preferred_floor)\n        upper_target = int(target_floor * 1.25) if target_floor else 0\n        word_count_far_above_target = bool(upper_target and word_count > upper_target)\n        paragraphs = [segment for segment in text.splitlines() if segment.strip()]\n        paragraph_count = len(paragraphs)\n        dialogue_markers = sum(text.count(marker) for marker in (\"“\", \"”\", \"「\", \"」\", \"『\", \"』\", '\"'))\n        mission_keywords = cls._collect_fallback_mission_keywords(chapter_mission)\n        mission_hits = [keyword for keyword in mission_keywords if keyword and keyword in condensed]\n        expected_dialogue = cls._chapter_mission_expects_dialogue(chapter_mission)\n        ending_excerpt = condensed[-220:]\n        hook_markers = (\"？\", \"！\", \"?\", \"!\", \"忽然\", \"却\", \"竟\", \"脚步\", \"敲门\", \"消息\", \"声音\", \"目光\", \"门外\", \"下一瞬\")\n        ending_hook = any(marker in ending_excerpt for marker in hook_markers)\n        static_description_risk = dialogue_markers == 0 and paragraph_count <= 4 and word_count >= 1800\n\n        score = 0\n        score += len(mission_hits) * 180\n        score += min(paragraph_count, 12) * 18\n        score += min(dialogue_markers, 10) * 12\n        score += 80 if ending_hook else 0\n        score += min(word_count, 2400) // 50\n        score -= len(violations) * 500\n        score -= 160 if static_description_risk else 0\n\n        return {\n            \"score\": score,\n            \"word_count\": word_count,\n            \"paragraph_count\": paragraph_count,\n            \"dialogue_marker_count\": dialogue_markers,\n            \"guardrail_violation_count\": len(violations),\n            \"mission_hit_count\": len(mission_hits),\n            \"mission_hits\": mission_hits[:8],\n            \"expected_dialogue\": expected_dialogue,\n            \"ending_hook_detected\": ending_hook,\n            \"static_description_risk\": static_description_risk,\n        }\n\n    @staticmethod\n    def _detect_chapter_artifact_markers(text):\n",
+   "new_string": "    @staticmethod\n    def _detect_chapter_artifact_markers(text):\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 1816,
+  "ts": "2026-08-17T16:41:02.630Z",
+  "uuid": "df35ec6f-747d-4bc6-ae32-5a246131fe0c",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "    @staticmethod\n    def _content_fingerprint(text: Optional[str]) -> str:\n    # ====== EXTRACTABLE: _pipeline_quality_gate.py (L381-L940) ======\n        normalized = re.sub(r\"\\s+\", \" \", str(text or \"\")).strip()\n",
+   "new_string": "    # ====== EXTRACTABLE: _pipeline_quality_gate.py — 结构质量门与内容指纹 ======\n    @staticmethod\n    def _content_fingerprint(text: Optional[str]) -> str:\n        normalized = re.sub(r\"\\s+\", \" \", str(text or \"\")).strip()\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 1820,
+  "ts": "2026-08-17T16:41:31.057Z",
+  "uuid": "7fb86244-22d9-4ca3-a5aa-83664f526e62",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "    STORY_PROGRESSION_MARKERS = (\n        \"逼问\", \"质问\", \"追问\", \"反问\", \"试探\", \"压迫\", \"威胁\", \"拒绝\", \"反制\", \"让步\",\n        \"改口\", \"承认\", \"暴露\", \"揭开\", \"揭露\", \"证实\", \"发现\", \"意识到\", \"明白\", \"决定\",\n        \"选择\", \"交换\", \"代价\", \"风险\", \"危险\", \"失控\", \"反转\", \"翻脸\", \"背叛\", \"线索\",\n        \"证据\", \"期限\", \"后果\", \"付出\", \"受伤\", \"倒下\", \"失去\", \"得到\", \"夺回\", \"打开\",\n        \"推开\", \"抓住\", \"按住\", \"拔出\", \"砸开\", \"冲进\", \"闯入\", \"逃出\", \"追上\", \"救下\",\n    # ====== EXTRACTABLE: _pipeline_story_scoring.py (L5881-L6281, ~400 lines) ======\n        \"杀\", \"死\", \"活\", \"必须\", \"否则\", \"来不及\", \"下一步\", \"转而\", \"却\", \"但\", \"然而\",\n    )\n",
+   "new_string": "    # ====== EXTRACTABLE: _pipeline_story_scoring.py — 故事质量评分与事件密度 ======\n    STORY_PROGRESSION_MARKERS = (\n        \"逼问\", \"质问\", \"追问\", \"反问\", \"试探\", \"压迫\", \"威胁\", \"拒绝\", \"反制\", \"让步\",\n        \"改口\", \"承认\", \"暴露\", \"揭开\", \"揭露\", \"证实\", \"发现\", \"意识到\", \"明白\", \"决定\",\n        \"选择\", \"交换\", \"代价\", \"风险\", \"危险\", \"失控\", \"反转\", \"翻脸\", \"背叛\", \"线索\",\n        \"证据\", \"期限\", \"后果\", \"付出\", \"受伤\", \"倒下\", \"失去\", \"得到\", \"夺回\", \"打开\",\n        \"推开\", \"抓住\", \"按住\", \"拔出\", \"砸开\", \"冲进\", \"闯入\", \"逃出\", \"追上\", \"救下\",\n        \"杀\", \"死\", \"活\", \"必须\", \"否则\", \"来不及\", \"下一步\", \"转而\", \"却\", \"但\", \"然而\",\n    )\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 1826,
+  "ts": "2026-08-17T16:41:43.181Z",
+  "uuid": "bf79c54c-9923-428d-89b6-e29bc11bcabf",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"flaws\": ai_review_result.critical_flaws,\n    # ====== EXTRACTABLE: _pipeline_self_critique.py (L6506-L6782, ~276 lines) ======\n            \"suggestions\": ai_review_result.refinement_suggestions,\n            \"status\": \"ai_review_overridden_by_story_guard\" if override_applied else ai_review_result.status,\n            \"skip_reason\": None,\n            \"fallback_summary\": fallback_summary,\n            \"selection_override\": override_detail,\n        }\n\n    async def _run_self_critique(\n",
+   "new_string": "            \"flaws\": ai_review_result.critical_flaws,\n            \"suggestions\": ai_review_result.refinement_suggestions,\n            \"status\": \"ai_review_overridden_by_story_guard\" if override_applied else ai_review_result.status,\n            \"skip_reason\": None,\n            \"fallback_summary\": fallback_summary,\n            \"selection_override\": override_detail,\n        }\n\n    # ====== EXTRACTABLE: _pipeline_self_critique.py — 自评与定向修复 ======\n    async def _run_self_critique(\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 1990,
+  "ts": "2026-08-17T17:08:32.225Z",
+  "uuid": "67aa9fac-0095-4378-9934-b6becaf6f322",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        \"杀\", \"死\", \"活\", \"必须\", \"否则\", \"来不及\", \"下一步\", \"转而\", \"却\", \"但\", \"然而\",\n    )\n",
+   "new_string": "        \"杀\", \"死\", \"活\", \"必须\", \"否则\", \"来不及\", \"下一步\", \"转而\", \"却\", \"但\", \"然而\",\n    )\n\n    # 章末压力词表分两级：弱信号（标点与纯副词，任何句子都可能出现）只能做辅助，\n    # 不能单独顶替语义压力；语义信号才是\"这一章留下了未解决的麻烦\"的证据。\n    ENDING_WEAK_HOOK_MARKERS = (\n        \"？\", \"?\", \"！\", \"!\", \"却\", \"突然\", \"忽然\",\n    )\n    # 必须写成中文字面量而不是 \\uXXXX 转义：转义后 grep 不到，谁都没法维护。\n    # 也不许放某一部小说的专有名词（药渣 / 旧南渠 之类），否则换题材就判不出压力。\n    ENDING_SEMANTIC_HOOK_MARKERS = (\n        \"门外\", \"脚步\", \"消息\", \"期限\", \"代价\", \"危险\", \"危机\", \"压力\", \"后果\",\n        \"线索\", \"证据\", \"异常\", \"不自然\", \"来不及\", \"问题\", \"警告\",\n        \"下一\", \"下一轮\", \"下一章\", \"下一刻\", \"倒计时\", \"没时间\", \"最后一次\",\n        \"必须\", \"否则\", \"只能\", \"不得不\", \"别无选择\", \"绝路\", \"退路\",\n        \"封锁\", \"通缉\", \"追索\", \"追杀\", \"追兵\", \"追上来\", \"包围\", \"逼近\", \"堵死\", \"锁死\",\n        \"陷阱\", \"盯上\", \"跟踪\", \"失踪\", \"失控\", \"暴露\", \"真相\", \"背叛\", \"威胁\",\n        \"死人\", \"会死\", \"死在\", \"人命\", \"生死\", \"活不过\", \"重伤\",\n    )\n    # 只有完整的收束表达才算平淡结尾。\"一切都\"是中性前缀（\"一切都还是未知\"是真钩子），\n    # 单独拿它做硬否决会把强钩子误杀。\n    ENDING_CLOSURE_MARKERS = (\n        \"终于结束\", \"告一段落\", \"松了口气\", \"暂时平静\", \"圆满\", \"尘埃落定\",\n        \"一切都结束\", \"一切都过去\", \"一切都平静\", \"一切都恢复\",\n        \"一切都安稳\", \"一切都很好\", \"一切都没事\", \"平平淡淡才是真\",\n    )\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 1993,
+  "ts": "2026-08-17T17:09:03.969Z",
+  "uuid": "27cb5c70-3979-45f7-b216-6cf40be2b18c",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        _, mission_hook_hits = cls._score_text_hits(mission_hook_sources, ending_excerpt)\n        hook_markers = (\n            \"却\", \"突然\", \"忽然\", \"门外\", \"脚步\", \"消息\", \"期限\", \"代价\", \"危险\",\n            \"线索\", \"证据\", \"下一刻\", \"来不及\", \"问题\", \"？\", \"?\", \"！\", \"!\",\n        )\n        closure_markers = (\"终于结束\", \"告一段落\", \"松了口气\", \"一切都\", \"暂时平静\", \"圆满\", \"尘埃落定\")\n        zh_hook_markers = (\n            \"下一\", \"下一轮\", \"下一章\",\n            \"涨潮\", \"潮水\", \"危险\", \"危机\",\n            \"压力\", \"代价\", \"后果\", \"证据\",\n            \"线索\", \"异常\", \"不自然\",\n            \"来不及\", \"必须\", \"否则\",\n            \"退路\", \"封锁\", \"缉印令\", \"通缉\",\n            \"倒计时\", \"追索\", \"追杀\", \"逼近\",\n            \"堵死\", \"锁死\", \"只能\", \"不得不\",\n            \"会先死\", \"死在\", \"旧木片\",\n            \"死人\", \"会死人\", \"真会死\",\n            \"旧南渠\", \"药渣\", \"药味\", \"药耗\",\n            \"见了地\", \"人命\", \"病人\",\n        )\n        hook_hits = [marker for marker in (*hook_markers, *zh_hook_markers) if marker in ending_excerpt]\n        # 明确倒计时是可验证的章末压力，不能因没有复述任务书原词而漏判。\n        if re.search(r\"[一二三四五六七八九十]\\s*[、，,]\\s*[一二三四五六七八九十]\", ending_excerpt):\n            hook_hits.append(\"倒计时\")\n        closure_hits = [marker for marker in closure_markers if marker in ending_excerpt]\n        mission_hook_pass = bool(mission_hook_hits and hook_hits)\n        passed = bool((deliver_hits or len(hook_hits) >= 2 or mission_hook_pass) and not closure_hits)\n        return {\n            \"ending_pressure_passed\": passed,\n            \"ending_pressure_hits\": (deliver_hits + mission_hook_hits + hook_hits)[:10],\n            \"mission_hook_hits\": mission_hook_hits[:6],\n            \"flat_closure_markers\": closure_hits[:4],\n        }\n",
+   "new_string": "        _, mission_hook_hits = cls._score_text_hits(mission_hook_sources, ending_excerpt)\n        semantic_hits = [marker for marker in cls.ENDING_SEMANTIC_HOOK_MARKERS if marker in ending_excerpt]\n        weak_hits = [marker for marker in cls.ENDING_WEAK_HOOK_MARKERS if marker in ending_excerpt]\n        # 明确倒计时是可验证的章末压力，不能因没有复述任务书原词而漏判。\n        if re.search(r\"[一二三四五六七八九十]\\s*[、，,]\\s*[一二三四五六七八九十]\", ending_excerpt):\n            semantic_hits.append(\"倒计时\")\n        closure_hits = [marker for marker in cls.ENDING_CLOSURE_MARKERS if marker in ending_excerpt]\n        # 语义压力是必要条件：两个问号叹号骗不过章末压力门。\n        generic_pass = bool(semantic_hits) and (len(semantic_hits) + len(weak_hits)) >= 2\n        mission_hook_pass = bool(mission_hook_hits and (semantic_hits or weak_hits))\n        passed = bool((deliver_hits or mission_hook_pass or generic_pass) and not closure_hits)\n        return {\n            \"ending_pressure_passed\": passed,\n            \"ending_pressure_hits\": (deliver_hits + mission_hook_hits + semantic_hits + weak_hits)[:10],\n            \"mission_hook_hits\": mission_hook_hits[:6],\n            \"ending_semantic_hit_count\": len(semantic_hits),\n            \"ending_weak_hit_count\": len(weak_hits),\n            \"flat_closure_markers\": closure_hits[:4],\n        }\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 2003,
+  "ts": "2026-08-17T17:09:55.383Z",
+  "uuid": "b5c2c2fe-7b1a-4e21-99c6-68b5a3c705e7",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        hook_markers = (\n            \"却\", \"突然\", \"忽然\", \"门外\", \"脚步\", \"消息\", \"期限\", \"代价\", \"危险\",\n            \"线索\", \"证据\", \"下一刻\", \"来不及\", \"问题\", \"？\", \"?\", \"！\", \"!\",\n        )\n        closure_markers = (\"终于结束\", \"告一段落\", \"松了口气\", \"一切都\", \"暂时平静\", \"圆满\", \"尘埃落定\")\n        zh_hook_markers = (\n            \"下一\", \"下一轮\", \"下一章\",\n            \"涨潮\", \"潮水\", \"危险\", \"危机\",\n            \"压力\", \"代价\", \"后果\", \"证据\",\n            \"线索\", \"异常\", \"不自然\",\n            \"来不及\", \"必须\", \"否则\",\n            \"退路\", \"封锁\", \"缉印令\", \"通缉\",\n            \"倒计时\", \"追索\", \"追杀\", \"逼近\",\n            \"堵死\", \"锁死\", \"只能\", \"不得不\",\n            \"会先死\", \"死在\", \"旧木片\",\n            \"死人\", \"会死人\", \"真会死\",\n            \"旧南渠\", \"药渣\", \"药味\", \"药耗\",\n            \"见了地\", \"人命\", \"病人\",\n        )\n        hook_hits = [marker for marker in (*hook_markers, *zh_hook_markers) if marker in ending_excerpt]\n        # 明确倒计时是可验证的章末压力，不能因没有复述任务书原词而漏判。\n        if re.search(r\"[一二三四五六七八九十]\\s*[、，,]\\s*[一二三四五六七八九十]\", ending_excerpt):\n            hook_hits.append(\"倒计时\")\n        closure_hits = [marker for marker in closure_markers if marker in ending_excerpt]\n        mission_hook_pass = bool(mission_hook_hits and hook_hits)\n        passed = bool((deliver_hits or len(hook_hits) >= 2 or mission_hook_pass) and not closure_hits)\n        return {\n            \"ending_pressure_passed\": passed,\n            \"ending_pressure_hits\": (deliver_hits + mission_hook_hits + hook_hits)[:10],\n            \"mission_hook_hits\": mission_hook_hits[:6],\n            \"flat_closure_markers\": closure_hits[:4],\n        }\n",
+   "new_string": "        semantic_hits = [marker for marker in cls.ENDING_SEMANTIC_HOOK_MARKERS if marker in ending_excerpt]\n        weak_hits = [marker for marker in cls.ENDING_WEAK_HOOK_MARKERS if marker in ending_excerpt]\n        # 明确倒计时是可验证的章末压力，不能因没有复述任务书原词而漏判。\n        if re.search(r\"[一二三四五六七八九十]\\s*[、，,]\\s*[一二三四五六七八九十]\", ending_excerpt):\n            semantic_hits.append(\"倒计时\")\n        closure_hits = [marker for marker in cls.ENDING_CLOSURE_MARKERS if marker in ending_excerpt]\n        # 语义压力是必要条件：两个问号叹号骗不过章末压力门。\n        generic_pass = bool(semantic_hits) and (len(semantic_hits) + len(weak_hits)) >= 2\n        mission_hook_pass = bool(mission_hook_hits and (semantic_hits or weak_hits))\n        passed = bool((deliver_hits or mission_hook_pass or generic_pass) and not closure_hits)\n        return {\n            \"ending_pressure_passed\": passed,\n            \"ending_pressure_hits\": (deliver_hits + mission_hook_hits + semantic_hits + weak_hits)[:10],\n            \"mission_hook_hits\": mission_hook_hits[:6],\n            \"ending_semantic_hit_count\": len(semantic_hits),\n            \"ending_weak_hit_count\": len(weak_hits),\n            \"flat_closure_markers\": closure_hits[:4],\n        }\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 2010,
+  "ts": "2026-08-17T17:11:01.921Z",
+  "uuid": "1b8518a4-a2bb-4c08-b80c-353bb716977d",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"ending_pressure_hits\": (deliver_hits + mission_hook_hits + hook_hits)[:10],\n            \"mission_hook_hits\": mission_hook_hits[:6],\n            \"flat_closure_markers\": closure_hits[:4],\n",
+   "new_string": "            \"ending_pressure_hits\": (deliver_hits + mission_hook_hits + semantic_hits + weak_hits)[:10],\n            \"mission_hook_hits\": mission_hook_hits[:6],\n            \"ending_semantic_hit_count\": len(semantic_hits),\n            \"ending_weak_hit_count\": len(weak_hits),\n            \"flat_closure_markers\": closure_hits[:4],\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 2130,
+  "ts": "2026-08-17T17:27:16.541Z",
+  "uuid": "c260aea6-c52d-4c01-849a-28f938469291",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"ending_pressure_passed\": ending_hook,\n",
+   "new_string": "            \"ending_pressure_passed\": ending_hook,\n            \"ending_semantic_hit_count\": ending_pressure.get(\"ending_semantic_hit_count\", 0),\n            \"ending_weak_hit_count\": ending_pressure.get(\"ending_weak_hit_count\", 0),\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 2395,
+  "ts": "2026-08-17T18:00:53.576Z",
+  "uuid": "313b04d2-d1bc-4008-8214-ba755e84461a",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        \"杀\", \"死\", \"活\", \"必须\", \"否则\", \"来不及\", \"下一步\", \"转而\", \"却\", \"但\", \"然而\",\n    )\n",
+   "new_string": "        \"杀\", \"死\", \"必须\", \"否则\", \"来不及\",\n    )\n    # 弱转折信号：只是句子之间的转折修饰，不代表故事状态发生了改变；\n    # \"活\" 还会被「生活 / 干活 / 活动」命中。它们只做辅助，不参与推进判定，\n    # 否则任何日常流水账都能骗过事件密度门。\n    WEAK_TRANSITION_MARKERS = (\"却\", \"但\", \"然而\", \"转而\", \"下一步\", \"活\")\n    # 引号自身不是推进证据——寒暄对话也全是引号。带引号的句子必须另有推进词\n    # 或对话状态改变词才算推进。\n    DIALOGUE_QUOTE_MARKS = (\"“\", \"”\", \"「\", \"」\", \"『\", \"』\", '\"')\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 2402,
+  "ts": "2026-08-17T18:01:23.156Z",
+  "uuid": "05f076f0-9f41-4aaa-a494-cdf1895088d8",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "    @classmethod\n    def _unit_has_progression(cls, unit: str) -> bool:\n        if not unit:\n            return False\n        if any(mark in unit for mark in (\"“\", \"”\", \"「\", \"」\", \"『\", \"』\", '\"')):\n            return True\n        return any(marker in unit for marker in cls.STORY_PROGRESSION_MARKERS)\n",
+   "new_string": "    @classmethod\n    def _unit_has_progression(cls, unit: str) -> bool:\n        if not unit:\n            return False\n        has_marker = any(marker in unit for marker in cls.STORY_PROGRESSION_MARKERS)\n        if any(mark in unit for mark in cls.DIALOGUE_QUOTE_MARKS):\n            # 对话句要么带推进词，要么带对话状态改变词；只有引号不算。\n            return has_marker or cls._count_dialogue_state_change_markers(unit) > 0\n        return has_marker\n\n    # 窗口内推进句占比的下限，以及窗口至少要有的推进句数。\n    # 只要求「占比」会让只剩两三句的窗口靠一句推进就满分，所以两个条件都要满足。\n    WINDOW_PROGRESSION_RATIO_FLOOR = 0.25\n    WINDOW_PROGRESSION_MIN_HITS = 2\n    # 尾窗短于窗口长度的这个比例时并入前一窗，不单独判定：\n    # 950 字切完只剩十几个字，再要求它有两句推进必然不达标，是纯粹的切分噪声。\n    WINDOW_TAIL_MERGE_RATIO = 0.4\n\n    @classmethod\n    def _window_has_state_change(cls, window: str) -> bool:\n        \"\"\"千字窗口是否算「有状态推进」。\n\n        判定按窗口内的推进句占比算，而不是「窗口里出现过一次推进词」——\n        后者用在 950 字的窗口上等于恒真，指标会完全失去鉴别力。\n        \"\"\"\n        units = cls._story_units(window)\n        if not units:\n            return False\n        hits = sum(1 for unit in units if cls._unit_has_progression(unit))\n        return (hits / len(units)) >= cls.WINDOW_PROGRESSION_RATIO_FLOOR and hits >= cls.WINDOW_PROGRESSION_MIN_HITS\n\n    @classmethod\n    def _split_progression_windows(cls, condensed: str, *, window_size: int) -> List[str]:\n        windows = [condensed[index:index + window_size] for index in range(0, len(condensed), window_size)]\n        if not windows:\n            return [condensed]\n        if len(windows) > 1 and len(windows[-1]) < int(window_size * cls.WINDOW_TAIL_MERGE_RATIO):\n            tail = windows.pop()\n            windows[-1] = windows[-1] + tail\n        return windows\n\n    @classmethod\n    def _event_density_floors(cls, word_count: int) -> Dict[str, Any]:\n        \"\"\"事件密度门的分档阈值。\n\n        量级说明：`_story_units` 是句子级切分，千字中文正文能切出 45-65 个单元，\n        所以 `event_density_per_1000`（每千字的推进句数）的真实量级是几十，不是个位数。\n        历史值 1.0 / 1.25 / 1.45 让这个门在数学上不可能失败。\n\n        当前值按实测样本校准（推进判定收紧之后）：\n        真冲突场景约 20/千字、推进句占比 0.32；纯寒暄灌水 0/千字、占比 0；\n        起床上班流水账 4.6/千字、占比 0.10。阈值取两者之间并偏向宽松，\n        宁可漏判也不要误杀真实章节。\n        \"\"\"\n        if word_count < 2500:\n            return {\"density_floor\": 6.0, \"unit_rate_floor\": 0.14, \"window_floor\": 0.5, \"plain_run_limit\": 12}\n        if word_count < 7000:\n            return {\"density_floor\": 7.0, \"unit_rate_floor\": 0.16, \"window_floor\": 0.55, \"plain_run_limit\": 12}\n        return {\"density_floor\": 8.0, \"unit_rate_floor\": 0.18, \"window_floor\": 0.6, \"plain_run_limit\": 10}\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 2406,
+  "ts": "2026-08-17T18:02:08.667Z",
+  "uuid": "f5aff9f7-07ec-4cc8-95f7-fece1124198f",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        condensed = \"\".join(str(text or \"\").split())\n        window_size = 1200 if word_count >= 7000 else 950\n        windows = [condensed[index:index + window_size] for index in range(0, len(condensed), window_size)] or [condensed]\n        window_hits = sum(1 for window in windows if cls._unit_has_progression(window))\n        window_pass_rate = round(window_hits / max(1, len(windows)), 4)\n\n        density_per_1000 = round(progression_count / max(1.0, word_count / 1000), 4)\n        progression_rate = round(progression_count / max(1, story_unit_count), 4)\n        density_floor = 1.0 if word_count < 2500 else 1.25 if word_count < 7000 else 1.45\n        unit_rate_floor = 0.16 if word_count < 2500 else 0.2 if word_count < 7000 else 0.22\n        window_floor = 0.6 if word_count < 2500 else 0.68 if word_count < 7000 else 0.74\n        plain_run_limit = 5 if word_count < 7000 else 4\n",
+   "new_string": "        condensed = \"\".join(str(text or \"\").split())\n        window_size = 1200 if word_count >= 7000 else 950\n        windows = cls._split_progression_windows(condensed, window_size=window_size) or [condensed]\n        window_hits = sum(1 for window in windows if cls._window_has_state_change(window))\n        window_pass_rate = round(window_hits / max(1, len(windows)), 4)\n\n        density_per_1000 = round(progression_count / max(1.0, word_count / 1000), 4)\n        progression_rate = round(progression_count / max(1, story_unit_count), 4)\n        floors = cls._event_density_floors(word_count)\n        density_floor = floors[\"density_floor\"]\n        unit_rate_floor = floors[\"unit_rate_floor\"]\n        window_floor = floors[\"window_floor\"]\n        plain_run_limit = floors[\"plain_run_limit\"]\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 2548,
+  "ts": "2026-08-17T18:25:38.776Z",
+  "uuid": "eb1674ab-03a2-4e12-bbf9-a8c73caf8552",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "    @classmethod\n    def _event_density_floors(cls, word_count: int) -> Dict[str, Any]:\n        \"\"\"事件密度门的分档阈值。\n\n        量级说明：`_story_units` 是句子级切分，千字中文正文能切出 45-65 个单元，\n        所以 `event_density_per_1000`（每千字的推进句数）的真实量级是几十，不是个位数。\n        历史值 1.0 / 1.25 / 1.45 让这个门在数学上不可能失败。\n\n        当前值按实测样本校准（推进判定收紧之后）：\n        真冲突场景约 20/千字、推进句占比 0.32；纯寒暄灌水 0/千字、占比 0；\n        起床上班流水账 4.6/千字、占比 0.10。阈值取两者之间并偏向宽松，\n        宁可漏判也不要误杀真实章节。\n        \"\"\"\n        if word_count < 2500:\n            return {\"density_floor\": 6.0, \"unit_rate_floor\": 0.14, \"window_floor\": 0.5, \"plain_run_limit\": 12}\n        if word_count < 7000:\n            return {\"density_floor\": 7.0, \"unit_rate_floor\": 0.16, \"window_floor\": 0.55, \"plain_run_limit\": 12}\n        return {\"density_floor\": 8.0, \"unit_rate_floor\": 0.18, \"window_floor\": 0.6, \"plain_run_limit\": 10}\n",
+   "new_string": "    @classmethod\n    def _event_density_floors(cls, word_count: int) -> Dict[str, Any]:\n        \"\"\"事件密度门的分档阈值。\n\n        历史值 1.0 / 1.25 / 1.45 让这个门在数学上不可能失败：`_story_units` 是句子级\n        切分，千字正文能切出 45-65 个单元，`event_density_per_1000` 不可能低到 1.0。\n\n        当前值由 147 条真实生成章节（去重、剔除退化循环文本后 107 条历史判定合格的\n        正文）实测校准，不是拍脑袋也不是靠合成样本定的——第一版阈值（6.0 / 0.14 /\n        绝对连段 12 句）正是用合成样本定的，在真实语料上误杀 96%。\n\n        真实分布（历史合格池，n=107）：\n        `event_density_per_1000` p05=2.01 / p50=4.60 / p95=9.48；\n        `progression_unit_rate` p05=0.026 / p50=0.079 / p95=0.204；\n        `max_plain_unit_run` 的绝对值毫无参考性（p50=36 / p95=104 / max=167，随章节\n        长度线性膨胀），必须换成占全章句数的比例 `plain_run_ratio`：p50=0.22 /\n        p95=0.45 / max=0.68，而纯寒暄灌水样本是 1.0——这才是有鉴别力的形态。\n\n        阈值一律取真实分布的低分位（约 p03-p08），因为这是一道**底线门**：只拦纯描写\n        堆砌、纯寒暄这类灾难样本，不承担质量优选（那是评分与 prompt 的职责）。\n        宁可漏判，也不要误杀真实章节。\n        \"\"\"\n        if word_count < 2500:\n            return {\"density_floor\": 1.5, \"unit_rate_floor\": 0.025, \"window_floor\": 0.5, \"plain_run_ratio_limit\": 0.75}\n        if word_count < 7000:\n            return {\"density_floor\": 1.8, \"unit_rate_floor\": 0.028, \"window_floor\": 0.5, \"plain_run_ratio_limit\": 0.72}\n        return {\"density_floor\": 2.0, \"unit_rate_floor\": 0.03, \"window_floor\": 0.55, \"plain_run_ratio_limit\": 0.7}\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 2554,
+  "ts": "2026-08-17T18:25:55.456Z",
+  "uuid": "8fdbace6-6154-4717-97e0-eea44ee4dfd1",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        density_per_1000 = round(progression_count / max(1.0, word_count / 1000), 4)\n        progression_rate = round(progression_count / max(1, story_unit_count), 4)\n        floors = cls._event_density_floors(word_count)\n        density_floor = floors[\"density_floor\"]\n        unit_rate_floor = floors[\"unit_rate_floor\"]\n        window_floor = floors[\"window_floor\"]\n        plain_run_limit = floors[\"plain_run_limit\"]\n\n        state_interval_passed = bool(window_pass_rate >= window_floor)\n        dense_progression_override = bool(\n            state_interval_passed\n            and density_per_1000 >= density_floor * 2\n            and progression_rate >= unit_rate_floor * 1.6\n        )\n        event_density_passed = bool(\n            density_per_1000 >= density_floor\n            and progression_rate >= unit_rate_floor\n            and (max_plain_run <= plain_run_limit or dense_progression_override)\n        )\n",
+   "new_string": "        density_per_1000 = round(progression_count / max(1.0, word_count / 1000), 4)\n        progression_rate = round(progression_count / max(1, story_unit_count), 4)\n        # 最长无推进连段要按占全章句数的比例算：绝对句数随章节长度线性膨胀，\n        # 真实章节的 p95 是 104 句，用绝对阈值必然按长度歧视长章。\n        plain_run_ratio = round(max_plain_run / max(1, story_unit_count), 4)\n        floors = cls._event_density_floors(word_count)\n        density_floor = floors[\"density_floor\"]\n        unit_rate_floor = floors[\"unit_rate_floor\"]\n        window_floor = floors[\"window_floor\"]\n        plain_run_ratio_limit = floors[\"plain_run_ratio_limit\"]\n\n        state_interval_passed = bool(window_pass_rate >= window_floor)\n        dense_progression_override = bool(\n            state_interval_passed\n            and density_per_1000 >= density_floor * 2\n            and progression_rate >= unit_rate_floor * 1.6\n        )\n        event_density_passed = bool(\n            density_per_1000 >= density_floor\n            and progression_rate >= unit_rate_floor\n            and (plain_run_ratio <= plain_run_ratio_limit or dense_progression_override)\n        )\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 2556,
+  "ts": "2026-08-17T18:26:08.871Z",
+  "uuid": "42a293c6-c4e7-448c-9bb7-5eb8f254f9f5",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"state_change_window_pass_rate\": window_pass_rate,\n            \"max_plain_unit_run\": max_plain_run,\n        }\n",
+   "new_string": "            \"state_change_window_pass_rate\": window_pass_rate,\n            \"max_plain_unit_run\": max_plain_run,\n            \"max_plain_unit_run_ratio\": plain_run_ratio,\n        }\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 2558,
+  "ts": "2026-08-17T18:26:18.735Z",
+  "uuid": "b9e28ce8-da07-4e28-b579-7ff4c106ea10",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "                \"state_change_window_pass_rate\": 1.0,\n                \"max_plain_unit_run\": 0,\n            }\n",
+   "new_string": "                \"state_change_window_pass_rate\": 1.0,\n                \"max_plain_unit_run\": 0,\n                \"max_plain_unit_run_ratio\": 0.0,\n            }\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 2564,
+  "ts": "2026-08-17T18:26:44.877Z",
+  "uuid": "e427c037-68f9-40ed-97d9-c1ead55f1241",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "    # 窗口内推进句占比的下限，以及窗口至少要有的推进句数。\n    # 只要求「占比」会让只剩两三句的窗口靠一句推进就满分，所以两个条件都要满足。\n    WINDOW_PROGRESSION_RATIO_FLOOR = 0.25\n    WINDOW_PROGRESSION_MIN_HITS = 2\n",
+   "new_string": "    # 窗口内推进句占比的下限，以及窗口至少要有的推进句数。\n    # 只要求「占比」会让只剩两三句的窗口靠一句推进就满分，所以两个条件都要满足。\n    # 占比 0.05 是真实语料实测下来的：历史合格章节的整章推进句占比中位数只有 0.079\n    # （p05 0.026），千字窗口里约 50 句、推进 3-4 句。第一版取 0.25 时，107 条真实\n    # 合格正文只有 6.5% 能让 window_pass_rate 达到 0.5，指标等于恒假。\n    # 「推进不能只集中在开头」这个诉求主要由 MIN_HITS 保证，不靠抬高占比。\n    WINDOW_PROGRESSION_RATIO_FLOOR = 0.05\n    WINDOW_PROGRESSION_MIN_HITS = 2\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 2573,
+  "ts": "2026-08-17T18:27:05.713Z",
+  "uuid": "c8bbe191-b4e5-4b73-b516-501dccfe0e78",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"max_plain_unit_run\": event_density.get(\"max_plain_unit_run\", 0),\n        }\n",
+   "new_string": "            \"max_plain_unit_run\": event_density.get(\"max_plain_unit_run\", 0),\n            \"max_plain_unit_run_ratio\": event_density.get(\"max_plain_unit_run_ratio\", 0),\n        }\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 2817,
+  "ts": "2026-08-17T18:52:49.563Z",
+  "uuid": "e795b48a-570c-4bc9-93b8-2db498a14fdb",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"quality_issue_summary\": quality_issue_summary,\n            \"quality_issue_codes\": quality_issue_summary.get(\"codes\", []),\n            \"quality_issue_labels\": quality_issue_summary.get(\"labels\", []),\n    # ====== END _pipeline_story_scoring.py ======\n\n            \"quality_metric_snapshot\": quality_metric_snapshot,\n            **artifact_markers,\n        }\n",
+   "new_string": "            \"quality_issue_summary\": quality_issue_summary,\n            \"quality_issue_codes\": quality_issue_summary.get(\"codes\", []),\n            \"quality_issue_labels\": quality_issue_summary.get(\"labels\", []),\n            \"quality_metric_snapshot\": quality_metric_snapshot,\n            **artifact_markers,\n        }\n\n    # ====== END _pipeline_story_scoring.py ======\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 2987,
+  "ts": "2026-08-17T19:09:01.097Z",
+  "uuid": "42c9174d-7a8e-4b5e-9f10-b41a6c44aef1",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"ending_pressure_passed\": ending_hook,\n            \"ending_semantic_hit_count\": ending_pressure.get(\"ending_semantic_hit_count\", 0),\n            \"ending_weak_hit_count\": ending_pressure.get(\"ending_weak_hit_count\", 0),\n",
+   "new_string": "            \"ending_pressure_passed\": ending_hook,\n            \"ending_semantic_hit_count\": ending_pressure.get(\"ending_semantic_hit_count\", 0),\n            \"ending_weak_hit_count\": ending_pressure.get(\"ending_weak_hit_count\", 0),\n            # 平淡收束是一票否决，不透出命中的词，用户只会看到「章末未递出压力」\n            # 却不知道是哪句话触发的，也没法判断是不是误杀。\n            \"flat_closure_markers\": ending_pressure.get(\"flat_closure_markers\", []),\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 3494,
+  "ts": "2026-08-18T14:46:20.277Z",
+  "uuid": "944d22c5-3799-4ed9-ad5c-4ca73aec675e",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "    async def _attempt_structural_gate_repair(\n        self,\n        *,\n        best_content: str,\n        review_summaries: Dict[str, Any],\n        structural_quality_gate: Dict[str, Any],\n        guardrail_violations: Optional[List[Dict[str, Any]]],\n        chapter_mission: Optional[dict],\n        repair_context: Optional[Dict[str, Any]],\n        active_config: \"PipelineConfig\",\n        user_id: int,\n    ) -> Optional[Dict[str, Any]]:\n        \"\"\"结构质量门失败后的一次结构定向修复尝试。\n\n        取失败闸门对应的 story guard，转成结构问题清单，交给 revise_chapter 做局部定向\n        修复；用 non-regressive 保护防缩水，再用同一评分口径重评。仅当重评通过时返回采纳\n        结果 {content, review_summaries, structural_quality_gate, repair_summary}；修复不可行\n        （开关关闭 / 无可修结构问题 / 修复无变化 / 缩水回退 / 重评仍不过）时返回 None，由\n        调用方走原有的“落库拒稿 + 422 拦截”逻辑。\n\n        与其把 quality_issue_codes 甩给用户做“全新随机重试”，不如先按拦截原因做一次确定性\n        的定向修复——这是结构质量闸门从“只评分”走向“评分并自愈”的闭环补齐。\n        \"\"\"\n        if not active_config.enable_self_critique:\n            return None\n\n        story_guard = structural_quality_gate.get(\"story_progression_guard\")\n        if not isinstance(story_guard, dict) and isinstance(review_summaries, dict):\n            story_guard = review_summaries.get(\"story_progression_guard\")\n        if not isinstance(story_guard, dict):\n            return None\n\n        structural_issues = self._build_structural_reader_polish_issues(story_guard)\n        if not structural_issues:\n            # 闸门失败但没有可定向修复的结构问题（例如纯连续性冲突），交回调用方拦截\n            return None\n\n        try:\n            repair_service = SelfCritiqueService(self.session, self.llm_service, self.prompt_service)\n            revised = await repair_service.revise_chapter(\n                chapter_content=best_content,\n                issues=structural_issues[:8],\n                context=repair_context or {},\n                user_id=user_id,\n                allow_stagewide=False,\n            )\n        except Exception as exc:  # noqa: BLE001 - 修复失败不应吞掉原始拦截，降级即可\n            logger.warning(\"结构质量门定向修复降级：error=%s\", exc)\n            return None\n\n        if not revised or revised == best_content:\n            return None\n\n        next_content, content_guard = self._preserve_non_regressive_content(\n            previous_content=best_content,\n            candidate_content=revised,\n            stage_label=\"self_critique\",\n            min_word_count=active_config.min_word_count,\n        )\n        if content_guard is not None:\n            # 修复导致内容缩水被回退，没有实质改善\n            return None\n\n        repaired_summaries, repaired_gate = self._evaluate_structural_quality_gate_for_content(\n            review_summaries=review_summaries,\n            content=next_content,\n            violations=guardrail_violations,\n            chapter_mission=chapter_mission,\n        )\n        if not repaired_gate.get(\"passed\", False):\n            return None\n\n        return {\n            \"content\": next_content,\n            \"review_summaries\": repaired_summaries,\n            \"structural_quality_gate\": repaired_gate,\n            \"repair_summary\": {\n                \"status\": \"applied\",\n                \"issue_count\": len(structural_issues),\n                \"issue_codes_before\": list(structural_quality_gate.get(\"quality_issue_codes\") or []),\n            },\n        }",
+   "new_string": "    # 定向修复的轮数上限。每一轮都是一次 LLM 调用，成本与耗时线性增长，所以\n    # 刻意硬编码而不做配置项——它是成本闸门，不是调参空间。\n    STRUCTURAL_GATE_REPAIR_MAX_ROUNDS = 2\n\n    @staticmethod\n    def _is_structural_repair_improvement(\n        before_codes: Sequence[str],\n        after_codes: Sequence[str],\n    ) -> bool:\n        \"\"\"判定一次定向修复是否算改善：blocker 严格子集收缩。\n\n        只看数量会把「换了一种毛病」当成「治好了一种毛病」——实测一个只剩\n        `chapter_artifact_markers` 的正文，blocker 数从 7 降到 1，但那是一种全新的失败形态，\n        采纳它会让修复循环朝错误方向收敛。所以要求：数量严格下降，且不引入新的 code 类型。\n        \"\"\"\n        before = set(before_codes or ())\n        after = set(after_codes or ())\n        return len(after) < len(before) and not (after - before)\n\n    async def _attempt_structural_gate_repair(\n        self,\n        *,\n        best_content: str,\n        review_summaries: Dict[str, Any],\n        structural_quality_gate: Dict[str, Any],\n        guardrail_violations: Optional[List[Dict[str, Any]]],\n        chapter_mission: Optional[dict],\n        repair_context: Optional[Dict[str, Any]],\n        active_config: \"PipelineConfig\",\n        user_id: int,\n    ) -> Optional[Dict[str, Any]]:\n        \"\"\"结构质量门失败后的结构定向修复闭环（最多 2 轮）。\n\n        取失败闸门对应的 story guard，转成结构问题清单，交给 revise_chapter 做局部定向修复；\n        用 non-regressive 保护防缩水，再用同一评分口径重评。每轮的采纳标准是\n        `_is_structural_repair_improvement`（blocker 严格子集收缩），**不是「必须一次过门」**：\n        从 7 个 blocker 修到只剩 1 个也要采纳，因为拒稿对用户价值为零，而带未达标标记的部分\n        改善至少可用、可见，并且下一轮从更好的起点继续。\n\n        返回值总是字典（除 `enable_self_critique` 之外的跳过原因也会带诊断），\n        用 `adopted` 表达是否采纳：\n\n        - `adopted=True`：带 `content` / `review_summaries` / `structural_quality_gate`，\n          调用方回写正文；此时门可能仍未通过（部分改善），不能假装过门。\n        - `adopted=False`：只带 `repair_summary`，调用方照原有逻辑落库拒稿 + 422，\n          但要把诊断写进 runtime_metadata，让前端能显示「已尝试自动修复，仍有 N 项未达标」，\n          而不是让用户面对一个无解的 422。\n\n        与其把 quality_issue_codes 甩给用户做“全新随机重试”，不如先按拦截原因做确定性的\n        定向修复——这是结构质量闸门从“只评分”走向“评分并自愈”的闭环补齐。\n        \"\"\"\n        codes_before = [str(code) for code in (structural_quality_gate.get(\"quality_issue_codes\") or [])]\n\n        def _summary(\n            *,\n            attempted: bool,\n            rounds: int,\n            outcome: str,\n            codes_after: Sequence[str],\n            new_codes: Sequence[str] = (),\n            skipped_reason: Optional[str] = None,\n            issue_count: int = 0,\n        ) -> Dict[str, Any]:\n            after = [str(code) for code in codes_after]\n            return {\n                \"status\": \"applied\" if outcome in {\"passed\", \"improved\"} else \"rejected\",\n                \"repair_attempted\": attempted,\n                \"repair_rounds\": rounds,\n                \"repair_outcome\": outcome,\n                \"repair_skipped_reason\": skipped_reason,\n                \"issue_count\": issue_count,\n                \"issue_codes_before\": list(codes_before),\n                \"issue_codes_after\": after,\n                \"new_issue_codes\": sorted(set(new_codes)),\n                \"remaining_issue_count\": len(after),\n            }\n\n        def _skip(reason: str) -> Dict[str, Any]:\n            return {\n                \"adopted\": False,\n                \"repair_summary\": _summary(\n                    attempted=False,\n                    rounds=0,\n                    outcome=\"skipped\",\n                    codes_after=codes_before,\n                    skipped_reason=reason,\n                ),\n            }\n\n        if not active_config.enable_self_critique:\n            # TODO(T-17/D-11)：关闭自评时至少要走确定性清理，不该完全无自愈手段。\n            return _skip(\"self_critique_disabled\")\n\n        story_guard = structural_quality_gate.get(\"story_progression_guard\")\n        if not isinstance(story_guard, dict) and isinstance(review_summaries, dict):\n            story_guard = review_summaries.get(\"story_progression_guard\")\n        if not isinstance(story_guard, dict):\n            return _skip(\"story_guard_missing\")\n\n        current_content = best_content\n        current_summaries = review_summaries\n        current_gate = structural_quality_gate\n        current_codes = list(codes_before)\n        current_guard = story_guard\n\n        adopted_content: Optional[str] = None\n        adopted_summaries: Optional[Dict[str, Any]] = None\n        adopted_gate: Optional[Dict[str, Any]] = None\n        rounds = 0\n        new_codes_seen: set = set()\n        issue_count = 0\n        skipped_reason: Optional[str] = None\n\n        for _round in range(self.STRUCTURAL_GATE_REPAIR_MAX_ROUNDS):\n            structural_issues = self._build_structural_reader_polish_issues(current_guard)\n            if not structural_issues:\n                # 闸门失败但没有可定向修复的结构问题（例如纯连续性冲突），交回调用方拦截\n                if rounds == 0:\n                    skipped_reason = \"no_structural_issue\"\n                break\n            issue_count = len(structural_issues)\n\n            try:\n                repair_service = SelfCritiqueService(self.session, self.llm_service, self.prompt_service)\n                revised = await repair_service.revise_chapter(\n                    chapter_content=current_content,\n                    issues=structural_issues[:8],\n                    context=repair_context or {},\n                    user_id=user_id,\n                    allow_stagewide=False,\n                )\n            except Exception as exc:  # noqa: BLE001 - 修复失败不应吞掉原始拦截，降级即可\n                logger.warning(\"结构质量门定向修复降级：error=%s\", exc)\n                if rounds == 0:\n                    skipped_reason = \"revise_failed\"\n                break\n\n            rounds += 1\n            if not revised or revised == current_content:\n                continue\n\n            next_content, content_guard = self._preserve_non_regressive_content(\n                previous_content=current_content,\n                candidate_content=revised,\n                stage_label=\"self_critique\",\n                min_word_count=active_config.min_word_count,\n            )\n            if content_guard is not None:\n                # 修复导致内容缩水被回退，没有实质改善\n                continue\n\n            repaired_summaries, repaired_gate = self._evaluate_structural_quality_gate_for_content(\n                review_summaries=current_summaries,\n                content=next_content,\n                violations=guardrail_violations,\n                chapter_mission=chapter_mission,\n            )\n            repaired_codes = [str(code) for code in (repaired_gate.get(\"quality_issue_codes\") or [])]\n            passed = bool(repaired_gate.get(\"passed\", False))\n\n            if not passed and not self._is_structural_repair_improvement(current_codes, repaired_codes):\n                new_codes_seen.update(set(repaired_codes) - set(current_codes))\n                continue\n\n            adopted_content = next_content\n            adopted_summaries = repaired_summaries\n            adopted_gate = repaired_gate\n            current_content = next_content\n            current_summaries = repaired_summaries\n            current_gate = repaired_gate\n            current_codes = repaired_codes\n            guard_candidate = repaired_gate.get(\"story_progression_guard\")\n            if isinstance(guard_candidate, dict):\n                current_guard = guard_candidate\n\n            if passed:\n                break\n\n        if adopted_content is None:\n            return {\n                \"adopted\": False,\n                \"repair_summary\": _summary(\n                    attempted=rounds > 0,\n                    rounds=rounds,\n                    outcome=\"skipped\" if rounds == 0 else \"unchanged\",\n                    codes_after=codes_before,\n                    new_codes=new_codes_seen,\n                    skipped_reason=skipped_reason,\n                    issue_count=issue_count,\n                ),\n            }\n\n        outcome = \"passed\" if bool((adopted_gate or {}).get(\"passed\", False)) else \"improved\"\n        return {\n            \"adopted\": True,\n            \"content\": adopted_content,\n            \"review_summaries\": adopted_summaries,\n            \"structural_quality_gate\": adopted_gate,\n            \"repair_summary\": _summary(\n                attempted=True,\n                rounds=rounds,\n                outcome=outcome,\n                codes_after=current_codes,\n                new_codes=new_codes_seen,\n                issue_count=issue_count,\n            ),\n        }"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 3507,
+  "ts": "2026-08-18T14:46:38.939Z",
+  "uuid": "48ed0b95-ead7-43bd-a071-40a478b5b842",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple",
+   "new_string": "from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 3510,
+  "ts": "2026-08-18T14:46:55.974Z",
+  "uuid": "68a08901-f3bd-45ef-a312-1f6ce9eaa062",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "                    if gate_repair_result is not None:\n                        best_content = gate_repair_result[\"content\"]\n                        review_summaries = gate_repair_result[\"review_summaries\"]\n                        structural_quality_gate = gate_repair_result[\"structural_quality_gate\"]\n                        runtime_metadata.setdefault(\"quality_gate_repairs\", []).append(\n                            gate_repair_result[\"repair_summary\"]\n                        )\n                        await self._update_generation_runtime(\n                            chapter,\n                            generation_run_id=generation_run_id,\n                            stage=\"review\",\n                            message=\"结构质量闸门定向修复已生效，章节通过质量门\",\n                            progress_percent=91,\n                            level=\"info\",\n                            event_kind=\"quality_gate\",\n                            title=\"质量门定向修复通过\",\n                            summary=\"按拦截原因做了一次结构定向修复并重评通过，未走全新随机重试。\",\n                            content_preview=self._truncate_runtime_text(best_content, 520),\n                            metrics={\n                                \"actual_word_count\": self._count_words(best_content),\n                                \"issue_codes_before\": gate_repair_result[\"repair_summary\"].get(\n                                    \"issue_codes_before\", []\n                                ),\n                            },\n                        )",
+   "new_string": "                    gate_repair_summary = (gate_repair_result or {}).get(\"repair_summary\")\n                    if gate_repair_summary:\n                        # 未采纳也要留诊断，否则用户面对的是一个「无解的 422」\n                        runtime_metadata.setdefault(\"quality_gate_repairs\", []).append(\n                            gate_repair_summary\n                        )\n                    if gate_repair_result and gate_repair_result.get(\"adopted\"):\n                        best_content = gate_repair_result[\"content\"]\n                        review_summaries = gate_repair_result[\"review_summaries\"]\n                        structural_quality_gate = gate_repair_result[\"structural_quality_gate\"]\n                        repair_passed = bool(structural_quality_gate.get(\"passed\", False))\n                        await self._update_generation_runtime(\n                            chapter,\n                            generation_run_id=generation_run_id,\n                            stage=\"review\",\n                            message=(\n                                \"结构质量闸门定向修复已生效，章节通过质量门\"\n                                if repair_passed\n                                else \"结构质量闸门定向修复改善了部分问题，但仍有未达标项\"\n                            ),\n                            progress_percent=91,\n                            level=\"info\" if repair_passed else \"warning\",\n                            event_kind=\"quality_gate\",\n                            title=\"质量门定向修复通过\" if repair_passed else \"质量门定向修复部分改善\",\n                            summary=(\n                                \"按拦截原因做了结构定向修复并重评通过，未走全新随机重试。\"\n                                if repair_passed\n                                else \"按拦截原因做了结构定向修复，问题已减少但尚未全部消除。\"\n                            ),\n                            content_preview=self._truncate_runtime_text(best_content, 520),\n                            metrics={\n                                \"actual_word_count\": self._count_words(best_content),\n                                \"repair_rounds\": gate_repair_summary.get(\"repair_rounds\"),\n                                \"repair_outcome\": gate_repair_summary.get(\"repair_outcome\"),\n                                \"issue_codes_before\": gate_repair_summary.get(\"issue_codes_before\", []),\n                                \"issue_codes_after\": gate_repair_summary.get(\"issue_codes_after\", []),\n                            },\n                        )"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 3518,
+  "ts": "2026-08-18T14:47:11.551Z",
+  "uuid": "c6138453-3909-4f24-8a17-d9b63dedcebb",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "                if gate_repair_result is not None:\n                    best_content = gate_repair_result[\"content\"]\n                    review_summaries = gate_repair_result[\"review_summaries\"]\n                    structural_quality_gate = gate_repair_result[\"structural_quality_gate\"]\n                    runtime_metadata.setdefault(\"quality_gate_repairs\", []).append(\n                        gate_repair_result[\"repair_summary\"]\n                    )\n                    await self._update_generation_runtime(\n                        chapter,\n                        generation_run_id=generation_run_id,\n                        stage=\"review\",\n                        message=\"结构质量闸门定向修复已生效，章节通过质量门\",\n                        progress_percent=91,\n                        level=\"info\",\n                        event_kind=\"quality_gate\",\n                        title=\"质量门定向修复通过\",\n                        summary=\"按拦截原因做了一次结构定向修复并重评通过，未走全新随机重试。\",\n                        content_preview=self._truncate_runtime_text(best_content, 520),\n                        metrics={\n                            \"actual_word_count\": self._count_words(best_content),\n                            \"issue_codes_before\": gate_repair_result[\"repair_summary\"].get(\n                                \"issue_codes_before\", []\n                            ),\n                        },\n                    )",
+   "new_string": "                gate_repair_summary = (gate_repair_result or {}).get(\"repair_summary\")\n                if gate_repair_summary:\n                    # 未采纳也要留诊断，否则用户面对的是一个「无解的 422」\n                    runtime_metadata.setdefault(\"quality_gate_repairs\", []).append(\n                        gate_repair_summary\n                    )\n                if gate_repair_result and gate_repair_result.get(\"adopted\"):\n                    best_content = gate_repair_result[\"content\"]\n                    review_summaries = gate_repair_result[\"review_summaries\"]\n                    structural_quality_gate = gate_repair_result[\"structural_quality_gate\"]\n                    repair_passed = bool(structural_quality_gate.get(\"passed\", False))\n                    await self._update_generation_runtime(\n                        chapter,\n                        generation_run_id=generation_run_id,\n                        stage=\"review\",\n                        message=(\n                            \"结构质量闸门定向修复已生效，章节通过质量门\"\n                            if repair_passed\n                            else \"结构质量闸门定向修复改善了部分问题，但仍有未达标项\"\n                        ),\n                        progress_percent=91,\n                        level=\"info\" if repair_passed else \"warning\",\n                        event_kind=\"quality_gate\",\n                        title=\"质量门定向修复通过\" if repair_passed else \"质量门定向修复部分改善\",\n                        summary=(\n                            \"按拦截原因做了结构定向修复并重评通过，未走全新随机重试。\"\n                            if repair_passed\n                            else \"按拦截原因做了结构定向修复，问题已减少但尚未全部消除。\"\n                        ),\n                        content_preview=self._truncate_runtime_text(best_content, 520),\n                        metrics={\n                            \"actual_word_count\": self._count_words(best_content),\n                            \"repair_rounds\": gate_repair_summary.get(\"repair_rounds\"),\n                            \"repair_outcome\": gate_repair_summary.get(\"repair_outcome\"),\n                            \"issue_codes_before\": gate_repair_summary.get(\"issue_codes_before\", []),\n                            \"issue_codes_after\": gate_repair_summary.get(\"issue_codes_after\", []),\n                        },\n                    )"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 4420,
+  "ts": "2026-08-18T16:05:36.313Z",
+  "uuid": "9f6cb0be-3505-4131-962e-bcd836a84f84",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "    @staticmethod\n    def _estimate_static_description_runs(paragraphs: List[str]) -> Dict[str, int]:\n        static_count = 0\n        max_run = 0\n        current_run = 0\n        action_markers = (\"说\", \"问\", \"答\", \"走\", \"退\", \"伸手\", \"抬头\", \"看\", \"盯\", \"推\", \"抓\", \"按\", \"转身\", \"决定\", \"发现\", \"却\", \"但\")\n        for paragraph in paragraphs:\n            plain = \"\".join(str(paragraph or \"\").split())\n            is_static = len(plain) >= 100 and not any(marker in plain for marker in action_markers)",
+   "new_string": "    # 静态段落判定用的动作词表（T-09）。两条硬约束，改这张表前先看 D-08：\n    # ① 不放高频单字。原表里的「看 / 却 / 但 / 发现」是汉语超高频字，纯风景描写里\n    #    「湖面看似平滑」「云影却淡」「但风铃不动」轻易出现，整段立刻被判成「有动作」，\n    #    于是 max_static_run 恒为 0 —— 这是 D-08 的第一层根因，实测 130 字纯风景段\n    #    含这四个字时 static_paragraph_count 就是 0。\n    # ② 自然现象动词不算动作，单列在 AMBIENT_MOTION_MARKERS 里，只做文档与护栏用途，\n    #    不参与判定。「风吹过」「光洒在」没有行为主体，不构成情节推进。\n    STATIC_ACTION_MARKERS = (\n        \"说\", \"问\", \"答\", \"开口\",\n        \"回头\", \"扭头\", \"转身\", \"起身\", \"坐下\",\n        \"走\", \"退\", \"冲向\", \"冲出\", \"扑\", \"撞\",\n        \"伸手\", \"抬头\", \"抬手\", \"举起\", \"放下\", \"拿起\", \"握\", \"推\", \"抓\", \"按\",\n        \"拔出\", \"扣动\", \"掏出\",\n        \"盯\", \"看向\", \"看着\", \"瞪\",\n        \"决定\",\n    )\n\n    # 无主体的自然现象动词：**永远不算动作**。单列出来是为了让护栏测试能断言\n    # 它们没有偷偷混进 STATIC_ACTION_MARKERS。\n    AMBIENT_MOTION_MARKERS = (\"吹\", \"洒\", \"飘\", \"流\", \"垂\", \"映\", \"漫\", \"摇曳\", \"掠\", \"拂\")\n\n    @classmethod\n    def _estimate_static_description_runs(cls, paragraphs: List[str]) -> Dict[str, int]:\n        static_count = 0\n        max_run = 0\n        current_run = 0\n        action_markers = cls.STATIC_ACTION_MARKERS\n        for paragraph in paragraphs:\n            plain = \"\".join(str(paragraph or \"\").split())\n            is_static = len(plain) >= 100 and not any(marker in plain for marker in action_markers)"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 4482,
+  "ts": "2026-08-18T16:10:00.792Z",
+  "uuid": "e722fe0f-fd7b-4734-8648-60d00300dab1",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        static_description_risk = bool(\n            (dialogue_markers == 0 and paragraph_count <= 4 and word_count >= 1800)\n            or (word_count >= 1500 and static_runs.get(\"max_static_run\", 0) >= 3)\n            or (word_count >= 2500 and event_density.get(\"event_density_passed\") is False and static_runs.get(\"max_static_run\", 0) >= 2)\n        )",
+   "new_string": "        # 静态描写风险的四条 or（T-08）。阈值来自孤儿版 story_quality_scoring.py，\n        # 但**第 2 条的 max_static_run 门槛保持 >= 3 而不是照抄孤儿版的 >= 2**：\n        # T-09 收紧 STATIC_ACTION_MARKERS 后，真实语料（n=136，§11.2.1 分位表见\n        # 交接文档第 7 节批 6 记录）的 max_static_run 分布整体右移（p50 0→1），\n        # 孤儿版原样触发 4.4%，而 >= 3 只触发 2.9%，都在底线门可接受范围内，\n        # 但 >= 3 对「零星长段」更宽容，符合「宁可漏判不要误杀」。\n        # 第 4 条是唯一能抓「插几句寒暄对话掩护大段描写」的判定，前三条一有对话就放过。\n        static_paragraph_count = int(static_runs.get(\"static_paragraph_count\") or 0)\n        max_static_run = int(static_runs.get(\"max_static_run\") or 0)\n        static_description_risk = bool(\n            (dialogue_markers == 0 and paragraph_count <= 4 and word_count >= 1200)\n            or (word_count >= 1200 and max_static_run >= 3)\n            or (word_count >= 2000 and event_density.get(\"event_density_passed\") is False and max_static_run >= 2)\n            or (\n                word_count >= 1600\n                and dialogue_markers > 0\n                and max_static_run >= 2\n                and static_paragraph_count >= 3\n            )\n        )"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 4491,
+  "ts": "2026-08-18T16:11:02.242Z",
+  "uuid": "a1b3ce71-30fd-4bb5-b163-c4493a164506",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "    @staticmethod\n    def _detect_chapter_artifact_markers(text):",
+   "new_string": "    @staticmethod\n    def _evaluate_repetition_risk(paragraphs: List[str], *, word_count: int) -> Dict[str, Any]:\n        \"\"\"精确重复段落检测（T-10，阈值照抄孤儿版 story_quality_scoring.py，不要调）。\n\n        为什么必须有这道门：重复段落是 LLM 凑字数最典型的退化形式，而评分器会把它\n        当成正分——重复段同样贡献 `paragraph_count` 与 `progression_unit_count`，\n        也就是说在这道门落地之前，**复制粘贴同一段能刷高分**。\n\n        三个阈值的用意：\n        - `len(plain) >= 30` 才计入：短段落重复是正常的（「好。」「嗯。」这类对话应答）。\n        - `word_count >= 800` 才启用：短文本统计量不稳。\n        - 判定用「同段 >= 3 次且 >= 30 字」或「重复占比 >= 0.3 且最长 >= 80 字」两条，\n          刻意留出排比/复沓修辞的空间。真实语料 n=136 实测触发率 0.000\n          （`repeated_instances` p95=0、max=1），所以这道门不会碰到正常文本。\n\n        近似重复（编辑距离/向量相似）明确不做，留 P3——精确重复已能抓住绝大多数灌水。\n        \"\"\"\n        normalized: List[str] = []\n        for paragraph in paragraphs:\n            plain = re.sub(r\"\\s+\", \"\", str(paragraph or \"\"))\n            if len(plain) >= 30:\n                normalized.append(plain)\n        counts: Dict[str, int] = {}\n        for paragraph in normalized:\n            counts[paragraph] = counts.get(paragraph, 0) + 1\n        repeated = [(text, count) for text, count in counts.items() if count > 1]\n        repeated_instances = sum(count - 1 for _text, count in repeated)\n        max_repeat = max((count for _text, count in repeated), default=1)\n        longest_repeated = max((len(text) for text, _count in repeated), default=0)\n        repeated_ratio = round(repeated_instances / max(1, len(normalized)), 4)\n        risk = bool(\n            word_count >= 800\n            and repeated\n            and (\n                (max_repeat >= 3 and longest_repeated >= 30)\n                or (repeated_instances >= 2 and repeated_ratio >= 0.3 and longest_repeated >= 80)\n            )\n        )\n        return {\n            \"repetition_risk\": risk,\n            \"repeated_paragraph_count\": len(repeated),\n            \"repeated_paragraph_instances\": repeated_instances,\n            \"max_repeated_paragraph_count\": max_repeat,\n            \"repeated_paragraph_ratio\": repeated_ratio,\n            \"longest_repeated_paragraph_chars\": longest_repeated,\n            \"repeated_paragraph_examples\": [text[:120] for text, _count in repeated[:3]],\n        }\n\n    @staticmethod\n    def _detect_chapter_artifact_markers(text):"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 4498,
+  "ts": "2026-08-18T16:11:08.700Z",
+  "uuid": "f6f63a01-44be-4aee-9d31-69d2dfe8c338",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        event_density = cls._evaluate_event_density(text, word_count=word_count)\n        artifact_markers = cls._detect_chapter_artifact_markers(text)",
+   "new_string": "        event_density = cls._evaluate_event_density(text, word_count=word_count)\n        repetition = cls._evaluate_repetition_risk(paragraphs, word_count=word_count)\n        artifact_markers = cls._detect_chapter_artifact_markers(text)"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 4502,
+  "ts": "2026-08-18T16:11:16.567Z",
+  "uuid": "72fd9341-78a2-492b-8ed4-758a0e2587ab",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        score -= len(violations) * 500\n        score -= 260 if static_description_risk else 0\n\n        quality_metric_snapshot = {",
+   "new_string": "        score -= len(violations) * 500\n        score -= 260 if static_description_risk else 0\n        # 判罚必须大于重复段落自身能刷到的正分，否则复制粘贴仍然划算。\n        score -= 420 if repetition.get(\"repetition_risk\") else 0\n\n        quality_metric_snapshot = {"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 4505,
+  "ts": "2026-08-18T16:11:26.477Z",
+  "uuid": "ae7c329b-7b30-495a-bab1-f0d8ddaa203a",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"max_plain_unit_run\": event_density.get(\"max_plain_unit_run\", 0),\n            \"max_plain_unit_run_ratio\": event_density.get(\"max_plain_unit_run_ratio\", 0),\n        }",
+   "new_string": "            \"max_plain_unit_run\": event_density.get(\"max_plain_unit_run\", 0),\n            \"max_plain_unit_run_ratio\": event_density.get(\"max_plain_unit_run_ratio\", 0),\n            # T-10：这四个字段是 repeated_paragraph_flood 的唯一诊断依据。\n            # 这份白名单是新字段唯一的静默丢弃点——漏一个，前端就只能看到\n            # 「章节内有整段复制」而不知道是哪一段、重复了几次。\n            \"repetition_risk\": bool(repetition.get(\"repetition_risk\")),\n            \"repeated_paragraph_count\": repetition.get(\"repeated_paragraph_count\", 0),\n            \"max_repeated_paragraph_count\": repetition.get(\"max_repeated_paragraph_count\", 1),\n            \"repeated_paragraph_ratio\": repetition.get(\"repeated_paragraph_ratio\", 0),\n            \"longest_repeated_paragraph_chars\": repetition.get(\"longest_repeated_paragraph_chars\", 0),\n        }"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 4508,
+  "ts": "2026-08-18T16:11:33.749Z",
+  "uuid": "4e4216a7-546c-4af1-937d-27e4a5bd85c2",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"quality_issue_labels\": quality_issue_summary.get(\"labels\", []),\n            \"quality_metric_snapshot\": quality_metric_snapshot,\n            **artifact_markers,\n        }",
+   "new_string": "            \"quality_issue_labels\": quality_issue_summary.get(\"labels\", []),\n            \"quality_metric_snapshot\": quality_metric_snapshot,\n            **repetition,\n            **artifact_markers,\n        }"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 4511,
+  "ts": "2026-08-18T16:11:41.349Z",
+  "uuid": "ddb123c2-9cf1-470a-8e96-008893e3ea1d",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        \"static_description_risk\": \"静态描写过多\",",
+   "new_string": "        \"static_description_risk\": \"静态描写过多\",\n        \"repeated_paragraph_flood\": \"整段重复灌水\","
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 4514,
+  "ts": "2026-08-18T16:11:48.559Z",
+  "uuid": "7ee319ab-f677-4144-b31a-2e51ee92a88d",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        \"static_description_risk\": \"压缩独立景物/心理段，把篇幅改成动作回合、对话攻防和后果。\",",
+   "new_string": "        \"static_description_risk\": \"压缩独立景物/心理段，把篇幅改成动作回合、对话攻防和后果。\",\n        \"repeated_paragraph_flood\": \"删掉整段照抄的重复内容，用新的事件、对话或后果补足字数。\","
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 4522,
+  "ts": "2026-08-18T16:11:55.735Z",
+  "uuid": "64a80a09-0dbf-437a-aef8-eebfb7a82742",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            if guard.get(\"static_description_risk\"):\n                add(\"static_description_risk\")",
+   "new_string": "            if guard.get(\"static_description_risk\"):\n                add(\"static_description_risk\")\n            if guard.get(\"repetition_risk\"):\n                add(\"repeated_paragraph_flood\")"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 4525,
+  "ts": "2026-08-18T16:12:05.616Z",
+  "uuid": "d1b2aaba-5cf7-4f49-bb00-6f49a0fc8986",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            if story_guard.get(\"chapter_artifact_markers\"):\n                blockers.append({\n                    \"source\": \"story_progression_guard\",\n                    \"code\": \"chapter_artifact_markers\",\n                    \"message\": \"章节正文含有提纲/标记残留，不能作为成品章节放行。\",\n                })",
+   "new_string": "            if story_guard.get(\"chapter_artifact_markers\"):\n                blockers.append({\n                    \"source\": \"story_progression_guard\",\n                    \"code\": \"chapter_artifact_markers\",\n                    \"message\": \"章节正文含有提纲/标记残留，不能作为成品章节放行。\",\n                })\n            # T-10：精确重复是字符串完全相同，判定 100% 可靠，可以直接做 blocker，\n            # 不需要 soft_pass 兜底——没有任何正当理由让整段照抄的正文过门。\n            if story_guard.get(\"repetition_risk\"):\n                blockers.append({\n                    \"source\": \"story_progression_guard\",\n                    \"code\": \"repeated_paragraph_flood\",\n                    \"message\": (\n                        \"正文里存在整段照抄的重复内容\"\n                        f\"（最长重复段 {int(story_guard.get('longest_repeated_paragraph_chars') or 0)} 字，\"\n                        f\"同一段最多出现 {int(story_guard.get('max_repeated_paragraph_count') or 0)} 次），\"\n                        \"属于凑字数退化，不能放行。\"\n                    ),\n                })"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 4548,
+  "ts": "2026-08-18T16:14:36.672Z",
+  "uuid": "bf205680-e779-4f6e-88fc-1a5aad9c6a24",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "    @classmethod\n    def _evaluate_ending_pressure(cls, condensed_text: str, chapter_mission: Optional[dict]) -> Dict[str, Any]:\n        ending_excerpt = condensed_text[-260:]",
+   "new_string": "    # D-24：章末「泄气」判定的两个阈值。\n    # 260 字符窗保留原样（缩窗会把真实语料通过率从 81.2% 打到 47%-74%，是误杀而不是提高召回），\n    # 改成在窗判定之外**加一条针对末段本身的否决**：\n    # - `ENDING_CORE_WEAK_ONLY_LIMIT = 2`：末段零语义命中却有 >= 2 个弱信号（问号、叹号、\n    #   省略号、程度副词），就是「用标点假装压力」。真实语料 n=136 的历史通过池（n=101）\n    #   实测：W>=1 通过率 76.2%、W>=2 是 80.2%、W>=3 是 81.2%（= 基线，等于没修）。\n    #   取 2 是「能拦住合成坏样本、又只净减 1 条真实样本」的唯一取值。\n    # - `ENDING_CORE_FLAT_CHARS = 150`：末段长到 150 字还一个语义压力词都没有，\n    #   属于平铺收尾。真实语料里**没有任何样本落进这一条**（w_min=2 叠加 long_n\n    #   120/150/200 通过率都仍是 80.2%），所以它是零误杀成本的补充覆盖，\n    #   专门堵「不用问号、纯粹写一大段平淡收尾」的形态。\n    ENDING_CORE_WEAK_ONLY_LIMIT = 2\n    ENDING_CORE_FLAT_CHARS = 150\n\n    @classmethod\n    def _evaluate_ending_pressure(\n        cls,\n        condensed_text: str,\n        chapter_mission: Optional[dict],\n        raw_text: Optional[str] = None,\n    ) -> Dict[str, Any]:\n        \"\"\"章末压力门。\n\n        `condensed_text` 是去掉全部空白的正文，用来取 260 字尾窗；`raw_text` 是保留\n        换行的原文，**只用来切出「最后一个非空段落」**（D-24）。不传 raw_text 时退化成\n        「整段就是末段」，老的单元测试调用因此不用改。\n        \"\"\"\n        ending_excerpt = condensed_text[-260:]\n        # D-24 核心段：真实语料末段长度 p50=24 / p75=73 / p95=151，远短于 260，\n        # 所以正文最后一段几乎必然被卷进尾窗——语义命中可能根本不来自结尾。\n        source_text = raw_text if raw_text is not None else condensed_text\n        ending_paragraphs = [line.strip() for line in str(source_text or \"\").splitlines() if line.strip()]\n        ending_core = \"\".join(ending_paragraphs[-1].split()) if ending_paragraphs else ending_excerpt"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 4555,
+  "ts": "2026-08-18T16:14:51.475Z",
+  "uuid": "36653b17-7604-4b3a-8a09-9341ed7fc46d",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        closure_hits = [marker for marker in cls.ENDING_CLOSURE_MARKERS if marker in ending_excerpt]\n        # 语义压力是必要条件：只靠两个问号叹号骗不过章末压力门。\n        generic_pass = bool(semantic_hits) and (len(semantic_hits) + len(weak_hits)) >= 2\n        mission_hook_pass = bool(mission_hook_hits and (semantic_hits or weak_hits))\n        passed = bool((deliver_hits or mission_hook_pass or generic_pass) and not closure_hits)\n        return {\n            \"ending_pressure_passed\": passed,\n            \"ending_pressure_hits\": (deliver_hits + mission_hook_hits + semantic_hits + weak_hits)[:10],\n            \"mission_hook_hits\": mission_hook_hits[:6],\n            \"ending_semantic_hit_count\": len(semantic_hits),\n            \"ending_weak_hit_count\": len(weak_hits),\n            \"flat_closure_markers\": closure_hits[:4],\n        }",
+   "new_string": "        closure_hits = [marker for marker in cls.ENDING_CLOSURE_MARKERS if marker in ending_excerpt]\n        # D-24：末段自身的命中情况。语义命中落在窗内但不在末段里，说明压力来自正文而非结尾。\n        core_semantic_hits = [marker for marker in cls.ENDING_SEMANTIC_HOOK_MARKERS if marker in ending_core]\n        core_weak_hits = [marker for marker in cls.ENDING_WEAK_HOOK_MARKERS if marker in ending_core]\n        core_deflating = bool(\n            not core_semantic_hits\n            and (\n                len(core_weak_hits) >= cls.ENDING_CORE_WEAK_ONLY_LIMIT\n                or len(ending_core) >= cls.ENDING_CORE_FLAT_CHARS\n            )\n        )\n        # 语义压力是必要条件：只靠两个问号叹号骗不过章末压力门。\n        generic_pass = bool(semantic_hits) and (len(semantic_hits) + len(weak_hits)) >= 2\n        mission_hook_pass = bool(mission_hook_hits and (semantic_hits or weak_hits))\n        passed = bool(\n            (deliver_hits or mission_hook_pass or generic_pass)\n            and not closure_hits\n            and not core_deflating\n        )\n        return {\n            \"ending_pressure_passed\": passed,\n            \"ending_pressure_hits\": (deliver_hits + mission_hook_hits + semantic_hits + weak_hits)[:10],\n            \"mission_hook_hits\": mission_hook_hits[:6],\n            \"ending_semantic_hit_count\": len(semantic_hits),\n            \"ending_weak_hit_count\": len(weak_hits),\n            \"flat_closure_markers\": closure_hits[:4],\n            # D-24 第 3 条要求：语义命中落在尾窗哪个位置必须可观测，否则误杀无法诊断。\n            \"ending_core_chars\": len(ending_core),\n            \"ending_core_semantic_hit_count\": len(core_semantic_hits),\n            \"ending_core_weak_hit_count\": len(core_weak_hits),\n            \"ending_core_deflating\": core_deflating,\n        }"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 4558,
+  "ts": "2026-08-18T16:15:00.194Z",
+  "uuid": "cf413116-a2d1-4a90-a4cf-fc6dbb31af67",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        ending_pressure = cls._evaluate_ending_pressure(condensed, chapter_mission)\n        ending_hook = bool(ending_pressure.get(\"ending_pressure_passed\"))",
+   "new_string": "        # raw_text 必须传原文：D-24 的末段判定要靠换行切段，condensed 已经没有换行了。\n        ending_pressure = cls._evaluate_ending_pressure(condensed, chapter_mission, raw_text=text)\n        ending_hook = bool(ending_pressure.get(\"ending_pressure_passed\"))"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 4561,
+  "ts": "2026-08-18T16:15:12.026Z",
+  "uuid": "f62e82f3-4d5f-4bf1-b664-461e5bb2d68c",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"flat_closure_markers\": ending_pressure.get(\"flat_closure_markers\", []),",
+   "new_string": "            \"flat_closure_markers\": ending_pressure.get(\"flat_closure_markers\", []),\n            # D-24：末段泄气是新的一票否决路径，四个字段一起进快照才能解释「为什么被拦」。\n            \"ending_core_chars\": ending_pressure.get(\"ending_core_chars\", 0),\n            \"ending_core_semantic_hit_count\": ending_pressure.get(\"ending_core_semantic_hit_count\", 0),\n            \"ending_core_weak_hit_count\": ending_pressure.get(\"ending_core_weak_hit_count\", 0),\n            \"ending_core_deflating\": bool(ending_pressure.get(\"ending_core_deflating\")),"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5367,
+  "ts": "2026-08-18T18:14:06.754Z",
+  "uuid": "bd141449-5c93-40a0-a268-048a6b2d41ef",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "    @classmethod\n    def _estimate_static_description_runs(cls, paragraphs: List[str]) -> Dict[str, int]:",
+   "new_string": "    # T-11：焦点人物名的占位符黑名单。任务书里写「主角」「男主」这类通用称谓时，\n    # 拿它去正文里做字符串匹配必然匹配不到，会把每一章都判成「焦点人物缺席」。\n    FOCUS_CHARACTER_PLACEHOLDERS = frozenset(\n        {\"主角\", \"男主\", \"女主\", \"角色\", \"角色A\", \"角色B\", \"protagonist\", \"pov\"}\n    )\n\n    @classmethod\n    def _collect_focus_character_names(cls, chapter_mission: Optional[dict]) -> List[str]:\n        \"\"\"从任务书里收集本章焦点人物名（T-11，逻辑照搬孤儿版 story_quality_scoring.py）。\n\n        四个数据源按优先级合并：`focus_characters` / `character_focus` / `pov_character` /\n        `scene_list[].characters`。这四个键**生产路径此前一个都没用过**——连续性门用的是\n        另一条数据源 `package.cast_plan.chapter_focus_names`，在 `package is None`\n        （短篇或未启用长篇上下文）时整条门直接放行，所以这里补的是独立的第二条通路。\n\n        三个约束都是必要的，不是防御性代码：\n        - 占位符过滤：见 FOCUS_CHARACTER_PLACEHOLDERS 的注释。\n        - 2-12 字：短于 2 字的切片是标点残渣，长于 12 字的是被误切的句子而不是人名。\n        - 去重后取前 8：任务书里的人物表可以很长，但一章里真正的焦点不会超过这个数，\n          名字越多，「一个都没出现」这个判定越难成立，也就越保守。\n        \"\"\"\n        if not isinstance(chapter_mission, dict):\n            return []\n        names: List[str] = []\n        seen: set = set()\n\n        def add_name(value: Any) -> None:\n            if not value:\n                return\n            if isinstance(value, dict):\n                for item in value.values():\n                    add_name(item)\n                return\n            if isinstance(value, list):\n                for item in value:\n                    add_name(item)\n                return\n            text = str(value).strip()\n            if not text:\n                return\n            for raw in re.split(r\"[，。；、,;\\s/|]+\", text):\n                name = raw.strip(\"：:- \").strip()\n                if not (2 <= len(name) <= 12):\n                    continue\n                if name in cls.FOCUS_CHARACTER_PLACEHOLDERS or name.lower() in cls.FOCUS_CHARACTER_PLACEHOLDERS:\n                    continue\n                if name not in seen:\n                    seen.add(name)\n                    names.append(name)\n\n        add_name(chapter_mission.get(\"focus_characters\"))\n        add_name(chapter_mission.get(\"character_focus\"))\n        add_name(chapter_mission.get(\"pov_character\"))\n        for scene in chapter_mission.get(\"scene_list\") or []:\n            if isinstance(scene, dict):\n                add_name(scene.get(\"characters\"))\n        return names[:8]\n\n    @classmethod\n    def _estimate_static_description_runs(cls, paragraphs: List[str]) -> Dict[str, int]:"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5370,
+  "ts": "2026-08-18T18:14:16.023Z",
+  "uuid": "2ee3fc4f-7e6c-49dc-bd9d-55a8c56a6c18",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        mission_keywords = cls._collect_fallback_mission_keywords(chapter_mission)\n        mission_hits = [keyword for keyword in mission_keywords if keyword and keyword in condensed]\n        expected_dialogue = cls._chapter_mission_expects_dialogue(chapter_mission)",
+   "new_string": "        mission_keywords = cls._collect_fallback_mission_keywords(chapter_mission)\n        mission_hits = [keyword for keyword in mission_keywords if keyword and keyword in condensed]\n        # T-11：焦点人物缺席。判罚条件是「一个都没出现」而不是「有人没出现」——\n        # 配角某章不出场是正常叙事，只有全员缺席才说明这一章写偏了任务书。\n        focus_character_names = cls._collect_focus_character_names(chapter_mission)\n        focus_character_hits = [name for name in focus_character_names if name and name in condensed]\n        focus_character_missing = bool(\n            focus_character_names and not focus_character_hits and word_count >= 1200\n        )\n        expected_dialogue = cls._chapter_mission_expects_dialogue(chapter_mission)"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5373,
+  "ts": "2026-08-18T18:14:29.034Z",
+  "uuid": "81523fd4-b3e0-4c55-822d-9fcf5c0304a5",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        # 判罚必须大于重复段落自身能刷到的正分，否则复制粘贴仍然划算。\n        score -= 420 if repetition.get(\"repetition_risk\") else 0\n\n        quality_metric_snapshot = {",
+   "new_string": "        # 判罚必须大于重复段落自身能刷到的正分，否则复制粘贴仍然划算。\n        score -= 420 if repetition.get(\"repetition_risk\") else 0\n        # T-11：判罚 −240，不做 blocker。LLM 常用别名/称谓替代本名（「顾家小姐」代「顾棠」），\n        # 字符串匹配会误判，所以只压候选排序、不拦章节，与连续性门的 warning 定位一致。\n        # 真实语料校准（§11.2.1 批 7 表）：能解析出人物名的样本占 49.1%，其中全员缺席\n        # 且 >=1200 字的 0/53 —— 触发率 0.000，与 T-10 同型，是底线门不是优选项。\n        score -= 240 if focus_character_missing else 0\n\n        quality_metric_snapshot = {"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5376,
+  "ts": "2026-08-18T18:14:38.637Z",
+  "uuid": "abee7965-e898-49fa-bed3-a3a700b441c8",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"repeated_paragraph_ratio\": repetition.get(\"repeated_paragraph_ratio\", 0),\n            \"longest_repeated_paragraph_chars\": repetition.get(\"longest_repeated_paragraph_chars\", 0),\n        }",
+   "new_string": "            \"repeated_paragraph_ratio\": repetition.get(\"repeated_paragraph_ratio\", 0),\n            \"longest_repeated_paragraph_chars\": repetition.get(\"longest_repeated_paragraph_chars\", 0),\n            # T-11：四个字段一起进白名单。只透出 focus_character_missing 的话，用户看到\n            # 「焦点角色缺席」却不知道系统认为焦点是谁——而这个判定恰恰最容易因为别名而误判，\n            # 没有 focus_character_names 就没法判断是不是误杀。\n            \"focus_character_names\": focus_character_names,\n            \"focus_character_hit_count\": len(focus_character_hits),\n            \"missing_focus_characters\": [\n                name for name in focus_character_names if name not in focus_character_hits\n            ],\n            \"focus_character_missing\": focus_character_missing,\n        }"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5383,
+  "ts": "2026-08-18T18:14:46.602Z",
+  "uuid": "9ae744ec-a80b-422b-8e48-ae2d43293d4f",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"quality_metric_snapshot\": quality_metric_snapshot,\n            **repetition,\n            **artifact_markers,\n        }",
+   "new_string": "            \"focus_character_names\": focus_character_names,\n            \"focus_character_hit_count\": len(focus_character_hits),\n            \"missing_focus_characters\": [\n                name for name in focus_character_names if name not in focus_character_hits\n            ],\n            \"focus_character_missing\": focus_character_missing,\n            \"quality_metric_snapshot\": quality_metric_snapshot,\n            **repetition,\n            **artifact_markers,\n        }"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5387,
+  "ts": "2026-08-18T18:14:54.492Z",
+  "uuid": "8e553dd9-ac9b-4db5-ad6d-08b13b8f33a4",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        \"ending_pressure_missing\": \"章末递压不足\",\n        \"critical_issues_remaining\": \"自检严重问题未消除\",",
+   "new_string": "        \"ending_pressure_missing\": \"章末递压不足\",\n        \"focus_character_missing\": \"焦点角色缺席\",\n        \"critical_issues_remaining\": \"自检严重问题未消除\","
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5390,
+  "ts": "2026-08-18T18:15:01.222Z",
+  "uuid": "dab314e6-84c6-48fa-b420-5427376a6023",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        \"ending_pressure_missing\": \"结尾必须交出危险、证据、期限、误会或代价，避免总结式平收。\",",
+   "new_string": "        \"ending_pressure_missing\": \"结尾必须交出危险、证据、期限、误会或代价，避免总结式平收。\",\n        \"focus_character_missing\": \"让本章焦点角色实际出场、说话、行动或被明确处理。\","
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5393,
+  "ts": "2026-08-18T18:15:42.804Z",
+  "uuid": "ac2b0d86-df97-408d-8743-c00bf1be599b",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            if int(guard.get(\"word_count\") or 0) >= 1200 and not guard.get(\"ending_pressure_passed\", guard.get(\"ending_hook_detected\", True)):\n                add(\"ending_pressure_missing\")",
+   "new_string": "            if int(guard.get(\"word_count\") or 0) >= 1200 and not guard.get(\"ending_pressure_passed\", guard.get(\"ending_hook_detected\", True)):\n                add(\"ending_pressure_missing\")\n            # T-11：只进 warning 摘要，不进 blockers（别名匹配不可靠，见判罚处注释）。\n            # 字数门槛已经在 focus_character_missing 里判过，这里不要再判一次。\n            if guard.get(\"focus_character_missing\"):\n                add(\"focus_character_missing\")"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5516,
+  "ts": "2026-08-18T19:53:52.684Z",
+  "uuid": "a5d92375-6e73-4d9e-bcc8-0d6ed36f2069",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        text = str(content or \"\")\n        condensed = \"\".join(text.split())\n        word_count = len(condensed)\n        paragraphs = [segment for segment in text.splitlines() if segment.strip()]\n        paragraph_count = len(paragraphs)\n        dialogue_markers = sum(text.count(marker) for marker in (\"“\", \"”\", \"「\", \"」\", \"『\", \"』\", '\"'))\n        mission_keywords = cls._collect_fallback_mission_keywords(chapter_mission)",
+   "new_string": "        text = str(content or \"\")\n        condensed = \"\".join(text.split())\n        word_count = len(condensed)\n        # T-12 第 1 层：在这之前，target_word_count / min_word_count 只出现在签名里，\n        # 函数体零引用——字数是 CLAUDE.md 的第一目标，却完全没进候选评分。\n        #\n        # preferred_floor 的 0.92 在生产里是个**死参数**：`_resolve_config` 与\n        # `_resolve_chapter_draft_contract` 都按 min = target * 0.9 推导，于是\n        # max(min_floor, 0.92*target) 恒等于 0.92*target。真实语料实测（n=82）把\n        # 比例从 0.92 一路降到 0.70，far_below 只从 0.244 动到 0.220。保留 0.92\n        # 是为了让「调用方显式传了更低的 min」这种情形仍然有意义，不是为了调参。\n        target_floor = max(0, int(target_word_count or 0))\n        minimum_floor = max(0, int(min_word_count or 0))\n        if target_floor and minimum_floor > target_floor:\n            minimum_floor = target_floor\n        preferred_floor = max(minimum_floor, int(target_floor * 0.92)) if target_floor else minimum_floor\n        word_count_below_min = bool(minimum_floor and word_count < minimum_floor)\n        word_count_far_below_target = bool(preferred_floor and word_count < preferred_floor)\n        # upper_target 的 2.0 / 1.6 来自孤儿版，**不要换成死代码 _score_fallback_candidate\n        # 里的 1.25**。真实语料敏感性实测（n=82，历史通过池）：2.0/1.6 → 0.012、\n        # 1.6/1.4 → 0.134、1.25/1.25 → 0.305。1.25 会把三成正常章节判成「字数远超目标」，\n        # 是 25 倍的误杀差距。\n        # 已知不单调：target=2500 时 upper=5000，target=2501 时 upper=4001。这是孤儿版\n        # 的原始行为，保留是因为 2500 是短章/长章的分界，两侧的「超长」含义本就不同。\n        if target_floor:\n            upper_target = int(target_floor * 2.0) if target_floor <= 2500 else int(target_floor * 1.6)\n        else:\n            upper_target = 0\n        word_count_far_above_target = bool(upper_target and word_count > upper_target)\n        paragraphs = [segment for segment in text.splitlines() if segment.strip()]\n        paragraph_count = len(paragraphs)\n        dialogue_markers = sum(text.count(marker) for marker in (\"“\", \"”\", \"「\", \"」\", \"『\", \"』\", '\"'))\n        mission_keywords = cls._collect_fallback_mission_keywords(chapter_mission)"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5526,
+  "ts": "2026-08-18T19:54:25.332Z",
+  "uuid": "c05aa6be-e675-4166-99b5-27c713a94157",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        quality_metric_snapshot = {\n            \"word_count\": word_count,\n            \"paragraph_count\": paragraph_count,",
+   "new_string": "        quality_metric_snapshot = {\n            \"word_count\": word_count,\n            # T-12：七个字数字段一起进白名单。`word_requirement_met` 用三态——\n            # 没有 minimum_floor 时是 None（「没配最低字数」不等于「没达标」），\n            # 前端要显示成「不适用」而不是「未通过」。\n            \"target_word_count\": target_floor,\n            \"min_word_count\": minimum_floor,\n            \"preferred_word_floor\": preferred_floor,\n            \"upper_word_ceiling\": upper_target,\n            \"word_count_below_min\": word_count_below_min,\n            \"word_count_far_above_target\": word_count_far_above_target,\n            \"word_count_far_below_target\": word_count_far_below_target,\n            \"word_requirement_met\": (not word_count_below_min) if minimum_floor else None,\n            \"paragraph_count\": paragraph_count,"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5529,
+  "ts": "2026-08-18T19:54:38.070Z",
+  "uuid": "ada0a3f4-1b38-4ae8-bd99-a52073387457",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"focus_character_missing\": focus_character_missing,\n            \"quality_metric_snapshot\": quality_metric_snapshot,\n            **repetition,\n            **artifact_markers,\n        }",
+   "new_string": "            \"focus_character_missing\": focus_character_missing,\n            \"target_word_count\": target_floor,\n            \"min_word_count\": minimum_floor,\n            \"preferred_word_floor\": preferred_floor,\n            \"upper_word_ceiling\": upper_target,\n            \"word_count_below_min\": word_count_below_min,\n            \"word_count_far_above_target\": word_count_far_above_target,\n            \"word_count_far_below_target\": word_count_far_below_target,\n            \"word_requirement_met\": (not word_count_below_min) if minimum_floor else None,\n            \"quality_metric_snapshot\": quality_metric_snapshot,\n            **repetition,\n            **artifact_markers,\n        }"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5543,
+  "ts": "2026-08-18T19:57:35.905Z",
+  "uuid": "2e926f76-9720-41b5-82a8-f37f442dce90",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        score -= 240 if focus_character_missing else 0",
+   "new_string": "        score -= 240 if focus_character_missing else 0\n        # T-12 步骤 B：字数三判罚。系数与分层的定值依据见 §11.2.1 批 7 分位表。\n        score -= 620 if word_count_below_min else 0\n        score -= 520 if word_count_far_above_target else 0\n        score -= 180 if word_count_far_below_target and not word_count_below_min else 0"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5578,
+  "ts": "2026-08-18T20:02:32.708Z",
+  "uuid": "f8228cec-14ac-487e-a1d6-1995d41dcb6e",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        story_guard_key: str = \"story_progression_guard\",\n        target_word_count: int = 3000,\n        min_word_count: int = 2000,\n    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:",
+   "new_string": "        story_guard_key: str = \"story_progression_guard\",\n        target_word_count: int,\n        min_word_count: int,\n    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:\n        # 两个字数参数**故意没有默认值**（T-12 步骤 C）。原来的 3000/2000 是硬编码\n        # 兜底，而 `_resolve_config` 实际产出的是 target/min = 0.9 的任意档位\n        # （800/720 一路到 20000/18000）——默认值一旦存在，新调用点忘记传就会\n        # 静默按 3000/2000 判，真实语料上这会让 `below_min` 触发 24.1%。\n        # 现在忘记传是 TypeError，在测试里就炸，不会漏到生产。"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5592,
+  "ts": "2026-08-18T20:03:12.417Z",
+  "uuid": "97875fd3-d35c-4dc1-996e-e1a966fb4e1e",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            repaired_summaries, repaired_gate = self._evaluate_structural_quality_gate_for_content(\n                review_summaries=current_summaries,\n                content=next_content,\n                violations=guardrail_violations,\n                chapter_mission=chapter_mission,\n            )",
+   "new_string": "            repaired_summaries, repaired_gate = self._evaluate_structural_quality_gate_for_content(\n                review_summaries=current_summaries,\n                content=next_content,\n                violations=guardrail_violations,\n                chapter_mission=chapter_mission,\n                target_word_count=active_config.target_word_count,\n                min_word_count=active_config.min_word_count,\n            )"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5598,
+  "ts": "2026-08-18T20:03:35.868Z",
+  "uuid": "0be5c7f3-9fc4-45c7-9523-7337939b956b",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "                    chapter_mission=chapter_mission,\n                    story_guard_key=\"story_progression_guard_pre_enrichment\",\n                )",
+   "new_string": "                    chapter_mission=chapter_mission,\n                    story_guard_key=\"story_progression_guard_pre_enrichment\",\n                    target_word_count=active_config.target_word_count,\n                    min_word_count=active_config.min_word_count,\n                )"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5605,
+  "ts": "2026-08-18T20:03:48.755Z",
+  "uuid": "ca54ccad-137d-4743-bc2a-530773717bb3",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "                review_summaries, structural_quality_gate = self._evaluate_structural_quality_gate_for_content(\n                    review_summaries=review_summaries,\n                    content=best_content,\n                    violations=guardrail_violations,\n                    chapter_mission=chapter_mission,\n                )\n                if not structural_quality_gate.get(\"passed\", True):",
+   "new_string": "                review_summaries, structural_quality_gate = self._evaluate_structural_quality_gate_for_content(\n                    review_summaries=review_summaries,\n                    content=best_content,\n                    violations=guardrail_violations,\n                    chapter_mission=chapter_mission,\n                    target_word_count=active_config.target_word_count,\n                    min_word_count=active_config.min_word_count,\n                )\n                if not structural_quality_gate.get(\"passed\", True):"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5609,
+  "ts": "2026-08-18T20:03:59.289Z",
+  "uuid": "1fac3b16-b544-46e8-98e0-0685700fc252",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            review_summaries, structural_quality_gate = self._evaluate_structural_quality_gate_for_content(\n                review_summaries=review_summaries,\n                content=best_content,\n                violations=guardrail_violations,\n                chapter_mission=chapter_mission,\n            )\n            if not structural_quality_gate.get(\"passed\", True):",
+   "new_string": "            review_summaries, structural_quality_gate = self._evaluate_structural_quality_gate_for_content(\n                review_summaries=review_summaries,\n                content=best_content,\n                violations=guardrail_violations,\n                chapter_mission=chapter_mission,\n                target_word_count=active_config.target_word_count,\n                min_word_count=active_config.min_word_count,\n            )\n            if not structural_quality_gate.get(\"passed\", True):"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5615,
+  "ts": "2026-08-18T20:04:26.860Z",
+  "uuid": "8f2acffe-2582-4d19-93b3-15351922da56",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "                    reader_structural_guard = self._score_story_quality_candidate(\n                        content=best_content,\n                        violations=(best_version.get(\"metadata\") or {}).get(\"guardrail\", {}).get(\"violations\", []),\n                        chapter_mission=chapter_mission,\n                    )",
+   "new_string": "                    reader_structural_guard = self._score_story_quality_candidate(\n                        content=best_content,\n                        violations=(best_version.get(\"metadata\") or {}).get(\"guardrail\", {}).get(\"violations\", []),\n                        chapter_mission=chapter_mission,\n                        target_word_count=active_config.target_word_count,\n                        min_word_count=active_config.min_word_count,\n                    )"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5625,
+  "ts": "2026-08-18T20:04:53.992Z",
+  "uuid": "1af2a63d-8dbe-4852-89bb-1ea71b0d4b44",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            final_quality_guard = self._score_story_quality_candidate(\n                content=best_content,\n                violations=guardrail_violations,\n                chapter_mission=chapter_mission,\n            )",
+   "new_string": "            final_quality_guard = self._score_story_quality_candidate(\n                content=best_content,\n                violations=guardrail_violations,\n                chapter_mission=chapter_mission,\n                target_word_count=active_config.target_word_count,\n                min_word_count=active_config.min_word_count,\n            )"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5632,
+  "ts": "2026-08-18T20:05:20.687Z",
+  "uuid": "4a6c127f-d1b9-4d02-9cf4-565ea0eb9402",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "                retry_story_guard = self._score_story_quality_candidate(\n                    content=retry_candidate,\n                    violations=retry_guardrail_metadata.get(\"violations\") or [],\n                    chapter_mission=chapter_mission,\n                )\n                retry_score = int(retry_story_guard.get(\"score\") or 0)",
+   "new_string": "                retry_story_guard = self._score_story_quality_candidate(\n                    content=retry_candidate,\n                    violations=retry_guardrail_metadata.get(\"violations\") or [],\n                    chapter_mission=chapter_mission,\n                    target_word_count=config.target_word_count,\n                    min_word_count=config.min_word_count,\n                )\n                retry_score = int(retry_story_guard.get(\"score\") or 0)"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5638,
+  "ts": "2026-08-18T20:05:50.232Z",
+  "uuid": "d453ee71-67dd-4925-b8f0-ee96211ef30d",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        story_guard = cls._score_story_quality_candidate(\n            content=content,\n            violations=list(violations or []),\n            chapter_mission=chapter_mission,\n        )\n        target_word_count = max(0, int(target_word_count or 0))",
+   "new_string": "        # T-12 第 2 层：这里原来漏传字数参数——本函数签名明明收了 target/min，\n        # 却让评分器按 0/0 判（字数三标志全假），于是 story_guard 里的字数字段\n        # 与下面 preferred_floor 算出的 `word_count_far_below_target` 长期不一致：\n        # reason_codes 说字数不足，同一份 story_guard 的字数标志却说没问题。\n        story_guard = cls._score_story_quality_candidate(\n            content=content,\n            violations=list(violations or []),\n            chapter_mission=chapter_mission,\n            target_word_count=target_word_count,\n            min_word_count=min_word_count,\n        )\n        target_word_count = max(0, int(target_word_count or 0))"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5652,
+  "ts": "2026-08-18T20:06:34.854Z",
+  "uuid": "d6a5b032-0cea-4ac2-b0dc-3773a54c4026",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "    def _fallback_select_best_version(\n        cls,\n        versions: List[Dict[str, Any]],\n        chapter_mission: Optional[dict] = None,\n    ) -> Tuple[int, Dict[str, Any]]:",
+   "new_string": "    def _fallback_select_best_version(\n        cls,\n        versions: List[Dict[str, Any]],\n        chapter_mission: Optional[dict] = None,\n        *,\n        target_word_count: int = 0,\n        min_word_count: int = 0,\n    ) -> Tuple[int, Dict[str, Any]]:\n        # T-12 第 4 层：这两个参数默认 0（= 字数判罚中性），和上面\n        # `_evaluate_structural_quality_gate_for_content` 的「不给默认值」相反。\n        # 差别在于失败模式：那边是**判定通过与否**，静默按错值判会误杀章节；\n        # 这里是**候选排序**，所有候选共享同一份配置，缺配置时字数维度整体缺席，\n        # 排序退化成 T-12 之前的行为，不会把某一个候选单独判死。"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5655,
+  "ts": "2026-08-18T20:06:44.500Z",
+  "uuid": "5452ac67-9447-42b2-b478-147556f212da",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            candidate_summary = cls._score_story_quality_candidate(\n                content=content,\n                violations=violations,\n                chapter_mission=chapter_mission,\n            )",
+   "new_string": "            candidate_summary = cls._score_story_quality_candidate(\n                content=content,\n                violations=violations,\n                chapter_mission=chapter_mission,\n                target_word_count=target_word_count,\n                min_word_count=min_word_count,\n            )"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5661,
+  "ts": "2026-08-18T20:07:08.942Z",
+  "uuid": "a123e18e-c16e-44e9-bcfb-968b88092e13",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        fallback_index, fallback_summary = self._fallback_select_best_version(\n            versions,\n            chapter_mission=chapter_mission,\n        )",
+   "new_string": "        fallback_index, fallback_summary = self._fallback_select_best_version(\n            versions,\n            chapter_mission=chapter_mission,\n            target_word_count=target_word_count,\n            min_word_count=min_word_count,\n        )"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5669,
+  "ts": "2026-08-18T20:07:18.173Z",
+  "uuid": "93ff0bfa-db6a-474f-80d7-b9c485352e7a",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "    async def _run_ai_review(\n        self,\n        *,\n        versions: List[Dict[str, Any]],\n        chapter_mission: Optional[dict],\n        user_id: int,\n    ) -> Tuple[int, Optional[Dict[str, Any]]]:",
+   "new_string": "    async def _run_ai_review(\n        self,\n        *,\n        versions: List[Dict[str, Any]],\n        chapter_mission: Optional[dict],\n        user_id: int,\n        target_word_count: int = 0,\n        min_word_count: int = 0,\n    ) -> Tuple[int, Optional[Dict[str, Any]]]:"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 5672,
+  "ts": "2026-08-18T20:07:26.834Z",
+  "uuid": "1a7baebc-af54-48c3-b3c7-fc42eb42b0fe",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        best_version_index, ai_review_result = await self._run_ai_review(\n            versions=versions,\n            chapter_mission=review_chapter_mission,\n            user_id=user_id,\n        )",
+   "new_string": "        best_version_index, ai_review_result = await self._run_ai_review(\n            versions=versions,\n            chapter_mission=review_chapter_mission,\n            user_id=user_id,\n            target_word_count=active_config.target_word_count,\n            min_word_count=active_config.min_word_count,\n        )"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6398,
+  "ts": "2026-08-19T07:35:37.397Z",
+  "uuid": "fc92d7d2-f129-489e-90ed-062334442873",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "    @classmethod\n    def _evaluate_dialogue_changes_state(cls, text: str, *, expected_dialogue: bool, dialogue_markers: int) -> Dict[str, Any]:\n        marker_count = cls._count_dialogue_state_change_markers(text)\n        passed = True if not expected_dialogue else dialogue_markers >= 2 and marker_count >= 2\n        return {\n            \"expected_dialogue\": expected_dialogue,\n            \"dialogue_marker_count\": dialogue_markers,\n            \"state_change_marker_count\": marker_count,\n            \"dialogue_changes_state\": passed,\n        }",
+   "new_string": "    # T-13：未声明对话预期时的状态标记门槛。取 1 而不是 2（声明时用的值），\n    # 因为这批章节本来就没被要求写对话场，用同样严的判据等于追认一个没提过的要求。\n    # 真实语料（n=28，即 expected_dialogue=False 的全部样本）实测 sc 分布\n    # p05=1 / p50=14 / p95=31 / min=0：门槛取 1 时 27 条判 True、1 条判 False，\n    # 取 2 会多罚 1 条。这是底线门不是优选项，按「宁可漏判不要误杀」取 1。\n    UNDECLARED_DIALOGUE_STATE_MARKER_FLOOR = 1\n\n    @classmethod\n    def _evaluate_dialogue_changes_state(cls, text: str, *, expected_dialogue: bool, dialogue_markers: int) -> Dict[str, Any]:\n        \"\"\"对话是否改变局势——**三态**：True 通过 / False 不通过 / None 不适用。\n\n        T-13（D-07）。改造前是 `True if not expected_dialogue else ...`，把「本章没要求\n        对话」直接当成「对话质量合格」，白给 +140 分，还会连带激活 4 条软放行——\n        后者比分数严重，因为它能绕过其它 blocker。\n\n        **判定顺序刻意与交接文档 D-07 的示例代码不同，不要\"改回去\"**：文档把\n        `dialogue_markers == 0 → None` 判在最前面，那样「任务书要求了对话、正文却零对话」\n        也会落进 None，而 `dialogue_does_not_change_state` blocker 用的是\n        `is not False` 判据 —— 这道 blocker 会因此静默失效，等于把门改松，与本任务\n        的目的相反。真实语料里这种样本恰好是 0 条（所以两种顺序在现有数据上跑分完全\n        一样，测不出差别），正因为测不出来才必须在代码里把顺序固定住。\n\n        所以：**先看任务书要求，「不适用」只在「没要求 + 正文确实没对话」时成立。**\n        \"\"\"\n        marker_count = cls._count_dialogue_state_change_markers(text)\n        if expected_dialogue:\n            # 声明了对话预期 → 判据保持原样，不放松（blocker 依赖这一支）\n            passed: Optional[bool] = bool(dialogue_markers >= 2 and marker_count >= 2)\n            applicable = True\n        elif dialogue_markers <= 0:\n            # 没要求对话，正文也确实没有对话 → 该维度不适用，不加分也不减分\n            passed = None\n            applicable = False\n        else:\n            # 没要求对话但正文有对话 → 仍按内容判，只是门槛更低（见上方常量注释）\n            passed = bool(marker_count >= cls.UNDECLARED_DIALOGUE_STATE_MARKER_FLOOR)\n            applicable = True\n        return {\n            \"expected_dialogue\": expected_dialogue,\n            # 显式记「任务书有没有声明预期」，让消费方不必靠 expected_dialogue 反推\n            \"dialogue_expectation_declared\": bool(expected_dialogue),\n            \"dialogue_state_applicable\": applicable,\n            \"dialogue_marker_count\": dialogue_markers,\n            \"state_change_marker_count\": marker_count,\n            \"dialogue_changes_state\": passed,\n        }"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6411,
+  "ts": "2026-08-19T07:37:12.610Z",
+  "uuid": "8c26b68b-524c-4530-a360-55d3695d2d27",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        score += 140 if dialogue_state.get(\"dialogue_changes_state\") else -140",
+   "new_string": "        # T-13：三态评分。`None`（该维度不适用）既不加分也不减分——原来的\n        # `if ... else -140` 会把 None 当假值扣 140，比改造前的「白给 +140」错得更远\n        # （280 分的摆动幅度，占好样本总分 11%）。**必须显式写三分支，不能用真假判断。**\n        dialogue_changes_state = dialogue_state.get(\"dialogue_changes_state\")\n        if dialogue_changes_state is True:\n            score += 140\n        elif dialogue_changes_state is False:\n            score -= 140"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6418,
+  "ts": "2026-08-19T07:38:13.043Z",
+  "uuid": "e7d3467f-f6fb-4d68-bd3c-66117c918d25",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"dialogue_changes_state\": bool(dialogue_state.get(\"dialogue_changes_state\")),\n            \"dialogue_state_change_markers\": dialogue_state.get(\"state_change_marker_count\", 0),\n            \"ending_pressure_passed\": ending_hook,",
+   "new_string": "            # T-13：**不能再套 bool()**——那会把三态里的 None 压回 False，\n            # 前端严格比较 `=== false` 就会把「本章不适用对话」显示成「对白未改局势」。\n            # 这个白名单是新字段唯一的静默丢弃点，所以另外两个字段也一起进来：\n            # 用户看到「对白未改局势」时得能知道这是任务书要求过的、还是系统自己加的。\n            \"dialogue_changes_state\": dialogue_state.get(\"dialogue_changes_state\"),\n            \"dialogue_expectation_declared\": dialogue_state.get(\"dialogue_expectation_declared\"),\n            \"dialogue_state_applicable\": dialogue_state.get(\"dialogue_state_applicable\"),\n            \"dialogue_state_change_markers\": dialogue_state.get(\"state_change_marker_count\", 0),\n            \"ending_pressure_passed\": ending_hook,"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6431,
+  "ts": "2026-08-19T07:39:39.883Z",
+  "uuid": "7cdc06a1-c152-469f-8426-aed54cdd261e",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"dialogue_changes_state\": dialogue_state.get(\"dialogue_changes_state\"),\n            \"dialogue_state_change_markers\": dialogue_state.get(\"state_change_marker_count\", 0),\n            \"ending_pressure_passed\": ending_pressure.get(\"ending_pressure_passed\"),\n            \"ending_pressure\": ending_pressure,",
+   "new_string": "            # T-13：guard 顶层本来就是原样透出（没套 bool），三态改造后自动生效。\n            # 两个新字段跟着一起进来，保持与 quality_metric_snapshot 同构。\n            \"dialogue_changes_state\": dialogue_state.get(\"dialogue_changes_state\"),\n            \"dialogue_expectation_declared\": dialogue_state.get(\"dialogue_expectation_declared\"),\n            \"dialogue_state_applicable\": dialogue_state.get(\"dialogue_state_applicable\"),\n            \"dialogue_state_change_markers\": dialogue_state.get(\"state_change_marker_count\", 0),\n            \"ending_pressure_passed\": ending_pressure.get(\"ending_pressure_passed\"),\n            \"ending_pressure\": ending_pressure,"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6446,
+  "ts": "2026-08-19T07:41:40.036Z",
+  "uuid": "307ad07e-43d2-4a82-88af-50b3d9761bab",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "                and bool(guard.get(\"dialogue_changes_state\", True))\n                and bool(guard.get(\"ending_pressure_passed\", guard.get(\"ending_hook_detected\", True)))",
+   "new_string": "                # T-13：`is not False` 而不是 `bool(get(..., True))`。语义是「只要不是\n                # 明确失败就不算反对证据」——None（不适用）不再被当成正向证据白送，\n                # 也不会被 bool() 压成 False 而误判为失败。\n                and guard.get(\"dialogue_changes_state\") is not False\n                and bool(guard.get(\"ending_pressure_passed\", guard.get(\"ending_hook_detected\", True)))"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6452,
+  "ts": "2026-08-19T07:43:07.053Z",
+  "uuid": "e95aed8b-2de1-40d8-b8ab-7e7a8c01b3ce",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "                and story_dialogue_markers >= 8\n                and not story_guard.get(\"static_description_risk\")\n                and story_guard.get(\"dialogue_changes_state\", True)\n                and story_guard.get(\"ending_pressure_passed\", story_guard.get(\"ending_hook_detected\", True))\n                and story_guard.get(\"event_density_passed\", True)\n                and story_guard.get(\"state_change_interval_passed\", True)\n            )\n            if story_guard.get(\"static_description_risk\"):",
+   "new_string": "                and story_dialogue_markers >= 8\n                and not story_guard.get(\"static_description_risk\")\n                # T-13/T-14：这三个都是三态字段，一律用 `is not False`。\n                and story_guard.get(\"dialogue_changes_state\") is not False\n                and story_guard.get(\"ending_pressure_passed\", story_guard.get(\"ending_hook_detected\", True))\n                and story_guard.get(\"event_density_passed\") is not False\n                and story_guard.get(\"state_change_interval_passed\") is not False\n            )\n            if story_guard.get(\"static_description_risk\"):"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6458,
+  "ts": "2026-08-19T07:44:18.307Z",
+  "uuid": "48aef437-3bf2-464c-a948-be6845ded359",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            progression_soft_pass = (\n                story_dialogue_markers >= 8\n                and not story_guard.get(\"static_description_risk\")\n                and story_guard.get(\"dialogue_changes_state\", False)\n                and story_guard.get(\"ending_pressure_passed\", story_guard.get(\"ending_hook_detected\", False))",
+   "new_string": "            progression_soft_pass = (\n                story_dialogue_markers >= 8\n                and not story_guard.get(\"static_description_risk\")\n                # T-13：这一条**故意保持「必须是 True」**，与同批其它消费点的\n                # `is not False` 不同。它的原写法默认值就是 False（要求正向证据），\n                # 而它的作用是豁免 chapter_progression_weak —— 豁免必须有据，\n                # 「不适用」不构成据。另外此处 None 实际不可达：None 只在\n                # dialogue_marker_count <= 0 时产生，与上一行 `>= 8` 互斥。\n                and story_guard.get(\"dialogue_changes_state\") is True\n                and story_guard.get(\"ending_pressure_passed\", story_guard.get(\"ending_hook_detected\", False))"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6468,
+  "ts": "2026-08-19T07:45:33.816Z",
+  "uuid": "356b2200-20a4-46b9-ba48-e0b4c8700231",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "                and story_dialogue_markers >= 4\n                and not story_guard.get(\"static_description_risk\")\n                and story_guard.get(\"dialogue_changes_state\", True)\n                and story_guard.get(\"ending_pressure_passed\", story_guard.get(\"ending_hook_detected\", True))\n                and critique_critical <= 1\n                and (critique_score is None or critique_score >= 60)\n                and not critical_consistency\n            )",
+   "new_string": "                and story_dialogue_markers >= 4\n                and not story_guard.get(\"static_description_risk\")\n                # T-13：原默认值是 True（缺键即视为不反对），照此映射成 `is not False`。\n                # 上一行 `>= 4` 已让 None 不可达，这里只是把语义写准。\n                and story_guard.get(\"dialogue_changes_state\") is not False\n                and story_guard.get(\"ending_pressure_passed\", story_guard.get(\"ending_hook_detected\", True))\n                and critique_critical <= 1\n                and (critique_score is None or critique_score >= 60)\n                and not critical_consistency\n            )"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6475,
+  "ts": "2026-08-19T07:46:39.530Z",
+  "uuid": "64779563-b260-4c77-9a1c-647820a67206",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "                and story_dialogue_markers >= 10\n                and story_guard.get(\"event_density_passed\", True)\n                and story_guard.get(\"state_change_interval_passed\", True)\n                and critique_critical <= 1\n                and critique_major < 8",
+   "new_string": "                and story_dialogue_markers >= 10\n                # T-14：密度三态。这里用 `is not False` 是安全的——None 只在\n                # word_count < 800 时产生，而它豁免的 blocker 门槛都在 1200 字以上，\n                # 两个区间不相交，所以「未评估也算不反对」不会放过任何该拦的样本。\n                and story_guard.get(\"event_density_passed\") is not False\n                and story_guard.get(\"state_change_interval_passed\") is not False\n                and critique_critical <= 1\n                and critique_major < 8"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6478,
+  "ts": "2026-08-19T07:47:36.155Z",
+  "uuid": "e9b2726b-845b-40dc-8cee-466b6a7e985c",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "                and not story_guard.get(\"static_description_risk\")\n                and story_guard.get(\"dialogue_changes_state\", True)\n                and story_guard.get(\"ending_pressure_passed\", story_guard.get(\"ending_hook_detected\", True))\n                and story_guard.get(\"event_density_passed\", True)\n                and story_guard.get(\"state_change_interval_passed\", True)\n                and critique_critical <= 1\n                and (critique_score is None or critique_score >= 70)\n                and not critical_consistency\n                and len(major_consistency) < 2\n            )\n            scene_soft_pass = bool(scene_soft_pass or semantic_scene_soft_pass or dense_scene_soft_pass)",
+   "new_string": "                and not story_guard.get(\"static_description_risk\")\n                # T-13/T-14：三个三态字段统一 `is not False`（原默认值都是 True）。\n                and story_guard.get(\"dialogue_changes_state\") is not False\n                and story_guard.get(\"ending_pressure_passed\", story_guard.get(\"ending_hook_detected\", True))\n                and story_guard.get(\"event_density_passed\") is not False\n                and story_guard.get(\"state_change_interval_passed\") is not False\n                and critique_critical <= 1\n                and (critique_score is None or critique_score >= 70)\n                and not critical_consistency\n                and len(major_consistency) < 2\n            )\n            scene_soft_pass = bool(scene_soft_pass or semantic_scene_soft_pass or dense_scene_soft_pass)"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6488,
+  "ts": "2026-08-19T07:49:01.765Z",
+  "uuid": "8c58a2af-1459-4115-aecf-583b85ea67e9",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            if (\n                story_guard.get(\"expected_dialogue\")\n                and \"dialogue_changes_state\" in story_guard\n                and not story_guard.get(\"dialogue_changes_state\", True)\n            ):\n                blockers.append({\n                    \"source\": \"story_progression_guard\",\n                    \"code\": \"dialogue_does_not_change_state\",",
+   "new_string": "            # T-13：blocker 判据改成显式 `is False`。三态下 None 表示「不适用」，\n            # 绝不能进 blocker；而 expected_dialogue 为真时 `_evaluate_dialogue_changes_state`\n            # 只会返回 True/False（见那里的判定顺序注释），所以这道 blocker 的触发面不变。\n            if (\n                story_guard.get(\"expected_dialogue\")\n                and \"dialogue_changes_state\" in story_guard\n                and story_guard.get(\"dialogue_changes_state\") is False\n            ):\n                blockers.append({\n                    \"source\": \"story_progression_guard\",\n                    \"code\": \"dialogue_does_not_change_state\","
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6494,
+  "ts": "2026-08-19T07:50:14.262Z",
+  "uuid": "f1150aa6-728a-4409-9ddb-449619fd4751",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            density_soft_pass = (\n                story_dialogue_markers >= 8\n                and story_mission_hits >= 3\n                and story_guard.get(\"dialogue_changes_state\", True)\n                and story_guard.get(\"ending_pressure_passed\", story_guard.get(\"ending_hook_detected\", True))\n                and not story_guard.get(\"static_description_risk\")\n            )\n            if (\n                story_word_count >= 1800\n                and story_guard.get(\"event_density_passed\") is False",
+   "new_string": "            density_soft_pass = (\n                story_dialogue_markers >= 8\n                and story_mission_hits >= 3\n                # T-13：原默认值 True，映射成 `is not False`。\n                and story_guard.get(\"dialogue_changes_state\") is not False\n                and story_guard.get(\"ending_pressure_passed\", story_guard.get(\"ending_hook_detected\", True))\n                and not story_guard.get(\"static_description_risk\")\n            )\n            if (\n                story_word_count >= 1800\n                and story_guard.get(\"event_density_passed\") is False"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6508,
+  "ts": "2026-08-19T07:51:32.759Z",
+  "uuid": "273d641b-c37e-4086-8613-a119a5a059d3",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            if guard.get(\"expected_dialogue\") and \"dialogue_changes_state\" in guard and not guard.get(\"dialogue_changes_state\", True):\n                add(\"dialogue_does_not_change_state\")",
+   "new_string": "            # T-13：与 blocker 侧同一判据（`is False`），否则 warning 摘要会比 blocker 更严，\n            # 出现「前端标红了但没拦章」的不一致。\n            if guard.get(\"expected_dialogue\") and \"dialogue_changes_state\" in guard and guard.get(\"dialogue_changes_state\") is False:\n                add(\"dialogue_does_not_change_state\")"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6514,
+  "ts": "2026-08-19T07:52:30.841Z",
+  "uuid": "73a72c68-17be-4571-80fe-f346b6a01501",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "                and bool(guard.get(\"ending_pressure_passed\", guard.get(\"ending_hook_detected\", True)))\n                and bool(guard.get(\"event_density_passed\", True))\n                and bool(guard.get(\"state_change_interval_passed\", True))\n            )",
+   "new_string": "                and bool(guard.get(\"ending_pressure_passed\", guard.get(\"ending_hook_detected\", True)))\n                # T-14：同理，密度两态字段的 bool() 也要去掉。\n                and guard.get(\"event_density_passed\") is not False\n                and guard.get(\"state_change_interval_passed\") is not False\n            )"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6525,
+  "ts": "2026-08-19T07:53:40.752Z",
+  "uuid": "fd1c6ca7-c255-4522-9c87-649aad18c9ba",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        if guard.get(\"expected_dialogue\") and not guard.get(\"dialogue_changes_state\", True):\n            issues.append({\n                \"dimension\": \"dialogue\",",
+   "new_string": "        # T-13：定向修复清单也用 `is False`。None 表示「本章不适用对话维度」，\n        # 给它发一条「把对话改成两轮攻防」的返修指令是无意义的返工要求。\n        if guard.get(\"expected_dialogue\") and guard.get(\"dialogue_changes_state\") is False:\n            issues.append({\n                \"dimension\": \"dialogue\","
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6531,
+  "ts": "2026-08-19T07:54:57.801Z",
+  "uuid": "21c2a541-6ddc-43cf-9957-62bce1004e71",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            and int(story_guard.get(\"dialogue_marker_count\") or 0) >= 4\n            and not story_guard.get(\"static_description_risk\")\n            and story_guard.get(\"dialogue_changes_state\", True)\n            and story_guard.get(\"ending_pressure_passed\", story_guard.get(\"ending_hook_detected\", True))\n            and story_guard.get(\"event_density_passed\", True)\n        )\n        density_soft_pass = bool(\n            int(story_guard.get(\"mission_hit_count\") or 0) >= 4\n            and int(story_guard.get(\"dialogue_marker_count\") or 0) >= 8\n            and story_guard.get(\"dialogue_changes_state\", True)\n            and story_guard.get(\"ending_pressure_passed\", story_guard.get(\"ending_hook_detected\", True))",
+   "new_string": "            and int(story_guard.get(\"dialogue_marker_count\") or 0) >= 4\n            and not story_guard.get(\"static_description_risk\")\n            # T-13/T-14：首稿重试路径的两条软放行，判据与质量门侧保持一致。\n            and story_guard.get(\"dialogue_changes_state\") is not False\n            and story_guard.get(\"ending_pressure_passed\", story_guard.get(\"ending_hook_detected\", True))\n            and story_guard.get(\"event_density_passed\") is not False\n        )\n        density_soft_pass = bool(\n            int(story_guard.get(\"mission_hit_count\") or 0) >= 4\n            and int(story_guard.get(\"dialogue_marker_count\") or 0) >= 8\n            and story_guard.get(\"dialogue_changes_state\") is not False\n            and story_guard.get(\"ending_pressure_passed\", story_guard.get(\"ending_hook_detected\", True))"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6537,
+  "ts": "2026-08-19T07:56:49.653Z",
+  "uuid": "a8e0a35e-df18-439a-acd8-9183235ccec6",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        if story_guard.get(\"expected_dialogue\") and not story_guard.get(\"dialogue_changes_state\", True):\n            reasons.append(\"dialogue_does_not_change_state\")",
+   "new_string": "        # T-13：重试原因码判据与质量门 blocker 一致（`is False`）。\n        # 这条 reason 会驱动定向重试的返修指令，None 不应触发返工。\n        if story_guard.get(\"expected_dialogue\") and story_guard.get(\"dialogue_changes_state\") is False:\n            reasons.append(\"dialogue_does_not_change_state\")"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6548,
+  "ts": "2026-08-19T07:58:44.948Z",
+  "uuid": "925de31f-5a78-45f5-80ac-88f2ef87e4d9",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            or (ai_candidate.get(\"expected_dialogue\") and not ai_candidate.get(\"dialogue_changes_state\", True))\n            or (ai_word_count >= 1200 and not ai_candidate.get(\"ending_pressure_passed\", ai_candidate.get(\"ending_hook_detected\")))",
+   "new_string": "            # T-13：`is False` —— 这是「AI 稿有硬伤所以考虑换兜底稿」的判据，\n            # 「本章不适用对话维度」不是硬伤。\n            or (ai_candidate.get(\"expected_dialogue\") and ai_candidate.get(\"dialogue_changes_state\") is False)\n            or (ai_word_count >= 1200 and not ai_candidate.get(\"ending_pressure_passed\", ai_candidate.get(\"ending_hook_detected\")))"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6554,
+  "ts": "2026-08-19T08:00:49.096Z",
+  "uuid": "b7202d62-7bb8-4b3b-a461-07cca2f21065",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            or (fallback_candidate.get(\"dialogue_changes_state\") and not ai_candidate.get(\"dialogue_changes_state\"))\n            or (fallback_candidate.get(\"ending_pressure_passed\") and not ai_candidate.get(\"ending_pressure_passed\"))",
+   "new_string": "            # T-13：「兜底稿明显更好」要求兜底通过而 AI 稿**明确不通过**。\n            # 原写法用真假判断，None 会被算成「AI 稿不通过」，凭「不适用」就换稿。\n            or (fallback_candidate.get(\"dialogue_changes_state\") is True\n                and ai_candidate.get(\"dialogue_changes_state\") is False)\n            or (fallback_candidate.get(\"ending_pressure_passed\") and not ai_candidate.get(\"ending_pressure_passed\"))"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6589,
+  "ts": "2026-08-19T08:06:52.070Z",
+  "uuid": "bba4bccf-3020-4201-b971-56f7fb3705fa",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "    @classmethod\n    def _evaluate_event_density(cls, text: str, *, word_count: int) -> Dict[str, Any]:\n        if word_count < 800:\n            return {\n                \"event_density_passed\": True,\n                \"long_chapter_density_passed\": True,\n                \"state_change_interval_passed\": True,\n                \"progression_unit_count\": 0,\n                \"story_unit_count\": 0,\n                \"progression_unit_rate\": 1.0,\n                \"event_density_per_1000\": 0.0,\n                \"state_change_window_pass_rate\": 1.0,\n                \"max_plain_unit_run\": 0,\n                \"max_plain_unit_run_ratio\": 0.0,\n            }\n",
+   "new_string": "    # T-14：短样本不评估事件密度的字数下限。**不要下调**——800 字以下切不出\n    # 足够的 story_unit，分位统计没有意义，密度会被单句噪声主导。真实语料\n    # （n=138）里 <800 字只有 2 条（0.014），p03 已经是 950，下调换不到什么。\n    EVENT_DENSITY_MIN_SAMPLE_CHARS = 800\n\n    @classmethod\n    def _evaluate_event_density(cls, text: str, *, word_count: int) -> Dict[str, Any]:\n        \"\"\"事件密度评估。样本过短时返回**「未评估」而不是「通过」**。\n\n        T-14（D-08）。改造前这个分支谎报 `passed=True` + `progression_unit_rate=1.0`\n        + `event_density_per_1000=0.0`，三个数字互相矛盾：推进单元 0 个、密度 0、\n        推进率却是 100%。历史库里实测有 2 条快照就长这样，用户看到的是\n        「推进单元 0 个，推进率 100%，密度达标」。\n\n        现在三个 passed 与四个比率一律返回 `None`（= 未评估），并显式给出\n        `event_density_evaluated=False` 与跳过原因。消费侧全部改成 `is not False`，\n        所以「未评估」不会被当成失败去拦章，也不会被当成正向证据去激活软放行。\n        \"\"\"\n        if word_count < cls.EVENT_DENSITY_MIN_SAMPLE_CHARS:\n            return {\n                # 这两个字段是「未评估」与「评估后不通过」的唯一区分依据。\n                # 前端靠 event_density_evaluated 显示中性提示而不是红色风险。\n                \"event_density_evaluated\": False,\n                \"event_density_skip_reason\": \"sample_too_short\",\n                \"event_density_min_sample_chars\": cls.EVENT_DENSITY_MIN_SAMPLE_CHARS,\n                # 三个 passed 判定：None 而不是 True。绝不能改回 True——\n                # 那是拿「没测」当「测过且合格」，会连带白送 4 条软放行。\n                \"event_density_passed\": None,\n                \"long_chapter_density_passed\": None,\n                \"state_change_interval_passed\": None,\n                # 计数是真实的 0（确实没统计出推进单元），保留；\n                # 但四个**比率/占比**没有分母，必须 None，不能给 1.0 / 0.0。\n                \"progression_unit_count\": 0,\n                \"story_unit_count\": 0,\n                \"progression_unit_rate\": None,\n                \"event_density_per_1000\": None,\n                \"state_change_window_pass_rate\": None,\n                \"max_plain_unit_run\": 0,\n                \"max_plain_unit_run_ratio\": None,\n            }\n"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6595,
+  "ts": "2026-08-19T08:07:48.230Z",
+  "uuid": "59cc973b-e433-445e-b12f-49ce1512c0b0",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        return {\n            \"event_density_passed\": event_density_passed,\n            \"long_chapter_density_passed\": long_chapter_passed,\n            \"state_change_interval_passed\": state_interval_passed,\n            \"progression_unit_count\": progression_count,",
+   "new_string": "        return {\n            # T-14：正常路径显式标记「评估过了」，与短路分支的 False 成对。\n            # 消费方判断「有没有测」只看这个字段，不要靠 passed is None 反推。\n            \"event_density_evaluated\": True,\n            \"event_density_passed\": event_density_passed,\n            \"long_chapter_density_passed\": long_chapter_passed,\n            \"state_change_interval_passed\": state_interval_passed,\n            \"progression_unit_count\": progression_count,"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6609,
+  "ts": "2026-08-19T08:08:50.186Z",
+  "uuid": "f173bf36-8136-4be9-911d-aca1c9e06dcf",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "        score += 80 if event_density.get(\"event_density_passed\") else -180\n        score += 60 if event_density.get(\"state_change_interval_passed\") else -130\n        score += 90 if event_density.get(\"long_chapter_density_passed\") else -180",
+   "new_string": "        # T-14：三个密度判定现在是三态。None（样本过短未评估）既不加也不减——\n        # 原写法 `if ... else -负分` 会把 None 当失败，三项合计倒扣 490 分，\n        # 等于凭「章节短到测不了」判它密度不合格。**必须显式三分支。**\n        for _metric_key, _bonus, _penalty in (\n            (\"event_density_passed\", 80, 180),\n            (\"state_change_interval_passed\", 60, 130),\n            (\"long_chapter_density_passed\", 90, 180),\n        ):\n            _metric_value = event_density.get(_metric_key)\n            if _metric_value is True:\n                score += _bonus\n            elif _metric_value is False:\n                score -= _penalty"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6615,
+  "ts": "2026-08-19T08:09:32.290Z",
+  "uuid": "0834ab4d-70e9-496c-88a9-3664867a95ee",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"event_density_passed\": bool(event_density.get(\"event_density_passed\")),\n            \"chapter_artifact_markers\": artifact_markers.get(\"chapter_artifact_markers\"),\n            \"chapter_artifact_marker_examples\": artifact_markers.get(\"chapter_artifact_marker_examples\", []),\n            \"long_chapter_density_passed\": bool(event_density.get(\"long_chapter_density_passed\")),\n            \"state_change_interval_passed\": bool(event_density.get(\"state_change_interval_passed\")),\n            \"progression_unit_count\": event_density.get(\"progression_unit_count\", 0),\n            \"story_unit_count\": event_density.get(\"story_unit_count\", 0),\n            \"progression_unit_rate\": event_density.get(\"progression_unit_rate\", 0),\n            \"event_density_per_1000\": event_density.get(\"event_density_per_1000\", 0),\n            \"state_change_window_pass_rate\": event_density.get(\"state_change_window_pass_rate\", 0),\n            \"max_plain_unit_run\": event_density.get(\"max_plain_unit_run\", 0),\n            \"max_plain_unit_run_ratio\": event_density.get(\"max_plain_unit_run_ratio\", 0),",
+   "new_string": "            # T-14：**三个 passed 不能再套 bool()**，比率也不能再用 `, 0` 兜底——\n            # 那两件事合起来正是历史库里那 2 条「推进单元 0 个 / 推进率 100% / 密度达标」\n            # 矛盾快照的成因。None 原样透出，前端靠 event_density_evaluated 区分\n            # 「未评估」和「不通过」。\n            \"event_density_evaluated\": event_density.get(\"event_density_evaluated\"),\n            \"event_density_skip_reason\": event_density.get(\"event_density_skip_reason\"),\n            \"event_density_passed\": event_density.get(\"event_density_passed\"),\n            \"chapter_artifact_markers\": artifact_markers.get(\"chapter_artifact_markers\"),\n            \"chapter_artifact_marker_examples\": artifact_markers.get(\"chapter_artifact_marker_examples\", []),\n            \"long_chapter_density_passed\": event_density.get(\"long_chapter_density_passed\"),\n            \"state_change_interval_passed\": event_density.get(\"state_change_interval_passed\"),\n            \"progression_unit_count\": event_density.get(\"progression_unit_count\", 0),\n            \"story_unit_count\": event_density.get(\"story_unit_count\", 0),\n            \"progression_unit_rate\": event_density.get(\"progression_unit_rate\"),\n            \"event_density_per_1000\": event_density.get(\"event_density_per_1000\"),\n            \"state_change_window_pass_rate\": event_density.get(\"state_change_window_pass_rate\"),\n            \"max_plain_unit_run\": event_density.get(\"max_plain_unit_run\", 0),\n            \"max_plain_unit_run_ratio\": event_density.get(\"max_plain_unit_run_ratio\"),"
+  }
+ },
+ {
+  "session": "829df125-c0b9-4848-8d1f-43fdcb8024aa",
+  "jsonl_line": 6629,
+  "ts": "2026-08-19T08:10:41.696Z",
+  "uuid": "8cd0b29e-3f00-4458-a8ed-bf5590bfc974",
+  "tool": "Edit",
+  "input": {
+   "replace_all": false,
+   "file_path": "D:\\小说写作\\xuanqiong-wenshu\\backend\\app\\services\\pipeline_orchestrator.py",
+   "old_string": "            \"event_density_passed\": event_density.get(\"event_density_passed\"),\n            \"long_chapter_density_passed\": event_density.get(\"long_chapter_density_passed\"),\n            \"state_change_interval_passed\": event_density.get(\"state_change_interval_passed\"),\n            \"progression_unit_count\": event_density.get(\"progression_unit_count\", 0),\n            \"event_density_per_1000\": event_density.get(\"event_density_per_1000\", 0),\n            \"state_change_window_pass_rate\": event_density.get(\"state_change_window_pass_rate\", 0),\n            \"quality_issue_summary\": quality_issue_summary,",
+   "new_string": "            # T-14：guard 顶层同样原样透出，比率去掉 `, 0` 兜底（未评估 ≠ 0.0）。\n            \"event_density_evaluated\": event_density.get(\"event_density_evaluated\"),\n            \"event_density_skip_reason\": event_density.get(\"event_density_skip_reason\"),\n            \"event_density_passed\": event_density.get(\"event_density_passed\"),\n            \"long_chapter_density_passed\": event_density.get(\"long_chapter_density_passed\"),\n            \"state_change_interval_passed\": event_density.get(\"state_change_interval_passed\"),\n            \"progression_unit_count\": event_density.get(\"progression_unit_count\", 0),\n            \"event_density_per_1000\": event_density.get(\"event_density_per_1000\"),\n            \"state_change_window_pass_rate\": event_density.get(\"state_change_window_pass_rate\"),\n            \"quality_issue_summary\": quality_issue_summary,"
+  }
+ }
+]

@@ -180,6 +180,59 @@ class AgentExecutionFactService:
             'latest_first_token_at': summary['latest_attempt_at'],
         }
 
+    async def project_provider_usage_summary_readable(
+        self,
+        *,
+        project_id: str,
+        user_id: int,
+        since: datetime | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        from ..services.project_access_service import ProjectAccessService
+        await ProjectAccessService(self.session).require_project_read(project_id, user_id)
+        bounded_limit = min(max(int(limit), 1), 100)
+        project = (await self.session.execute(
+            select(NovelProject).where(NovelProject.id == project_id),
+        )).scalar_one_or_none()
+        if project is None:
+            raise AgentExecutionFactNotFound('小说项目不存在')
+        conditions = [AgentRun.project_id == project.id]
+        if since is not None:
+            conditions.append(AgentRun.created_at >= since)
+        runs = (await self.session.execute(
+            select(AgentRun).where(*conditions)
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .limit(bounded_limit)
+        )).scalars().all()
+        return self._aggregate_project_runs(project.id, list(runs))
+
+    @staticmethod
+    def _aggregate_project_runs(project_id: str, runs: list[AgentRun]) -> dict[str, Any]:
+        aggregate = {
+            'project_id': project_id, 'run_count': len(runs), 'attempt_count': 0,
+            'succeeded_attempts': 0, 'failed_attempts': 0, 'fallback_attempts': 0,
+            'first_token_attempts': 0, 'digest_attempts': 0, 'selected_attempts': 0,
+            'last_error_category': None, 'latest_attempt_at': None, 'runs': [],
+        }
+        for run in runs:
+            summary = AgentExecutionFactService._provider_attempt_summary(run.context_json if isinstance(run.context_json, Mapping) else {})
+            for field in ('attempt_count','succeeded_attempts','failed_attempts','fallback_attempts','first_token_attempts','digest_attempts','selected_attempts'):
+                aggregate[field] += summary[field]
+            if summary['last_error_category']:
+                aggregate['last_error_category'] = summary['last_error_category']
+            if summary['latest_attempt_at'] and (aggregate['latest_attempt_at'] is None or summary['latest_attempt_at'] > aggregate['latest_attempt_at']):
+                aggregate['latest_attempt_at'] = summary['latest_attempt_at']
+            aggregate['runs'].append({
+                'run_id': run.id,
+                'status': run.status,
+                'attempt_count': summary['attempt_count'],
+                'failed_attempts': summary['failed_attempts'],
+                'fallback_attempts': summary['fallback_attempts'],
+                'last_error_category': summary['last_error_category'],
+                'latest_attempt_at': summary['latest_attempt_at'],
+            })
+        return aggregate
+
     async def project_provider_usage_summary(
         self,
         *,

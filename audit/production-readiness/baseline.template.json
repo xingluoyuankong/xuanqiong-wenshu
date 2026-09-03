@@ -1,0 +1,68 @@
+{
+  "audit_id": "production-readiness-batch0",
+  "captured_at": null,
+  "declared_count": 97,
+  "source_enumerated_count": 35,
+  "enumerated_count": 97,
+  "domain_count": 13,
+  "repository": {
+    "root": "D:/小说写作/xuanqiong-wenshu",
+    "commit": null,
+    "dirty": null,
+    "dirty_files": [],
+    "dirty_files_sha256": null
+  },
+  "contract": {
+    "openapi_sha256": null,
+    "task_runtime_event_schema_sha256": null,
+    "export_manifest_schema_sha256": null,
+    "database_schema_revision": null
+  },
+  "environment": {
+    "os": null,
+    "python": null,
+    "node": null,
+    "npm": null,
+    "sqlite": null,
+    "mysql": null
+  },
+  "commands": {
+    "backend_full": {
+      "command": "cd backend; .\\.venv\\Scripts\\python.exe -m pytest -q",
+      "status": "not_run",
+      "exit_code": null,
+      "summary": null,
+      "evidence": null
+    },
+    "frontend_typecheck": {
+      "command": "npm run type-check",
+      "status": "not_run",
+      "exit_code": null,
+      "summary": null,
+      "evidence": null
+    },
+    "frontend_tests": {
+      "command": "npm run test:run",
+      "status": "not_run",
+      "exit_code": null,
+      "summary": null,
+      "evidence": null
+    },
+    "frontend_build": {
+      "command": "npm run build-only",
+      "status": "not_run",
+      "exit_code": null,
+      "summary": null,
+      "evidence": null
+    }
+  },
+  "evidence_policy": {
+    "sensitive_values_redacted": true,
+    "tests_must_include_negative_verification": true,
+    "allowed_initial_statuses": ["CONFIRMED", "IMPLEMENTED_UNVERIFIED"]
+  },
+  "artifacts": {
+    "directory": "audit/production-readiness/evidence",
+    "files": []
+  }
+}

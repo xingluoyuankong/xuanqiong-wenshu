@@ -1,0 +1,88 @@
+    async def _update_generation_runtime(
+        self,
+        chapter: Chapter,
+        *,
+        generation_run_id: Optional[str],
+        stage: str,
+        message: str,
+        progress_percent: int,
+        level: str = "info",
+        extra: Optional[Dict[str, Any]] = None,
+        event_kind: Optional[str] = None,
+        title: Optional[str] = None,
+        summary: Optional[str] = None,
+        content_preview: Optional[str] = None,
+        metrics: Optional[Dict[str, Any]] = None,
+        artifact_refs: Optional[Dict[str, Any]] = None,
+        developer_detail: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not generation_run_id:
+            return
+        await self.session.refresh(chapter)
+        payload = self._parse_generation_runtime(chapter.real_summary)
+        runtime = payload.get("generation_runtime") if isinstance(payload.get("generation_runtime"), dict) else {}
+        current_run_id = runtime.get("run_id")
+        if current_run_id and current_run_id != generation_run_id:
+            return
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        events = runtime.get("events") if isinstance(runtime.get("events"), list) else []
+        event = {
+            "at": now_iso,
+            "stage": stage,
+            "level": level,
+            "message": message,
+            "progress_percent": max(0, min(100, int(progress_percent))),
+        }
+        if event_kind:
+            event["kind"] = event_kind
+        if title:
+            event["title"] = title
+        if summary:
+            event["summary"] = summary
+        if content_preview:
+            event["content_preview"] = content_preview
+        if metrics:
+            event["metrics"] = self._compact_runtime_value(metrics)
+        if artifact_refs:
+            event["artifact_refs"] = self._compact_runtime_value(artifact_refs)
+        if developer_detail:
+            event["developer_detail"] = self._compact_runtime_value(developer_detail)
+        if extra:
+            compact_extra = {key: value for key, value in extra.items() if value is not None}
+            if compact_extra:
+                event["metadata"] = self._compact_runtime_value(compact_extra)
+
+        allowed_actions = ["refresh_status", "cancel_generation"]
+        if stage == "waiting_for_confirm":
+            allowed_actions = ["refresh_status", "confirm_version", "review_versions"]
+        elif stage == "failed":
+            allowed_actions = ["refresh_status", "retry_generation"]
+
+        normalized_runtime: Dict[str, Any] = {
+            "run_id": generation_run_id,
+            "cancel_requested": bool(runtime.get("cancel_requested")),
+            "progress_stage": stage,
+            "progress_message": message,
+            "progress_percent": max(0, min(100, int(progress_percent))),
+            "allowed_actions": allowed_actions,
+            "started_at": runtime.get("started_at") or now_iso,
+            "updated_at": now_iso,
+            "heartbeat_at": now_iso,
+            "chapter_number": chapter.chapter_number,
+            "events": [*events[-199:], event],
+        }
+        if runtime.get("reason"):
+            normalized_runtime["reason"] = runtime.get("reason")
+        if extra:
+            normalized_runtime.update({
+                key: self._compact_runtime_value(value)
+                for key, value in extra.items()
+                if value is not None
+            })
+        target_word_count = int(normalized_runtime.get("target_word_count") or 0)
+        normalized_runtime["estimated_remaining_seconds"] = self._estimate_remaining_seconds(stage, target_word_count)
+        normalized_runtime = self._compact_runtime_payload(normalized_runtime)
+        chapter.real_summary = json.dumps({"generation_runtime": normalized_runtime}, ensure_ascii=False)
+        await self.session.commit()
+

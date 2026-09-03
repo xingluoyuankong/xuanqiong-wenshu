@@ -1,0 +1,59 @@
+........................................................................ [  8%]
+........................................................................ [ 16%]
+........................................................................ [ 24%]
+............F..........................F....F......FF.F................. [ 33%]
+..........FFF.................FFF.F.F................................... [ 41%]
+........................................................................ [ 49%]
+........................................................................ [ 57%]
+........................................................................ [ 66%]
+......FFFF...........................................F...........F...... [ 74%]
+........................................................................ [ 82%]
+....FFFFFF..FFFF.FFFFFFFFFF.FFF.............F........................... [ 91%]
+........................................................................ [ 99%]
+.....                                                                    [100%]
+=========================== short test summary info ===========================
+FAILED app/services/test_candidate_style_diversity.py::test_default_candidate_hints_use_distinct_narrative_strategies
+FAILED app/services/test_chapter_writing_contract_snapshot.py::test_pipeline_exposes_contract_snapshot_metadata_without_db_write
+FAILED app/services/test_cloud_provider_resilience.py::test_scene_and_local_rewrite_timeouts_scale_for_cloud
+FAILED app/services/test_compat_generation_config.py::test_chapter_mission_timeout_scales_with_target_length
+FAILED app/services/test_compat_generation_config.py::test_short_quality_config_disables_expensive_writing_ledgers_by_default
+FAILED app/services/test_compat_generation_config.py::test_chapter_generation_max_tokens_scales_with_target_length
+FAILED app/services/test_continuity_inherit_quality.py::test_continuity_inherit_missing_is_warning_and_penalty
+FAILED app/services/test_continuity_inherit_quality.py::test_continuity_inherit_exact_match_in_opening_is_recognized
+FAILED app/services/test_continuity_inherit_quality.py::test_continuity_inherit_late_is_a_weak_warning
+FAILED app/services/test_deterministic_cleanup.py::test_deterministic_cleanup_removes_markdown_chrome_and_records_diff
+FAILED app/services/test_deterministic_cleanup.py::test_deterministic_cleanup_aborts_when_result_falls_below_minimum
+FAILED app/services/test_deterministic_cleanup.py::test_deterministic_cleanup_is_wired_before_quality_processing_and_before_persistence
+FAILED app/services/test_deterministic_cleanup_integration.py::test_generate_chapter_keeps_both_cleanup_hooks_and_runtime_diff_recording
+FAILED app/services/test_deterministic_cleanup_integration.py::test_t17_cleanup_helper_still_enforces_safe_diff_contract
+FAILED app/services/test_generation_run_rebind.py::test_rebind_generation_run_overwrites_stale_run_id
+FAILED app/services/test_generation_run_rebind.py::test_rebind_is_noop_when_run_already_active
+FAILED app/services/test_generation_run_rebind.py::test_assert_generation_active_passes_after_rebind
+FAILED app/services/test_generation_run_rebind.py::test_formal_generate_chapter_entry_rebinds_before_runtime_updates
+FAILED app/services/test_longform_generation_service.py::test_longform_checkpoint_persistence_failure_stops_pipeline
+FAILED app/services/test_multi_chapter_continuity_production.py::test_production_multi_chapter_short_and_long_continuity_chain
+FAILED app/services/test_quality_enhancements.py::test_reversal_quality_observes_late_reversal_without_blocking
+FAILED app/services/test_quality_enhancements.py::test_content_balance_penalizes_only_extreme_dialogue
+FAILED app/services/test_quality_enhancements.py::test_mission_quality_marks_all_five_empty_mission_warnings
+FAILED app/services/test_quality_enhancements.py::test_mission_quality_accepts_complete_mission
+FAILED app/services/test_quality_enhancements.py::test_mission_quality_does_not_require_inherit_on_first_chapter
+FAILED app/services/test_quality_enhancements.py::test_quality_metric_snapshot_persists_the_same_total_score_as_the_story_guard
+FAILED app/services/test_quality_gate_repair_sabotage.py::test_t22_quality_gate_patch_repair_issues_rebuild_trusted_mission_instruction
+FAILED app/services/test_quality_gate_repair_sabotage.py::test_t22_repair_passes_quality_gate_patch_into_revision_request
+FAILED app/services/test_quality_gate_repair_sabotage.py::test_t22_sabotage_removing_patch_issue_injection_fails_request_assertion
+FAILED app/services/test_quality_gate_severity.py::test_gate_demotes_uncertain_scene_and_dialogue_issues_to_warnings
+FAILED app/services/test_quality_gate_severity.py::test_gate_records_high_critique_exemptions
+FAILED app/services/test_quality_gate_severity.py::test_gate_emits_focus_and_continuity_warnings_with_mission_specific_patches
+FAILED app/services/test_quality_gate_severity.py::test_gate_warning_patch_includes_scene_and_dialogue_mission_context
+FAILED app/services/test_quality_gate_severity.py::test_gate_reports_missing_mission_turn_as_permanent_warning
+FAILED app/services/test_quality_gate_severity.py::test_e11_severity_matrix_covers_all_structural_issue_classes
+FAILED app/services/test_quality_observability.py::test_dialogue_speaker_distribution_observes_dominant_speaker
+FAILED app/services/test_quality_observability.py::test_scene_transition_observes_unpressured_hard_cut
+FAILED app/services/test_quality_observability.py::test_static_run_requires_character_subject_for_action_marker
+FAILED app/services/test_quality_observability.py::test_reversal_detects_a_late_repeat_of_an_early_signal
+FAILED app/services/test_quality_observability.py::test_scene_transition_observes_summary_closure_before_next_scene
+FAILED app/services/test_quality_score_eligibility.py::test_eligibility_score_is_capped_at_thirty_five_percent_of_baseline
+FAILED app/services/test_quality_score_eligibility.py::test_score_gap_for_bad_samples_is_spread_across_quality_dimensions
+FAILED app/services/test_quality_score_sabotage.py::test_t16_bad_sample_gap_has_numeric_components_across_at_least_three_dimensions
+FAILED app/services/test_static_repetition_sabotage.py::test_t09_sabotage_treating_every_paragraph_as_action_breaks_scenery_guard
+44 failed, 825 passed in 46.16s

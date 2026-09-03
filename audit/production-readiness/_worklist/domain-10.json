@@ -1,0 +1,48 @@
+{
+ "domain": "管理、日志、技能与限额",
+ "slug": "domain-10",
+ "nodes": [
+  {
+   "id": "PR-073",
+   "title": "管理台 RBAC 与停用用户",
+   "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  },
+  {
+   "id": "PR-074",
+   "title": "管理员操作 before-after 审计",
+   "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-075",
+   "title": "运行日志统一 TaskRuntime 事件源",
+   "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+   "severity": "P0",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-076",
+   "title": "系统配置版本、校验与回滚",
+   "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-077",
+   "title": "请求限额与 Token 预算可解释",
+   "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+   "severity": "P1",
+   "status": "IMPLEMENTED_UNVERIFIED"
+  },
+  {
+   "id": "PR-078",
+   "title": "写作技能来源校验与执行沙箱",
+   "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+   "severity": "P0",
+   "status": "CONFIRMED"
+  }
+ ]
+}

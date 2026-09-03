@@ -1,0 +1,45 @@
+            "repair_summary": {
+                "status": "applied",
+                "issue_count": len(structural_issues),
+                "issue_codes_before": list(structural_quality_gate.get("quality_issue_codes") or []),
+            },
+        }
+
+    def _build_structural_gate_repair_context(
+        self,
+        *,
+        outline_title: str,
+        outline_summary: str,
+        chapter_mission: Optional[dict],
+        history_context: Dict[str, Any],
+        project_memory_text: str,
+        style_context: Any,
+        writer_blueprint: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """构造结构质量门定向修复用的上下文。
+
+        与 reader_polish / self_critique 局部修复同源，聚焦“修结构而非补描写”：把大纲目标、
+        章节任务、前情脉络与人物设定交给 revise_chapter，让它按拦截原因做定向修复，而不是脱离
+        上下文重新发挥。只依赖 generate_chapter 主体无条件定义的变量，避免闸门时点取到未定义值。
+        """
+        return {
+            "outline_title": outline_title,
+            "outline_summary": outline_summary,
+            "chapter_mission": chapter_mission,
+            "previous_summary": history_context.get("previous_summary"),
+            "previous_tail": history_context.get("previous_tail"),
+            "previous_chapter_bundle": history_context.get("previous_chapter_bundle"),
+            "recent_track": history_context.get("recent_track"),
+            "plot_arc_digest": history_context.get("plot_arc_digest"),
+            "project_memory": project_memory_text,
+            "style_context": style_context,
+            "character_profiles": json.dumps(writer_blueprint.get("characters", []), ensure_ascii=False),
+            "emotion_target": (chapter_mission or {}).get("emotion_target"),
+            "reader_polish_hard_rule": (
+                "本轮修复必须优先修结构问题：场景兑现、对话改局势、结尾递压、连续性；"
+                "禁止把修复变成补景物、补心理、补形容词。"
+            ),
+        }
+
+    async def _rebind_generation_run_if_needed(
+        self,

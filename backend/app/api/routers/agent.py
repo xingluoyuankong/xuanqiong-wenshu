@@ -36,7 +36,7 @@ from ...agent.schemas import (
 from ...core.config import settings
 from ...core.dependencies import get_current_admin, get_current_user
 from ...db.session import AsyncSessionLocal, get_session
-from ...models.agent import AgentArtifactRef, AgentRun
+from ...models.agent import AgentArtifactRef, AgentRun, AgentSession
 from ...schemas.user import UserInDB
 from ...services.llm_service import LLMService
 from ...services.agent_context_service import AgentContextService
@@ -175,7 +175,7 @@ async def list_agent_project_entity_summaries(
 @router.get("/sessions", response_model=list[AgentSessionRead])
 async def list_agent_sessions(project_id: str | None = Query(default=None), limit: Annotated[int, Query(ge=1, le=100)] = 50, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> list[AgentSessionRead]:
     try:
-        return await AgentRuntimeService(session).list_sessions(user_id=current_user.id, project_id=project_id, limit=limit)
+        return await AgentRuntimeService(session).list_sessions_readable(user_id=current_user.id, project_id=project_id, limit=limit)
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
@@ -192,9 +192,9 @@ async def archive_agent_session(session_id: str, session: AsyncSession = Depends
 async def get_agent_session(session_id: str, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> AgentSessionDetail:
     try:
         service = AgentRuntimeService(session)
-        item = await service.get_session(session_id, current_user.id)
-        messages = await service.list_messages(session_id=session_id, user_id=current_user.id)
-        runs = list((await session.execute(select(AgentRun).where(AgentRun.session_id == session_id, AgentRun.user_id == current_user.id).order_by(AgentRun.created_at.asc()))).scalars().all())
+        item = await service.get_session_readable(session_id, current_user.id)
+        messages = await service.list_messages_readable(session_id=session_id, user_id=current_user.id)
+        runs = list((await session.execute(select(AgentRun).where(AgentRun.session_id == session_id).order_by(AgentRun.created_at.asc()))).scalars().all())
         payload = {"id": item.id, "user_id": item.user_id, "project_id": item.project_id, "title": item.title, "status": item.status, "created_at": item.created_at, "updated_at": item.updated_at, "messages": messages, "runs": runs}
         return AgentSessionDetail.model_validate(payload)
     except (AgentRuntimeError, SQLAlchemyError) as exc:
@@ -506,11 +506,13 @@ def resolve_agent_stream_cursor(last_event_id: str | None, after_sequence: int =
 
 
 async def _validate_agent_stream_scope(*, session_id: str, run_id: str, user_id: int) -> None:
-    """Validate stream ownership before sending response headers."""
+    """Validate stream access for owners, project members, and administrators."""
     async with AsyncSessionLocal() as db:
         service = AgentRuntimeService(db)
-        item = await service.get_session(session_id, user_id)
-        run = await service.get_run(run_id, user_id)
+        run = await service.get_readable_run(run_id, user_id)
+        item = (await db.execute(select(AgentSession).where(AgentSession.id == session_id))).scalar_one_or_none()
+        if item is None:
+            raise AgentNotFound("agent session not found")
         if run.session_id != item.id:
             raise AgentScopeViolation("run does not belong to session")
 
@@ -533,11 +535,11 @@ async def stream_agent_events(session_id: str, run_id: str, request: Request, af
             async with AsyncSessionLocal() as db:
                 service = AgentRuntimeService(db)
                 try:
-                    item = await service.get_session(session_id, user_id)
-                    run = await service.get_run(run_id, user_id)
-                    if run.session_id != item.id:
+                    item = (await db.execute(select(AgentSession).where(AgentSession.id == session_id))).scalar_one_or_none()
+                    run = await service.get_readable_run(run_id, user_id)
+                    if item is None or run.session_id != item.id:
                         return
-                    events = await service.list_events(run_id=run_id, user_id=user_id, after_sequence=cursor, limit=500)
+                    events = await service.list_events_readable(run_id=run_id, user_id=user_id, after_sequence=cursor, limit=500)
                 except AgentRuntimeError:
                     return
                 except SQLAlchemyError:
@@ -910,7 +912,7 @@ async def list_agent_run_reasoning(
     """Read paginated Provider reasoning fragments for one user-owned Run."""
     try:
         service = AgentRuntimeService(session)
-        rows = await service.list_reasoning_chunks(
+        rows = await service.list_reasoning_chunks_readable(
             run_id=run_id,
             user_id=current_user.id,
             after_sequence=after_sequence,
@@ -949,7 +951,7 @@ async def list_agent_run_activity(
 ) -> list[AgentEventRead]:
     """Read the durable, replay-safe activity ledger for one user-owned Run."""
     try:
-        return await AgentRuntimeService(session).list_events(
+        return await AgentRuntimeService(session).list_events_readable(
             run_id=run_id,
             user_id=current_user.id,
             after_sequence=after_sequence,
@@ -969,7 +971,7 @@ async def get_agent_project_provider_usage_summary(
 ) -> AgentProjectProviderUsageSummaryRead:
     """Return a bounded, payload-free Provider usage aggregate for one user-owned project."""
     try:
-        summary = await AgentExecutionFactService(session).project_provider_usage_summary(
+        summary = await AgentExecutionFactService(session).project_provider_usage_summary_readable(
             project_id=project_id,
             user_id=current_user.id,
             since=since,

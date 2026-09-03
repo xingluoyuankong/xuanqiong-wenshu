@@ -1,0 +1,32 @@
+        closure_hits = [marker for marker in cls.ENDING_CLOSURE_MARKERS if marker in ending_excerpt]
+        # D-24：末段自身的命中情况。语义命中落在窗内但不在末段里，说明压力来自正文而非结尾。
+        core_semantic_hits = [marker for marker in cls.ENDING_SEMANTIC_HOOK_MARKERS if marker in ending_core]
+        core_weak_hits = [marker for marker in cls.ENDING_WEAK_HOOK_MARKERS if marker in ending_core]
+        core_deflating = bool(
+            not core_semantic_hits
+            and (
+                len(core_weak_hits) >= cls.ENDING_CORE_WEAK_ONLY_LIMIT
+                or len(ending_core) >= cls.ENDING_CORE_FLAT_CHARS
+            )
+        )
+        # 语义压力是必要条件：只靠两个问号叹号骗不过章末压力门。
+        generic_pass = bool(semantic_hits) and (len(semantic_hits) + len(weak_hits)) >= 2
+        mission_hook_pass = bool(mission_hook_hits and (semantic_hits or weak_hits))
+        passed = bool(
+            (deliver_hits or mission_hook_pass or generic_pass)
+            and not closure_hits
+            and not core_deflating
+        )
+        return {
+            "ending_pressure_passed": passed,
+            "ending_pressure_hits": (deliver_hits + mission_hook_hits + semantic_hits + weak_hits)[:10],
+            "mission_hook_hits": mission_hook_hits[:6],
+            "ending_semantic_hit_count": len(semantic_hits),
+            "ending_weak_hit_count": len(weak_hits),
+            "flat_closure_markers": closure_hits[:4],
+            # D-24 第 3 条要求：语义命中落在尾窗哪个位置必须可观测，否则误杀无法诊断。
+            "ending_core_chars": len(ending_core),
+            "ending_core_semantic_hit_count": len(core_semantic_hits),
+            "ending_core_weak_hit_count": len(core_weak_hits),
+            "ending_core_deflating": core_deflating,
+        }

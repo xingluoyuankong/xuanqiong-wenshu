@@ -1,0 +1,746 @@
+[
+ {
+  "domain": "身份、权限与资产隔离",
+  "nodes": [
+   {
+    "id": "PR-001",
+    "title": "登录与令牌生命周期",
+    "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-002",
+    "title": "生产环境禁用匿名默认用户",
+    "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-003",
+    "title": "项目 owner 权限矩阵",
+    "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-004",
+    "title": "任务 owner 与项目双校验",
+    "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-005",
+    "title": "SSE 持续鉴权与资源隔离",
+    "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+    "severity": "P0",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-006",
+    "title": "上传下载路径与文件授权",
+    "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-007",
+    "title": "管理员显式运维边界与审计",
+    "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-008",
+    "title": "敏感字段统一脱敏与大小限制",
+    "location": "backend/app/api/dependencies.py; backend/app/api/routers/auth.py; backend/app/services/novel_service.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   }
+  ]
+ },
+ {
+  "domain": "统一任务中心与事件协议",
+  "nodes": [
+   {
+    "id": "PR-009",
+    "title": "attempt 与 lease_generation 代际隔离",
+    "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-010",
+    "title": "全部状态写入数据库 CAS",
+    "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-011",
+    "title": "幂等键稳定业务作用域",
+    "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-012",
+    "title": "普通用户不可调用 worker 写接口",
+    "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-013",
+    "title": "统一持久化 dispatcher",
+    "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-014",
+    "title": "业务内存字典降为进程句柄",
+    "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-015",
+    "title": "取消状态最终收敛",
+    "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-016",
+    "title": "stale 扫描与自动恢复",
+    "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-017",
+    "title": "统一事件 envelope 与通道",
+    "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-018",
+    "title": "SSE 游标回放、去重与终态关闭",
+    "location": "backend/app/models/task_runtime.py; backend/app/services/task_runtime.py; backend/app/api/routers/task_runtime.py",
+    "severity": "P0",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   }
+  ]
+ },
+ {
+  "domain": "版本化创作结构资产",
+  "nodes": [
+   {
+    "id": "PR-019",
+    "title": "创作意图与长度合同 revision",
+    "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-020",
+    "title": "蓝图 revision 与 If-Match",
+    "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-021",
+    "title": "全书总纲 canonical shape",
+    "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-022",
+    "title": "分卷范围完整且无重叠",
+    "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-023",
+    "title": "故事弧与剧情线稳定 ID",
+    "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-024",
+    "title": "章节纲富字段 revision",
+    "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-025",
+    "title": "ScenePlan 与 Scene 稳定资产",
+    "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-026",
+    "title": "结构资产回填、双读与 checksum",
+    "location": "backend/app/api/routers/novels.py; backend/app/api/routers/outline.py; backend/app/api/routers/writer.py; backend/app/models/novel.py",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   }
+  ]
+ },
+ {
+  "domain": "正文生成、版本与质量",
+  "nodes": [
+   {
+    "id": "PR-027",
+    "title": "短章单候选与调用预算",
+    "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-028",
+    "title": "中长章候选与统一 RetryBudget",
+    "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-029",
+    "title": "生成完成不自动选择最长候选",
+    "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-030",
+    "title": "不可变 ChapterVersion 与父版本图",
+    "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-031",
+    "title": "续写改写局部 patch 基线冲突",
+    "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-032",
+    "title": "正文协议与元文本污染守卫",
+    "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-033",
+    "title": "统一字数口径与测试向量",
+    "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-034",
+    "title": "质量门 blocker warning degraded 契约",
+    "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-035",
+    "title": "20k 分段 artifact 与 checkpoint",
+    "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+    "severity": "P0",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-036",
+    "title": "长章取消、断线、杀进程和续接",
+    "location": "backend/app/api/routers/writer.py; backend/app/services/pipeline_orchestrator.py; backend/app/services/longform_generation_service.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   }
+  ]
+ },
+ {
+  "domain": "原子定稿与连续性账本",
+  "nodes": [
+   {
+    "id": "PR-037",
+    "title": "FinalizationSession 冻结版本与 hash",
+    "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-038",
+    "title": "ProjectMemory 真正 CAS 更新",
+    "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-039",
+    "title": "章节快照幂等与 commit_id",
+    "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-040",
+    "title": "单事务提交正文和数据库事实",
+    "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-041",
+    "title": "DomainEventOutbox 外部副作用",
+    "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-042",
+    "title": "人物势力时间线因果 append-only 事件",
+    "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-043",
+    "title": "伏笔线索回收证据与状态机",
+    "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+    "severity": "P0",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-044",
+    "title": "投影 stale、回退与可重建",
+    "location": "backend/app/services/finalize_service.py; backend/app/models/project_memory.py; backend/app/models/memory_layer.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   }
+  ]
+ },
+ {
+  "domain": "Provider、配置、成本与资料",
+  "nodes": [
+   {
+    "id": "PR-045",
+    "title": "ConfigSnapshot 冻结 Provider 与参数",
+    "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-046",
+    "title": "PromptRevision 与版本化缓存键",
+    "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-047",
+    "title": "统一超时重试与费用预算",
+    "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-048",
+    "title": "跨 worker Provider 并发与背压",
+    "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-049",
+    "title": "研究来源、引用与可信度版本化",
+    "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-050",
+    "title": "文风来源、授权和画像 revision",
+    "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-051",
+    "title": "任务 payload 与正文 artifact 化",
+    "location": "backend/app/services/llm_config_service.py; backend/app/services/config_sync_manager.py; backend/app/api/routers/research.py; backend/app/api/routers/style.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   }
+  ]
+ },
+ {
+  "domain": "导入导出与工程往返",
+  "nodes": [
+   {
+    "id": "PR-052",
+    "title": "版本化工程 manifest 与 checksums",
+    "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-053",
+    "title": "TXT 阅读版与工程包能力声明",
+    "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+    "severity": "P1",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-054",
+    "title": "DOCX 阅读版能力声明与往返边界",
+    "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-055",
+    "title": "导入 staging 校验后原子发布",
+    "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-056",
+    "title": "分章预览、置信度与人工确认",
+    "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-057",
+    "title": "空库 roundtrip 图同构与 hash",
+    "location": "backend/app/api/routers/novels.py; backend/app/services/import_service.py; backend/app/services/export_service.py; backend/app/utils/novel_text_format.py",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   }
+  ]
+ },
+ {
+  "domain": "前端统一任务与交互",
+  "nodes": [
+   {
+    "id": "PR-058",
+    "title": "全局 TaskRuntime store 与任务发现",
+    "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+    "severity": "P0",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-059",
+    "title": "唯一事件 reducer 代际序列去重",
+    "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-060",
+    "title": "蓝图章节纲研究文风导入统一 SSE",
+    "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+    "severity": "P0",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-061",
+    "title": "正文流日志流诊断流严格分区",
+    "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-062",
+    "title": "刷新断网重连取消恢复动作",
+    "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-063",
+    "title": "revision 冲突 diff 与 stale 提示",
+    "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-064",
+    "title": "长正文块缓冲和虚拟化",
+    "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-065",
+    "title": "窄屏键盘与可访问性",
+    "location": "frontend/src/views/WritingDesk.vue; frontend/src/components/GlobalNavBar.vue; frontend/src/api; frontend/src/stores",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   }
+  ]
+ },
+ {
+  "domain": "业务工作台与领域功能",
+  "nodes": [
+   {
+    "id": "PR-066",
+    "title": "项目创建编辑归档删除保护",
+    "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-067",
+    "title": "角色、势力、关系稳定 ID 与并发编辑",
+    "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-068",
+    "title": "线索线程红鲱鱼与未解决项",
+    "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-069",
+    "title": "伏笔提醒分析与回收操作",
+    "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-070",
+    "title": "知识图谱节点边与时间线",
+    "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-071",
+    "title": "版本评审 diff patch 回退",
+    "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-072",
+    "title": "阅读器选中版本与导出一致",
+    "location": "backend/app/api/routers/projects.py; backend/app/api/routers/clue_tracker.py; backend/app/api/routers/knowledge_graph.py; frontend/src/components",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   }
+  ]
+ },
+ {
+  "domain": "管理、日志、技能与限额",
+  "nodes": [
+   {
+    "id": "PR-073",
+    "title": "管理台 RBAC 与停用用户",
+    "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-074",
+    "title": "管理员操作 before-after 审计",
+    "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-075",
+    "title": "运行日志统一 TaskRuntime 事件源",
+    "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+    "severity": "P0",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-076",
+    "title": "系统配置版本、校验与回滚",
+    "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-077",
+    "title": "请求限额与 Token 预算可解释",
+    "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-078",
+    "title": "写作技能来源校验与执行沙箱",
+    "location": "backend/app/api/routers/admin.py; backend/app/api/routers/updates.py; backend/app/api/routers/writing_skills.py; frontend/src/components/admin",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   }
+  ]
+ },
+ {
+  "domain": "数据库、迁移与部署",
+  "nodes": [
+   {
+    "id": "PR-079",
+    "title": "fresh 数据库迁移到 head",
+    "location": "backend/alembic; backend/app/db; backend/app/models",
+    "severity": "P0",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-080",
+    "title": "legacy 数据升级与数据保留",
+    "location": "backend/alembic; backend/app/db; backend/app/models",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-081",
+    "title": "重复升级与降级再升级",
+    "location": "backend/alembic; backend/app/db; backend/app/models",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-082",
+    "title": "并发迁移锁与异常恢复",
+    "location": "backend/alembic; backend/app/db; backend/app/models",
+    "severity": "P0",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-083",
+    "title": "SQLite 关键事务和锁竞争",
+    "location": "backend/alembic; backend/app/db; backend/app/models",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-084",
+    "title": "MySQL CAS 事务索引兼容验证",
+    "location": "backend/alembic; backend/app/db; backend/app/models",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   }
+  ]
+ },
+ {
+  "domain": "可观测性与审计证据",
+  "nodes": [
+   {
+    "id": "PR-085",
+    "title": "request_id task_id commit_id 关联",
+    "location": "backend/app/main.py; backend/app/services/task_runtime.py; audit/production-readiness/evidence",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-086",
+    "title": "结构化错误与可执行动作",
+    "location": "backend/app/main.py; backend/app/services/task_runtime.py; audit/production-readiness/evidence",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-087",
+    "title": "任务延迟重试取消恢复指标",
+    "location": "backend/app/main.py; backend/app/services/task_runtime.py; audit/production-readiness/evidence",
+    "severity": "P1",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-088",
+    "title": "密钥隐私 canary 扫描",
+    "location": "backend/app/main.py; backend/app/services/task_runtime.py; audit/production-readiness/evidence",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-089",
+    "title": "证据 manifest、产物 checksum、故障注入与反向验证",
+    "location": "backend/app/main.py; backend/app/services/task_runtime.py; audit/production-readiness/evidence",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   }
+  ]
+ },
+ {
+  "domain": "真实验收与发布门禁",
+  "nodes": [
+   {
+    "id": "PR-090",
+    "title": "后端正式全量门禁",
+    "location": "backend/scripts; frontend; backend; audit/production-readiness",
+    "severity": "P0",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-091",
+    "title": "前端类型测试构建三门禁",
+    "location": "backend/scripts; frontend; backend; audit/production-readiness",
+    "severity": "P0",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-092",
+    "title": "真实 Provider 短章串行稳定性",
+    "location": "backend/scripts; frontend; backend; audit/production-readiness",
+    "severity": "P0",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-093",
+    "title": "真实入口连续生成并定稿 1 至 10 章",
+    "location": "backend/scripts; frontend; backend; audit/production-readiness",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-094",
+    "title": "真实 20k 分段恢复",
+    "location": "backend/scripts; frontend; backend; audit/production-readiness",
+    "severity": "P0",
+    "status": "IMPLEMENTED_UNVERIFIED"
+   },
+   {
+    "id": "PR-095",
+    "title": "双用户双项目双 worker 隔离",
+    "location": "backend/scripts; frontend; backend; audit/production-readiness",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-096",
+    "title": "完整浏览器黑盒主流程",
+    "location": "backend/scripts; frontend; backend; audit/production-readiness",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   },
+   {
+    "id": "PR-097",
+    "title": "连续两轮发布证据与签字",
+    "location": "backend/scripts; frontend; backend; audit/production-readiness",
+    "severity": "P0",
+    "status": "CONFIRMED"
+   }
+  ]
+ }
+]
