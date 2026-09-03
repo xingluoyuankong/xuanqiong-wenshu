@@ -606,6 +606,8 @@ export interface AgentStateProjection {
   cancellation_requested: boolean
   blocked_reason?: string | null
   last_event_sequence: number
+  /** Server cursor to use after the local projection already covers this prefix. */
+  resume_after_sequence?: number
   latest_public_summary?: AgentPublicWorkSummary | null
   latest_public_summary_sequence?: number
   latest_public_summary_at?: string | null

@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 
 const {
   getRunProviderProvenanceMock,
+  getRunStateMock,
   getRunContextSnapshotMock,
   getRunPlanRevisionMock,
   listRunConversationSummariesMock,
@@ -20,6 +21,7 @@ const {
   sessionStreamUrlMock,
 } = vi.hoisted(() => ({
   getRunProviderProvenanceMock: vi.fn(),
+  getRunStateMock: vi.fn(),
   getRunContextSnapshotMock: vi.fn(),
   getRunPlanRevisionMock: vi.fn(),
   listRunConversationSummariesMock: vi.fn(),
@@ -39,6 +41,7 @@ const {
 vi.mock('@/api/agent', () => ({
   AgentAPI: {
     getRunProviderProvenance: getRunProviderProvenanceMock,
+    getRunState: getRunStateMock,
     getRunContextSnapshot: getRunContextSnapshotMock,
     getRunPlanRevision: getRunPlanRevisionMock,
     listRunConversationSummaries: listRunConversationSummariesMock,
@@ -77,6 +80,7 @@ describe('useAgentWorkspaceRuntime', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    getRunStateMock.mockResolvedValue(null)
     getRunProviderProvenanceMock.mockResolvedValue({
       planner_provider_called: true, planner_provider_fallback_reason: null,
       response_provider_called: false, response_provider_fallback_reason: 'TimeoutError',
@@ -511,6 +515,54 @@ describe('useAgentWorkspaceRuntime', () => {
 
     await vi.waitFor(() => expect(runtime.gapRepairStateByRunId.value[run.id]).toBe('repaired'))
     expect(listRunActivityMock).toHaveBeenCalledWith(run.id, 0, 500)
+  })
+
+
+
+  it('已有连续事件投影时使用 state 的显式恢复游标启动历史回放和 SSE', async () => {
+    const { runtime, session, stream } = createRuntime()
+    session.value = { id: 'session' }
+    for (let sequence = 1; sequence <= 7; sequence += 1) {
+      runtime.applyEvent({
+        id: `event-${sequence}`,
+        run_id: run.id,
+        sequence,
+        event_type: 'progress_update',
+        summary: `event-${sequence}`,
+        data: { progress: sequence },
+        created_at: run.created_at,
+      })
+    }
+    getRunStateMock.mockResolvedValue({
+      correlation_id: 'corr',
+      run_id: run.id,
+      project_id: run.project_id,
+      user_id: run.user_id,
+      status: 'running',
+      phase: 'planning',
+      progress: 70,
+      current_step: 7,
+      recoverable: true,
+      cancellation_requested: false,
+      last_event_sequence: 7,
+      resume_after_sequence: 7,
+      latest_public_summary: null,
+      steps: [],
+      approvals: [],
+      artifacts: [],
+      accepted_version_ids: [],
+      jobs: [],
+      commands: [],
+      task_runtime_refs: [],
+    })
+
+    await runtime.loadEventsAndStream(session.value as never, run)
+    const streamOptions = stream.start.mock.calls[0][0]
+    await streamOptions.loadHistory()
+
+    expect(listEventsMock).toHaveBeenCalledWith('session', run.id, 7)
+    expect(listRunActivityMock).toHaveBeenCalledWith(run.id, 7, 500)
+    expect(stream.start.mock.calls[0][0]).toMatchObject({ initialAfterSequence: 7 })
   })
 
   it('projects a stream_error only into the right-side activity log without mutating AgentEvent state', async () => {

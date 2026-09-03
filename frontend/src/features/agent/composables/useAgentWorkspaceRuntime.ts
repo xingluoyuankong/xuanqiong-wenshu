@@ -564,11 +564,12 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     }
   }
 
-  const loadDurableRunActivity = async (currentSession: AgentSession, runId: string) => {
-    const sessionEvents = await AgentAPI.listEvents(currentSession.id, runId, 0)
+  const loadDurableRunActivity = async (currentSession: AgentSession, runId: string, afterSequence = 0) => {
+    const cursor = Number.isSafeInteger(afterSequence) && afterSequence >= 0 ? afterSequence : 0
+    const sessionEvents = await AgentAPI.listEvents(currentSession.id, runId, cursor)
     if (typeof AgentAPI.listRunActivity !== 'function') return sessionEvents
     try {
-      const activityEvents = await AgentAPI.listRunActivity(runId, 0, 500)
+      const activityEvents = await AgentAPI.listRunActivity(runId, cursor, 500)
       const byIdentity = new Map<string, AgentEvent>()
       for (const event of [...sessionEvents, ...activityEvents]) {
         byIdentity.set(event.id || `${event.run_id}:${event.sequence}`, event)
@@ -595,13 +596,22 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
       lifecycleGeneration === generation &&
       options.session.value?.id === currentSession.id &&
       options.selectedRunId.value === run.id
-    await Promise.all([loadRunSteps(run.id), loadRunState(run.id), loadRunFacts(run.id)])
+    const [, state] = await Promise.all([
+      Promise.all([loadRunSteps(run.id), loadRunFacts(run.id)]),
+      loadRunState(run.id),
+    ])
     if (!isCurrentFeed()) return
+    const existingCursor = options.runProjection.activeEventProjection.value.lastContiguousSequence
+    const stateCursor = Number(state?.resume_after_sequence)
+    const initialAfterSequence = Number.isSafeInteger(stateCursor) && stateCursor >= 0 && existingCursor >= stateCursor
+      ? stateCursor
+      : 0
     await options.stream.start({
       sessionId: currentSession.id,
       runId: run.id,
       initialStatus: options.activeRun.value?.status || run.status,
-      loadHistory: () => loadDurableRunActivity(currentSession, run.id),
+      initialAfterSequence,
+      loadHistory: () => loadDurableRunActivity(currentSession, run.id, initialAfterSequence),
       streamUrl: (afterSequence) => AgentAPI.sessionStreamUrl(currentSession.id, run.id, afterSequence),
       isCurrent: isCurrentFeed,
       onEvent: (event) => applyEvent(event),

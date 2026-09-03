@@ -11,6 +11,8 @@ export interface AgentRunStreamStartOptions {
   sessionId: string
   runId: string
   initialStatus?: string | null
+  /** Resume only after a cursor already covered by the local event projection. */
+  initialAfterSequence?: number
   loadHistory: () => Promise<AgentEvent[]>
   streamUrl: (afterSequence: number) => string
   isCurrent?: () => boolean
@@ -67,7 +69,12 @@ export function useAgentRunStream() {
       for (const event of history) {
         options.onEvent(event, 'history')
       }
-      const cursor = history.reduce((max, event) => Math.max(max, event.sequence), 0)
+      const historyCursor = history.reduce((max, event) => Math.max(max, event.sequence), 0)
+      const requestedCursor = Number(options.initialAfterSequence)
+      const initialCursor = Number.isSafeInteger(requestedCursor) && requestedCursor >= 0
+        ? requestedCursor
+        : 0
+      const cursor = Math.max(initialCursor, historyCursor)
       const historyTerminal = history.find((event) => terminalEvents.has(event.event_type))
       if (historyTerminal || DEFAULT_TERMINAL_RUN_STATUSES.has(String(options.initialStatus || ''))) {
         connectionState.value = 'terminal'

@@ -171,4 +171,26 @@ describe('useAgentRunStream', () => {
     expect(received).toEqual([])
     expect(stream.activeRunId.value).toBe('run-new')
   })
+
+  it('在没有新增历史事件时也从显式初始恢复游标启动 SSE', async () => {
+    const stream = useAgentRunStream()
+    connectMock.mockReset().mockReturnValue({ close: vi.fn() })
+
+    await stream.start({
+      sessionId: 'session-1',
+      runId: 'run-1',
+      initialAfterSequence: 7,
+      loadHistory: async () => [],
+      streamUrl: (cursor) => `/stream?cursor=${cursor}`,
+      onEvent: vi.fn(),
+    })
+
+    expect(connectMock).toHaveBeenCalledWith(
+      '/stream?cursor=7',
+      expect.any(Object),
+      3,
+      { cursorParam: 'after_sequence' },
+    )
+  })
+
 })
