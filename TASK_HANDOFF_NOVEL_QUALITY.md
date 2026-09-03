@@ -86342,3 +86342,214 @@ CARD-078 文档：本节首版提交待生成
 CARD-079：pending / backend-first
 总目标：active
 ```
+---
+
+# 2026-09-03 追加记录：CARD-079 运行状态显式 resume cursor
+
+> 本节记录 CARD-079 的实际后端优化结果。它是对 CARD-078 终态顺序修复的增量：不改变既有事件 sequence，只给 state projection 增加明确的客户端恢复游标。
+
+## A. 本批目标
+
+```text
+CARD-079｜统一运行状态接口对 SSE/activity 恢复游标的公开语义。
+```
+
+问题：
+
+```text
+state projection 原先只有 last_event_sequence；前端实际把它隐式当作 after_sequence 使用，但 API 没有明确字段表达“从该序号之后恢复”。
+```
+
+目标：
+
+```text
+在不破坏 last_event_sequence 兼容性的前提下，增加 resume_after_sequence，并保证它始终等于该 Run 当前最新持久化事件 sequence。
+```
+
+## B. 失败测试先行
+
+新增文件测试：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_state_projection.py
+```
+
+新增测试：
+
+```text
+test_state_projection_exposes_explicit_resume_cursor
+```
+
+旧实现执行：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_state_projection.py -k explicit_resume_cursor
+```
+
+真实失败：
+
+```text
+KeyError: 'resume_after_sequence'
+1 failed, 8 deselected in 11.34s
+```
+
+## C. 实际代码修复
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\state_projection.py
+```
+
+增加公开字段：
+
+```python
+"resume_after_sequence": last_sequence
+```
+
+同时保留：
+
+```python
+"last_event_sequence": last_sequence
+```
+
+由此形成明确不变量：
+
+```text
+projection.resume_after_sequence == projection.last_event_sequence == AgentRun.event_sequence
+```
+
+该批不修改事件账本、不改变 SSE 的 `after_sequence` 参数、不改变终态顺序和前端布局。
+
+## D. 定向测试
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_state_projection.py -k "explicit_resume_cursor or state_projection"
+```
+
+结果：
+
+```text
+9 passed in 5.58s
+```
+
+## E. 反向破坏验证
+
+临时移除 state projection 的 `resume_after_sequence` 输出后重跑新增测试：
+
+```text
+KeyError: 'resume_after_sequence'
+EXPECTED_FAILURE_EXIT=1
+```
+
+正式文件已自动恢复，破坏版本没有进入提交。
+
+## F. 后端全量门禁
+
+后台 PID：
+
+```text
+27356
+```
+
+日志：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\_card079_full_pytest_20260903-123209.log
+D:\小说写作\xuanqiong-wenshu\backend\_card079_full_pytest_20260903-123209.err.log
+```
+
+最终结果：
+
+```text
+1464 passed in 456.69s (0:07:36)
+```
+
+stderr 为空。
+
+## G. 提交、推送和回退
+
+代码提交：
+
+```text
+872bff6 feat: expose agent resume cursor
+```
+
+推送：
+
+```text
+0ee179d..872bff6 codex/bohrium-integration-20260831 -> origin/codex/bohrium-integration-20260831
+```
+
+精确回退：
+
+```powershell
+git revert 872bff6
+```
+
+本批文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\state_projection.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_state_projection.py
+```
+
+## H. 当前状态
+
+```text
+CARD-072：completed
+CARD-073：completed
+CARD-074-A：completed
+CARD-074-B1：completed
+CARD-074-B2：completed
+CARD-075：completed
+CARD-076：completed
+CARD-077：completed
+CARD-078：completed
+CARD-079：completed（代码已推送，文档回写进行中）
+总目标：active
+前端：已由 start.ps1 恢复到 127.0.0.1:5174
+后端：已由 start.ps1 恢复到 127.0.0.1:8013
+启动配置：本次使用当前 PowerShell 的 DB_PROVIDER=sqlite；默认未设置时 start.ps1 会尝试 MySQL
+```
+
+## I. 下一任务目标：CARD-080 前端消费显式恢复游标
+
+下一批开始逐步推进前端：
+
+```text
+CARD-080｜将 AgentStateProjection.resume_after_sequence 接入前端 API 类型、运行时恢复和 SSE 启动策略。
+```
+
+实施重点：
+
+```text
+1. frontend/src/api/agent.ts 增加 resume_after_sequence 类型；
+2. AgentWorkspaceRuntime 在 state 回读后记录该游标；
+3. history replay 与 SSE start 使用同一游标事实，避免重复猜测；
+4. sequence gap repair 仍从 lastContiguousSequence 开始，不被 state cursor 覆盖；
+5. 增加 Vitest 失败测试和真实 Chromium 验收；
+6. 左侧保持紧凑可折叠，中央聊天继续为主阅读区，右侧日志独立滚动。
+```
+
+执行纪律不变：
+
+```text
+先写失败测试 → 修改真实代码 → 定向验证 → 反向破坏 → 前后端门禁 → 代码独立提交推送 → 文档独立提交推送 → 记录精确回退命令。
+```
+
+## J. 回写索引
+
+```text
+CARD-075：d15d35e / 5093c41
+CARD-076：935752c / ed8cb1c
+CARD-077：9766ff6 / 1c247c2
+CARD-078：221a0c1 / 0ee179d
+CARD-079 代码：872bff6
+CARD-079 代码回退：git revert 872bff6
+CARD-079 文档：本节首版提交待生成
+CARD-080：pending / frontend-consumer
+总目标：active
+```
