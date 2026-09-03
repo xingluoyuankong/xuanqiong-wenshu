@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <n-card :bordered="false" class="runtime-card">
     <template #header>
       <div class="runtime-card__header">
@@ -164,7 +164,7 @@ const stageLabelMap: Record<string, string> = {
   'optimize_character': '人物优化', 
   'optimize_delivery': '表达优化',
 }
-const stageToZh = (stage: string) => STAGE_LABEL_MAP[stage] || stage
+const stageToZh = (stage: string) => stageLabelMap[stage] || stage
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'

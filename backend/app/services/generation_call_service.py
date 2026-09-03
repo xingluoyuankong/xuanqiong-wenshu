@@ -39,7 +39,7 @@ class GenerationCallPolicy:
     heartbeat_interval_seconds: Optional[float] = 3.0
     soft_timeout_seconds: Optional[float] = 600.0
     stage_label: Optional[str] = None
-    progress_stage: Optional[str] = None
+    progress_stage: Optional[str] = "generating"
     json_schema_name: Optional[str] = None
     json_repair_attempts: int = 2
     json_schema_strict: bool = True

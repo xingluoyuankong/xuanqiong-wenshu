@@ -1,4 +1,4 @@
-﻿from app.api.routers.writer import _build_advanced_background_flow_config, _build_compat_generate_flow_config
+from app.api.routers.writer import _build_advanced_background_flow_config, _build_compat_generate_flow_config
 from app.schemas.novel import AdvancedGenerateRequest, FlowConfig, GenerateChapterRequest
 from app.services.pipeline_orchestrator import PipelineOrchestrator
 
@@ -68,15 +68,15 @@ def test_compat_generate_supports_extra_long_quality_contract():
 
 
 def test_chapter_generation_timeout_scales_with_target_length():
-    assert PipelineOrchestrator._resolve_chapter_generation_timeout(700) == 180.0
-    assert PipelineOrchestrator._resolve_chapter_generation_timeout(1800) == 300.0
+    assert PipelineOrchestrator._resolve_chapter_generation_timeout(700) == 120.0
+    assert PipelineOrchestrator._resolve_chapter_generation_timeout(1800) == 200.0
     assert PipelineOrchestrator._resolve_chapter_generation_timeout(3200) == 600.0
     assert PipelineOrchestrator._resolve_chapter_generation_timeout(5000) == 900.0
 
 
 def test_chapter_mission_timeout_scales_with_target_length():
-    assert PipelineOrchestrator._resolve_chapter_mission_timeout(700) == 45.0
-    assert PipelineOrchestrator._resolve_chapter_mission_timeout(1800) == 60.0
+    assert PipelineOrchestrator._resolve_chapter_mission_timeout(700) == 30.0
+    assert PipelineOrchestrator._resolve_chapter_mission_timeout(1800) == 45.0
     assert PipelineOrchestrator._resolve_chapter_mission_timeout(3200) == 90.0
     assert PipelineOrchestrator._resolve_chapter_mission_timeout(5000) == 120.0
     assert PipelineOrchestrator._resolve_chapter_mission_timeout(7000) == 180.0
@@ -84,13 +84,13 @@ def test_chapter_mission_timeout_scales_with_target_length():
 
 
 def test_chapter_generation_max_tokens_scales_with_target_length():
-    assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(700) == 2800
-    assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(1800) == 5200
-    assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(3200) == 7800
-    assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(5000) == 11000
+    assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(700) == 3200
+    assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(1800) == 6400
+    assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(3200) == 9600
+    assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(5000) == 18000
     assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(7000) >= 14000
     assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(10000) >= 24000
-    assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(13000) <= 32000
+    assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(13000) <= 56000
 
 
 def test_advanced_generate_config_is_background_safe_and_bounded():

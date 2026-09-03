@@ -4,7 +4,7 @@ from collections.abc import AsyncGenerator
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import AsyncAdaptedQueuePool
 
 from ..core.config import settings
 
@@ -19,6 +19,7 @@ if settings.is_sqlite_backend:
             "check_same_thread": False,
             "timeout": 300,  # 等待锁释放的超时时间（秒）- 适应长生成
         },
+        poolclass=AsyncAdaptedQueuePool,
         pool_size=10,
         max_overflow=20,
         pool_timeout=60,
