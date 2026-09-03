@@ -86866,3 +86866,645 @@ CARD-080 文档：本节首版提交待生成
 CARD-081：pending / frontend
 总目标：active
 ```
+---
+
+# 2026-09-03 追加记录：Agent 主界面重构 UI-001/UI-002/UI-003-A/B/C 实际进度
+
+> 本节是本次真实实施结果，不把前文方案文字当作完成证据。所有“完成”均以当前工作树中的实际代码和命令结果为准。
+
+## A. 当前唯一任务目标
+
+```text
+当前主任务：Agent 主界面全面重构
+当前实施批次：UI-001 + UI-002 + UI-003-A/B/C
+当前状态：代码已实现，前端定向/全量单元测试通过，后端定向测试通过，真实浏览器回归仍需修复
+下一门槛：定位 Playwright 失败并完成真实浏览器回归；随后补充 reasoning 历史 API、独立分片持久化和项目成员权限
+```
+
+本次没有声称 UI-003-D/E、UI-004、UI-005、UI-006 已完成。
+
+## B. 现状审查结论
+
+### B.1 前端真实结构
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+仍然是业务编排中心，包含项目、会话、工具、内容树、Run、Artifact、质量和运行日志状态。当前批次没有强行拆掉全部业务逻辑，先通过壳层容器完成信息架构变化，避免破坏既有 Run 恢复和日志引用定位。
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.vue
+```
+
+已从原三栏完整面板壳层改为：
+
+```text
+左图标窄轨道 → 左资源面板（按需展开）
+中央聊天主区 → 始终存在并保持最大可用宽度
+右资源图标窄轨道 → 右运行面板（按需展开）
+```
+
+移动端改为固定轨道与抽屉式面板，不再把完整 sidebar/activity 继续堆到聊天下方。
+
+### B.2 Provider reasoning 真实链路
+
+当前 Provider 适配器已经读取 `reasoning_content`/`reasoning`，但旧 `stream_visible_response()` 原先只向上层暴露正文。本次已增加 Agent 专用结构化流：
+
+```text
+Provider chunk
+→ LLMService.stream_agent_response_parts()
+→ runner 同时读取 content/reasoning_content
+→ Runtime 写入独立 reasoning 事件
+→ SSE 复用既有 Agent event sequence
+→ 前端安全层和 reducer 分离投影
+→ Reasoning Card 展示
+```
+
+当前仍未完成：
+
+```text
+reasoning 独立数据库分片表
+reasoning 专用历史分页 API
+项目成员权限模型
+reasoning 长历史虚拟列表
+```
+
+## C. UI-001｜主界面信息架构与图标窄轨道
+
+### C.1 已实现文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\layout\AgentRail.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\layout\AgentRail.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentPanelState.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentPanelState.spec.ts
+```
+
+### C.2 行为
+
+```text
+1. 左侧默认只显示图标轨道；
+2. 右侧默认只显示图标轨道；
+3. 左右两侧各自维护当前展开面板；
+4. 同一侧重复点击可关闭；
+5. 左右面板可以同时展开，不互相销毁；
+6. slot 内容继续挂载，保留日志滚动、details.open、Artifact 和内容树状态；
+7. 面板状态写入 localStorage，刷新后恢复；
+8. 桌面端中央区域使用 minmax(0, 1fr)；
+9. 960px 以下改为固定抽屉；
+10. 650px 以下使用底部安全区域和双侧移动工具栏；
+11. 按钮包含 aria-label、aria-pressed 和键盘焦点样式；
+12. 既有项目、会话、工具、内容树、日志、Inspector 和质量面板 selector 保留。
+```
+
+### C.3 UI-001 测试证据
+
+前置旧实现失败证据：
+
+```text
+新增窄轨道行为测试运行于旧三栏壳层时失败；
+失败包括缺少 agent-left-rail、agent-right-rail、展开面板和移动抽屉契约。
+```
+
+实现后定向结果：
+
+```text
+AgentWorkspaceShell.spec.ts：6 passed
+AgentRail.spec.ts：5 passed
+useAgentPanelState.spec.ts：5 passed
+AgentWorkspace.spec.ts：18 passed
+```
+
+当前 UI-001 代码测试结论：
+
+```text
+通过
+```
+
+## D. UI-002｜Reasoning/摘要/轨迹/正文分层
+
+### D.1 已实现文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\utils\agentEventSafety.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\utils\agentEventSafety.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\stores\agentRunProjection.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentReasoningCard.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentReasoningCard.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+### D.2 前端投影结构
+
+新增投影字段：
+
+```text
+reasoningChunks
+reasoningText
+reasoningStatus
+activeReasoningChunks
+activeReasoningText
+activeReasoningStatus
+```
+
+事件映射：
+
+```text
+assistant_reasoning_started
+assistant_reasoning_chunk
+assistant_reasoning_completed
+assistant_reasoning_failed
+```
+
+与以下三类信息严格分离：
+
+```text
+assistant_delta       → assistantText
+public_work_summary  → AgentPublicWorkSummary
+work_trace_delta     → workTraceDeltas
+```
+
+reasoning 分片：
+
+```text
+按 chunk_index 排序；
+按 run_id + sequence 去重；
+不进入 assistantText；
+不占用 Assistant delta segment 上限；
+单独拥有 4096 分片/200000 字符前端容量边界；
+保留换行和等宽文本展示。
+```
+
+### D.3 Reasoning Card 行为
+
+```text
+1. 标题：Provider 原始 reasoning；
+2. 流式中自动展开；
+3. completed/failed 后自动折叠；
+4. 用户可以手动展开历史原文；
+5. 支持复制当前已加载 reasoning；
+6. 原文显示在 Assistant 流式正文之前；
+7. reasoning 不拼接到 Assistant 正文；
+8. 保留换行和 Provider 分片顺序。
+```
+
+### D.4 UI-002 测试证据
+
+```text
+agentEventSafety.spec.ts：11 passed
+agentEventReducer.spec.ts：12 passed
+AgentReasoningCard.spec.ts：2 passed
+AgentConversation.spec.ts：6 passed
+```
+
+前端全量门禁当前结果：
+
+```text
+Test Files 77 passed
+Tests 489 passed
+```
+
+类型检查：
+
+```text
+npm run type-check：通过
+```
+
+生产构建：
+
+```text
+npm run build-only：通过
+4913 modules transformed
+```
+
+## E. UI-003-A/B/C｜后端 reasoning 最小闭环
+
+### E.1 已实现文件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\llm_service.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\runner.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\test_agent_visible_stream.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\test_agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\test_agent_conversation_runtime.py
+```
+
+### E.2 LLMService
+
+新增：
+
+```python
+stream_agent_response_parts(...)
+```
+
+输出：
+
+```python
+{
+    "content": "...",
+    "reasoning_content": "...",
+    "finish_reason": "stop",
+}
+```
+
+旧接口保持：
+
+```python
+stream_visible_response(...) -> str content
+```
+
+正文优先、reasoning-only fallback、Provider attempt ledger、限流、超时和异常处理保持原有兼容路径。
+
+### E.3 Runtime
+
+新增事件类型：
+
+```text
+assistant_reasoning_started
+assistant_reasoning_chunk
+assistant_reasoning_completed
+assistant_reasoning_failed
+```
+
+新增：
+
+```python
+append_assistant_reasoning_chunk(...)
+```
+
+事件继续使用统一：
+
+```text
+AgentRun.event_sequence
+```
+
+终止 Run 后 reasoning 事件与其他实时公开事件一样被 fence。
+
+### E.4 Runner
+
+有结构化流方法时：
+
+```text
+发射 reasoning started
+消费 Provider reasoning_content
+写入 reasoning chunk
+消费 Provider content
+写入 assistant_delta
+发射 reasoning completed
+```
+
+结构化流失败时发射 reasoning failed；旧 fake LLM 没有新方法时继续使用 `stream_visible_response()` 字符串流。
+
+### E.5 后端定向证据
+
+已执行：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/services/test_agent_visible_stream.py app/services/test_agent_runtime.py app/services/test_agent_conversation_runtime.py
+```
+
+结果：
+
+```text
+48 passed in 26.08s
+```
+
+子智能体补充的扩展定向结果：
+
+```text
+63 passed in 24.26s
+```
+
+反向验证已执行：
+
+```text
+移除 reasoning payload 白名单 → reasoning payload 测试失败；
+关闭 Runner 结构化流优先逻辑 → reasoning 闭环测试失败；
+两次均已恢复正确实现。
+```
+
+## F. 全量门禁实际状态
+
+| 门禁 | 实际结果 | 当前结论 |
+|---|---:|---|
+| 前端定向单元测试 | 通过 | 通过 |
+| 前端全量 Vitest | 77 files / 489 tests passed | 通过 |
+| 前端 type-check | 通过 | 通过 |
+| 前端 build-only | 通过 | 通过 |
+| 后端 reasoning 定向测试 | 48 passed；扩展定向 63 passed | 通过 |
+| 后端全量 pytest | 正在执行/结果待回写 | 未完成 |
+| Playwright card071 | 当前运行出现失败，结果待定位 | 未完成 |
+| git diff --check | 发现 AgentWorkspaceShell.vue 文件尾部多余空行 | 待清理后复核 |
+
+不能把后端全量和 Playwright 在结果未出来前写成通过。
+
+## G. 未完成缺口
+
+### UI-003-D
+
+```text
+新增 agent_run_reasoning_chunks 分片实体；
+建立 run_id/chunk_index 唯一约束；
+增加 content_hash；
+增加分页读取；
+历史无限保留策略落地。
+```
+
+### UI-003-E
+
+```text
+新增 reasoning 历史 API；
+让 SSE/历史 API 支持 reasoning 分片回放；
+统一 after_sequence/Last-Event-ID；
+断线恢复和 terminal fence 浏览器验证。
+```
+
+### UI-004
+
+```text
+新增 project_members；
+owner/editor/viewer 角色；
+项目成员和管理员 reasoning 读取权限；
+迁移既有 project.user_id owner。
+```
+
+### UI-005
+
+```text
+工具注册中心 schema 化；
+Agent 根据对话自主选择项目内工具；
+工具调用/结果消息独立进入聊天时间线；
+页面只承担展示和交互，不硬编码小说内容生产流程。
+```
+
+### UI-006
+
+```text
+reasoning 历史分页；
+虚拟列表；
+自动滚动锚点；
+未读计数；
+移动端长文本体验；
+性能和断线回放验收。
+```
+
+## H. 本批回退命令
+
+本次尚未生成提交，因此工作树回退按文件精确恢复，不触碰未跟踪历史工件：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu
+
+git restore -- frontend/src/features/agent/AgentConversation.spec.ts
+ git restore -- frontend/src/features/agent/AgentConversation.vue
+ git restore -- frontend/src/features/agent/AgentWorkspaceShell.spec.ts
+ git restore -- frontend/src/features/agent/AgentWorkspaceShell.vue
+ git restore -- frontend/src/features/agent/reducers/agentEventReducer.spec.ts
+ git restore -- frontend/src/features/agent/reducers/agentEventReducer.ts
+ git restore -- frontend/src/features/agent/stores/agentRunProjection.ts
+ git restore -- frontend/src/utils/agentEventSafety.spec.ts
+ git restore -- frontend/src/utils/agentEventSafety.ts
+ git restore -- frontend/src/views/AgentWorkspace.vue
+ git restore -- backend/app/agent/runner.py
+ git restore -- backend/app/services/agent_runtime.py
+ git restore -- backend/app/services/llm_service.py
+ git restore -- backend/app/services/test_agent_conversation_runtime.py
+ git restore -- backend/app/services/test_agent_runtime.py
+ git restore -- backend/app/services/test_agent_visible_stream.py
+ Remove-Item -LiteralPath frontend/src/features/agent/AgentReasoningCard.vue,frontend/src/features/agent/AgentReasoningCard.spec.ts,frontend/src/features/agent/composables/useAgentPanelState.ts,frontend/src/features/agent/composables/useAgentPanelState.spec.ts,frontend/src/features/agent/layout/AgentRail.vue,frontend/src/features/agent/layout/AgentRail.spec.ts -Force
+```
+
+上面命令只适用于完整回退本次实施批次；执行前必须再次确认这些新文件没有被其他任务复用。
+
+## I. 下一任务目标
+
+```text
+下一任务：UI-003-D/E｜reasoning 分片持久化、历史 API、SSE 回放与浏览器断线恢复
+```
+
+前置条件：
+
+```text
+1. 后端全量 pytest 完成；
+2. 当前 Playwright 失败全部定位并修复；
+3. UI-001/UI-002/UI-003-A/B/C 代码提交独立生成；
+4. 任务文档提交独立生成。
+```
+
+下一批必须先写失败测试：
+
+```text
+reasoning chunk 写入独立表；
+(run_id, chunk_index) 唯一；
+历史 API 分页；
+SSE after_sequence 从 reasoning 事件继续；
+terminal 后迟到 reasoning 被拒绝；
+成员权限边界；
+浏览器断线恢复不丢不重。
+```
+
+执行顺序：
+
+```text
+后端失败测试
+→ reasoning 分片实体/迁移
+→ Runtime 双写事件索引和分片表
+→ 历史 API
+→ SSE 回放
+→ 前端分页读取/虚拟列表
+→ Playwright 断线恢复
+→ 全量门禁
+→ 代码独立提交推送
+→ 文档独立提交推送
+```
+
+## J. 当前工作树说明
+
+```text
+1. 所有原有未跟踪审计、恢复、导入、上传和 node_modules 工件继续保留；
+2. 未使用 git add -A；
+3. 未执行 reset --hard；
+4. 本次代码改动尚未提交；
+5. 任务接续文档本节是当前最新事实登记；
+6. UI-003-D/E、UI-004、UI-005、UI-006 不得标记为完成。
+```
+
+---
+
+# 2026-09-03 追加勘误：UI-001/UI-002/UI-003-A/B/C 最终门禁结果
+
+## A. 最终门禁
+
+```text
+前端定向测试：通过
+前端全量 Vitest：77 个测试文件通过，489 个测试通过
+前端 type-check：通过
+前端 build-only：通过，4913 modules transformed
+前端 Playwright card071：7 passed
+后端 reasoning/Agent 定向测试：通过
+后端全量 pytest：1469 passed in 435.11s
+git diff --check：通过（仅保留换行格式提示，无空白错误）
+```
+
+## B. Playwright 失败修复记录
+
+首次运行失败的原因不是运行时逻辑损坏，而是旧 E2E 仍假设：
+
+```text
+左侧完整面板默认可见；
+右侧完整面板默认可见；
+移动端采用三栏纵向堆叠；
+桌面端固定为三列 grid；
+```
+
+UI-001 已将产品契约改为：
+
+```text
+默认图标窄轨道；
+点击轨道后展开面板；
+移动端固定轨道/抽屉；
+桌面端五区域 grid：左轨道、左面板、聊天、右面板、右轨道；
+```
+
+因此已同步更新：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\e2e\agent-workspace.spec.ts
+```
+
+E2E 现在会通过真实点击打开左/右面板，再验证原有项目、会话、运行、日志、Artifact、恢复和滚动隔离行为。最终结果：
+
+```text
+7 passed (21.6s)
+```
+
+## C. 代码批次最终状态
+
+### UI-001
+
+```text
+status：completed
+范围：窄轨道、可展开面板、桌面五区域布局、移动端抽屉、面板 localStorage、ARIA
+```
+
+### UI-002
+
+```text
+status：completed（前端事件模型与展示层）
+范围：reasoning 安全解析、Reducer 分片投影、Reasoning Card、聊天前置展示、正文隔离
+```
+
+### UI-003-A/B/C
+
+```text
+status：completed
+范围：结构化 Provider 流、Runtime reasoning 事件、Runner reasoning 发射、旧接口兼容
+```
+
+### 仍未完成
+
+```text
+UI-003-D：reasoning 独立分片表和 content_hash
+UI-003-E：reasoning 专用历史分页 API 与 SSE 历史回放完善
+UI-004：project_members 正式成员权限模型
+UI-005：工具注册中心 schema 化和 Agent 自主工具编排深化
+UI-006：无限历史分页、虚拟列表、长文本性能闭环
+```
+
+## D. 最终修改文件清单
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\e2e\agent-workspace.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentWorkspaceShell.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentReasoningCard.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentReasoningCard.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentPanelState.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentPanelState.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\layout\AgentRail.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\layout\AgentRail.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\reducers\agentEventReducer.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\stores\agentRunProjection.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\utils\agentEventSafety.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\utils\agentEventSafety.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\runner.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\llm_service.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\test_agent_conversation_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\test_agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\test_agent_visible_stream.py
+```
+
+## E. 当前唯一下一任务目标
+
+```text
+UI-003-D/E｜reasoning 分片持久化、历史 API、SSE 回放与断线恢复
+```
+
+进入该任务前必须保持以下已完成事实：
+
+```text
+UI-001/UI-002/UI-003-A/B/C 代码门禁全绿；
+旧 stream_visible_response 契约继续只输出正文；
+reasoning 与 assistant_delta 使用同一 run sequence；
+终态 fence 继续生效；
+原有审计工件继续保留。
+```
+
+下一批第一步仍然是失败测试：
+
+```text
+独立表写入；
+run_id + chunk_index 唯一性；
+content_hash；
+reasoning 历史分页；
+SSE after_sequence 恢复；
+terminal 后迟到 reasoning；
+项目 owner/editor/viewer 权限；
+浏览器断线不丢不重。
+```
+
+---
+
+# 2026-09-03 追加记录：本批代码提交与推送完成
+
+## 代码提交
+
+```text
+提交：8063c90 feat: rebuild agent workspace and stream provider reasoning
+分支：codex/bohrium-integration-20260831
+远端：origin/codex/bohrium-integration-20260831
+推送：completed
+```
+
+本次代码提交只包含显式列出的 23 个 Agent 前端/后端实现与测试文件，没有使用 `git add -A`，未跟踪审计工件继续保留。
+
+## 文档状态
+
+```text
+本文件追加内容：completed
+文档独立提交：pending
+文档独立推送：pending
+```
+
+## 精确代码回退
+
+```powershell
+git revert 8063c90
+git push origin codex/bohrium-integration-20260831
+```
+
+该回退只撤销本批已提交代码，不删除历史未跟踪工件。
