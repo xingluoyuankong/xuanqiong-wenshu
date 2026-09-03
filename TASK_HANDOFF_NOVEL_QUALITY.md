@@ -87508,3 +87508,354 @@ git push origin codex/bohrium-integration-20260831
 ```
 
 该回退只撤销本批已提交代码，不删除历史未跟踪工件。
+
+---
+
+# 2026-09-03 追加记录：UI-003-D/E reasoning 分片持久化、分页 API 与历史加载
+
+## A. 任务目标与实际状态
+
+```text
+任务：UI-003-D/E
+目标：Provider reasoning 独立持久化、按统一 sequence 分页、前端历史加载和断线兼容
+状态：completed
+权限状态：继续沿用现有 owner-scoped 校验；project_members 属于 UI-004，尚未宣称完成
+```
+
+## B. 数据库实现
+
+新增 ORM：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\models\agent.py
+```
+
+新增模型：
+
+```text
+AgentRunReasoningChunk
+```
+
+数据表：
+
+```text
+agent_run_reasoning_chunks
+```
+
+字段：
+
+```text
+id
+run_id
+project_id
+user_id
+sequence
+chunk_index
+content
+content_hash
+phase
+action_id
+result_ref
+created_at
+```
+
+约束和索引：
+
+```text
+UNIQUE(run_id, chunk_index)
+UNIQUE(run_id, sequence)
+INDEX(run_id, sequence)
+INDEX(run_id, chunk_index)
+外键 run_id → agent_runs.id ON DELETE CASCADE
+```
+
+hash 规则：
+
+```text
+content_hash = SHA-256(实际持久化 content 的 UTF-8 字节)
+```
+
+迁移：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\alembic\versions\028_agent_reasoning_chunks.py
+```
+
+迁移链：
+
+```text
+027_agent_terminal_event_key → 028_agent_reasoning_chunks
+```
+
+实际 SQLite 状态：
+
+```text
+数据库：D:\小说写作\xuanqiong-wenshu\backend\storage\xuanqiong_wenshu.db
+alembic_version：028_agent_reasoning_chunks
+agent_run_reasoning_chunks：存在
+```
+
+## C. 原子双写实现
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+```
+
+`append_assistant_reasoning_chunk()` 现在执行：
+
+```text
+1. 校验 Run 归属和终态；
+2. 校验 run_id + chunk_index 不重复；
+3. 通过统一 AgentRun.event_sequence 生成 reasoning event；
+4. 使用 commit=False 创建 agent_events 行；
+5. 同一事务加入 agent_run_reasoning_chunks 行；
+6. 一次 commit；
+7. 唯一约束冲突转为 AgentConflict。
+```
+
+reasoning event 和独立表共享同一个：
+
+```text
+run_id + sequence
+```
+
+没有引入第二套 SSE 游标。
+
+## D. 历史 API
+
+新增 schema：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\schemas.py
+```
+
+新增：
+
+```text
+AgentReasoningChunkRead
+AgentReasoningPageRead
+```
+
+新增路由：
+
+```http
+GET /api/agent/runs/{run_id}/reasoning
+```
+
+参数：
+
+```text
+after_sequence
+before_sequence
+limit
+```
+
+返回：
+
+```text
+run_id
+items
+next_cursor
+previous_cursor
+has_more
+has_previous
+```
+
+默认 owner-scoped 权限沿用：
+
+```text
+AgentRuntimeService.get_run(run_id, current_user.id)
+```
+
+分页行为：
+
+```text
+首次请求从最大 sequence 向前读取最近页面；
+点击“加载更早 reasoning”使用 before_sequence；
+返回结果按 sequence 升序排列；
+前端按 sequence 去重并合并。
+```
+
+## E. 前端历史加载
+
+API 类型和调用：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\api\agent.ts
+```
+
+新增：
+
+```text
+AgentReasoningChunk
+AgentReasoningPage
+AgentAPI.listRunReasoning()
+```
+
+组合式状态：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentReasoningHistory.ts
+```
+
+功能：
+
+```text
+按 Run 加载最近 reasoning 页面；
+按 before_sequence 加载更早页面；
+按 sequence 合并去重；
+Run 切换时清空旧历史；
+防止并发重复加载；
+错误单独暴露给 Reasoning Card。
+```
+
+Reasoning Card：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentReasoningCard.vue
+```
+
+新增：
+
+```text
+加载更早 reasoning
+加载状态
+历史错误提示
+按分片渲染
+```
+
+当前消息层仍保持：
+
+```text
+reasoning → AgentReasoningCard
+assistant_delta → Assistant 正文
+public_work_summary → 结构化工作摘要
+work_trace_delta → 公开工作轨迹
+```
+
+## F. 测试证据
+
+新增/更新后端测试：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\test_agent_reasoning_chunks.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_reasoning_route.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\test_alembic_migrations.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_durable_event_replay.py
+```
+
+新增/更新前端测试：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentReasoningHistory.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentReasoningCard.spec.ts
+```
+
+定向结果：
+
+```text
+后端 reasoning/路由/迁移/SSE 定向：25 passed
+前端 reasoning/history/conversation/reducer 定向：21 passed
+```
+
+全量结果：
+
+```text
+后端：1473 passed
+前端：78 个测试文件通过，490 个测试通过
+前端 type-check：通过
+前端 build-only：通过，4914 modules transformed
+Playwright card071：7 passed
+```
+
+## G. 反向破坏验证
+
+已完成两类反向验证：
+
+```text
+1. 移除 reasoning 表 payload/写入契约时，reasoning 持久化测试失败；
+2. 关闭 reasoning 历史分页或错误游标推进时，history 测试失败；
+```
+
+破坏版本均未保留，当前实现已恢复。
+
+## H. 当前提交前状态
+
+```text
+UI-003-D/E 代码：已修改，待独立提交
+UI-003-D/E 文档：本节已追加，待独立提交
+数据库：已升级到 028
+既有未跟踪审计工件：继续保留
+```
+
+## I. 下一任务目标
+
+```text
+UI-004｜project_members 正式项目成员权限模型
+```
+
+下一批目标：
+
+```text
+1. 新增 project_members 表和 owner/editor/viewer 角色；
+2. 既有 project.user_id 自动迁移为 owner；
+3. reasoning API、SSE、Run state、项目内容读取统一接入成员权限；
+4. 项目成员和管理员可读取 reasoning；
+5. 非成员拒绝访问；
+6. 成员增删改和权限回归测试；
+7. 不破坏现有 owner-scoped 兼容路径。
+```
+
+UI-005 和 UI-006 继续排队：
+
+```text
+UI-005：Agent 工具注册 schema 和自主工具编排
+UI-006：reasoning 长历史虚拟列表、性能和移动端体验
+```
+
+## J. UI-003-D/E 代码提交与推送
+
+```text
+代码提交：f8113ed feat: persist and page provider reasoning
+代码分支：codex/bohrium-integration-20260831
+代码推送：completed
+数据库本地迁移：028_agent_reasoning_chunks
+```
+
+精确代码回退：
+
+```powershell
+git revert f8113ed
+git push origin codex/bohrium-integration-20260831
+```
+
+文档提交将在本次追加完成后独立生成，不与代码提交混合。
+
+## K. 下一任务目标更新
+
+```text
+当前唯一下一任务：UI-004｜project_members 正式项目成员权限模型
+状态：planned / implementation pending
+```
+
+UI-004 必须先写失败测试，覆盖：
+
+```text
+owner/editor/viewer 角色；
+已有 project.user_id 自动生成 owner；
+成员读取 reasoning 历史；
+成员读取 SSE；
+非成员读取拒绝；
+管理员读取所有项目；
+成员变更后旧权限立即失效；
+owner-scoped 兼容路径不回归。
+```
+
+UI-005 和 UI-006 保持排队：
+
+```text
+UI-005：Agent 工具注册 schema 与自主工具编排深化
+UI-006：reasoning 长历史虚拟列表、性能和移动端体验
+```
