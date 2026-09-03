@@ -86553,3 +86553,316 @@ CARD-079 文档：本节首版提交待生成
 CARD-080：pending / frontend-consumer
 总目标：active
 ```
+---
+
+# 2026-09-03 追加记录：CARD-080 前端消费显式 resume cursor
+
+> 本节记录 CARD-080 的实际前端优化结果。它把 CARD-079 后端公开的 `resume_after_sequence` 接入 Agent API 类型、运行时历史回放和 SSE 启动策略，同时保持中央聊天主阅读区、左侧紧凑折叠和右侧日志独立滚动。
+
+## A. 本批目标
+
+```text
+CARD-080｜将 AgentStateProjection.resume_after_sequence 接入前端 API 类型、运行时恢复和 SSE 启动策略。
+```
+
+设计不变量：
+
+```text
+1. 首次打开没有本地事件投影时，历史回放仍从 0 开始；
+2. 本地事件投影已连续覆盖到服务端 cursor 时，历史 activity 与 SSE 从同一 cursor 继续；
+3. state cursor 不覆盖 sequence gap repair 的 lastContiguousSequence；
+4. history/live 仍由同一个 stream hook 生命周期管理；
+5. 不改变聊天布局、日志右栏或终态关闭规则。
+```
+
+## B. 失败测试先行
+
+新增失败测试：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentRunStream.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.spec.ts
+```
+
+旧实现 stream hook 基线：
+
+```text
+提供 initialAfterSequence=7 时，旧实现仍调用 /stream?cursor=0；
+实际收到：cursor=0，第三方重试参数保持 3；
+```
+
+旧实现测试失败：
+
+```text
+Expected /stream?cursor=7
+Received /stream?cursor=0
+```
+
+失败证明 stream hook 没有消费显式初始恢复游标。
+
+工作台集成测试首版曾错误地期待 `loadEventsAndStream()` 直接执行 `loadHistory`；真实实现是把回调交给 stream hook，mock stream 不会自动执行。修正测试为显式调用 `stream.start` 收到的 `loadHistory` 后，测试用于验证真实运行时行为。
+
+## C. 实际代码变更
+
+### C.1 API 类型
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\api\agent.ts
+```
+
+`AgentStateProjection` 增加：
+
+```typescript
+resume_after_sequence?: number
+```
+
+保留旧字段：
+
+```typescript
+last_event_sequence: number
+```
+
+### C.2 useAgentRunStream
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentRunStream.ts
+```
+
+新增启动参数：
+
+```typescript
+initialAfterSequence?: number
+```
+
+实际游标规则：
+
+```text
+historyCursor = history 事件最大 sequence
+requestedCursor = 合法的非负安全整数 initialAfterSequence，否则 0
+cursor = max(requestedCursor, historyCursor)
+```
+
+因此：
+
+```text
+- 显式恢复游标不会被历史中更大的新事件覆盖；
+- 历史事件回放后，SSE 从最终 cursor 继续；
+- 非法、负数或非安全整数自动回退到 0。
+```
+
+### C.3 useAgentWorkspaceRuntime
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.ts
+```
+
+变更：
+
+```text
+1. loadDurableRunActivity(currentSession, runId, afterSequence) 同时给 session events 和 activity API 传同一个 cursor；
+2. loadEventsAndStream 等待 run state 后读取 resume_after_sequence；
+3. 只有本地 event projection 的 lastContiguousSequence >= state cursor 时才采用 state cursor；
+4. 否则 initialAfterSequence=0，避免把缺口状态错误地当作已连续覆盖；
+5. stream.start、loadHistory 和 SSE URL 共享同一个 initialAfterSequence 来源；
+6. sequence gap repair 继续从 reducer 的 lastContiguousSequence 独立修复。
+```
+
+### C.4 前端测试
+
+新增/更新断言：
+
+```text
+1. stream hook 在无新增历史事件时从 7 启动 SSE；
+2. workspace runtime 把 7 传给 listEvents；
+3. workspace runtime 把 7 传给 listRunActivity；
+4. workspace runtime 给 stream.start 传 initialAfterSequence=7；
+5. 既有 gap repair、terminal stop、stream_error、history/live fencing 保持不变。
+```
+
+## D. 反向验证
+
+临时移除 workspace runtime 向 `stream.start` 传入：
+
+```text
+initialAfterSequence
+```
+
+再运行新增集成测试，结果：
+
+```text
+Expected initialAfterSequence: 7
+Received: no initialAfterSequence
+EXPECTED_FAILURE_EXIT=1
+```
+
+正式文件已恢复，破坏版本没有提交。
+
+## E. 前端定向验证
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npx vitest run src/features/agent/composables/useAgentWorkspaceRuntime.spec.ts src/features/agent/composables/useAgentRunStream.spec.ts src/features/agent/reducers/agentEventReducer.spec.ts src/features/agent/AgentConversation.spec.ts
+npm run type-check
+```
+
+结果：
+
+```text
+4 个 Agent 测试文件通过
+47 passed
+type-check 通过
+```
+
+## F. 前端全量门禁
+
+### F.1 全量 Vitest
+
+```powershell
+npm run test:run
+```
+
+结果：
+
+```text
+Test Files  74 passed (74)
+Tests       479 passed (479)
+```
+
+### F.2 生产构建
+
+```powershell
+npm run build-only
+```
+
+结果：
+
+```text
+✓ 4906 modules transformed.
+✓ built in 1m 44s
+```
+
+### F.3 真实 Chromium
+
+```powershell
+npx playwright test -c playwright.card071.config.ts
+```
+
+首次完整运行出现 1 个恢复测试时序失败，单独诊断确认恢复按钮和状态均正确；随后单独重跑通过，并再次完整运行得到：
+
+```text
+7 passed (48.2s)
+```
+
+覆盖：
+
+```text
+加载项目和工具注册表；
+历史 Run 深链与切换；
+Artifact ContextRef；
+真实运行摘要；
+恢复/DLQ 交互；
+CARD-071 五视口布局测量；
+日志/聊天滚动隔离。
+```
+
+五视口保持：
+
+```text
+1920×1080
+1440×900
+1280×800
+960×800
+650×844
+```
+
+## G. 代码提交、推送和回退
+
+代码提交：
+
+```text
+a6e41d3 feat: consume agent resume cursor
+```
+
+推送：
+
+```text
+9d3e3f5..a6e41d3 codex/bohrium-integration-20260831 -> origin/codex/bohrium-integration-20260831
+```
+
+精确回退：
+
+```powershell
+git revert a6e41d3
+```
+
+本批代码文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\api\agent.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentRunStream.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentRunStream.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\composables\useAgentWorkspaceRuntime.spec.ts
+```
+
+## H. 服务和工作树状态
+
+```text
+前端：http://127.0.0.1:5174/agent
+后端：http://127.0.0.1:8013/health
+CARD-075：completed
+CARD-076：completed
+CARD-077：completed
+CARD-078：completed
+CARD-079：completed
+CARD-080：completed（代码已推送，文档回写进行中）
+总目标：active
+```
+
+历史未跟踪审计、恢复和导入工件继续保留，没有使用 `git add -A`，没有清理或覆盖。
+
+## I. 下一任务目标：CARD-081 前端状态快照与事件投影对齐
+
+下一批继续前端主线：
+
+```text
+CARD-081｜将 state projection 的公开摘要与本地 event reducer 投影对齐，避免刷新后聊天进度、最新工作轨迹和运行详情出现短暂分叉。
+```
+
+重点：
+
+```text
+1. state 返回 latest_public_summary 时，前端将其投影到中央聊天实时活动区；
+2. 已回放事件与 state 快照合并时保持 sequence 去重；
+3. summary receipt、progress_update、work_trace_delta 的显示优先级明确；
+4. 终态 Run 刷新后不残留 streaming 标记或旧 Assistant 文本；
+5. 左侧标签继续紧凑折叠，中央聊天宽度优先，右侧日志独立滚动；
+6. 先写失败测试，再修改代码、做反向验证和全量前端门禁。
+```
+
+执行纪律：
+
+```text
+先写失败测试 → 修改真实代码 → 定向验证 → 反向破坏 → 前后端门禁 → 代码独立提交推送 → 文档独立提交推送 → 记录精确回退命令。
+```
+
+## J. 回写索引
+
+```text
+CARD-075：d15d35e / 5093c41
+CARD-076：935752c / ed8cb1c
+CARD-077：9766ff6 / 1c247c2
+CARD-078：221a0c1 / 0ee179d
+CARD-079：872bff6 / 9d3e3f5
+CARD-080 代码：a6e41d3
+CARD-080 代码回退：git revert a6e41d3
+CARD-080 文档：本节首版提交待生成
+CARD-081：pending / frontend
+总目标：active
+```
