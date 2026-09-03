@@ -28,7 +28,7 @@ def test_terminal_event_migration_creates_nullable_unique_fence(tmp_path, monkey
         indexes = {item["name"]: item for item in inspector.get_indexes("agent_events")}
         with engine.connect() as connection:
             version = connection.execute(text("select version_num from alembic_version")).scalar_one()
-        assert version == "027_agent_terminal_event_key"
+        assert version == "028_agent_reasoning_chunks"
         assert "terminal_key" in columns
         assert bool(indexes["uq_agent_event_terminal_key"]["unique"]) is True
     finally:

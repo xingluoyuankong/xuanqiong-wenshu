@@ -256,6 +256,30 @@ export interface AgentRunStep {
   started_at?: string | null
   finished_at?: string | null
 }
+export interface AgentReasoningChunk {
+  id: string
+  run_id: string
+  project_id?: string | null
+  user_id: number
+  sequence: number
+  chunk_index: number
+  content: string
+  content_hash: string
+  phase?: string | null
+  action_id?: string | null
+  result_ref?: string | null
+  created_at: string
+}
+
+export interface AgentReasoningPage {
+  run_id: string
+  items: AgentReasoningChunk[]
+  next_cursor?: number | null
+  previous_cursor?: number | null
+  has_more: boolean
+  has_previous: boolean
+}
+
 export interface AgentEvent {
   id: string
   run_id: string
@@ -797,6 +821,16 @@ export const AgentAPI = {
     request<AgentEvent[]>(
       `/agent/runs/${encodeURIComponent(runId)}/activity?after_sequence=${Math.max(0, afterSequence)}&limit=${Math.max(1, Math.min(500, limit))}`,
     ),
+  listRunReasoning: (
+    runId: string,
+    options: { afterSequence?: number; beforeSequence?: number; limit?: number } = {},
+  ) => {
+    const params = new URLSearchParams()
+    if (Number.isFinite(options.afterSequence)) params.set('after_sequence', String(Math.max(0, Number(options.afterSequence))))
+    if (Number.isFinite(options.beforeSequence)) params.set('before_sequence', String(Math.max(0, Number(options.beforeSequence))))
+    params.set('limit', String(Math.max(1, Math.min(500, options.limit || 100))))
+    return request<AgentReasoningPage>(`/agent/runs/${encodeURIComponent(runId)}/reasoning?${params.toString()}`)
+  },
   listTimeline: (
     filters: {
       projectId?: string

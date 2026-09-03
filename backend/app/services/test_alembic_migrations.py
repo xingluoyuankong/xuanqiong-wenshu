@@ -24,6 +24,7 @@ MIGRATION_TABLES = (
     "agent_run_steps",
     "agent_jobs",
     "agent_run_commands",
+    "agent_run_reasoning_chunks",
 )
 
 
@@ -42,7 +43,7 @@ def test_fresh_upgrade_is_repeatable_and_downgrade_is_clean(tmp_path: Path, monk
     _upgrade(monkeypatch, db_path)
 
     con = sqlite3.connect(db_path)
-    assert con.execute("select version_num from alembic_version").fetchone()[0] == "027_agent_terminal_event_key"
+    assert con.execute("select version_num from alembic_version").fetchone()[0] == "028_agent_reasoning_chunks"
     assert "step_id" in {row[1] for row in con.execute("pragma table_info(agent_approvals)")}
     assert {
         "cancel_requested_at", "cancel_reason", "event_sequence",
@@ -155,7 +156,7 @@ async def test_concurrent_schema_upgrades_are_serialized(tmp_path: Path, monkeyp
     await asyncio.gather(_run_schema_migrations(), _run_schema_migrations())
 
     con = sqlite3.connect(db_path)
-    assert con.execute("select version_num from alembic_version").fetchone()[0] == "027_agent_terminal_event_key"
+    assert con.execute("select version_num from alembic_version").fetchone()[0] == "028_agent_reasoning_chunks"
     assert "step_id" in {row[1] for row in con.execute("pragma table_info(agent_approvals)")}
     assert {
         "cancel_requested_at", "cancel_reason", "event_sequence",
@@ -339,7 +340,7 @@ def test_agent_correlation_migration_backfills_children_and_keeps_legacy_task_ru
         assert con.execute(f"select transaction_id from {table} where id=?", (row_id,)).fetchone()[0] is None
     assert con.execute("select correlation_id from task_runtime_tasks where task_id='legacy-task'").fetchone()[0] is None
     assert con.execute("select correlation_id from task_runtime_events where task_id='legacy-task'").fetchone()[0] is None
-    assert con.execute("select version_num from alembic_version").fetchone()[0] == "027_agent_terminal_event_key"
+    assert con.execute("select version_num from alembic_version").fetchone()[0] == "028_agent_reasoning_chunks"
     for lease_table in ("agent_runs", "agent_run_steps", "agent_jobs", "agent_run_commands"):
         assert "lease_generation" in {row[1] for row in con.execute(f"pragma table_info({lease_table})")}
     con.close()
@@ -402,5 +403,5 @@ def test_024_reconciles_legacy_snapshot_table_without_rebuilding_or_losing_rows(
         "select id, snapshot_id, run_id, generation, digest, selection_reason, resolved_version "
         "from agent_run_capability_snapshots where id='snapshot-1'"
     ).fetchone() == ("snapshot-1", "resolver-1", "run-1", 1, "digest-1", None, None)
-    assert con.execute("select version_num from alembic_version").fetchone()[0] == "027_agent_terminal_event_key"
+    assert con.execute("select version_num from alembic_version").fetchone()[0] == "028_agent_reasoning_chunks"
     con.close()

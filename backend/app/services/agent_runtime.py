@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified, set_committed_value
 
-from ..models.agent import AgentApproval, AgentArtifactRef, AgentEventRecord, AgentJob, AgentMessage, AgentRun, AgentRunCommand, AgentRunStep, AgentSession
+from ..models.agent import AgentApproval, AgentArtifactRef, AgentEventRecord, AgentJob, AgentMessage, AgentRun, AgentRunCommand, AgentRunStep, AgentSession, AgentRunReasoningChunk
 from ..agent.schemas import AgentPublicWorkSummary
 from ..agent.state_machine import (
     InvalidRunStatus,
@@ -1098,7 +1098,7 @@ class AgentRuntimeService:
         result_ref: str | None = None,
         commit: bool = True,
     ) -> AgentEventRecord:
-        """Persist one Provider reasoning chunk as a distinct replayable event."""
+        """Persist one Provider reasoning chunk and its replay event atomically."""
         text = str(content or "")
         if not text:
             raise AgentConflict("reasoning chunk content is empty")
@@ -1106,7 +1106,16 @@ class AgentRuntimeService:
             normalized_index = max(0, int(chunk_index))
         except (TypeError, ValueError) as exc:
             raise AgentConflict("reasoning chunk index is invalid") from exc
-        return await self.append_event(
+        run = await self.get_run(run_id, user_id)
+        existing = (await self.session.execute(
+            select(AgentRunReasoningChunk).where(
+                AgentRunReasoningChunk.run_id == run.id,
+                AgentRunReasoningChunk.chunk_index == normalized_index,
+            )
+        )).scalar_one_or_none()
+        if existing is not None:
+            raise AgentConflict("reasoning chunk index already exists")
+        event = await self.append_event(
             run_id=run_id,
             user_id=user_id,
             event_type="assistant_reasoning_chunk",
@@ -1118,8 +1127,54 @@ class AgentRuntimeService:
                 **({"action_id": str(action_id)[:160]} if action_id else {}),
                 **({"result_ref": str(result_ref)[:160]} if result_ref else {}),
             },
-            commit=commit,
+            commit=False,
         )
+        self.session.add(AgentRunReasoningChunk(
+            run_id=run.id,
+            project_id=run.project_id,
+            user_id=user_id,
+            sequence=event.sequence,
+            chunk_index=normalized_index,
+            content=text,
+            content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            phase=str(phase or "assistant_response")[:80],
+            action_id=action_id[:160] if action_id else None,
+            result_ref=result_ref[:160] if result_ref else None,
+        ))
+        if commit:
+            try:
+                await self.session.commit()
+                await self.session.refresh(event)
+            except IntegrityError as exc:
+                await self.session.rollback()
+                raise AgentConflict("reasoning chunk index already exists") from exc
+        return event
+
+    async def list_reasoning_chunks(
+        self,
+        *,
+        run_id: str,
+        user_id: int,
+        after_sequence: int = 0,
+        before_sequence: int | None = None,
+        limit: int = 100,
+    ) -> list[AgentRunReasoningChunk]:
+        """Return durable reasoning fragments for a user-owned Run."""
+        run = await self.get_run(run_id, user_id)
+        page_limit = min(max(limit, 1), 500)
+        conditions = [
+            AgentRunReasoningChunk.run_id == run.id,
+            AgentRunReasoningChunk.user_id == user_id,
+        ]
+        if before_sequence is not None:
+            conditions.append(AgentRunReasoningChunk.sequence < max(0, before_sequence))
+            order = AgentRunReasoningChunk.sequence.desc()
+        else:
+            conditions.append(AgentRunReasoningChunk.sequence > max(0, after_sequence))
+            order = AgentRunReasoningChunk.sequence.asc()
+        stmt = select(AgentRunReasoningChunk).where(*conditions).order_by(order).limit(page_limit)
+        rows = list((await self.session.execute(stmt)).scalars().all())
+        return list(reversed(rows)) if before_sequence is not None else rows
 
     async def append_work_trace_delta(
         self,

@@ -559,6 +559,32 @@ class AgentPublicWorkSummary(BaseModel):
         }
 
 
+class AgentReasoningChunkRead(BaseModel):
+    id: str
+    run_id: str
+    project_id: str | None = None
+    user_id: int
+    sequence: int
+    chunk_index: int
+    content: str
+    content_hash: str
+    phase: str | None = None
+    action_id: str | None = None
+    result_ref: str | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgentReasoningPageRead(BaseModel):
+    run_id: str
+    items: list[AgentReasoningChunkRead]
+    next_cursor: int | None = None
+    previous_cursor: int | None = None
+    has_more: bool = False
+    has_previous: bool = False
+
+
 class AgentEventRead(BaseModel):
     id: str
     run_id: str

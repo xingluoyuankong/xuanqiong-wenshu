@@ -166,6 +166,7 @@ __all__ = [
     "AgentRun",
     "AgentRunStep",
     "AgentEventRecord",
+    "AgentRunReasoningChunk",
     "AgentApproval",
     "AgentArtifactRef",
     "AgentRunCommand",
@@ -186,7 +187,7 @@ __all__ = [
 ]
 
 # Agent 创作工作台持久化模型
-from .agent import AgentSession, AgentMessage, AgentRun, AgentRunStep, AgentEventRecord, AgentApproval, AgentArtifactRef, AgentRunCommand, AgentJob
+from .agent import AgentSession, AgentMessage, AgentRun, AgentRunStep, AgentEventRecord, AgentRunReasoningChunk, AgentApproval, AgentArtifactRef, AgentRunCommand, AgentJob
 
 # Agent Catalog/Resolver 关系化模型
 from .agent_catalog import (

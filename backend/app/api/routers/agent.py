@@ -30,7 +30,7 @@ from ...agent.tool_adapters import execute_read_tool
 from ...agent.schemas import (
     AgentApprovalDecisionRequest, AgentApprovalRead, AgentArtifactAcceptRequest, AgentExecutionFactRead, AgentProviderUsageSummaryRead, AgentProjectProviderUsageSummaryRead, AgentArtifactDiffRead, AgentArtifactRead, AgentArtifactVersionDiffRead, AgentEventRead, AgentMessageCreateRequest,
     AgentAuditRecordRead, AgentJobRead, AgentRewriteInstructionRead, AgentMessageRead, AgentPlan, AgentPlanRequest, AgentPlanStep, AgentQualityBlockerRead, AgentArtifactQualityRead, AgentArtifactLineageRead, AgentArtifactLineageEdgeRead, AgentArtifactLineageArtifactRead, AgentQualityFindingRead, AgentQualityGateRead, AgentQualityResultRead, AgentRunRead, AgentRunStepRead, AgentTimelineEventRead,
-    AgentSessionCreateRequest, AgentSessionDetail, AgentSessionRead, AgentToolCatalog, AgentToolHealthRead,
+    AgentSessionCreateRequest, AgentSessionDetail, AgentSessionRead, AgentToolCatalog, AgentToolHealthRead, AgentReasoningChunkRead, AgentReasoningPageRead,
     AgentRunCommandRequest, AgentRunCommandRead, AgentContextSnapshotRead, AgentPlanRevisionRead, AgentConversationSummaryRead, AgentProviderProvenanceRead, AgentProjectEntitySummariesRead,
 )
 from ...core.config import settings
@@ -893,6 +893,47 @@ async def get_agent_run_state(
     try:
         return await AgentStateProjectionService(session).get_run_state(
             run_id=run_id, user_id=current_user.id
+        )
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
+        raise _error(exc) from exc
+
+
+@router.get("/runs/{run_id}/reasoning", response_model=AgentReasoningPageRead)
+async def list_agent_run_reasoning(
+    run_id: str,
+    after_sequence: Annotated[int, Query(ge=0)] = 0,
+    before_sequence: Annotated[int | None, Query(ge=0)] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> AgentReasoningPageRead:
+    """Read paginated Provider reasoning fragments for one user-owned Run."""
+    try:
+        service = AgentRuntimeService(session)
+        rows = await service.list_reasoning_chunks(
+            run_id=run_id,
+            user_id=current_user.id,
+            after_sequence=after_sequence,
+            before_sequence=before_sequence,
+            limit=limit + 1,
+        )
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        if before_sequence is not None:
+            previous_cursor = page_rows[0].sequence if has_more and page_rows else None
+            next_cursor = None
+            has_previous = has_more
+        else:
+            next_cursor = page_rows[-1].sequence if has_more and page_rows else None
+            previous_cursor = None
+            has_previous = False
+        return AgentReasoningPageRead(
+            run_id=run_id,
+            items=[AgentReasoningChunkRead.model_validate(item) for item in page_rows],
+            next_cursor=next_cursor,
+            previous_cursor=previous_cursor,
+            has_more=has_more,
+            has_previous=has_previous,
         )
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc

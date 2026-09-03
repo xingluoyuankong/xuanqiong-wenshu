@@ -22,6 +22,8 @@ export interface AgentReasoningChunk {
   chunkIndex: number
   content: string
   createdAt?: string
+  id?: string
+  runId?: string
 }
 
 export type AgentReasoningStatus = 'idle' | 'streaming' | 'completed' | 'failed'

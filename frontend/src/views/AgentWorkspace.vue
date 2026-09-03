@@ -186,9 +186,13 @@
           :artifact-preview-artifact-id="artifactPreviewArtifactId"
           :artifact-preview-error="artifactPreviewError"
           :public-work-summary="publicWorkSummary"
-          :reasoning-chunks="runProjection.activeReasoningChunks.value"
-          :reasoning-text="runProjection.activeReasoningText.value"
+          :reasoning-chunks="reasoningChunks"
+          :reasoning-text="reasoningText"
+          :reasoning-has-previous="reasoningHistory.hasPrevious.value"
+          :reasoning-loading-previous="reasoningHistory.loading.value"
+          :reasoning-previous-error="reasoningHistory.error.value"
           :reasoning-status="runProjection.activeReasoningStatus.value"
+          @load-previous-reasoning="reasoningHistory.loadPrevious"
           :work-trace-deltas="runProjection.activeWorkTraceDeltas.value"
           :latest-work-trace="runProjection.latestWorkTrace.value"
           :has-sequence-gap="runProjection.activeEventProjection.value.hasSequenceGap"
@@ -440,6 +444,7 @@ import { useAgentWorkspaceRuntime } from '@/features/agent/composables/useAgentW
 import { useAgentSessionLifecycle } from '@/features/agent/composables/useAgentSessionLifecycle'
 import { useAgentRunCommands } from '@/features/agent/composables/useAgentRunCommands'
 import { useAgentProjectGovernanceData } from '@/features/agent/composables/useAgentProjectGovernanceData'
+import { useAgentReasoningHistory } from '@/features/agent/composables/useAgentReasoningHistory'
 import { useNovelStore } from '@/stores/novel'
 import { useAuthStore } from '@/stores/auth'
 import { XqButton, XqPanel } from '@/shared/ui'
@@ -572,6 +577,18 @@ watch(
 const streamingAssistant = computed(() => runProjection.activeEventProjection.value.assistantText)
 const latestProgressMessage = computed(() => runProjection.activeEventProjection.value.latestProgressMessage)
 const publicWorkSummary = computed(() => runState.value?.latest_public_summary || null)
+const reasoningHistory = useAgentReasoningHistory()
+const reasoningChunks = computed(() => {
+  const bySequence = new Map<number, typeof runProjection.activeReasoningChunks.value[number]>()
+  for (const item of [...reasoningHistory.chunks.value, ...runProjection.activeReasoningChunks.value]) bySequence.set(item.sequence, item)
+  return [...bySequence.values()].sort((left, right) => left.sequence - right.sequence)
+})
+const reasoningText = computed(() => reasoningChunks.value.map((item) => item.content).join(''))
+watch(
+  () => activeRun.value?.id || '',
+  (runId) => { void reasoningHistory.load(runId || null) },
+  { immediate: true },
+)
 const agentRunStream = useAgentRunStream()
 const streamConnectionState = computed<SSEConnectionState>({
   get: () => runProjection.activeConnectionState.value,

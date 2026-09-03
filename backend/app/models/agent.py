@@ -76,6 +76,7 @@ class AgentRun(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     session: Mapped[AgentSession] = relationship(back_populates="runs")
     events: Mapped[list["AgentEventRecord"]] = relationship(back_populates="run", cascade="all, delete-orphan", order_by="AgentEventRecord.sequence")
+    reasoning_chunks: Mapped[list["AgentRunReasoningChunk"]] = relationship(back_populates="run", cascade="all, delete-orphan", order_by="AgentRunReasoningChunk.sequence")
     steps: Mapped[list["AgentRunStep"]] = relationship(back_populates="run", cascade="all, delete-orphan", order_by="AgentRunStep.step_order")
 
 
@@ -129,6 +130,30 @@ class AgentEventRecord(Base):
     data_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     run: Mapped[AgentRun] = relationship(back_populates="events")
+
+
+class AgentRunReasoningChunk(Base):
+    """Durable Provider reasoning fragment kept separate from the event payload."""
+    __tablename__ = "agent_run_reasoning_chunks"
+    __table_args__ = (
+        UniqueConstraint("run_id", "chunk_index", name="uq_agent_reasoning_run_chunk"),
+        UniqueConstraint("run_id", "sequence", name="uq_agent_reasoning_run_sequence"),
+        Index("ix_agent_reasoning_run_sequence", "run_id", "sequence"),
+        Index("ix_agent_reasoning_run_chunk", "run_id", "chunk_index"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    phase: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    action_id: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    result_ref: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    run: Mapped[AgentRun] = relationship(back_populates="reasoning_chunks")
 
 
 class AgentApproval(Base):

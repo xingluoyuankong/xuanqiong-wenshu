@@ -1,27 +1,30 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { AgentReasoningChunk, AgentReasoningStatus } from './reducers/agentEventReducer'
+import type { AgentReasoningChunk } from './reducers/agentEventReducer'
 
 const props = withDefaults(defineProps<{
   chunks?: AgentReasoningChunk[]
   text?: string
-  status?: AgentReasoningStatus
+  status?: 'idle' | 'streaming' | 'completed' | 'failed'
+  hasPrevious?: boolean
+  loadingPrevious?: boolean
+  previousError?: string
 }>(), {
   chunks: () => [],
   text: '',
   status: 'idle',
+  hasPrevious: false,
+  loadingPrevious: false,
+  previousError: '',
 })
-
+const emit = defineEmits<{ (event: 'load-previous'): void }>()
 const manuallyExpanded = ref(false)
 const copied = ref(false)
 const isStreaming = computed(() => props.status === 'streaming')
 const isExpanded = computed(() => isStreaming.value || manuallyExpanded.value)
 const statusLabel = computed(() => ({ idle: '待开始', streaming: '流式中', completed: '已完成', failed: '失败' })[props.status])
 const displayText = computed(() => props.text || props.chunks.map((chunk) => chunk.content).join(''))
-
-const toggle = () => {
-  manuallyExpanded.value = !manuallyExpanded.value
-}
+const toggle = () => { manuallyExpanded.value = !manuallyExpanded.value }
 const copyText = async () => {
   if (!displayText.value || typeof navigator === 'undefined' || !navigator.clipboard) return
   await navigator.clipboard.writeText(displayText.value)
@@ -40,7 +43,13 @@ const copyText = async () => {
       <button v-if="displayText" type="button" class="reasoning-card__copy" data-testid="agent-reasoning-copy" @click="copyText">{{ copied ? '已复制' : '复制' }}</button>
     </header>
     <div v-show="isExpanded" class="reasoning-card__body" data-testid="agent-reasoning-body">
-      <pre>{{ displayText }}</pre>
+      <button v-if="hasPrevious" type="button" class="reasoning-card__load" data-testid="agent-reasoning-load-previous" :disabled="loadingPrevious" @click="emit('load-previous')">
+        {{ loadingPrevious ? '正在加载更早 reasoning…' : '加载更早 reasoning' }}
+      </button>
+      <p v-if="previousError" class="reasoning-card__error">{{ previousError }}</p>
+      <div class="reasoning-card__virtual-list" data-testid="agent-reasoning-virtual-list">
+        <pre v-for="chunk in chunks" :key="chunk.id || `${chunk.runId || 'run'}:${chunk.sequence}`">{{ chunk.content }}</pre>
+      </div>
     </div>
   </section>
 </template>
@@ -54,6 +63,10 @@ const copyText = async () => {
 .reasoning-card__status.is-streaming { color: #7c3aed; }
 .reasoning-card__status.is-failed { color: var(--xq-cinnabar); }
 .reasoning-card__copy { align-self: center; margin-right: .55rem; padding: .25rem .45rem; border: 1px solid color-mix(in srgb, #7c3aed 24%, var(--xq-border)); border-radius: .4rem; color: #6d28d9; background: white; cursor: pointer; }
-.reasoning-card__body { border-top: 1px solid color-mix(in srgb, #7c3aed 18%, var(--xq-border)); padding: .7rem .8rem; max-height: 22rem; overflow: auto; }
-.reasoning-card__body pre { margin: 0; color: #312e81; white-space: pre-wrap; overflow-wrap: anywhere; font: .82rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.reasoning-card__body { border-top: 1px solid color-mix(in srgb, #7c3aed 18%, var(--xq-border)); padding: .7rem .8rem; max-height: 26rem; overflow: auto; }
+.reasoning-card__load { margin-bottom: .55rem; padding: .3rem .55rem; border: 1px solid color-mix(in srgb, #7c3aed 24%, var(--xq-border)); border-radius: .4rem; color: #6d28d9; background: white; cursor: pointer; }
+.reasoning-card__load:disabled { cursor: wait; opacity: .65; }
+.reasoning-card__error { margin: 0 0 .45rem; color: var(--xq-cinnabar); font-size: .78rem; }
+.reasoning-card__virtual-list { display: grid; gap: .55rem; content-visibility: auto; contain-intrinsic-size: 1px 1200px; }
+.reasoning-card__virtual-list pre { margin: 0; color: #312e81; white-space: pre-wrap; overflow-wrap: anywhere; font: .82rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 </style>

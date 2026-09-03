@@ -55,6 +55,10 @@
       :chunks="reasoningChunks"
       :text="reasoningText"
       :status="reasoningStatus"
+      :has-previous="reasoningHasPrevious"
+      :loading-previous="reasoningLoadingPrevious"
+      :previous-error="reasoningPreviousError"
+      @load-previous="emit('load-previous-reasoning')"
     />
     <article v-if="streamingAssistant" class="message message-assistant message-streaming" data-testid="agent-streaming-message">
       <b>Agent</b><p>{{ streamingAssistant }}</p>
@@ -123,6 +127,9 @@ const props = withDefaults(
     reasoningChunks?: AgentReasoningChunk[]
     reasoningText?: string
     reasoningStatus?: AgentReasoningStatus
+    reasoningHasPrevious?: boolean
+    reasoningLoadingPrevious?: boolean
+    reasoningPreviousError?: string
     workTraceDeltas?: AgentWorkTraceDelta[]
     latestWorkTrace?: AgentWorkTraceDelta | null
     hasSequenceGap?: boolean
@@ -154,6 +161,9 @@ const props = withDefaults(
     reasoningChunks: () => [],
     reasoningText: '',
     reasoningStatus: 'idle',
+    reasoningHasPrevious: false,
+    reasoningLoadingPrevious: false,
+    reasoningPreviousError: '',
     workTraceDeltas: () => [],
     latestWorkTrace: null,
     hasSequenceGap: false,
@@ -171,6 +181,7 @@ const emit = defineEmits<{
   (event: 'submit'): void
   (event: 'remove-context-ref', ref: AgentContextRef): void
   (event: 'close-artifact-preview'): void
+  (event: 'load-previous-reasoning'): void
 }>()
 
 const sessionLabel = computed(() => {
