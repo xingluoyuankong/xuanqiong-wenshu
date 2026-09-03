@@ -35,6 +35,10 @@ const KNOWN_EVENT_TYPES = new Set([
   'tool_cancelled',
   'assistant_queued',
   'assistant_delta',
+  'assistant_reasoning_started',
+  'assistant_reasoning_chunk',
+  'assistant_reasoning_completed',
+  'assistant_reasoning_failed',
   'assistant_completed',
   'artifact_created',
   'artifact_accepted',
@@ -120,6 +124,7 @@ const INTEGER_KEYS = new Set([
   'step_count',
   'revision',
   'input_scope_count',
+  'chunk_index',
 ])
 const PROGRESS_KEYS = new Set(['progress', 'percent'])
 const UNKNOWN_EVENT_TYPE = 'unknown'
@@ -191,6 +196,16 @@ export function toSafeAgentEvent(raw: AgentEvent): SafeAgentEvent {
     if (eventType === 'assistant_delta') {
       const value = text(source.content, 4000)
       if (value !== undefined) data.content = value
+    }
+    if (eventType === 'assistant_reasoning_chunk') {
+      const value = typeof source.content === 'string'
+        ? source.content.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').slice(0, 4000)
+        : typeof source.reasoning === 'string'
+          ? source.reasoning.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').slice(0, 4000)
+          : typeof source.reasoning_content === 'string'
+            ? source.reasoning_content.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').slice(0, 4000)
+            : ''
+      if (value) data.content = value
     }
     if (eventType === 'work_trace_delta') {
       for (const key of ['trace_id', 'capability_id', 'result_ref']) {

@@ -303,3 +303,20 @@ it('规范化公开事件文本中的控制字符', () => {
     next_action: '整理 结果',
   })
 })
+
+
+it('只对明确的 Provider reasoning 事件开放原始分片字段', () => {
+  const reasoning = toSafeAgentEvent({
+    id: 'reasoning-event', run_id: 'run-reasoning', sequence: 8,
+    event_type: 'assistant_reasoning_chunk', summary: 'Provider reasoning 分片',
+    data: { chunk_index: 3, content: '第一行\n第二行', reasoning: 'same-source' },
+  } as any)
+  expect(reasoning.data).toEqual({ chunk_index: 3, content: '第一行\n第二行' })
+
+  const legacy = toSafeAgentEvent({
+    id: 'legacy-event', run_id: 'run-reasoning', sequence: 9,
+    event_type: 'assistant_delta', summary: 'Agent 正在输出',
+    data: { content: '正文', reasoning: 'HIDDEN_REASONING' },
+  } as any)
+  expect(legacy.data).toEqual({ content: '正文' })
+})

@@ -63,11 +63,27 @@ const contentTree = {
   },
 }
 
+async function openAgentPanel(
+  page: import('@playwright/test').Page,
+  side: 'left' | 'right',
+  panel: string,
+) {
+  const panelHost = page.getByTestId(side === 'left' ? 'agent-left-panel' : 'agent-right-panel')
+  if ((await panelHost.getAttribute('data-panel-open')) !== 'true') {
+    await page.getByTestId(`agent-rail-panel-${side}-${panel}`).click()
+  }
+  await expect(panelHost).toHaveAttribute('data-panel-open', 'true')
+}
+
 async function expandWorkspaceSection(
   page: import('@playwright/test').Page,
   testId: string,
 ) {
   const section = page.getByTestId(testId)
+  const side = testId.includes('run-details') || testId.includes('governance') || testId.includes('activity')
+    ? 'right'
+    : 'left'
+  await openAgentPanel(page, side, side === 'right' ? 'log' : 'project')
   await expect(section).toBeVisible()
   if (!(await section.evaluate((element) => (element as HTMLDetailsElement).open))) {
     await section.locator('summary').scrollIntoViewIfNeeded()
@@ -390,6 +406,7 @@ test.describe('Agent 创作工作台浏览器冒烟', () => {
     const state = await mockAgentApi(page)
     await page.goto('/agent')
     await expect(page.getByTestId('agent-workspace')).toBeVisible()
+    await openAgentPanel(page, 'left', 'project')
     await expect(page.getByTestId('agent-project-select')).toContainText('E2E 星河旧梦')
     await expect(page.getByTestId('agent-tool-list')).toContainText('project.context')
     await expandWorkspaceSection(page, 'agent-session-section')
@@ -502,6 +519,7 @@ test.describe('Agent 创作工作台浏览器冒烟', () => {
     })
 
     await page.goto(`/agent?project_id=${project.id}&session_id=${session.id}&run_id=${oldRun.id}`)
+    await openAgentPanel(page, 'right', 'log')
     await expect(page.getByTestId('agent-run-selector')).toHaveValue(oldRun.id)
     await expect(page.getByTestId('agent-selected-run-id')).toContainText('run-old')
     await expect(page.getByTestId('agent-run-progress')).toHaveText('21%')
@@ -761,6 +779,7 @@ test.describe('Agent 创作工作台浏览器冒烟', () => {
       })
     })
     await page.goto('/agent')
+    await openAgentPanel(page, 'left', 'project')
     await page.getByTestId('agent-content-chapter-1').click()
     await expect(page.getByTestId('agent-context-chip-chapter-version')).toContainText(
       '第 1 章 · 版本 11',
@@ -914,6 +933,7 @@ test.describe('Agent 恢复与 DLQ 浏览器交互', () => {
       },
     )
     await page.goto('/agent')
+    await openAgentPanel(page, 'right', 'log')
     await page.getByTestId('agent-message-input').fill('恢复运行')
     await page.getByTestId('agent-plan-submit').click()
     await expect(page.getByTestId('agent-recover-run-button')).toBeVisible()
@@ -1037,6 +1057,9 @@ test.describe('Agent 恢复与 DLQ 浏览器交互', () => {
       await expect(page.getByTestId('agent-workspace')).toBeVisible()
       await expect(page.getByTestId('agent-project-select')).toContainText('E2E 星河旧梦')
       await expect(page.getByTestId('agent-message-list')).toBeVisible()
+      await openAgentPanel(page, 'left', 'project')
+      await openAgentPanel(page, 'right', 'log')
+      await expect(page.getByTestId('agent-runtime-log-viewport')).toBeVisible()
 
       const measurement = await page.evaluate(() => {
         const query = (selector: string) => document.querySelector(selector)
@@ -1124,16 +1147,13 @@ test.describe('Agent 恢复与 DLQ 浏览器交互', () => {
         .trim()
         .split(/\s+/)
       if (viewport.width <= 960) {
-        expect(layoutColumns).toHaveLength(1)
-        expect((measurement.main as { y: number }).y).toBeLessThan((measurement.sidebar as { y: number }).y)
-        expect((measurement.sidebar as { y: number }).y).toBeLessThan((measurement.activity as { y: number }).y)
+        expect((measurement.sidebar as { width: number }).width).toBeGreaterThan(0)
+        expect((measurement.activity as { width: number }).width).toBeGreaterThan(0)
       } else {
-        expect(layoutColumns).toHaveLength(3)
-        expect((measurement.sidebar as { width: number }).width).toBeGreaterThanOrEqual(160)
-        expect((measurement.activity as { width: number }).width).toBeGreaterThanOrEqual(190)
-        expect((measurement.main as { width: number }).width).toBeGreaterThan(700)
-        expect((measurement.main as { width: number }).width).toBeGreaterThan((measurement.sidebar as { width: number }).width)
-        expect((measurement.main as { width: number }).width).toBeGreaterThan((measurement.activity as { width: number }).width)
+        expect(layoutColumns).toHaveLength(5)
+        expect((measurement.sidebar as { width: number }).width).toBeGreaterThanOrEqual(240)
+        expect((measurement.activity as { width: number }).width).toBeGreaterThanOrEqual(240)
+        expect((measurement.main as { width: number }).width).toBeGreaterThan(300)
       }
 
       await page.screenshot({

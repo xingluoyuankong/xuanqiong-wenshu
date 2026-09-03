@@ -136,4 +136,20 @@ describe('AgentConversation', () => {
     expect(failed.get('[data-testid="agent-artifact-preview-error"]').text()).toContain('preview failed')
   })
 
+  it('在 Assistant 正文之前独立展示 Provider 原始 reasoning', () => {
+    const wrapper = mount(AgentConversation, {
+      props: {
+        messages: [message],
+        streamingAssistant: '可见正文',
+        reasoningText: 'Provider 的原始 reasoning\n第二行',
+        reasoningStatus: 'streaming',
+        reasoningChunks: [{ sequence: 2, chunkIndex: 0, content: 'Provider 的原始 reasoning\n第二行' }],
+      },
+    })
+    expect(wrapper.get('[data-testid="agent-reasoning-card"]').text()).toContain('Provider 原始 reasoning')
+    expect(wrapper.get('[data-testid="agent-reasoning-body"] pre').text()).toContain('第二行')
+    expect(wrapper.get('[data-testid="agent-streaming-message"]').text()).toContain('可见正文')
+    expect(wrapper.find('[data-testid="agent-reasoning-body"]').element.compareDocumentPosition(wrapper.get('[data-testid="agent-streaming-message"]').element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
 })

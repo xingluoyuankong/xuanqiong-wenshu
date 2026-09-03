@@ -1,20 +1,21 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import shellSource from './AgentWorkspaceShell.vue?raw'
-import workspaceSource from '@/views/AgentWorkspace.vue?raw'
-
 import AgentWorkspaceShell from './AgentWorkspaceShell.vue'
 
 describe('AgentWorkspaceShell', () => {
-  it('保留工作台根节点、布局插槽和未选项目状态说明', () => {
-    const wrapper = mount(AgentWorkspaceShell, {
-      slots: {
-        sidebar: '<div data-testid="shell-sidebar-slot">sidebar</div>',
-        main: '<div data-testid="shell-main-slot">main</div>',
-        activity: '<div data-testid="shell-activity-slot">activity</div>',
-      },
-    })
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
 
+  const slots = {
+    sidebar: '<div data-testid="shell-sidebar-slot">sidebar</div>',
+    main: '<div data-testid="shell-main-slot">main</div>',
+    activity: '<div data-testid="shell-activity-slot">activity</div>',
+  }
+
+  it('保留工作台根节点、布局插槽和未选项目状态说明', () => {
+    const wrapper = mount(AgentWorkspaceShell, { slots })
     expect(wrapper.get('[data-testid="agent-workspace"]').attributes('data-testid')).toBe('agent-workspace')
     expect(wrapper.get('[data-testid="agent-status"]').text()).toContain('尚未选择小说项目')
     expect(wrapper.get('[data-testid="agent-status"]').text()).toContain('选择项目后，Agent 会限制在该项目范围内工作')
@@ -23,115 +24,60 @@ describe('AgentWorkspaceShell', () => {
     expect(wrapper.get('[data-testid="shell-activity-slot"]').text()).toBe('activity')
   })
 
-  it('提供窄侧栏、主聊天栏和独立活动栏的结构钩子', () => {
-    const wrapper = mount(AgentWorkspaceShell, {
-      slots: {
-        sidebar: '<div>sidebar</div>',
-        main: '<div>main</div>',
-        activity: '<div>activity</div>',
-      },
-    })
-
-    expect(wrapper.find('.agent-layout').exists()).toBe(true)
-    expect(wrapper.find('.agent-sidebar').exists()).toBe(true)
+  it('提供左右图标窄轨道、中央聊天栏和保留挂载的侧面板', () => {
+    const wrapper = mount(AgentWorkspaceShell, { slots })
+    expect(wrapper.find('[data-testid="agent-left-rail"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="agent-right-rail"]').exists()).toBe(true)
     expect(wrapper.find('.agent-main').exists()).toBe(true)
+    expect(wrapper.find('.agent-sidebar').exists()).toBe(true)
     expect(wrapper.find('.agent-activity').exists()).toBe(true)
-    expect(wrapper.find('.agent-sidebar').attributes('style')).toBeUndefined()
+    expect(wrapper.get('[data-testid="agent-left-panel"]').classes()).not.toContain('agent-panel-open')
+    expect(wrapper.get('[data-testid="agent-right-panel"]').classes()).not.toContain('agent-panel-open')
   })
 
-  it('显示恢复的会话状态与忙碌标识', () => {
-    const wrapper = mount(AgentWorkspaceShell, {
-      props: {
-        busy: true,
-        projectTitle: '星河旧梦',
-        sessionStatus: 'active',
-        hasSelectedProject: true,
-      },
-    })
+  it('点击左侧和右侧轨道时只展开对应面板，重复点击可关闭', async () => {
+    const wrapper = mount(AgentWorkspaceShell, { slots })
+    await wrapper.get('[data-testid="agent-rail-panel-left-project"]').trigger('click')
+    expect(wrapper.get('[data-testid="agent-left-panel"]').classes()).toContain('agent-panel-open')
+    expect(wrapper.get('[data-testid="agent-right-panel"]').classes()).not.toContain('agent-panel-open')
+    expect(wrapper.get('[data-testid="agent-workspace"]').get('.agent-layout').classes()).toContain('has-left-panel')
 
+    await wrapper.get('[data-testid="agent-rail-panel-right-log"]').trigger('click')
+    expect(wrapper.get('[data-testid="agent-left-panel"]').classes()).toContain('agent-panel-open')
+    expect(wrapper.get('[data-testid="agent-right-panel"]').classes()).toContain('agent-panel-open')
+
+    await wrapper.get('[data-testid="agent-rail-panel-right-log"]').trigger('click')
+    expect(wrapper.get('[data-testid="agent-right-panel"]').classes()).not.toContain('agent-panel-open')
+  })
+
+  it('支持忙碌状态和会话恢复状态', () => {
+    const wrapper = mount(AgentWorkspaceShell, {
+      props: { busy: true, projectTitle: '星河旧梦', sessionStatus: 'active', hasSelectedProject: true },
+      slots,
+    })
     expect(wrapper.get('[data-testid="agent-status"]').text()).toContain('星河旧梦')
     expect(wrapper.get('[data-testid="agent-status"]').text()).toContain('会话已恢复 · active')
     expect(wrapper.find('.status-dot.busy').exists()).toBe(true)
   })
 
+  it('面板状态可以在重新挂载后恢复，并提供可访问性属性', async () => {
+    const first = mount(AgentWorkspaceShell, { slots })
+    await first.get('[data-testid="agent-rail-panel-left-tools"]').trigger('click')
+    expect(first.get('[data-testid="agent-rail-panel-left-tools"]').attributes('aria-pressed')).toBe('true')
+    first.unmount()
 
-  it('把紧凑侧栏、聊天主栏和右侧活动栏的宽度约束集中在壳层', () => {
-    expect(shellSource).toContain('grid-template-columns: minmax(9.5rem, 11rem) minmax(0, 1fr) minmax(11rem, 12.5rem);')
-    expect(shellSource).toContain('grid-template-columns: minmax(9rem, 10rem) minmax(0, 1fr) minmax(10.5rem, 11.5rem);')
-    expect(workspaceSource).not.toContain('grid-template-columns: minmax(210px, 0.85fr) minmax(0, 1.8fr) minmax(210px, 0.75fr);')
-    expect(workspaceSource).toContain('max-height: min(7rem, 14vh);')
-    expect(workspaceSource).toContain('class="workspace-section workspace-inspector-section"')
-    expect(workspaceSource).toContain('data-testid="agent-inspector-section"')
-    expect(workspaceSource.indexOf('data-testid="agent-log-panel"')).toBeLessThan(
-      workspaceSource.indexOf('data-testid="agent-inspector-section"'),
-    )
+    const second = mount(AgentWorkspaceShell, { slots })
+    expect(second.get('[data-testid="agent-left-panel"]').classes()).toContain('agent-panel-open')
+    expect(second.get('[data-testid="agent-side-panel-close-left"]').attributes('aria-label')).toBe('关闭项目资源面板')
   })
 
-  it('把聊天主区做大并压缩两侧轨道和日志窗口', () => {
-    expect(shellSource).toContain('grid-template-columns: minmax(9.5rem, 11rem) minmax(0, 1fr) minmax(11rem, 12.5rem);')
-    expect(shellSource).toContain('grid-template-columns: minmax(9rem, 10rem) minmax(0, 1fr) minmax(10.5rem, 11.5rem);')
-    expect(workspaceSource).toContain('min-height: min(78vh, 60rem);')
-    expect(workspaceSource).toContain('min-height: min(30rem, 52vh);')
-    expect(workspaceSource).toContain('min-height: 1.75rem;')
-  })
-
-  it('把桌面侧栏进一步压缩，把空间优先留给中央聊天', () => {
-    expect(shellSource).toContain('grid-template-columns: minmax(9.5rem, 11rem) minmax(0, 1fr) minmax(11rem, 12.5rem);')
-    expect(shellSource).toContain('grid-template-columns: minmax(9rem, 10rem) minmax(0, 1fr) minmax(10.5rem, 11.5rem);')
-    expect(workspaceSource).toContain('max-height: min(7rem, 14vh);')
-    expect(workspaceSource).toContain('min-height: 2rem;')
-  })
-
-  it('把日志固定为右侧唯一滚动视口，并保护中央阅读宽度', () => {
-    expect(workspaceSource).toContain('workspace-runtime-log-viewport')
-    expect(workspaceSource).toContain('data-testid="agent-runtime-log-viewport"')
-    expect(workspaceSource).toContain('.workspace-runtime-log-viewport')
-    expect(workspaceSource).toContain('min-width: 0;')
-    expect(workspaceSource).toContain('min-height: 0;')
-    expect(shellSource).toContain('.agent-activity {')
-    expect(shellSource).toContain('display: flex;')
-    expect(shellSource).toContain('flex-direction: column;')
-    expect(workspaceSource).toContain('.message {')
-    expect(workspaceSource).toContain('max-width: 96%;')
-  })
-
-  it('把中窄与手机断点的聊天优先规则固定为 CSS contract', () => {
+  it('桌面和移动端布局契约以窄轨道、抽屉与安全区为核心', () => {
+    expect(shellSource).toContain('grid-template-columns: 3.5rem 0 minmax(0, 1fr) 0 3.5rem;')
+    expect(shellSource).toContain('agent-panel-open')
     expect(shellSource).toContain('@media (max-width: 960px)')
-    expect(shellSource).toContain('grid-template-columns: minmax(0, 1fr);')
-    expect(shellSource).toContain('.agent-main { grid-row: 1; }')
-    expect(shellSource).toContain('.agent-sidebar { position: static; grid-row: 2; max-height: none; overflow: visible; }')
-    expect(shellSource).toContain('.agent-activity { position: static; grid-row: 3; max-height: none; overflow: visible; }')
-    expect(shellSource).toContain('@media (max-width: 650px)')
-    expect(shellSource).toContain('.agent-layout { grid-template-columns: 1fr; }')
-    expect(shellSource).toContain('.agent-sidebar, .agent-main, .agent-activity { grid-column: auto; position: static; max-height: none; overflow: visible; }')
-    expect(shellSource).toMatch(/\.agent-main\s*\{\s*min-height: min\(72vh, 56rem\);\s*\}/)
-  })
-  it('进一步压缩左侧嵌套面板与右侧日志窗口的视觉占用', () => {
-    expect(workspaceSource).toContain('.workspace-sidebar-stack :deep(.xq-panel__title),')
-    expect(workspaceSource).toContain('font-size: 0.88rem;')
-    expect(workspaceSource).toContain('.workspace-sidebar-stack :deep(.xq-panel__body),')
-    expect(workspaceSource).toContain('padding: 0.55rem;')
-    expect(workspaceSource).toContain('max-height: min(7rem, 14vh);')
-    expect(workspaceSource).toContain('min-height: 2rem;')
-    expect(workspaceSource.match(/\.workspace-runtime-log-viewport\s*\{[^}]*\}/)?.[0]).toContain('overflow-y: auto;')
-  })
-
-  it('把右栏运行日志限制为有界渲染窗口', () => {
-    expect(workspaceSource).toContain('const LOG_RENDER_LIMIT = 120')
-    expect(workspaceSource).toContain('const visibleLogEvents = computed(() => events.value.slice(-LOG_RENDER_LIMIT))')
-    expect(workspaceSource).toContain('const hiddenLogEventCount = computed(() => Math.max(0, events.value.length - visibleLogEvents.value.length))')
-    expect(workspaceSource).toContain('v-if="hiddenLogEventCount" class="workspace-log-window"')
-    expect(workspaceSource).toContain('v-for="event in visibleLogEvents"')
-  })
-
-  it('仅在用户停留日志底部时跟随高频运行事件', () => {
-    expect(workspaceSource).toContain('const LOG_TAIL_THRESHOLD = 24')
-    expect(workspaceSource).toContain('ref="logListEl"')
-    expect(workspaceSource).toContain('@scroll="onLogScroll"')
-    expect(workspaceSource).toContain('const logFollowTail = ref(true)')
-    expect(workspaceSource).toContain('element.scrollHeight - element.scrollTop - element.clientHeight <= LOG_TAIL_THRESHOLD')
-    expect(workspaceSource).toContain('if (element && logFollowTail.value) element.scrollTop = element.scrollHeight')
-    expect(workspaceSource).toContain("() => visibleLogEvents.value.map((event) => event.id).join('|')")
-    expect(workspaceSource).toContain("() => selectedRunId.value")
+    expect(shellSource).toContain('position: fixed;')
+    expect(shellSource).toContain('env(safe-area-inset-bottom)')
+    expect(shellSource).toContain('min-width: 0')
+    expect(shellSource).toContain('min-height: 0')
   })
 })

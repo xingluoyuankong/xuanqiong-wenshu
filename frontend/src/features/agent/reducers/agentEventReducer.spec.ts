@@ -236,4 +236,16 @@ describe('agentEventReducer', () => {
     ])
     expect(JSON.stringify(result.projection)).not.toContain('HIDDEN')
   })
+  it('将 Provider reasoning 分片独立投影，不污染 Assistant 正文并按 chunk_index 排序', () => {
+    const started = reduceAgentRunEvent(createAgentRunEventProjection(), event({ sequence: 2, event_type: 'assistant_reasoning_started' })).projection
+    const later = reduceAgentRunEvent(started, event({ id: 'reasoning-2', sequence: 4, event_type: 'assistant_reasoning_chunk', data: { chunk_index: 1, content: '后半段' } })).projection
+    const first = reduceAgentRunEvent(later, event({ id: 'reasoning-1', sequence: 3, event_type: 'assistant_reasoning_chunk', data: { chunk_index: 0, content: '前半段\n' } })).projection
+    const completed = reduceAgentRunEvent(first, event({ sequence: 5, event_type: 'assistant_reasoning_completed' })).projection
+
+    expect(completed.reasoningText).toBe('前半段\n后半段')
+    expect(completed.reasoningChunks.map((item) => item.chunkIndex)).toEqual([0, 1])
+    expect(completed.assistantText).toBe('')
+    expect(completed.reasoningStatus).toBe('completed')
+  })
+
 })

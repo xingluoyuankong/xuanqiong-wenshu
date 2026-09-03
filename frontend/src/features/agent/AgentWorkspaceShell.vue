@@ -12,16 +12,69 @@
         <small>{{ statusText }}</small>
       </div>
     </section>
-    <section class="agent-layout">
-      <aside class="agent-sidebar"><slot name="sidebar" /></aside>
+
+    <section class="agent-layout" :class="{ 'has-left-panel': activeLeftPanel, 'has-right-panel': activeRightPanel }">
+      <aside class="agent-sidebar-rail" data-testid="agent-left-rail">
+        <AgentRail
+          side="left"
+          :active-panel="activeLeftPanel"
+          :panels="leftPanels"
+          aria-label="项目资源面板"
+          @toggle="togglePanel('left', $event)"
+        />
+      </aside>
+      <aside
+        class="agent-side-panel agent-sidebar agent-side-panel--left"
+        :class="{ 'agent-panel-open': activeLeftPanel }"
+        data-testid="agent-left-panel"
+        :data-panel-open="Boolean(activeLeftPanel)"
+        :aria-hidden="!activeLeftPanel"
+      >
+        <header class="agent-side-panel__header">
+          <div>
+            <strong>{{ leftPanelTitle }}</strong>
+            <small>项目资源与上下文</small>
+          </div>
+          <button type="button" class="agent-side-panel__close" data-testid="agent-side-panel-close-left" aria-label="关闭项目资源面板" @click="closePanel('left')">×</button>
+        </header>
+        <div class="agent-side-panel__body"><slot name="sidebar" /></div>
+      </aside>
+
       <section class="agent-main"><slot name="main" /></section>
-      <aside class="agent-activity"><slot name="activity" /></aside>
+
+      <aside
+        class="agent-side-panel agent-activity agent-side-panel--right"
+        :class="{ 'agent-panel-open': activeRightPanel }"
+        data-testid="agent-right-panel"
+        :data-panel-open="Boolean(activeRightPanel)"
+        :aria-hidden="!activeRightPanel"
+      >
+        <header class="agent-side-panel__header">
+          <div>
+            <strong>{{ rightPanelTitle }}</strong>
+            <small>运行轨迹与诊断信息</small>
+          </div>
+          <button type="button" class="agent-side-panel__close" data-testid="agent-side-panel-close-right" aria-label="关闭运行信息面板" @click="closePanel('right')">×</button>
+        </header>
+        <div class="agent-side-panel__body"><slot name="activity" /></div>
+      </aside>
+      <aside class="agent-activity-rail" data-testid="agent-right-rail">
+        <AgentRail
+          side="right"
+          :active-panel="activeRightPanel"
+          :panels="rightPanels"
+          aria-label="运行信息面板"
+          @toggle="togglePanel('right', $event)"
+        />
+      </aside>
     </section>
   </main>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import AgentRail, { type AgentRailPanelDefinition } from './layout/AgentRail.vue'
+import { useAgentPanelState, type AgentPanelId, type AgentPanelSide } from './composables/useAgentPanelState'
 
 const props = withDefaults(
   defineProps<{
@@ -33,6 +86,36 @@ const props = withDefaults(
   { busy: false, projectTitle: null, sessionStatus: null, hasSelectedProject: false },
 )
 
+const panelState = useAgentPanelState({
+  storageKey: 'xuanqiong-wenshu:agent-workspace-panels',
+})
+const activeLeftPanel = panelState.activeLeftPanel
+const activeRightPanel = panelState.activeRightPanel
+
+const leftPanels: AgentRailPanelDefinition[] = [
+  { id: 'project', label: '项目', shortLabel: '项目', icon: 'project' },
+  { id: 'content', label: '内容', shortLabel: '内容', icon: 'content' },
+  { id: 'characters', label: '人物', shortLabel: '人物', icon: 'characters' },
+  { id: 'world', label: '世界观', shortLabel: '世界', icon: 'world' },
+  { id: 'materials', label: '资料', shortLabel: '资料', icon: 'materials' },
+  { id: 'tools', label: '工具', shortLabel: '工具', icon: 'tools' },
+]
+const rightPanels: AgentRailPanelDefinition[] = [
+  { id: 'log', label: '运行日志', shortLabel: '日志', icon: 'log' },
+  { id: 'run', label: '运行详情', shortLabel: '运行', icon: 'run' },
+  { id: 'progress', label: '进度', shortLabel: '进度', icon: 'progress' },
+  { id: 'artifact', label: '结果产物', shortLabel: '产物', icon: 'artifact' },
+  { id: 'quality', label: '质量', shortLabel: '质量', icon: 'quality' },
+]
+
+const panelLabel = (panels: AgentRailPanelDefinition[], active: AgentPanelId | null, fallback: string) =>
+  panels.find((panel) => panel.id === active)?.label || fallback
+const leftPanelTitle = computed(() => panelLabel(leftPanels, activeLeftPanel.value, '项目资源'))
+const rightPanelTitle = computed(() => panelLabel(rightPanels, activeRightPanel.value, '运行信息'))
+
+const togglePanel = (side: AgentPanelSide, panelId: AgentPanelId) => panelState.toggle(side, panelId)
+const closePanel = (side: AgentPanelSide) => panelState.close(side)
+
 const statusText = computed(() => {
   if (props.sessionStatus) return `会话已恢复 · ${props.sessionStatus}`
   if (props.hasSelectedProject) return '正在准备项目会话'
@@ -41,20 +124,8 @@ const statusText = computed(() => {
 </script>
 
 <style scoped>
-.agent-page {
-  display: grid;
-  gap: 0.75rem;
-  min-width: 0;
-  padding: clamp(0.6rem, 1.5vw, 1rem);
-}
-.agent-hero {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: clamp(0.9rem, 2vw, 1.4rem);
-  border-radius: var(--xq-radius-lg);
-}
+.agent-page { display: grid; gap: 0.75rem; min-width: 0; padding: clamp(0.6rem, 1.5vw, 1rem); }
+.agent-hero { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: clamp(0.9rem, 2vw, 1.4rem); border-radius: var(--xq-radius-lg); }
 .agent-kicker { margin: 0 0 0.35rem; color: var(--xq-gold-deep); font-size: 0.72rem; font-weight: 900; letter-spacing: 0.16em; }
 .agent-hero h1 { margin: 0; font-family: var(--xq-font-serif); font-size: clamp(1.45rem, 2.5vw, 2.25rem); }
 .agent-hero p { max-width: 52rem; margin: 0.45rem 0 0; color: var(--xq-ink-muted); line-height: 1.55; }
@@ -62,60 +133,55 @@ const statusText = computed(() => {
 .agent-status small { color: var(--xq-ink-muted); line-height: 1.45; }
 .status-dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--xq-jade); }
 .status-dot.busy { background: #d97706; }
-.agent-layout {
-  display: grid;
-  grid-template-columns: minmax(9.5rem, 11rem) minmax(0, 1fr) minmax(11rem, 12.5rem);
-  gap: 0.75rem;
-  align-items: start;
-  min-width: 0;
-}
-.agent-sidebar,
-.agent-main,
-.agent-activity {
-  display: grid;
-  min-width: 0;
-  gap: 0.75rem;
-}
-.agent-sidebar {
-  position: sticky;
-  top: 0.75rem;
-  max-height: calc(100vh - 1.5rem);
-  overflow: auto;
-  scrollbar-gutter: stable;
-}
-.agent-main {
-  min-height: min(72vh, 56rem);
-}
-.agent-activity {
-  display: flex;
-  flex-direction: column;
-  position: sticky;
-  top: 0.75rem;
-  max-height: calc(100vh - 1.5rem);
-  overflow: auto;
-  scrollbar-gutter: stable;
-}
-.agent-main > *,
-.agent-sidebar > *,
-.agent-activity > * { min-width: 0; }
+.agent-layout { display: grid; grid-template-columns: 3.5rem 0 minmax(0, 1fr) 0 3.5rem; grid-template-areas: 'left-rail left-panel main right-panel right-rail'; gap: 0.65rem; align-items: stretch; min-width: 0; min-height: min(72vh, 56rem); }
+.agent-layout.has-left-panel { grid-template-columns: 3.5rem minmax(15rem, 20rem) minmax(0, 1fr) 0 3.5rem; }
+.agent-layout.has-right-panel { grid-template-columns: 3.5rem 0 minmax(0, 1fr) minmax(16rem, 22rem) 3.5rem; }
+.agent-layout.has-left-panel.has-right-panel { grid-template-columns: 3.5rem minmax(15rem, 20rem) minmax(0, 1fr) minmax(16rem, 22rem) 3.5rem; }
+.agent-sidebar-rail { grid-area: left-rail; }
+.agent-activity-rail { grid-area: right-rail; }
+.agent-side-panel--left { grid-area: left-panel; }
+.agent-side-panel--right { grid-area: right-panel; }
+.agent-sidebar-rail, .agent-activity-rail { min-width: 0; position: sticky; top: 0.75rem; height: fit-content; z-index: 3; }
+.agent-side-panel { display: none; min-width: 0; min-height: 0; max-height: calc(100vh - 1.5rem); overflow: hidden; border: 1px solid color-mix(in srgb, var(--xq-border) 82%, transparent); border-radius: var(--xq-radius-md); background: rgba(255, 255, 255, 0.46); box-shadow: var(--xq-shadow-sm, 0 8px 24px rgba(16, 24, 40, 0.08)); }
+.agent-side-panel.agent-panel-open { display: flex; flex-direction: column; }
+.agent-side-panel__header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.7rem 0.8rem; border-bottom: 1px solid var(--xq-border); background: rgba(255, 255, 255, 0.72); }
+.agent-side-panel__header div { display: grid; gap: 0.15rem; min-width: 0; }
+.agent-side-panel__header small { color: var(--xq-ink-muted); font-size: 0.72rem; }
+.agent-side-panel__close { width: 1.8rem; height: 1.8rem; border: 0; border-radius: 0.5rem; color: var(--xq-ink-muted); background: transparent; font-size: 1.35rem; cursor: pointer; }
+.agent-side-panel__close:hover { background: rgba(15, 23, 42, 0.08); color: var(--xq-ink); }
+.agent-side-panel__body { min-width: 0; min-height: 0; overflow: auto; padding: 0.45rem; scrollbar-gutter: stable; }
+.agent-main { grid-area: main; display: grid; min-width: 0; min-height: min(72vh, 56rem); }
+.agent-main > * { min-width: 0; }
 @media (max-width: 1120px) {
-  .agent-layout { grid-template-columns: minmax(9rem, 10rem) minmax(0, 1fr) minmax(10.5rem, 11.5rem); gap: 0.6rem; }
+  .agent-layout { gap: 0.5rem; grid-template-columns: 3.25rem 0 minmax(0, 1fr) 0 3.25rem; }
+  .agent-layout.has-left-panel { grid-template-columns: 3.25rem minmax(13rem, 17rem) minmax(0, 1fr) 0 3.25rem; }
+  .agent-layout.has-right-panel { grid-template-columns: 3.25rem 0 minmax(0, 1fr) minmax(14rem, 18rem) 3.25rem; }
+  .agent-layout.has-left-panel.has-right-panel { grid-template-columns: 3.25rem minmax(13rem, 17rem) minmax(0, 1fr) minmax(14rem, 18rem) 3.25rem; }
   .agent-page { padding-inline: 0.65rem; }
 }
 @media (max-width: 960px) {
-  .agent-layout { grid-template-columns: minmax(0, 1fr); }
-  .agent-main { grid-row: 1; }
-  .agent-sidebar { position: static; grid-row: 2; max-height: none; overflow: visible; }
-  .agent-activity { position: static; grid-row: 3; max-height: none; overflow: visible; }
+  .agent-layout, .agent-layout.has-left-panel, .agent-layout.has-right-panel, .agent-layout.has-left-panel.has-right-panel { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: 'main'; position: relative; }
+  .agent-main { grid-row: 1; min-height: min(78vh, 60rem); }
+  .agent-sidebar-rail { position: fixed; left: 0.65rem; top: 5.5rem; }
+  .agent-activity-rail { position: fixed; right: 0.65rem; top: 5.5rem; }
+  .agent-side-panel { position: fixed; top: 5.5rem; bottom: 0.75rem; width: min(22rem, calc(100vw - 5rem)); z-index: 4; }
+  .agent-side-panel--left { left: 0.65rem; }
+  .agent-side-panel--right { right: 0.65rem; }
 }
 @media (max-width: 650px) {
-  .agent-layout { grid-template-columns: 1fr; }
-  .agent-sidebar, .agent-main, .agent-activity { grid-column: auto; position: static; max-height: none; overflow: visible; }
   .agent-hero { align-items: stretch; flex-direction: column; }
   .agent-status { min-width: 0; }
+  .agent-layout, .agent-layout.has-left-panel, .agent-layout.has-right-panel, .agent-layout.has-left-panel.has-right-panel { display: flex; flex-direction: column; min-height: calc(100vh - 9rem); padding-bottom: calc(4.25rem + env(safe-area-inset-bottom)); }
+  .agent-main { order: 1; min-height: calc(100vh - 11rem); }
+  .agent-sidebar-rail, .agent-activity-rail { position: fixed; top: auto; bottom: calc(0.55rem + env(safe-area-inset-bottom)); z-index: 5; }
+  .agent-sidebar-rail { left: 0.55rem; width: calc(50% - 0.8rem); }
+  .agent-activity-rail { right: 0.55rem; width: calc(50% - 0.8rem); }
+  .agent-side-panel { top: 4.8rem; bottom: calc(4.1rem + env(safe-area-inset-bottom)); width: calc(100vw - 1.1rem); }
+  .agent-side-panel--left, .agent-side-panel--right { left: 0.55rem; right: 0.55rem; }
 }
 
-/* 主页面继续持有业务模板；壳层用 :deep 保持三个命名 Slot 内既有 Agent 样式。 */
+
+/* 主页面继续持有业务模板；壳层用 :deep 保持命名插槽内既有 Agent 样式。 */
 :deep(.muted) { color: var(--xq-ink-muted); line-height: 1.6; }
 :deep(.error) { color: var(--xq-cinnabar); }
 :deep(.agent-sidebar label) { display: block; margin-bottom: 0.4rem; font-weight: 800; }

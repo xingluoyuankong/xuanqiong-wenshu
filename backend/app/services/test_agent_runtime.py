@@ -958,3 +958,89 @@ async def test_terminal_run_rejects_late_public_work_summary(task_session):
         )
 
     assert await runtime.list_events(run_id=run.id, user_id=user.id, after_sequence=0) == []
+
+@pytest.mark.asyncio
+async def test_reasoning_event_payload_is_explicitly_cleaned_and_persisted(task_session):
+    from app.services.agent_runtime import _visible_event_data
+
+    payload = _visible_event_data(
+        "assistant_reasoning_chunk",
+        {
+            "content": "原始 reasoning",
+            "chunk_index": "7",
+            "phase": "assistant_response",
+            "reasoning": "不应从旧字段进入",
+            "system_prompt": "不应公开",
+            "nested": {"secret": True},
+        },
+    )
+
+    assert payload == {
+        "content": "原始 reasoning",
+        "chunk_index": 7,
+        "phase": "assistant_response",
+    }
+
+
+@pytest.mark.asyncio
+async def test_append_assistant_reasoning_chunk_uses_live_event_contract(task_session):
+    from app.services.agent_runtime import AgentRuntimeService
+    from app.models import User
+
+    user = User(
+        id=4711,
+        username="reasoning-runtime-owner",
+        email="reasoning-runtime-owner@example.com",
+        hashed_password="x",
+        is_active=True,
+    )
+    task_session.add(user)
+    await task_session.flush()
+    runtime = AgentRuntimeService(task_session)
+    session = await runtime.create_session(user_id=user.id)
+    run = await runtime.create_run(session_id=session.id, user_id=user.id)
+
+    event = await runtime.append_assistant_reasoning_chunk(
+        run_id=run.id,
+        user_id=user.id,
+        chunk_index=3,
+        content="先读取项目上下文。",
+        phase="assistant_response",
+        action_id="response:reasoning",
+    )
+
+    assert event.event_type == "assistant_reasoning_chunk"
+    assert event.data_json == {
+        "content": "先读取项目上下文。",
+        "chunk_index": 3,
+        "phase": "assistant_response",
+        "action_id": "response:reasoning",
+    }
+
+@pytest.mark.asyncio
+async def test_reasoning_live_events_are_fenced_after_terminal_run(task_session):
+    from app.services.agent_runtime import AgentConflict, AgentRuntimeService
+    from app.models import User
+
+    user = User(
+        id=4712,
+        username="reasoning-terminal-owner",
+        email="reasoning-terminal-owner@example.com",
+        hashed_password="x",
+        is_active=True,
+    )
+    task_session.add(user)
+    await task_session.flush()
+    runtime = AgentRuntimeService(task_session)
+    session = await runtime.create_session(user_id=user.id)
+    run = await runtime.create_run(session_id=session.id, user_id=user.id)
+    await runtime.update_run(run_id=run.id, user_id=user.id, status="running", phase="assistant_response", progress=85)
+    await runtime.update_run(run_id=run.id, user_id=user.id, status="completed", phase="completed", progress=100)
+
+    with pytest.raises(AgentConflict):
+        await runtime.append_assistant_reasoning_chunk(
+            run_id=run.id,
+            user_id=user.id,
+            chunk_index=0,
+            content="迟到 reasoning",
+        )

@@ -359,7 +359,7 @@ class LLMService:
                 ),
             ) from exc
 
-    async def stream_visible_response(
+    async def stream_agent_response_parts(
         self,
         *,
         system_prompt: str,
@@ -371,11 +371,12 @@ class LLMService:
         attempt_ledger: Optional[ProviderAttemptLedger] = None,
         attempt_role: str = "response",
     ):
-        """Yield only user-visible content deltas; reasoning is deliberately discarded.
+        """Yield structured Agent response parts without merging reasoning into content.
 
-        This is the Agent-facing streaming API.  It shares normal configuration
-        and daily-limit resolution with the main LLM service but never exposes
-        provider reasoning fields to callers, events, logs, or persistence.
+        This Agent-only adapter exposes the already-normalized Provider stream
+        fields while keeping Provider metadata and credentials out of the
+        public event contract.  ``stream_visible_response`` below remains the
+        compatibility adapter for callers that only consume visible text.
         """
         config = await self._resolve_llm_config(user_id, enforce_daily_limit=True)
         if attempt_ledger is None:
@@ -409,18 +410,53 @@ class LLMService:
                         ledger=attempt_ledger,
                     )
                 async for part in stream_source:
+                    if not isinstance(part, dict):
+                        # Keep the adapter tolerant of simple test/provider
+                        # shims while preserving the documented dictionary shape.
+                        part = {"content": str(part or "")}
                     content = part.get("content")
-                    if isinstance(content, str) and content:
-                        yield content
-                    # reasoning_content intentionally has no code path here.
+                    reasoning = part.get("reasoning_content")
+                    finish_reason = part.get("finish_reason")
+                    yield {
+                        "content": content if isinstance(content, str) else "",
+                        "reasoning_content": reasoning if isinstance(reasoning, str) else "",
+                        "finish_reason": finish_reason if isinstance(finish_reason, str) else None,
+                    }
             except Exception as exc:
                 logger.warning(
-                    "Agent visible stream failed: model=%s user_id=%s error=%s",
+                    "Agent structured stream failed: model=%s user_id=%s error=%s",
                     model_name,
                     user_id,
                     self._extract_provider_error_detail(exc, "provider stream failure"),
                 )
                 raise
+
+    async def stream_visible_response(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        user_id: Optional[int],
+        temperature: float = 0.4,
+        timeout: float = 120.0,
+        max_tokens: Optional[int] = None,
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
+        attempt_role: str = "response",
+    ):
+        """Yield only user-visible content deltas; preserve the legacy contract."""
+        async for part in self.stream_agent_response_parts(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            user_id=user_id,
+            temperature=temperature,
+            timeout=timeout,
+            max_tokens=max_tokens,
+            attempt_ledger=attempt_ledger,
+            attempt_role=attempt_role,
+        ):
+            content = part.get("content")
+            if isinstance(content, str) and content:
+                yield content
 
     async def generate(
         self,

@@ -17,6 +17,15 @@ interface AssistantDelta {
   content: string
 }
 
+export interface AgentReasoningChunk {
+  sequence: number
+  chunkIndex: number
+  content: string
+  createdAt?: string
+}
+
+export type AgentReasoningStatus = 'idle' | 'streaming' | 'completed' | 'failed'
+
 export interface AgentWorkTraceDelta {
   sequence: number
   traceId: string
@@ -36,6 +45,9 @@ export interface AgentRunEventProjection {
   assistantText: string
   workTraceDeltas: AgentWorkTraceDelta[]
   latestWorkTrace: AgentWorkTraceDelta | null
+  reasoningChunks: AgentReasoningChunk[]
+  reasoningText: string
+  reasoningStatus: AgentReasoningStatus
   latestProgressMessage: string
   latestProgressActionId?: string
   latestProgressPhase?: string
@@ -67,6 +79,8 @@ export const MAX_AGENT_PENDING_SEQUENCES = 4_096
 export const MAX_AGENT_ASSISTANT_DELTA_SEGMENTS = 1_024
 export const MAX_AGENT_ASSISTANT_CHARACTERS = 48_000
 export const MAX_AGENT_WORK_TRACE_DELTAS = 512
+export const MAX_AGENT_REASONING_CHUNKS = 4096
+export const MAX_AGENT_REASONING_CHARACTERS = 200_000
 
 export const agentEventLabel = (type: string) =>
   ({
@@ -98,6 +112,10 @@ export const agentEventLabel = (type: string) =>
     assistant_queued: '回复已排队',
     assistant_started: 'Agent 开始回复',
     assistant_delta: 'Agent 正在输出',
+    assistant_reasoning_started: 'Provider reasoning 开始',
+    assistant_reasoning_chunk: 'Provider reasoning 分片',
+    assistant_reasoning_completed: 'Provider reasoning 完成',
+    assistant_reasoning_failed: 'Provider reasoning 失败',
     work_trace_delta: '公开工作轨迹',
     assistant_completed: 'Agent 回复完成',
     warning: '运行警告',
@@ -117,6 +135,9 @@ export function createAgentRunEventProjection(): AgentRunEventProjection {
     assistantText: '',
     workTraceDeltas: [],
     latestWorkTrace: null,
+    reasoningChunks: [],
+    reasoningText: '',
+    reasoningStatus: 'idle',
     latestProgressMessage: '',
     latestProgressActionId: undefined,
     latestProgressPhase: undefined,
@@ -226,6 +247,33 @@ export function reduceAgentRunEvent(
     : [...current.assistantDeltas, { sequence: event.sequence, content }]
         .sort((left, right) => left.sequence - right.sequence)
         .slice(-MAX_AGENT_ASSISTANT_DELTA_SEGMENTS)
+  const reasoningContent = event.event_type === 'assistant_reasoning_chunk' && typeof event.data.content === 'string'
+    ? event.data.content
+    : undefined
+  const reasoningChunk = reasoningContent === undefined
+    ? undefined
+    : {
+        sequence: event.sequence,
+        chunkIndex: positiveInteger(event.data.chunk_index) ?? current.reasoningChunks.length,
+        content: reasoningContent,
+        createdAt: event.created_at,
+      } satisfies AgentReasoningChunk
+  const reasoningChunks = reasoningChunk
+    ? [...current.reasoningChunks, reasoningChunk]
+        .sort((left, right) => left.chunkIndex - right.chunkIndex || left.sequence - right.sequence)
+        .slice(-MAX_AGENT_REASONING_CHUNKS)
+    : current.reasoningChunks
+  const reasoningText = reasoningChunks
+    .map((item) => item.content)
+    .join('')
+    .slice(-MAX_AGENT_REASONING_CHARACTERS)
+  const reasoningStatus: AgentReasoningStatus =
+    event.event_type === 'assistant_reasoning_started' ? 'streaming'
+      : event.event_type === 'assistant_reasoning_chunk' ? 'streaming'
+      : event.event_type === 'assistant_reasoning_completed' ? 'completed'
+      : event.event_type === 'assistant_reasoning_failed' || event.event_type === 'run_failed' ? 'failed'
+      : event.event_type === 'run_completed' || event.event_type === 'run_cancelled' ? 'completed'
+      : current.reasoningStatus
   const traceMessage = event.event_type === 'work_trace_delta' && typeof event.data.message === 'string'
     ? event.data.message
     : undefined
@@ -276,6 +324,9 @@ export function reduceAgentRunEvent(
       assistantText: mergeAssistantText(assistantDeltas),
       workTraceDeltas,
       latestWorkTrace: workTraceDeltas.at(-1) || null,
+      reasoningChunks,
+      reasoningText,
+      reasoningStatus,
       latestProgressMessage:
         isLatest && event.event_type === 'progress_update'
           ? typeof data.progress_message === 'string' ? data.progress_message : ''

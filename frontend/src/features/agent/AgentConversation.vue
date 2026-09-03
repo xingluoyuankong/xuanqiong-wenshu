@@ -1,5 +1,5 @@
 <template>
-  <XqPanel tone="ink" title="创作对话" subtitle="展示目标、计划、工具调用和结果摘要，不展示隐藏思维链。">
+  <XqPanel tone="ink" title="创作对话" subtitle="展示目标、公开轨迹、Provider reasoning、Assistant 正文、工具调用和结果摘要。">
     <div class="session-bar">
       <span data-testid="agent-session-status">{{ sessionLabel }}</span>
       <small v-if="sessionLoading">正在恢复历史…</small>
@@ -51,6 +51,11 @@
       </article>
     </div>
     <p v-else class="empty-chat" data-testid="agent-empty-chat">请选择项目并发送目标，Agent 的历史消息会显示在这里。</p>
+    <AgentReasoningCard
+      :chunks="reasoningChunks"
+      :text="reasoningText"
+      :status="reasoningStatus"
+    />
     <article v-if="streamingAssistant" class="message message-assistant message-streaming" data-testid="agent-streaming-message">
       <b>Agent</b><p>{{ streamingAssistant }}</p>
     </article>
@@ -91,6 +96,8 @@ import type { SSEConnectionState } from '@/utils/sseStream'
 import type { AgentWorkTraceDelta } from './reducers/agentEventReducer'
 import AgentContextChips from './AgentContextChips.vue'
 import AgentPublicWorkSummary from './AgentPublicWorkSummary.vue'
+import AgentReasoningCard from './AgentReasoningCard.vue'
+import type { AgentReasoningChunk, AgentReasoningStatus } from './reducers/agentEventReducer'
 import { XqButton, XqPanel } from '@/shared/ui'
 
 const props = withDefaults(
@@ -113,6 +120,9 @@ const props = withDefaults(
     artifactPreviewArtifactId?: string | null
     artifactPreviewError?: string
     publicWorkSummary?: AgentPublicWorkSummaryType | null
+    reasoningChunks?: AgentReasoningChunk[]
+    reasoningText?: string
+    reasoningStatus?: AgentReasoningStatus
     workTraceDeltas?: AgentWorkTraceDelta[]
     latestWorkTrace?: AgentWorkTraceDelta | null
     hasSequenceGap?: boolean
@@ -141,6 +151,9 @@ const props = withDefaults(
     artifactPreviewArtifactId: null,
     artifactPreviewError: '',
     publicWorkSummary: null,
+    reasoningChunks: () => [],
+    reasoningText: '',
+    reasoningStatus: 'idle',
     workTraceDeltas: () => [],
     latestWorkTrace: null,
     hasSequenceGap: false,

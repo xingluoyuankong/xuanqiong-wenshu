@@ -21,6 +21,8 @@ import {
   type AgentEventReduction,
   type AgentRunEventProjection,
   type AgentWorkTraceDelta,
+  type AgentReasoningChunk,
+  type AgentReasoningStatus,
 } from '@/features/agent/reducers/agentEventReducer'
 import type { SSEConnectionState } from '@/utils/sseStream'
 
@@ -91,6 +93,9 @@ export function useAgentRunProjection() {
   )
   const activeWorkTraceDeltas = computed<AgentWorkTraceDelta[]>(() => activeEventProjection.value.workTraceDeltas)
   const latestWorkTrace = computed<AgentWorkTraceDelta | null>(() => activeEventProjection.value.latestWorkTrace)
+  const activeReasoningChunks = computed<AgentReasoningChunk[]>(() => activeEventProjection.value.reasoningChunks)
+  const activeReasoningText = computed(() => activeEventProjection.value.reasoningText)
+  const activeReasoningStatus = computed<AgentReasoningStatus>(() => activeEventProjection.value.reasoningStatus)
   const replayRequired = computed(() => activeEventProjection.value.replayRequired)
   const activeConnectionState = computed<SSEConnectionState>(() =>
     activeRun.value ? recordOf(connectionByRunId.value, activeRun.value.id, 'closed') : 'closed',
@@ -285,6 +290,9 @@ export function useAgentRunProjection() {
     activeEventProjection,
     activeWorkTraceDeltas,
     latestWorkTrace,
+    activeReasoningChunks,
+    activeReasoningText,
+    activeReasoningStatus,
     replayRequired,
     activeConnectionState,
     hasRun,

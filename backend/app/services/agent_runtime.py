@@ -33,8 +33,17 @@ CLAIMABLE_RUN_STATUSES = set(STATE_CLAIMABLE_RUN_STATUSES)
 VALID_RUN_COMMAND_TYPES = {"pause", "resume", "cancel"}
 _IDEMPOTENT_EVENT_TYPES = {"assistant_completed", "run_completed", "run_failed", "run_cancelled"}
 # In-flight public stream events stop at the terminal boundary. Lifecycle events above remain explicitly allowed and idempotent.
-_LIVE_PUBLIC_EVENT_TYPES = {"assistant_delta", "work_trace_delta", "public_work_summary"}
+_LIVE_PUBLIC_EVENT_TYPES = {
+    "assistant_delta",
+    "assistant_reasoning_started",
+    "assistant_reasoning_chunk",
+    "assistant_reasoning_completed",
+    "assistant_reasoning_failed",
+    "work_trace_delta",
+    "public_work_summary",
+}
 _MAX_ASSISTANT_DELTA_CHARS = 4000
+_MAX_REASONING_CHUNK_CHARS = 4000
 _RUN_COMMAND_ORDER = ("pause", "resume", "cancel")
 _RUN_COMMAND_TERMINAL_STATUSES = {"applied", "rejected", "failed"}
 _FORBIDDEN_KEYS = {"thought", "reasoning", "chain_of_thought", "private_reasoning", "system_prompt", "provider_secret"}
@@ -92,6 +101,10 @@ _VISIBLE_EVENT_KEYS: dict[str, set[str]] = {
     "assistant_queued": {"phase", "provider_called", "planner_provider_called", "planner_provider_fallback_reason"},
     "assistant_started": {"phase", "action_id", "result_ref", "response_provider_called", "response_provider_fallback_reason"},
     "assistant_delta": {"content", "phase", "action_id", "result_ref", "response_provider_called"},
+    "assistant_reasoning_started": {"phase", "action_id", "result_ref"},
+    "assistant_reasoning_chunk": {"content", "chunk_index", "phase", "action_id", "result_ref"},
+    "assistant_reasoning_completed": {"phase", "action_id", "result_ref", "chunk_count"},
+    "assistant_reasoning_failed": {"phase", "action_id", "result_ref", "error_type"},
     "assistant_completed": {"phase", "length", "action_id", "result_ref", "response_provider_called", "response_provider_fallback_reason"},
     "visible_response_retry_pending": {"error_type", "reason", "phase", "action_id", "result_ref", "response_provider_called", "response_provider_fallback_reason"},
     "conversation_summary_created": {"phase", "summary_id", "start_message_sequence", "end_message_sequence", "message_count"},
@@ -278,8 +291,18 @@ def _visible_event_data(event_type: str, value: Any) -> dict[str, Any]:
             result[name] = item
         elif isinstance(item, list) and all(isinstance(entry, (str, int, float, bool)) or entry is None for entry in item):
             result[name] = item[:100]
-    if event_type == "assistant_delta" and isinstance(result.get("content"), str):
-        result["content"] = result["content"][:_MAX_ASSISTANT_DELTA_CHARS]
+    if event_type in {"assistant_delta", "assistant_reasoning_chunk"} and isinstance(result.get("content"), str):
+        limit = _MAX_REASONING_CHUNK_CHARS if event_type == "assistant_reasoning_chunk" else _MAX_ASSISTANT_DELTA_CHARS
+        result["content"] = result["content"][:limit]
+    if event_type == "assistant_reasoning_chunk":
+        if "chunk_index" in result:
+            try:
+                result["chunk_index"] = max(0, int(result["chunk_index"]))
+            except (TypeError, ValueError):
+                result.pop("chunk_index", None)
+        for key, limit in (("phase", 80), ("action_id", 160), ("result_ref", 160)):
+            if isinstance(result.get(key), str):
+                result[key] = result[key][:limit]
     if event_type == "progress_update":
         if "progress" in result:
             try:
@@ -1062,6 +1085,41 @@ class AgentRuntimeService:
                 commit=commit,
             ))
         return events
+
+    async def append_assistant_reasoning_chunk(
+        self,
+        *,
+        run_id: str,
+        user_id: int,
+        chunk_index: int,
+        content: str,
+        phase: str = "assistant_response",
+        action_id: str | None = None,
+        result_ref: str | None = None,
+        commit: bool = True,
+    ) -> AgentEventRecord:
+        """Persist one Provider reasoning chunk as a distinct replayable event."""
+        text = str(content or "")
+        if not text:
+            raise AgentConflict("reasoning chunk content is empty")
+        try:
+            normalized_index = max(0, int(chunk_index))
+        except (TypeError, ValueError) as exc:
+            raise AgentConflict("reasoning chunk index is invalid") from exc
+        return await self.append_event(
+            run_id=run_id,
+            user_id=user_id,
+            event_type="assistant_reasoning_chunk",
+            summary="Agent Provider reasoning 分片",
+            data={
+                "content": text[:_MAX_REASONING_CHUNK_CHARS],
+                "chunk_index": normalized_index,
+                "phase": str(phase or "assistant_response")[:80],
+                **({"action_id": str(action_id)[:160]} if action_id else {}),
+                **({"result_ref": str(result_ref)[:160]} if result_ref else {}),
+            },
+            commit=commit,
+        )
 
     async def append_work_trace_delta(
         self,

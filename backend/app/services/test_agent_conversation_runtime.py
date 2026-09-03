@@ -321,3 +321,48 @@ async def test_finalize_visible_response_is_atomic_and_idempotent(task_session):
     ]
     assert event_types.count("assistant_completed") == 1
     assert event_types.count("run_completed") == 1
+
+@pytest.mark.asyncio
+async def test_runner_emits_structured_reasoning_events_without_mixing_assistant_text(task_session, monkeypatch):
+    runtime, session, run = await _create_runtime_run(task_session, user_id=2877)
+
+    @asynccontextmanager
+    async def same_test_session():
+        yield task_session
+
+    class StructuredVisibleLLM:
+        def __init__(self, _session):
+            pass
+
+        async def stream_agent_response_parts(self, **_kwargs):
+            yield {"content": "正文第一句。", "reasoning_content": "先检查项目上下文。", "finish_reason": None}
+            yield {"content": "正文第二句。", "reasoning_content": "再组织可见回答。", "finish_reason": "stop"}
+
+        async def stream_visible_response(self, **_kwargs):
+            raise AssertionError("structured Agent stream should be preferred")
+            yield ""
+
+    monkeypatch.setattr("app.agent.runner.AsyncSessionLocal", lambda: same_test_session())
+    monkeypatch.setattr("app.agent.runner.LLMService", StructuredVisibleLLM)
+
+    await _run_visible_response(
+        run_id=run.id,
+        session_id=session.id,
+        user_id=run.user_id,
+        goal="验证 reasoning 事件闭环",
+        tool_results=[],
+        manage_job=False,
+        worker_id="structured-reasoning-test",
+    )
+
+    events = await runtime.list_events(run_id=run.id, user_id=run.user_id)
+    reasoning = [event for event in events if event.event_type == "assistant_reasoning_chunk"]
+    assistant = [event for event in events if event.event_type == "assistant_delta"]
+    event_types = [event.event_type for event in events]
+
+    assert [event.data_json["content"] for event in reasoning] == ["先检查项目上下文。", "再组织可见回答。"]
+    assert [event.data_json["chunk_index"] for event in reasoning] == [0, 1]
+    assert "assistant_reasoning_started" in event_types
+    assert "assistant_reasoning_completed" in event_types
+    assert "先检查项目上下文" not in "".join(event.data_json.get("content", "") for event in assistant)
+    assert "正文第一句。正文第二句。" == "".join(event.data_json.get("content", "") for event in assistant)

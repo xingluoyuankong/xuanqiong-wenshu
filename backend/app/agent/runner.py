@@ -243,6 +243,8 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
     run_generation = 0
     response_attempts = ProviderAttemptLedger(run_id=run_id)
     response_result_ref = f"response:{run_id}"
+    reasoning_stream_started = False
+    reasoning_stream_completed = False
     run_owner = (worker_id or _WORKER_ID)[:128]
     job_owner = f"agent:{run_owner}:{run_id}"[:128]
     try:
@@ -322,52 +324,123 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
             await runtime.publish_progress(run_id=run_id, user_id=user_id, status="running", phase="assistant_response", action_id="response:started", result_ref=response_result_ref, progress=85, progress_message="正在整理工具结果并生成可见回复。")
             llm = LLMService(session)
             user_prompt = f"用户目标：{goal}\n已完成工具摘要：{_tool_context(tool_results)}\n请直接给用户可见答复。"
-            async for delta in llm.stream_visible_response(
-                system_prompt=_response_system_prompt(),
-                user_prompt=user_prompt,
-                user_id=user_id,
-                temperature=0.35,
-                timeout=120,
-                max_tokens=_visible_response_max_tokens(),
-                attempt_ledger=response_attempts,
-                attempt_role="response",
-            ):
-                if not await _wait_until_runnable(runtime, run_id, user_id):
-                    return
-                await runtime.claim_run(run_id=run_id, user_id=user_id, lease_owner=run_owner, lease_seconds=run_lease_seconds)
-                if not response_provider_called:
-                    response_provider_called = True
-                    await runtime.update_run_provider_provenance(
-                        run_id=run_id,
-                        user_id=user_id,
-                        updates={"response_provider_called": True, "response_provider_fallback_reason": None},
-                    )
-                buffer += delta
-                full_text += delta
-                if len(buffer) >= 32 or any(mark in buffer for mark in "。！？!?\n"):
-                    await runtime.append_assistant_delta(
-                        run_id=run_id,
-                        user_id=user_id,
-                        content=buffer,
-                        phase="assistant_response",
-                        action_id="response:stream",
-                        result_ref=response_result_ref,
-                        response_provider_called=response_provider_called,
-                    )
-                    target_progress = min(95, 85 + len(full_text) // 256)
-                    if target_progress > reported_progress:
-                        await runtime.publish_progress(
+            structured_stream = getattr(llm, "stream_agent_response_parts", None)
+            use_structured_stream = callable(structured_stream)
+            if use_structured_stream:
+                await runtime.append_event(
+                    run_id=run_id,
+                    user_id=user_id,
+                    event_type="assistant_reasoning_started",
+                    summary="Agent 开始接收 Provider reasoning",
+                    data={"phase": "assistant_response", "action_id": "response:reasoning", "result_ref": response_result_ref},
+                )
+                reasoning_stream_started = True
+                stream_source = structured_stream(
+                    system_prompt=_response_system_prompt(),
+                    user_prompt=user_prompt,
+                    user_id=user_id,
+                    temperature=0.35,
+                    timeout=120,
+                    max_tokens=_visible_response_max_tokens(),
+                    attempt_ledger=response_attempts,
+                    attempt_role="response",
+                )
+            else:
+                stream_source = llm.stream_visible_response(
+                    system_prompt=_response_system_prompt(),
+                    user_prompt=user_prompt,
+                    user_id=user_id,
+                    temperature=0.35,
+                    timeout=120,
+                    max_tokens=_visible_response_max_tokens(),
+                    attempt_ledger=response_attempts,
+                    attempt_role="response",
+                )
+            reasoning_chunk_index = 0
+            try:
+                async for raw_part in stream_source:
+                    if use_structured_stream:
+                        part = raw_part if isinstance(raw_part, dict) else {"content": str(raw_part or "")}
+                        delta = part.get("content") if isinstance(part.get("content"), str) else ""
+                        reasoning = part.get("reasoning_content") if isinstance(part.get("reasoning_content"), str) else ""
+                        if reasoning:
+                            await runtime.append_assistant_reasoning_chunk(
+                                run_id=run_id,
+                                user_id=user_id,
+                                chunk_index=reasoning_chunk_index,
+                                content=reasoning,
+                                phase="assistant_response",
+                                action_id="response:reasoning",
+                                result_ref=response_result_ref,
+                            )
+                            reasoning_chunk_index += 1
+                    else:
+                        delta = raw_part if isinstance(raw_part, str) else str(raw_part or "")
+                    if not await _wait_until_runnable(runtime, run_id, user_id):
+                        return
+                    await runtime.claim_run(run_id=run_id, user_id=user_id, lease_owner=run_owner, lease_seconds=run_lease_seconds)
+                    if not response_provider_called:
+                        response_provider_called = True
+                        await runtime.update_run_provider_provenance(
                             run_id=run_id,
                             user_id=user_id,
-                            status="running",
+                            updates={"response_provider_called": True, "response_provider_fallback_reason": None},
+                        )
+                    buffer += delta
+                    full_text += delta
+                    if len(buffer) >= 32 or any(mark in buffer for mark in "。！？!?\n"):
+                        await runtime.append_assistant_delta(
+                            run_id=run_id,
+                            user_id=user_id,
+                            content=buffer,
                             phase="assistant_response",
                             action_id="response:stream",
                             result_ref=response_result_ref,
-                            progress=target_progress,
-                            progress_message=f"正在输出可见回复，已生成 {len(full_text)} 字。",
+                            response_provider_called=response_provider_called,
                         )
-                        reported_progress = target_progress
-                    buffer = ""
+                        target_progress = min(95, 85 + len(full_text) // 256)
+                        if target_progress > reported_progress:
+                            await runtime.publish_progress(
+                                run_id=run_id,
+                                user_id=user_id,
+                                status="running",
+                                phase="assistant_response",
+                                action_id="response:stream",
+                                result_ref=response_result_ref,
+                                progress=target_progress,
+                                progress_message=f"正在输出可见回复，已生成 {len(full_text)} 字。",
+                            )
+                            reported_progress = target_progress
+                        buffer = ""
+                if use_structured_stream:
+                    await runtime.append_event(
+                        run_id=run_id,
+                        user_id=user_id,
+                        event_type="assistant_reasoning_completed",
+                        summary="Agent Provider reasoning 接收完成",
+                        data={
+                            "phase": "assistant_response",
+                            "action_id": "response:reasoning",
+                            "result_ref": response_result_ref,
+                            "chunk_count": reasoning_chunk_index,
+                        },
+                    )
+                    reasoning_stream_completed = True
+            except Exception as exc:
+                if use_structured_stream and reasoning_stream_started and not reasoning_stream_completed:
+                    await runtime.append_event(
+                        run_id=run_id,
+                        user_id=user_id,
+                        event_type="assistant_reasoning_failed",
+                        summary="Agent Provider reasoning 接收失败",
+                        data={
+                            "phase": "assistant_response",
+                            "action_id": "response:reasoning",
+                            "result_ref": response_result_ref,
+                            "error_type": type(exc).__name__,
+                        },
+                    )
+                raise
             if buffer:
                 await runtime.append_assistant_delta(
                     run_id=run_id,
