@@ -236,3 +236,22 @@ async def test_public_summary_keeps_run_state_projection_in_sync(task_session):
     assert projection["state_version"] == before_version + 1
     assert projection["latest_public_summary"]["phase"] == projection["phase"]
     assert projection["latest_public_summary"]["step_order"] == projection["current_step"]
+
+@pytest.mark.asyncio
+async def test_state_projection_exposes_explicit_resume_cursor(task_session):
+    user = await _user(task_session, 1816, "projection-resume-cursor")
+    runtime = AgentRuntimeService(task_session)
+    agent_session = await runtime.create_session(user_id=user.id)
+    run = await runtime.create_run(session_id=agent_session.id, user_id=user.id)
+    event = await runtime.append_event(
+        run_id=run.id,
+        user_id=user.id,
+        event_type="run_started",
+        summary="开始运行",
+        data={"phase": "observe"},
+    )
+
+    projection = await AgentStateProjectionService(task_session).get_run_state(run_id=run.id, user_id=user.id)
+
+    assert projection["resume_after_sequence"] == event.sequence
+    assert projection["resume_after_sequence"] == projection["last_event_sequence"]

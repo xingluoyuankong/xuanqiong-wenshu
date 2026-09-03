@@ -121,6 +121,9 @@ class AgentStateProjectionService:
             "blocked_reason": blocked_reason,
             "capability_snapshot": run.context_json.get("capability_snapshot", {}) if isinstance(run.context_json, dict) else {},
             "last_event_sequence": last_sequence,
+            # Explicit resume cursor for clients opening activity replay or
+            # SSE after a state refresh. Keep the legacy field for compatibility.
+            "resume_after_sequence": last_sequence,
             "latest_public_summary": latest_public_summary,
             "latest_public_summary_sequence": max(0, int(run.latest_public_summary_sequence or 0)),
             "latest_public_summary_at": run.latest_public_summary_at,
