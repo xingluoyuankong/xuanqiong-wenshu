@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import pytest
 
 from app.agent.runner import _record_visible_response_summary, _run_visible_response
+from app.agent.state_projection import AgentStateProjectionService
 from app.models import User
 from app.services.agent_conversation_service import AgentConversationService
 from app.services.agent_runtime import AgentRuntimeService
@@ -179,6 +180,43 @@ async def test_runner_archives_summary_after_persisting_final_visible_message(ta
     assert summary is not None
     assert (summary.start_message_sequence, summary.end_message_sequence) == (1, messages[-1].sequence)
     assert len([event for event in events if event.event_type == "conversation_summary_created"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_runner_persists_completion_receipt_before_terminal_event(task_session, monkeypatch):
+    runtime, session, run = await _create_runtime_run(task_session, user_id=2866)
+
+    @asynccontextmanager
+    async def same_test_session():
+        yield task_session
+
+    class FakeVisibleLLM:
+        def __init__(self, _session):
+            pass
+
+        async def stream_visible_response(self, **_kwargs):
+            yield "最终回复内容。"
+
+    monkeypatch.setattr("app.agent.runner.AsyncSessionLocal", lambda: same_test_session())
+    monkeypatch.setattr("app.agent.runner.LLMService", FakeVisibleLLM)
+    await _run_visible_response(
+        run_id=run.id,
+        session_id=session.id,
+        user_id=run.user_id,
+        goal="检查终态 receipt 顺序",
+        tool_results=[],
+        manage_job=False,
+        worker_id="card-078-order-test",
+    )
+
+    events = await runtime.list_events(run_id=run.id, user_id=run.user_id)
+    receipt = next(event for event in events if event.event_type == "public_work_summary" and event.data_json.get("action_id") == "response:completed")
+    terminal = next(event for event in events if event.event_type == "run_completed")
+    projection = await AgentStateProjectionService(task_session).get_run_state(run_id=run.id, user_id=run.user_id)
+
+    assert receipt.sequence < terminal.sequence
+    assert projection["latest_public_summary_sequence"] == receipt.sequence
+    assert projection["latest_public_summary_sequence"] < terminal.sequence
 
 
 @pytest.mark.asyncio

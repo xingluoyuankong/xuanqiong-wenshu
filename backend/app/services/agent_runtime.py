@@ -437,6 +437,7 @@ class AgentRuntimeService:
         session_id: str,
         content: str,
         completion_data: dict[str, Any],
+        completion_summary: AgentPublicWorkSummary | dict[str, Any] | None = None,
     ) -> AgentMessage:
         """Atomically persist one final assistant reply and its terminal Run facts.
 
@@ -473,6 +474,13 @@ class AgentRuntimeService:
         context["visible_response_final_message_id"] = message.id
         context["visible_response_final_message_sequence"] = message.sequence
         run.context_json = context
+        if completion_summary is not None:
+            await self.append_public_work_summary(
+                run_id=run_id,
+                user_id=user_id,
+                summary=completion_summary,
+                commit=False,
+            )
         await self.update_run(
             run_id=run_id,
             user_id=user_id,

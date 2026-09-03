@@ -407,24 +407,21 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
                 session_id=session_id,
                 content=full_text[:200000],
                 completion_data=completion_data,
+                completion_summary={
+                    "action_id": "response:completed",
+                    "phase": "assistant_response",
+                    "current_action": "已完成本次 Agent 运行。",
+                    "completed_action": "已生成并保存作者可见回复。",
+                    "input_scope": _public_scope_from_context(run_snapshot.context_json),
+                    "next_action": "等待作者查看结果、继续提问或批准候选。",
+                    "expected_output": "可追溯的对话与项目操作记录。",
+                },
             )
             await _record_visible_response_summary(
                 runtime=runtime,
                 run_id=run_id,
                 user_id=user_id,
                 final_message_sequence=final_message.sequence,
-            )
-            await _publish_response_activity(
-                runtime,
-                run_id=run_id,
-                user_id=user_id,
-                context=run_snapshot.context_json,
-                action_id="response:completed",
-                current_action="已完成本次 Agent 运行。",
-                completed_action="已生成并保存作者可见回复。",
-                next_action="等待作者查看结果、继续提问或批准候选。",
-                expected_output="可追溯的对话与项目操作记录。",
-                allow_terminal=True,
             )
             if manage_job and job_id is not None:
                 await AgentJobService(session).complete(job_id=job_id, user_id=user_id, lease_owner=job_owner, lease_generation=job_generation, result={"visible_response_length": len(full_text)})
@@ -451,22 +448,26 @@ async def _run_visible_response(*, run_id: str, session_id: str, user_id: int, g
                         updates=provenance_updates,
                     )
                     if manage_job:
+                        try:
+                            await _publish_response_activity(
+                                runtime,
+                                run_id=run_id,
+                                user_id=user_id,
+                                context=run.context_json,
+                                action_id="response:failed",
+                                current_action="可见回复未成功完成。",
+                                completed_action="失败已被记录为可恢复的运行证据。",
+                                next_action="检查运行状态并决定是否恢复或重新发起任务。",
+                                expected_output="明确失败原因与下一步操作。",
+                            )
+                        except Exception:
+                            # A receipt is useful evidence but must never prevent
+                            # the durable terminal failure from being recorded.
+                            pass
                         await runtime.update_run(run_id=run_id, user_id=user_id, status="failed", phase="error")
                         await runtime.append_event(
                             run_id=run_id, user_id=user_id, event_type="run_failed", summary="Agent Provider 回复失败",
                             data={"error_type": type(exc).__name__, "reason": str(exc)[:200], "phase": "error", "action_id": "response:failed", "result_ref": response_result_ref, "response_provider_called": response_called, "response_provider_fallback_reason": type(exc).__name__},
-                        )
-                        await _publish_response_activity(
-                            runtime,
-                            run_id=run_id,
-                            user_id=user_id,
-                            context=run.context_json,
-                            action_id="response:failed",
-                            current_action="可见回复未成功完成。",
-                            completed_action="失败已被记录为可恢复的运行证据。",
-                            next_action="检查运行状态并决定是否恢复或重新发起任务。",
-                            expected_output="明确失败原因与下一步操作。",
-                            allow_terminal=True,
                         )
                     else:
                         # The outer durable worker owns retry/dead-letter state.
