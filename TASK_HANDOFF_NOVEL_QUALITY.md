@@ -86075,3 +86075,270 @@ CARD-077 文档：本节首版提交待生成
 CARD-078：pending / backend-first
 总目标：active
 ```
+---
+
+# 2026-09-03 追加记录：CARD-078 终态 receipt 与 terminal event 顺序收敛
+
+> 本节记录 CARD-078 的实际代码、测试、失败基线、全量门禁和推送结果。总目标仍为持续整合优化，不代表项目整体完成。
+
+## A. 本批目标
+
+```text
+CARD-078｜验证并修复终态 receipt、terminal event、state projection 与 SSE 回放之间的 sequence 顺序。
+```
+
+核心要求：
+
+```text
+1. 最终可见回复的公开 receipt 必须先于 assistant_completed/run_completed 落账；
+2. terminal event 必须成为实时公开活动的最终边界；
+3. state projection 的 latest_public_summary_sequence 必须指向最终 receipt，不得落后或越过 terminal boundary；
+4. Worker、Runner、对话摘要归档、SSE 历史回放保持兼容；
+5. 失败收尾必须先尽力写 receipt，再稳定写入 run_failed；receipt 失败不能阻断终态失败事实。
+```
+
+## B. 现状审查与失败基线
+
+审查文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\runner.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\state_projection.py
+```
+
+审查发现 Runner 原先的顺序是：
+
+```text
+1. finalize_visible_response() 内部写 assistant_completed/run_completed；
+2. _record_visible_response_summary() 归档对话摘要；
+3. _publish_response_activity(response:completed) 再追加 public_work_summary。
+```
+
+这导致 `response:completed` receipt 的 sequence 晚于 `run_completed`。
+
+新增失败测试：
+
+```text
+test_runner_persists_completion_receipt_before_terminal_event
+```
+
+旧实现真实失败：
+
+```text
+receipt.sequence == 9
+terminal.sequence == 7
+AssertionError: assert 9 < 7
+```
+
+这证明终态 event 先于公开完成 receipt 落账，SSE 在 terminal close 后可能遗漏最终活动摘要。
+
+## C. 实际代码修复
+
+### C.1 finalize_visible_response 增加 completion_summary
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+```
+
+新增参数：
+
+```python
+completion_summary: AgentPublicWorkSummary | dict[str, Any] | None = None
+```
+
+当传入完成摘要时，`finalize_visible_response()` 在同一事务内按以下顺序持久化：
+
+```text
+1. 最终 assistant message；
+2. response:completed public_work_summary receipt；
+3. AgentRun completed 状态；
+4. assistant_completed；
+5. run_completed；
+6. 一次性 commit。
+```
+
+这样 worker 在 commit 前退出时，不会留下“终态已写、receipt 尚未写”的半完成事务。
+
+### C.2 Runner 完成路径
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\runner.py
+```
+
+变更：
+
+```text
+1. 将 response:completed 摘要作为 completion_summary 传入 finalize_visible_response；
+2. 删除 finalize 后重复调用的 response:completed _publish_response_activity；
+3. 保留对话摘要归档，但它不再位于 terminal event 之后追加公开完成 receipt。
+```
+
+### C.3 Runner 失败路径
+
+失败收尾改为：
+
+```text
+1. 尝试写 response:failed receipt；
+2. receipt 写入异常时吞并该异常并保留失败处理；
+3. update_run(status="failed")；
+4. append_event(run_failed)。
+```
+
+这保证 receipt 是增强型公开证据，而 `run_failed` 仍是不可丢失的核心生命周期事实。
+
+## D. 定向验证
+
+分组回归：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/services/test_agent_conversation_runtime.py -k "runner_archives_summary or finalize_visible_response or provider_failure or runner_persists_completion_receipt_before_terminal_event"
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_progress_updates.py -k "visible_response"
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_worker.py -k "visible_response"
+.\.venv\Scripts\python.exe -m pytest -q app/agent/test_state_projection.py -k "public_summary"
+```
+
+结果：
+
+```text
+Conversation：4 passed, 2 deselected
+Progress：2 passed, 2 deselected
+Worker：7 passed, 9 deselected
+Projection：2 passed, 6 deselected
+```
+
+合计：
+
+```text
+15 passed
+```
+
+此外，首次组合筛选的实际结果为：
+
+```text
+12 passed, 14 deselected in 24.53s
+```
+
+## E. 反向破坏验证
+
+临时移除 Runner 的 `completion_summary` 传入，再运行顺序回归：
+
+```text
+StopIteration：找不到 response:completed public_work_summary
+EXPECTED_FAILURE_EXIT=1
+```
+
+正式代码随后自动恢复，破坏版本没有进入提交。
+
+该验证证明新测试确实依赖本批实现，而不是仅凭已有 terminal event 通过。
+
+## F. 后端全量门禁
+
+全量测试通过后台 PID `15228` 执行，日志文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\_card078_full_pytest_20260903-121234.log
+```
+
+stderr：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\_card078_full_pytest_20260903-121234.err.log
+```
+
+最终日志：
+
+```text
+1463 passed in 348.29s (0:05:48)
+```
+
+stderr 为空。
+
+## G. 提交、推送和回退
+
+代码提交：
+
+```text
+221a0c1 fix: order agent completion receipts
+```
+
+推送：
+
+```text
+1c247c2..221a0c1 codex/bohrium-integration-20260831 -> origin/codex/bohrium-integration-20260831
+```
+
+精确代码回退：
+
+```powershell
+git revert 221a0c1
+```
+
+本批代码文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\runner.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\test_agent_conversation_runtime.py
+```
+
+本批回退不影响 CARD-075、CARD-076、CARD-077 的既有提交。
+
+## H. 当前状态
+
+```text
+CARD-072：completed
+CARD-073：completed
+CARD-074-A：completed
+CARD-074-B1：completed
+CARD-074-B2：completed
+CARD-075：completed
+CARD-076：completed
+CARD-077：completed
+CARD-078：completed（代码已推送，文档回写进行中）
+总目标：active
+前端：127.0.0.1:5174/agent
+后端：127.0.0.1:8013/health
+```
+
+## I. 下一任务目标：CARD-079 运行状态快照与事件游标统一
+
+下一批继续后端优先：
+
+```text
+CARD-079｜统一 state projection、activity API 和 SSE 的公开 resume cursor 语义。
+```
+
+重点审查：
+
+```text
+1. state projection 当前 last_event_sequence 是否应提供明确的 resume_after_sequence；
+2. latest_public_summary_sequence 与 last_event_sequence 的关系是否对前端足够明确；
+3. 前端回读 state 后重新建立 SSE 时是否存在重复或漏事件窗口；
+4. history replay、live SSE、sequence gap repair 是否使用同一游标事实；
+5. API 类型、后端 projection、前端 reducer 和 stream hook 是否需要一组跨层契约测试。
+```
+
+执行纪律：
+
+```text
+先审查真实实现 → 先写失败测试 → 修改真实代码 → 定向验证 → 反向破坏 → 后端全量门禁 → 代码独立提交推送 → 文档独立提交推送 → 记录精确回退命令。
+```
+
+## J. 回写索引
+
+```text
+CARD-075 代码：d15d35e；文档：5093c41
+CARD-076 代码：935752c；文档：ed8cb1c
+CARD-077 代码：9766ff6；文档：1c247c2
+CARD-078 代码：221a0c1；代码回退：git revert 221a0c1
+CARD-078 文档：本节首版提交待生成
+CARD-079：pending / backend-first
+总目标：active
+```
