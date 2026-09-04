@@ -129,7 +129,22 @@ async def create_task(
     current_user: UserInDB = Depends(get_current_user),
 ) -> TaskRuntimeRead:
     if request.project_id:
-        await ProjectAccessService(session).require_project_write(request.project_id, current_user)
+        try:
+            access = await ProjectAccessService(session).require_project_read(
+                request.project_id, current_user
+            )
+        except HTTPException as exc:
+            # Preserve the historical resource-hiding contract for a principal
+            # with no relationship to the project; a visible read-only member
+            # still receives the explicit 403 write denial below.
+            if exc.status_code == status.HTTP_403_FORBIDDEN:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "PROJECT_NOT_FOUND", "message": "项目不存在或无权访问"},
+                ) from exc
+            raise
+        if not access.can_write:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="当前项目为只读成员")
     try:
         return await TaskRuntimeService(session).create_task(
             task_type=request.task_type,

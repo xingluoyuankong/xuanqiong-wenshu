@@ -2823,3 +2823,61 @@ Agent/TaskRuntime 成员相关组合结果：
 2. 继续补齐 `novels.py` 蓝图成员矩阵、optimizer/writing-skills HTTP 级验证与跨请求成员移除即时失效测试。
 3. 评估 Agent audit、context snapshot、plan revision、conversation summary 和 provider usage 的统一 readable projection，保持写入方法的 owner/actor 边界不变。
 4. 所有生产修复稳定后重跑完整后端、前端、构建和 smoke 门禁。
+
+## 2026-09-04 当前会话接续回写：完整质量门禁与重启服务冒烟
+
+### A. 稳定工作树门禁
+
+在协作权限第二批代码收口、TaskRuntime 路由最终恢复语义落定后，重新执行完整后端门禁：
+
+```text
+Backend pytest：1694 passed in 727.86s
+```
+
+前端门禁：
+
+```text
+Frontend type-check：通过
+Frontend Vitest：80 files / 496 tests passed in 86.63s
+Frontend build-only：成功，4918 modules，15.61s
+```
+
+构建仍保留既有 `baseline-browser-mapping` 与 `caniuse-lite` 数据陈旧提示；没有因此跳过测试或缩小验证范围。
+
+### B. 重启后真实服务冒烟
+
+当前本地服务链验证：
+
+```text
+Backend：http://127.0.0.1:8013 → health 200
+Frontend：http://127.0.0.1:5174 → 首页可达
+Frontend proxy：http://127.0.0.1:5174/api/health → 可达
+OpenAPI：259 检查 = 55 通过 / 204 合理跳过 / 0 失败
+LLM settings smoke：通过
+```
+
+`verify.ps1 smoke` 已完成，未发现 500 级错误。资源 ID 依赖端点按既有 smoke 规则合理跳过，真实 JWT/HTTP Writer 资源链由隔离验收脚本单独覆盖。
+
+### C. 真实隔离 Writer 执行链
+
+```text
+SMOKE_PASSED {"checks": 31, "dispatch_kinds": ["generate", "generate", "finalize", "outline"], "finalize_status": 200, "generate_status": 200, "outline_status": 200, "resume_status": 200}
+```
+
+脚本使用临时 SQLite，结束后自动清理；主运行数据库未被写入。该验收覆盖五类登录身份、成员读取、Writer 状态、SSE 首次回放/cursor、跨项目隔离、Editor generate/cancel/resume/finalize/outline 控制和 Viewer/非成员拒绝。
+
+### D. 版本记录
+
+```text
+d1b29af feat: close collaborative project access gaps
+```
+
+本版本包含成员访问第二批修复、后台身份字段收口、TaskRuntime 路由、隔离验收脚本、专项测试和审计报告。未跟踪导入/上传二进制运行工件继续保留原状，不加入 Git。
+
+### E. 当前状态与下一计划
+
+```text
+总任务：active
+当前批次：权限残留第二批 + 完整后端/前端/构建/smoke 门禁已通过
+下一优先：逐项审查 agent.py 历史投影链与前端成员管理浏览器级缺口；确认后再进入性能/分页与发布门禁
+```
