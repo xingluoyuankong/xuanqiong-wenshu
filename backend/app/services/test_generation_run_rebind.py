@@ -105,9 +105,16 @@ async def test_formal_generate_chapter_entry_rebinds_before_runtime_updates():
     class _StopPipeline(Exception):
         pass
 
-    class _NovelService:
-        async def ensure_project_owner(self, project_id, user_id):
+    class _Repo:
+        async def get_by_id(self, project_id):
+            assert project_id == "p1"
             return project
+
+    class _NovelService:
+        repo = _Repo()
+
+        async def ensure_project_owner(self, project_id, user_id):
+            raise AssertionError("worker must not apply legacy project-owner filtering")
 
         async def get_outline(self, project_id, chapter_number):
             return outline

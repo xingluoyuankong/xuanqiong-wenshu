@@ -2820,8 +2820,12 @@ class PipelineOrchestrator:
             "writer_prompt_budget_tokens": self._resolve_writer_prompt_budget(config.target_word_count),
         }
         runtime_metadata["writing_contract_snapshot"] = self._writing_contract_runtime_metadata()
-        # T-24 生产候选路径由 _generate_single_version 实际采用：max_tokens=self._resolve_writer_prompt_budget(config.target_word_count)
-        project = await self.novel_service.ensure_project_owner(project_id, user_id)
+        # HTTP entrypoints have already authorized the actor. A queued worker
+        # must load its project by project_id, not by the legacy project creator,
+        # because its durable execution owner may be an Editor or Admin.
+        project = await self.novel_service.repo.get_by_id(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="项目不存在")
 
         token_budget_warning = await self._check_token_budget_before_generation(project_id)
         if token_budget_warning:

@@ -4938,7 +4938,6 @@ async def start_chapter_outline_rewrite(
     )
     return _serialize_outline_job(job)
 
-@router.get("/novels/{project_id}/chapters/rewrite-outline/status", response_model=OutlineGenerationJobResponse)
 async def get_chapter_outline_rewrite_status(
     project_id: str,
     session: AsyncSession = Depends(get_session),
@@ -5039,7 +5038,6 @@ async def start_chapters_outline_generation(
     )
     return _serialize_outline_job(job)
 
-@router.get("/novels/{project_id}/chapters/outline/status", response_model=OutlineGenerationJobResponse)
 async def get_chapters_outline_generation_status(
     project_id: str,
     background_tasks: BackgroundTasks = None,
