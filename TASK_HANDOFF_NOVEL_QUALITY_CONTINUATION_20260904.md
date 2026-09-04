@@ -1823,3 +1823,100 @@ deprecated outline generation 路径
 3. 审计并迁移 deprecated outline generation 路径，防止旧入口绕开项目成员 write gate 或复活 Owner-only 二次过滤。
 4. 完成真实多用户 HTTP 验收，覆盖 Owner、Editor、Viewer、Admin、非成员的生成、取消、恢复、状态和 SSE 流合同。
 5. H-2 全部收口后回写完整后端、前端、启动冒烟与跨项目隔离的权威实测基线。
+
+
+## 2026-09-04 接续回写：UI-004 Writer H-2 finalize 成员定稿闭环
+
+### A. finalize 项目写入合同
+
+`finalize` 入口已迁移到项目 write gate：
+
+```text
+Owner / Editor / Admin：可对同项目章节执行同步 finalize
+Viewer：403
+非成员：403
+```
+
+当前发起同步 finalize 的成员同时成为本次新 finalize 执行的 `execution owner`；项目成员权限用于入口 write 裁决，新的后台或同步定稿运行归属明确记录为当前 actor，不再依赖项目创建者身份。
+
+### B. 后台与记忆刷新二次过滤清理
+
+finalize 处理链中的项目 schema、后台定稿与记忆刷新已完成 Owner-only 二次过滤审计。角色/记忆层的 project character 查询不再通过 `NovelProject.user_id` 截断，因此 Editor 发起的同项目定稿可以完整命中项目角色与记忆数据，不会在入口校验通过后因旧项目创建者过滤而降级或中断。
+
+```text
+project character query：仅按 project 绑定查询
+finalize execution owner：当前发起 finalize 的 Owner / Editor / Admin
+Viewer / 非成员：持续禁止进入 finalize 写路径
+```
+
+### C. 验证
+
+本批已完成 finalize 专项和现有 finalize / regression / generation 组合验证：
+
+```text
+57 passed
+```
+
+验证覆盖同步 finalize 的 Owner / Editor / Admin 成员写入合同、Viewer/非成员 403、项目角色与记忆查询不受 `NovelProject.user_id` 旧过滤影响，以及 generation 运行控制回归不退化。
+
+### D. 下一步
+
+1. 迁移 `outline / rewrite-outline` 的 start / cancel 运行归属：项目 write actor 仅负责准入；既有 Runtime 的 execution owner、lease、重试、worker 与终态事件继续使用原运行归属；新 Run 使用实际发起成员作为 execution owner。
+2. 审计 deprecated outline generation 路径，统一项目 write gate、共享 active-run 去重与 project/task/run 绑定。
+3. 执行真实 HTTP 多用户验收，覆盖 Owner、Editor、Viewer、Admin、非成员的 generation、cancel、resume、finalize、outline/rewrite-outline、状态读取与 SSE cursor/replay，并验证跨项目隔离。
+
+
+## 2026-09-04 接续回写：UI-004 Writer H-2 outline / rewrite-outline 控制闭环
+
+### A. start / cancel 项目写入合同
+
+`outline` 与 `rewrite-outline` 的 start / cancel 入口已统一迁移至项目 write gate：
+
+```text
+Owner / Editor / Admin：可启动和取消同项目 outline / rewrite-outline 运行
+Viewer：403
+非成员：403
+```
+
+新启动的 outline 或 rewrite-outline Run 以实际发起成员作为 `execution owner`。项目成员身份仅用于入口 project write 裁决；新运行的 TaskRuntime、worker、计量与审计归属明确记录为当前 actor。
+
+### B. 共享项目 active Run 与既有运行控制
+
+共享项目中的 active outline / rewrite-outline Run 按项目与任务类型去重：
+
+```text
+active-run dedup key：project_id + task_type
+```
+
+同项目成员重复 start 不会因 actor 身份不同而创建并行重复运行。对于持久化既有 Run，Editor 可以取消 Owner 创建的同项目 Run；取消请求与终态事件继续使用原始运行 owner：
+
+```text
+TaskRuntime request_cancel：原 execution owner
+terminal event：原 execution owner
+lease / lease owner / lease generation：保持不变
+```
+
+这使协作成员能够处理 Owner 创建但卡住的 outline 运行，同时不静默篡改原始 TaskRuntime 的执行归属或 lease 控制边界。
+
+### C. 专项与组合验证
+
+新增专项：
+
+```text
+backend/app/api/routers/test_writer_member_outline_control_access.py
+```
+
+验证结果：
+
+```text
+Writer H-2 outline/rewrite-outline 控制专项：14 passed
+当前综合组合回归：129 passed（115 + 14）
+```
+
+专项覆盖 Owner / Editor / Admin 的 start 权限、新 Run execution owner=actor、按 `project_id + task_type` 的共享去重、Editor 取消 Owner 持久化 Run 时原 owner 的 request_cancel / terminal event 语义与 lease 不变，以及 Viewer / 非成员 403。
+
+### D. 下一步
+
+1. 迁移 deprecated outline generation path，统一 project write gate、TaskRuntime execution owner、共享项目 active-run 去重与项目/任务/run 绑定，清理遗留 Owner-only 二次过滤。
+2. 完成真实多用户 HTTP 验收，覆盖 Owner、Editor、Viewer、Admin、非成员的 generation、cancel、resume、finalize、outline/rewrite-outline start/cancel、状态读取、SSE cursor/replay 与跨项目隔离。
+3. deprecated path 与真实 HTTP 验收收口后，重新执行完整后端、前端、启动冒烟和跨项目隔离质量门禁，并回写权威实测基线。

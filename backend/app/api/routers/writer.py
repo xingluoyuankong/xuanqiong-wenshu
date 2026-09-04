@@ -2819,10 +2819,7 @@ async def _run_finalize_pipeline(
         project_stmt = (
             select(NovelProject)
             .options(selectinload(NovelProject.characters))
-            .where(
-                NovelProject.id == project_id,
-                NovelProject.user_id == user_id,
-            )
+            .where(NovelProject.id == project_id)
         )
         project_result = await session.execute(project_stmt)
         project = project_result.scalars().first()
@@ -3660,7 +3657,7 @@ async def finalize_chapter(
     定稿入口：选中版本后触发 FinalizeService 进行记忆更新与快照写入。
     """
     novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(request.project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(request.project_id, current_user.id)
 
     stmt = (
         select(Chapter)
@@ -4853,7 +4850,7 @@ async def start_chapter_outline_rewrite(
     current_user: UserInDB = Depends(get_current_user),
 ) -> OutlineGenerationJobResponse:
     novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user.id)
 
     async with _OUTLINE_JOB_LOCK:
         existing_run_id = _OUTLINE_PROJECT_RUNS.get(project_id)
@@ -4866,7 +4863,6 @@ async def start_chapter_outline_rewrite(
             session,
             project_id=project_id,
             task_types=("chapter_outline_generation", "chapter_outline_rewrite"),
-            owner_user_id=int(current_user.id),
         )
         if restored:
             _OUTLINE_JOBS[str(restored["run_id"])] = dict(restored)
@@ -4955,7 +4951,7 @@ async def start_chapters_outline_generation(
     current_user: UserInDB = Depends(get_current_user),
 ) -> OutlineGenerationJobResponse:
     novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user.id)
 
     async with _OUTLINE_JOB_LOCK:
         existing_run_id = _OUTLINE_PROJECT_RUNS.get(project_id)
@@ -4968,7 +4964,6 @@ async def start_chapters_outline_generation(
             session,
             project_id=project_id,
             task_types=("chapter_outline_generation", "chapter_outline_rewrite"),
-            owner_user_id=int(current_user.id),
         )
         if restored:
             _OUTLINE_JOBS[str(restored["run_id"])] = dict(restored)
@@ -5114,7 +5109,7 @@ async def cancel_chapters_outline_generation(
     current_user: UserInDB = Depends(get_current_user),
 ) -> OutlineGenerationJobResponse:
     novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user.id)
 
     async with _OUTLINE_JOB_LOCK:
         run_id = _OUTLINE_PROJECT_RUNS.get(project_id)
@@ -5126,7 +5121,6 @@ async def cancel_chapters_outline_generation(
             session,
             project_id=project_id,
             task_types=("chapter_outline_generation", "chapter_outline_rewrite"),
-            owner_user_id=int(current_user.id),
         )
         if restored:
             async with _OUTLINE_JOB_LOCK:
@@ -5167,9 +5161,15 @@ async def cancel_chapters_outline_generation(
             # queued 任务尚未领取租约时没有 worker 能负责收敛；即使本进程已
             # 把协程登记到调度集合，也必须由取消 API 原子收口为 cancelled。
             runtime_before_cancel = str(snapshot.get("_runtime_status") or "")
+            existing_runtime_task = await TaskRuntimeService(session).get_task(
+                str(snapshot["run_id"])
+            )
+            if existing_runtime_task.project_id != project_id:
+                raise TaskRuntimeNotFound("outline task does not belong to project")
+            execution_owner_id = int(existing_runtime_task.owner_user_id)
             runtime_task = await TaskRuntimeService(session).request_cancel(
                 str(snapshot["run_id"]),
-                owner_user_id=int(current_user.id),
+                owner_user_id=execution_owner_id,
                 finalize_unclaimed=(
                     runtime_before_cancel == TaskRuntimeStatus.QUEUED.value
                     or snapshot.get("status") == "queued"
@@ -5194,7 +5194,7 @@ async def cancel_chapters_outline_generation(
                     stage="cancelled",
                     progress=100.0,
                     message="章节大纲生成任务已取消",
-                    owner_user_id=int(current_user.id),
+                    owner_user_id=execution_owner_id,
                     idempotency_key=f"outline-terminal:{snapshot['run_id']}:cancelled",
                 )
         except Exception:

@@ -21,6 +21,9 @@ class _FakeProjectAccessService:
     async def require_project_read(self, project_id, user_id):
         return object()
 
+    async def require_project_write(self, project_id, user_id):
+        return object()
+
 
 @pytest.fixture(autouse=True)
 def clear_outline_jobs():

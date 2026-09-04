@@ -235,7 +235,7 @@ async def test_cancel_finalizes_queued_runtime_even_when_worker_is_scheduled(tas
 
 
 @pytest.mark.asyncio
-async def test_other_users_active_task_does_not_block(task_session, monkeypatch):
+async def test_project_member_active_task_is_shared_and_prevents_duplicate_start(task_session, monkeypatch):
     """归属隔离：别人的任务不能占用当前用户的项目大纲入口。"""
     monkeypatch.setattr(writer, "NovelService", _FakeNovelService)
     await _seed_project(task_session)
@@ -260,8 +260,8 @@ async def test_other_users_active_task_does_not_block(task_session, monkeypatch)
         current_user=UserInDB(id=USER_ID, username="t", email=None, hashed_password="x"),
     )
 
-    assert response.run_id != "outline-run-other"
-    assert len(background_tasks.tasks) == 1
+    assert response.run_id == "outline-run-other"
+    assert len(background_tasks.tasks) == 0
 
 @pytest.mark.asyncio
 async def test_rewrite_job_consults_runtime_stop_check_before_rewrite(monkeypatch):
