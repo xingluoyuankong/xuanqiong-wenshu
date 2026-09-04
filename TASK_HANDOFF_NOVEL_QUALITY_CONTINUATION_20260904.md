@@ -807,3 +807,67 @@ d5972aa test: stabilize admin view import regression
 ```
 
 本批结论：UI-004 成员管理 HTTP 与 Agent 读取权限基线的单元/静态门禁已经收口；真实服务启动、多用户 HTTP/SSE、全业务路由成员策略贯穿、成员管理 UI、UI-005、UI-006 和 main 质量主线逐批对齐仍是后续工作，任务总状态保持 `active`。
+
+## 2026-09-04 追加：SQLite 启动路径修复与真实服务冒烟
+
+### A. 发现与修复
+
+首次运行根目录 `start.ps1` 时，尽管 `backend/.env` 配置为 `DB_PROVIDER=sqlite`，脚本仍在载入 `.env` 前把 provider 默认成 `mysql`，导致错误调用本地 MySQL 启动脚本并因缺少 `mysqld.exe` 退出。
+
+修复文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\start.ps1
+```
+
+修复方式：
+
+- 优先使用显式环境变量 `DB_PROVIDER`；
+- 环境变量不存在时读取 `backend/.env` 的 `DB_PROVIDER`；
+- 两者都缺失时才保留历史默认 `mysql`；
+- 统一小写化后再决定是否启动本地 MySQL。
+
+### B. 真实运行验证
+
+修复后重新执行：
+
+```text
+.\start.ps1
+```
+
+结果：
+
+```text
+DB_PROVIDER=sqlite
+skip local MySQL
+BACKEND_READY=True
+FRONTEND_READY=True
+FRONTEND_PROXY_READY=True
+backend=http://127.0.0.1:8013
+frontend=http://127.0.0.1:5174
+```
+
+随后执行：
+
+```text
+Invoke-WebRequest http://127.0.0.1:8013/api/health
+Invoke-WebRequest http://127.0.0.1:5174/api/health
+.\verify.ps1 smoke
+```
+
+结果：
+
+```text
+后端 health：200
+前端代理 health：200
+OpenAPI 冒烟：259 项检查，55 通过、204 因缺少真实资源 ID 合理跳过、0 失败
+LLM 设置冒烟：通过
+verify.ps1 smoke：通过
+```
+
+### C. 当前边界
+
+- 本轮证明 SQLite 配置下的正式本地启动、前端代理、健康检查和 OpenAPI 冒烟可用；
+- 冒烟不替代带真实多用户项目、成员管理、Agent reasoning、SSE 断线恢复的端到端验收；
+- MySQL 部署路径仍要求由部署环境提供正确 `mysqld.exe` 或 `XUANQIONG_WENSHU_MYSQLD_PATH`；
+- 服务保持运行，后续可直接基于 8013/5174 继续多用户 UI/API 验收。

@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = 'Continue'
+$ErrorActionPreference = 'Continue'
 
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -28,7 +28,20 @@ $backendHost = Get-EnvValue -Names @('XUANQIONG_WENSHU_BACKEND_HOST') -Default '
 $backendPortValue = Get-EnvValue -Names @('XUANQIONG_WENSHU_BACKEND_PORT') -Default '8013'
 $frontendHost = Get-EnvValue -Names @('XUANQIONG_WENSHU_FRONTEND_HOST') -Default '127.0.0.1'
 $frontendPortValue = Get-EnvValue -Names @('XUANQIONG_WENSHU_FRONTEND_PORT') -Default '5174'
-$dbProvider = Get-EnvValue -Names @('DB_PROVIDER') -Default 'mysql'
+$dbProvider = Get-EnvValue -Names @('DB_PROVIDER') -Default ''
+if ([string]::IsNullOrWhiteSpace($dbProvider)) {
+    $backendEnvPathForProvider = Join-Path $repo 'backend\.env'
+    if (Test-Path -LiteralPath $backendEnvPathForProvider) {
+        $providerLine = Get-Content -LiteralPath $backendEnvPathForProvider |
+            Where-Object { $_ -match '^\s*DB_PROVIDER\s*=' } |
+            Select-Object -First 1
+        if ($providerLine) {
+            $dbProvider = (($providerLine -split '=', 2)[1]).Trim().Trim('"').Trim("'")
+        }
+    }
+}
+if ([string]::IsNullOrWhiteSpace($dbProvider)) { $dbProvider = 'mysql' }
+$dbProvider = $dbProvider.ToLowerInvariant()
 
 $env:XUANQIONG_WENSHU_BACKEND_HOST = $backendHost
 $env:XUANQIONG_WENSHU_BACKEND_PORT = $backendPortValue
@@ -302,3 +315,4 @@ if (-not $backendReady -or -not $frontendReady -or -not $frontendProxyReady) {
     }
     exit 1
 }
+
