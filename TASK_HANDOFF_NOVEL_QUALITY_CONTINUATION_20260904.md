@@ -1328,3 +1328,19 @@ write_executor.py：Editor 创建/接收候选，Viewer Artifact 可读
 execution_facts.py：单 Run facts / provider summary 成员可读
 writer.py H-1：状态、SSE、运行态项目成员读取
 ```
+
+## 2026-09-04 全量门禁回写：UI-004 当前阶段稳定基线
+
+在完成项目成员 HTTP、项目资源路由、Agent state/reasoning/activity、ContextRef、十个只读工具、Research/Outline/Style、Review/Patch/Token Budget 权限迁移后，完整回归结果：
+
+```text
+后端：1514 passed in 410.08s
+前端 type-check：通过
+前端 Vitest：80 files / 496 tests passed in 96.82s
+前端 build-only：通过，4918 modules transformed，43.74s
+git diff --check：通过
+```
+
+前端构建继续报告 `baseline-browser-mapping` 与 `caniuse-lite` 数据较旧，列为 P2 依赖数据更新，不影响本轮构建产物。
+
+当前 UI-004 仍为 active：下一 P0 是 Agent `write_executor.py` 与 `execution_facts.py` 的成员可读/可写投影，随后进入 Writer H-1 运行态和 SSE 成员读取；其余旧 Owner-only 业务域继续按小批次迁移，不把本轮全绿当作总任务完成。
