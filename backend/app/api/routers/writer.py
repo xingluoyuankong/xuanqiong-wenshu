@@ -4184,6 +4184,35 @@ async def _close_claimed_chapter_after_startup_failure(
         )
 
 
+# Static outline status paths must be registered before the generic
+# `{chapter_number}/status` route; otherwise FastAPI parses `outline` as an int
+# and returns a 422 before reaching the intended member-readable status handler.
+@router.get("/novels/{project_id}/chapters/rewrite-outline/status", response_model=OutlineGenerationJobResponse)
+async def _early_rewrite_outline_status(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> OutlineGenerationJobResponse:
+    return await get_chapter_outline_rewrite_status(
+        project_id, session=session, current_user=current_user
+    )
+
+
+@router.get("/novels/{project_id}/chapters/outline/status", response_model=OutlineGenerationJobResponse)
+async def _early_outline_status(
+    project_id: str,
+    background_tasks: BackgroundTasks = None,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> OutlineGenerationJobResponse:
+    return await get_chapters_outline_generation_status(
+        project_id,
+        background_tasks=background_tasks,
+        session=session,
+        current_user=current_user,
+    )
+
+
 @router.get("/novels/{project_id}/chapters/{chapter_number}/status", response_model=ChapterSchema)
 async def get_chapter_generation_status(
     project_id: str,
