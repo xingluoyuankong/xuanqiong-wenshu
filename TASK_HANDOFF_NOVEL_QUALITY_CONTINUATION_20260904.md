@@ -1992,3 +1992,39 @@ git diff --check：通过
 2. 真实多用户 HTTP/SSE 验收：以 Owner、Editor、Viewer、Admin、非成员会话覆盖 Writer 写入、运行控制、状态读取、SSE cursor/replay、断线续传、终态围栏与跨项目隔离。
 
 本地模块回归、组合回归和完整质量门禁均不替代上述真实 HTTP/SSE 验收或重启后真实服务 smoke；完成条件必须取得对应真实请求链的独立证据并回写本接续文档。
+
+
+## 2026-09-04 接续回写：重启后真实服务 smoke 基线
+
+### A. 实际服务与代理链
+
+重启后已对当前分支的真实服务进程完成 smoke：
+
+```text
+Backend：http://127.0.0.1:8013
+Frontend：http://127.0.0.1:5174
+Frontend proxy health：正常
+Backend health：正常
+```
+
+`verify.ps1 smoke` 已通过；OpenAPI smoke 的实际检查结果为：
+
+```text
+259 检查 = 55 通过 / 204 合理跳过 / 0 失败
+```
+
+LLM settings smoke 同样通过，确认服务启动、前端代理、OpenAPI 端点枚举与 LLM 配置读取链在重启后的真实进程中正常工作。
+
+### B. 日志日期与接续日期
+
+本次实际 run log 目录为：
+
+```text
+logs/run-20260905-044317
+```
+
+该目录名反映运行日志生成时间；本权威接续文档的任务接续日期继续保持 **2026-09-04**，不以日志目录日期改写本轮接续记录日期。
+
+### C. 尚未完成的真实验收
+
+当前仍未完成的唯一验收项，是使用真实且彼此不同的 Owner、Editor、Viewer、Admin、非成员会话执行 Writer HTTP/SSE 端到端矩阵。该矩阵必须覆盖项目写入、generation/cancel/resume/finalize、outline/rewrite-outline 控制、状态读取、SSE cursor/replay、断线续传、终态围栏和跨项目隔离，并保留真实请求链证据；现有单用户 smoke、OpenAPI smoke 与本地回归均不替代该验收。
