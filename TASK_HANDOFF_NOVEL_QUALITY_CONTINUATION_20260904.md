@@ -893,3 +893,11 @@ owner_delete_status=422
 ```
 
 该验收确认创建项目会同步生成 Owner 成员行，且 HTTP 层同样拒绝 Owner 降级与删除。该本地 API 验收使用的隔离项目 ID 为 `5e7bbd69-5509-45c8-ac09-255b3a13626d`；没有调用 Provider。
+
+### E. 远端同步状态
+
+本批本地提交已形成完整可回滚链，但推送到现有 `origin` 时返回 GitHub 403（当前本机认证身份没有该仓库写入权限）。代码、测试和接续文档全部保留在本地分支；不通过改 remote、不覆盖凭据、不改写历史来规避该问题。待本机切换到具有仓库写权限的 GitHub 身份后，执行：
+
+```powershell
+git push origin codex/bohrium-integration-20260831
+```
