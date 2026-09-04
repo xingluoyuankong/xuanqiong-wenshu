@@ -676,3 +676,101 @@ UI-004-D：前端成员管理 UI；
 UI-005：工具注册 schema/策略；
 UI-006：长历史分页、虚拟列表和移动端性能。
 ```
+
+## 2026-09-04 追加：Agent 接续线全量门禁复核与两项基线纠偏
+
+### A. 全量复核结果
+
+在 `codex/bohrium-integration-20260831` 分支执行：
+
+```text
+backend\.venv\Scripts\python.exe -m pytest -q
+```
+
+首轮结果：
+
+```text
+1474 passed, 2 failed
+```
+
+两个失败均为已有测试契约与 UI-004 现状不一致，并非成员管理新路由运行错误：
+
+1. 数据库失败映射测试没有把 Agent session lookup 设为数据库异常，实际按正确语义返回 session missing；
+2. 项目 Provider usage 的非成员访问在成员权限模型下统一返回 403，旧测试仍断言 owner-scoped 时代的 404。
+
+### B. 纠偏与复测
+
+修正文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_database_errors.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_runtime_route.py
+```
+
+修正内容：
+
+- 数据库失败测试在消息路由 session lookup 边界显式注入 SQLAlchemyError；
+- 非成员 Provider usage 测试改为断言统一 403，避免泄露项目存在性。
+
+定向复测：
+
+```text
+2 passed in 10.53s
+```
+
+成员/Reasoning/迁移/Agent stream 定向复测：
+
+```text
+45 passed in 42.29s
+```
+
+前端：
+
+```text
+npm run type-check       通过
+npm run build-only       通过，4914 modules transformed
+npm run test:run         77/78 文件通过，489/490 通过
+```
+
+前端唯一失败为并行高负载下 `src/views/AdminView.spec.ts` 20 秒超时；隔离重跑：
+
+```text
+npx vitest run src/views/AdminView.spec.ts --reporter=verbose
+1 passed in 9.37s
+```
+
+因此该项判定为测试运行资源竞争/超时敏感，不把全量并行结果伪装成全绿；后续需降低并行负载或提高该测试的稳定超时配置后再做一次完整前端门禁。
+
+生产构建警告：
+
+```text
+baseline-browser-mapping 数据超过两个月；
+caniuse-lite 数据约 11 个月未更新。
+```
+
+该警告未阻断构建，列入 P2 依赖刷新任务。
+
+### C. 新增提交
+
+```text
+1f2e265 feat: close project member management access loop
+ab3c1d3 test: align access and database failure contracts
+```
+
+### D. 当前状态
+
+- UI-004 成员管理 HTTP 已具备；
+- Owner 不可转授/降级/移除策略已加固；
+- Agent 分支工作树仍有未跟踪的 `TASK_HANDOFF_NOVEL_QUALITY_CONTINUATION_20260905.md`，该文件来自用户提供的次日环境上下文，当前权威接续文档仍为本文件（2026-09-04）；
+- 全量后端需在两项测试契约纠偏后再跑一轮确认；
+- 全部相关业务路由权限贯穿和真实 API/SSE 联调仍未完成。
+
+### E. 下一批执行目标
+
+```text
+1. 重跑 backend 全量 pytest，确认 1476 项基线收口；
+2. 修复或隔离 AdminView 并行超时，再跑前端全量；
+3. 枚举 Agent router 的所有读取端点并补成员访问测试；
+4. 启动真实后端，执行 health、成员管理、Agent reasoning、SSE 断线恢复 smoke；
+5. 追加 UI-004 状态和证据后，再进入 UI-005/UI-006。
+```
