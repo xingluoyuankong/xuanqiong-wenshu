@@ -109,7 +109,6 @@ class PipelineConfig:
 class PipelineOrchestrator:
     """统一写作流水线编排器。"""
 
-    _generation_semaphore: Optional[asyncio.Semaphore] = None
     _RUNTIME_MAX_EVENTS = 60
     _RUNTIME_MAX_STRING = 280
     _RUNTIME_MAX_LIST = 12
@@ -128,9 +127,6 @@ class PipelineOrchestrator:
         # Candidate tasks can emit provider heartbeats concurrently; an AsyncSession
         # only permits one in-flight database operation at a time.
         self._generation_runtime_lock = asyncio.Lock()
-        if PipelineOrchestrator._generation_semaphore is None:
-            limit = max(1, int(getattr(settings, "writer_chapter_versions", 1) or 1))
-            PipelineOrchestrator._generation_semaphore = asyncio.Semaphore(max(2, min(8, limit)))
 
     def _create_llm_config_service(self) -> LLMConfigService:
         return LLMConfigService(self.session)
