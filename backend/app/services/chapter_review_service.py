@@ -4,7 +4,7 @@
 每隔 N 章触发一次回顾，检查整体节奏、角色发展、伏笔状态，生成中期调整建议。
 """
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import logging
 
@@ -72,7 +72,7 @@ class ChapterReviewService:
         with LLMService.daily_limit_scope(f"chapter_periodic_review:{project_id}:{start_chapter}-{end_chapter}:{user_id}"):
             result = {
                 "review_range": f"第 {start_chapter} - {end_chapter} 章",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "pacing_analysis": {},
                 "character_analysis": {},
                 "foreshadowing_analysis": {},

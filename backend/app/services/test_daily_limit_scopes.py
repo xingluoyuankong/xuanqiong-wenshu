@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -204,6 +205,7 @@ async def test_chapter_review_scope_reuses_outer_logical_run():
         )
 
     assert review_result["review_range"] == "第 1 - 3 章"
+    assert datetime.fromisoformat(review_result["timestamp"]).tzinfo == timezone.utc
     assert adjustment_plan["global_adjustments"] == ["提前兑现一条关系裂缝"]
     assert len(llm.scope_ids) == 4
     assert all(scope_id == outer_scope_id for scope_id in llm.scope_ids)
