@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.agent.context_refs import (
@@ -12,7 +13,7 @@ from app.agent.context_refs import (
 from app.agent.policy import ProjectScopeViolation
 from app.agent.registry import AgentToolRegistry, DEFAULT_TOOL_REGISTRY
 from app.agent.schemas import AgentContextRef, AgentMessageCreateRequest, AgentRiskLevel, ToolContextBinding, ToolManifest
-from app.models import BlueprintCharacter, Chapter, ChapterVersion, CharacterNode, Faction, Foreshadowing, NovelProject, User
+from app.models import BlueprintCharacter, Chapter, ChapterVersion, CharacterNode, Faction, Foreshadowing, NovelProject, ProjectMember, ProjectMemberRole, User
 from app.models.research import ResearchArtifact
 from app.models.agent import AgentArtifactRef, AgentRun, AgentSession
 from app.models.agent_quality import QualityFinding, QualityResult
@@ -563,3 +564,48 @@ async def test_entity_context_ref_rejects_cross_project_and_raw_content(task_ses
                 "content": "MUST_NOT_BE_ACCEPTED",
             }],
         )
+
+
+@pytest.mark.asyncio
+async def test_context_refs_allow_project_member_to_select_owner_artifact(task_session):
+    owner, project, chapter, _first, second = await _seed_context_project(
+        task_session, owner_id=3901, project_id="context-member-project"
+    )
+    viewer = User(id=3902, username="context-viewer", email="context-viewer@example.com", hashed_password="x", is_active=True)
+    outsider = User(id=3903, username="context-outsider", email="context-outsider@example.com", hashed_password="x", is_active=True)
+    task_session.add_all([
+        viewer,
+        outsider,
+        ProjectMember(project_id=project.id, user_id=viewer.id, role=ProjectMemberRole.viewer.value),
+    ])
+    await task_session.flush()
+    owner_session = AgentSession(user_id=owner.id, project_id=project.id, title="owner context")
+    task_session.add(owner_session)
+    await task_session.flush()
+    run = AgentRun(session_id=owner_session.id, user_id=owner.id, project_id=project.id, correlation_id="member-context", transaction_id="member-context")
+    task_session.add(run)
+    await task_session.flush()
+    artifact = AgentArtifactRef(
+        id="member-context-artifact", run_id=run.id, correlation_id=run.correlation_id,
+        transaction_id=run.transaction_id, user_id=owner.id, project_id=project.id,
+        kind="chapter_candidate", uri="agent-artifact://member-context", sha256="a" * 64,
+    )
+    task_session.add(artifact)
+    await task_session.commit()
+
+    resolved = await resolve_agent_context_refs(
+        session=task_session, user_id=viewer.id, session_project_id=project.id,
+        refs=[
+            AgentContextRef(kind="chapter_version", project_id=project.id, chapter_number=chapter.chapter_number, version_id=second.id),
+            AgentContextRef(kind="artifact", project_id=project.id, artifact_id=artifact.id),
+        ],
+    )
+    assert resolved.selected_version_id == second.id
+    assert resolved.artifact_id == artifact.id
+
+    with pytest.raises(HTTPException) as denied:
+        await resolve_agent_context_refs(
+            session=task_session, user_id=outsider.id, session_project_id=project.id,
+            refs=[AgentContextRef(kind="project", project_id=project.id)],
+        )
+    assert denied.value.status_code == 403

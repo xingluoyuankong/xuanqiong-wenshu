@@ -12,7 +12,7 @@ from ..models import BlueprintCharacter, Chapter, ChapterVersion, CharacterNode,
 from ..models.agent import AgentArtifactRef, AgentRun
 from ..models.agent_quality import QualityFinding, QualityResult
 from ..models.research import ResearchArtifact
-from ..services.novel_service import NovelService
+from ..services.project_access_service import ProjectAccessService
 from .policy import ProjectScopeViolation
 from .schemas import AgentContextRef, ToolManifest
 
@@ -178,7 +178,6 @@ async def _assert_artifact(
     candidate = await session.scalar(
         select(AgentArtifactRef.id).where(
             AgentArtifactRef.id == artifact_id,
-            AgentArtifactRef.user_id == user_id,
             AgentArtifactRef.project_id == project_id,
         )
     )
@@ -203,7 +202,6 @@ async def _assert_quality_finding(
             QualityResult.run_id == AgentArtifactRef.run_id,
             QualityResult.user_id == user_id,
             QualityResult.project_id == project_id,
-            AgentArtifactRef.user_id == user_id,
             AgentArtifactRef.project_id == project_id,
             AgentRun.user_id == user_id,
             AgentRun.project_id == project_id,
@@ -232,8 +230,6 @@ async def _assert_entity(
     if model is None:
         raise ContextRefValidationError(f"unsupported entity context kind: {kind}")
     filters = [model.id == entity_id, model.project_id == project_id]
-    if model is ResearchArtifact:
-        filters.append(ResearchArtifact.user_id == user_id)
     candidate = await session.scalar(select(model.id).where(*filters))
     if candidate is None:
         raise ProjectScopeViolation(f"{kind} context reference is unavailable for this project")
@@ -253,7 +249,7 @@ async def resolve_agent_context_refs(
     if not session_project_id:
         raise ProjectScopeViolation("context references require a project-scoped Agent session")
 
-    await NovelService(session).ensure_project_owner(session_project_id, user_id)
+    await ProjectAccessService(session).require_project_read(session_project_id, user_id)
     canonical: list[AgentContextRef] = []
     seen: set[tuple[str, str, int | None, int | None, str | None, int | None, str | None, str]] = set()
     selected_chapter: int | None = None

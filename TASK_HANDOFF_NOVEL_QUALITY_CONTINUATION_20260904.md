@@ -1228,3 +1228,28 @@ git diff --check：通过
 ```
 
 下一批进入 Writer H-1 读路径/运行态可见性和 Agent ContextRef P0 迁移。
+
+## 2026-09-04 追加：UI-004 Agent ContextRef P0 成员协作修复
+
+`backend/app/agent/context_refs.py` 已从旧 Owner-only `NovelService.ensure_project_owner()` 切换到 `ProjectAccessService.require_project_read()`。
+
+共享项目 ContextRef 的可见性现在按项目成员权限判断，不再按创建者 `user_id` 截断：
+
+```text
+chapter / chapter_version
+Agent Artifact
+Quality Finding
+Research Artifact
+character / faction / foreshadowing / knowledge node
+```
+
+项目无关资源仍维持创建者隔离；跨项目 ContextRef 继续拒绝。
+
+新增回归覆盖：Viewer 选择 Owner 创建的 chapter version 与 Agent Artifact 成功；非成员得到 403。
+
+```text
+backend/app/agent/test_context_refs.py
+11 passed in 3.96s
+```
+
+下一 Agent P0：`tool_adapters.py`，将 `project.context`、章节/大纲/质量/统计/知识图谱/文风/研究/伏笔等只读工具改为项目成员可读；之后处理 `write_executor.py` 与单 Run execution facts。
