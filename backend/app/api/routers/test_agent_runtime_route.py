@@ -1100,4 +1100,6 @@ async def test_project_provider_usage_summary_route_is_owner_scoped_and_redacts_
             session=task_session,
             current_user=SimpleNamespace(id=other.id),
         )
-    assert error.value.status_code == 404
+    # Membership denial is intentionally uniform and does not reveal whether
+    # a project exists to an outsider.
+    assert error.value.status_code == 403

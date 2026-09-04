@@ -51,6 +51,9 @@ async def test_agent_session_and_message_routes_map_sqlalchemy_failures_to_ledge
         await agent_router.get_agent_session("session-db-failure", session=task_session, current_user=CURRENT_USER)
     _assert_ledger_503(get_error)
 
+    # Exercise the database-error mapping at the session lookup boundary;
+    # a genuinely missing session should remain a normal 404.
+    monkeypatch.setattr(AgentRuntimeService, "get_session", broken_session)
     with pytest.raises(HTTPException) as message_error:
         await agent_router.post_agent_message(
             "session-db-failure",
