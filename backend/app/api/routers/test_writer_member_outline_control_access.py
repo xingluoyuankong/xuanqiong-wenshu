@@ -50,7 +50,26 @@ def _clear_outline_memory() -> None:
 
 
 @pytest.fixture(autouse=True)
-def clear_outline_memory():
+def clear_outline_memory(monkeypatch):
+    async def no_legacy_persistence(*_args, **_kwargs):
+        return None
+
+    # The contract uses the fixture session for durable TaskRuntime assertions.
+    # Suppress only the legacy conversation mirror, which otherwise opens the
+    # application's separate file-backed session during an in-memory test.
+    async def local_schedule(run_id, project_id, user_id, request_payload, background_tasks, *, rewrite=False, runtime_session=None):
+        if background_tasks is not None:
+            background_tasks.add_task(
+                writer._run_outline_rewrite_job if rewrite else writer._run_outline_generation_job,
+                run_id,
+                project_id,
+                user_id,
+                request_payload,
+            )
+
+    monkeypatch.setattr(writer, "_persist_outline_job_state", no_legacy_persistence)
+    monkeypatch.setattr(writer, "_append_outline_task_runtime_event", no_legacy_persistence)
+    monkeypatch.setattr(writer, "_schedule_outline_recovery", local_schedule)
     _clear_outline_memory()
     yield
     _clear_outline_memory()

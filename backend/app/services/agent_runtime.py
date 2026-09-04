@@ -927,6 +927,11 @@ class AgentRuntimeService:
         stmt = select(AgentRunStep).where(AgentRunStep.run_id == run_id, AgentRunStep.user_id == user_id).order_by(AgentRunStep.step_order.asc())
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def list_steps_readable(self, *, run_id: str, user_id: int) -> list[AgentRunStep]:
+        run = await self.get_readable_run(run_id, user_id)
+        stmt = select(AgentRunStep).where(AgentRunStep.run_id == run.id).order_by(AgentRunStep.step_order.asc())
+        return list((await self.session.execute(stmt)).scalars().all())
+
     async def claim_step(self, *, step_id: str, user_id: int, lease_owner: str, lease_seconds: int = 120) -> AgentRunStep:
         owner = str(lease_owner or "").strip()[:128]
         if not owner:
@@ -2220,6 +2225,11 @@ class AgentRuntimeService:
         stmt = select(AgentApproval).where(AgentApproval.run_id == run_id, AgentApproval.user_id == user_id).order_by(AgentApproval.decision_at.asc().nullsfirst(), AgentApproval.id.asc())
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def list_approvals_readable(self, *, run_id: str, user_id: int) -> list[AgentApproval]:
+        run = await self.get_readable_run(run_id, user_id)
+        stmt = select(AgentApproval).where(AgentApproval.run_id == run.id).order_by(AgentApproval.decision_at.asc().nullsfirst(), AgentApproval.id.asc())
+        return list((await self.session.execute(stmt)).scalars().all())
+
     async def get_approval(self, *, approval_id: str, user_id: int) -> AgentApproval:
         approval = (await self.session.execute(select(AgentApproval).where(AgentApproval.id == approval_id, AgentApproval.user_id == user_id))).scalar_one_or_none()
         if approval is None:
@@ -2327,3 +2337,9 @@ class AgentRuntimeService:
         )
         return artifact
 
+
+
+    async def list_artifacts_readable(self, *, run_id: str, user_id: int) -> list[AgentArtifactRef]:
+        run = await self.get_readable_run(run_id, user_id)
+        stmt = select(AgentArtifactRef).where(AgentArtifactRef.run_id == run.id).order_by(AgentArtifactRef.created_at.asc())
+        return list((await self.session.execute(stmt)).scalars().all())

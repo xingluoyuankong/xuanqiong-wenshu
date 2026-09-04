@@ -308,11 +308,12 @@ async def test_quality_retest_is_read_only_and_project_scoped(task_session):
     assert refreshed is not None
     assert refreshed.metadata_ == {"target_word_count": 20, "min_word_count": 1}
 
-    with pytest.raises(ValueError):
+    with pytest.raises(HTTPException) as denied:
         await execute_read_tool(
             tool_name="quality.retest", session=task_session, user_id=other.id,
             project_id=project.id, arguments={"chapter_number": 3, "version_id": version.id},
         )
+    assert denied.value.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -391,7 +392,7 @@ async def test_quality_rewrite_instructions_are_project_scoped_prose_free_and_re
                 project_id=other_project.id,
                 arguments={"artifact_id": artifact.id},
             )
-        with pytest.raises(ValueError):
+        with pytest.raises(HTTPException) as denied:
             await execute_read_tool(
                 tool_name="quality.rewrite_instructions",
                 session=task_session,
@@ -399,6 +400,7 @@ async def test_quality_rewrite_instructions_are_project_scoped_prose_free_and_re
                 project_id=project.id,
                 arguments={"artifact_id": artifact.id},
             )
+        assert denied.value.status_code == 403
     finally:
         artifact_path.unlink(missing_ok=True)
 

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.agent import AgentRun
@@ -235,7 +236,7 @@ class AgentExecutionFactService:
             summary = AgentExecutionFactService._provider_attempt_summary(run.context_json if isinstance(run.context_json, Mapping) else {})
             for field in ('attempt_count','succeeded_attempts','failed_attempts','fallback_attempts','first_token_attempts','digest_attempts','selected_attempts'):
                 aggregate[field] += summary[field]
-            if summary['last_error_category']:
+            if aggregate['last_error_category'] is None and summary['last_error_category']:
                 aggregate['last_error_category'] = summary['last_error_category']
             if summary['latest_attempt_at'] and (aggregate['latest_attempt_at'] is None or summary['latest_attempt_at'] > aggregate['latest_attempt_at']):
                 aggregate['latest_attempt_at'] = summary['latest_attempt_at']
@@ -258,72 +259,34 @@ class AgentExecutionFactService:
         since: datetime | None = None,
         limit: int = 100,
     ) -> dict[str, Any]:
-        """Aggregate a bounded, user-scoped window of Provider attempt facts for one project."""
+        """Aggregate Provider attempt facts visible to a project member.
+
+        ``user_id`` is the requesting actor, not the immutable execution owner.
+        Project membership controls visibility; every Run in the shared project
+        contributes to the bounded aggregate regardless of who created it.
+        """
+        try:
+            await ProjectAccessService(self.session).require_project_read(project_id, user_id)
+        except HTTPException as exc:
+            # Preserve this service's historical not-found contract while the
+            # access service still performs the actual membership decision.
+            raise AgentExecutionFactNotFound('小说项目不存在或不属于当前用户') from exc
+
         project = (await self.session.execute(
-            select(NovelProject).where(NovelProject.id == project_id, NovelProject.user_id == user_id),
+            select(NovelProject).where(NovelProject.id == project_id),
         )).scalar_one_or_none()
         if project is None:
-            raise AgentExecutionFactNotFound('小说项目不存在或不属于当前用户')
+            raise AgentExecutionFactNotFound('小说项目不存在')
 
         bounded_limit = min(max(int(limit), 1), 100)
+        conditions = [AgentRun.project_id == project.id]
+        if since is not None:
+            conditions.append(AgentRun.created_at >= since)
         query = (
             select(AgentRun)
-            .where(AgentRun.project_id == project.id, AgentRun.user_id == user_id)
+            .where(*conditions)
             .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
             .limit(bounded_limit)
         )
-        if since is not None:
-            query = (
-                select(AgentRun)
-                .where(
-                    AgentRun.project_id == project.id,
-                    AgentRun.user_id == user_id,
-                    AgentRun.created_at >= since,
-                )
-                .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
-                .limit(bounded_limit)
-            )
         runs = (await self.session.execute(query)).scalars().all()
-
-        aggregate = {
-            'project_id': project.id,
-            'run_count': len(runs),
-            'attempt_count': 0,
-            'succeeded_attempts': 0,
-            'failed_attempts': 0,
-            'fallback_attempts': 0,
-            'first_token_attempts': 0,
-            'digest_attempts': 0,
-            'selected_attempts': 0,
-            'last_error_category': None,
-            'latest_attempt_at': None,
-            'runs': [],
-        }
-        for run in runs:
-            context = run.context_json if isinstance(run.context_json, Mapping) else {}
-            run_summary = self._provider_attempt_summary(context)
-            for field in (
-                'attempt_count',
-                'succeeded_attempts',
-                'failed_attempts',
-                'fallback_attempts',
-                'first_token_attempts',
-                'digest_attempts',
-                'selected_attempts',
-            ):
-                aggregate[field] += run_summary[field]
-            if aggregate['last_error_category'] is None and run_summary['last_error_category']:
-                aggregate['last_error_category'] = run_summary['last_error_category']
-            attempt_at = run_summary['latest_attempt_at']
-            if attempt_at and (aggregate['latest_attempt_at'] is None or attempt_at > aggregate['latest_attempt_at']):
-                aggregate['latest_attempt_at'] = attempt_at
-            aggregate['runs'].append({
-                'run_id': run.id,
-                'status': run.status,
-                'attempt_count': run_summary['attempt_count'],
-                'failed_attempts': run_summary['failed_attempts'],
-                'fallback_attempts': run_summary['fallback_attempts'],
-                'last_error_category': run_summary['last_error_category'],
-                'latest_attempt_at': attempt_at,
-            })
-        return aggregate
+        return self._aggregate_project_runs(project.id, list(runs))

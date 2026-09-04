@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...core.dependencies import get_current_user
 from ...db.session import get_session
 from ...schemas.user import UserInDB
-from ...services.novel_service import NovelService
+from ...services.project_access_service import ProjectAccessService
 from ...services.writing_skills_service import WritingSkillsService
 
 router = APIRouter(prefix="/api/writing-skills", tags=["writing-skills"])
@@ -186,8 +186,7 @@ async def execute_skill(
     current_user: UserInDB = Depends(get_current_user),
 ) -> dict:
     if request.project_id:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(request.project_id, current_user.id)
+        await ProjectAccessService(session).require_project_write(request.project_id, current_user)
 
     service = WritingSkillsService(session)
     try:

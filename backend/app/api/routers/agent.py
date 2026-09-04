@@ -471,11 +471,11 @@ async def list_agent_audit(
 async def list_agent_events(session_id: str, run_id: str, after_sequence: Annotated[int, Query(ge=0)] = 0, limit: Annotated[int, Query(ge=1, le=500)] = 500, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> list[AgentEventRead]:
     try:
         service = AgentRuntimeService(session)
-        item = await service.get_session(session_id, current_user.id)
-        run = await service.get_run(run_id, current_user.id)
+        item = await service.get_session_readable(session_id, current_user.id)
+        run = await service.get_readable_run(run_id, current_user.id)
         if run.session_id != item.id:
             raise AgentScopeViolation("run does not belong to session")
-        return await service.list_events(run_id=run_id, user_id=current_user.id, after_sequence=after_sequence, limit=limit)
+        return await service.list_events_readable(run_id=run_id, user_id=current_user.id, after_sequence=after_sequence, limit=limit)
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
@@ -1023,7 +1023,7 @@ async def list_agent_execution_facts(
 @router.get("/runs/{run_id}/approvals", response_model=list[AgentApprovalRead])
 async def list_agent_approvals(run_id: str, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> list[AgentApprovalRead]:
     try:
-        return await AgentRuntimeService(session).list_approvals(run_id=run_id, user_id=current_user.id)
+        return await AgentRuntimeService(session).list_approvals_readable(run_id=run_id, user_id=current_user.id)
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
@@ -1031,7 +1031,7 @@ async def list_agent_approvals(run_id: str, session: AsyncSession = Depends(get_
 @router.get("/runs/{run_id}/steps", response_model=list[AgentRunStepRead])
 async def list_agent_run_steps(run_id: str, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> list[AgentRunStepRead]:
     try:
-        return await AgentRuntimeService(session).list_steps(run_id=run_id, user_id=current_user.id)
+        return await AgentRuntimeService(session).list_steps_readable(run_id=run_id, user_id=current_user.id)
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
@@ -1202,7 +1202,7 @@ async def accept_agent_artifact(artifact_id: str, payload: AgentArtifactAcceptRe
 @router.get("/runs/{run_id}/artifacts", response_model=list[AgentArtifactRead])
 async def list_agent_artifacts(run_id: str, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> list[AgentArtifactRead]:
     try:
-        return await AgentRuntimeService(session).list_artifacts(run_id=run_id, user_id=current_user.id)
+        return await AgentRuntimeService(session).list_artifacts_readable(run_id=run_id, user_id=current_user.id)
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 

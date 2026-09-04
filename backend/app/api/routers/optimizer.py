@@ -22,6 +22,7 @@ from ...services.generation_call_service import GenerationCallPolicy, Generation
 from ...services.continuity_guard_utils import continuity_terms_guard_failure
 from ...services.longform_context_service import LongformContextService
 from ...services.novel_service import NovelService
+from ...services.project_access_service import ProjectAccessService
 from ...services.prompt_service import PromptService
 
 router = APIRouter(prefix="/api/optimizer", tags=["Optimizer"])
@@ -277,8 +278,11 @@ async def optimize_chapter(
     prompt_service = PromptService(session)
     llm_service = LLMService(session)
 
-    # 验证项目所有权
-    project = await novel_service.ensure_project_owner(request.project_id, current_user.id)
+    # 优化属于项目写操作；成员角色决定权限，旧 owner 字段仅保留兼容用途。
+    access = await ProjectAccessService(session).require_project_write(request.project_id, current_user)
+    project = await novel_service.repo.get_by_id(access.project.id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
 
     # 获取章节内容
     chapter = next(
@@ -490,7 +494,10 @@ async def apply_optimization(
             detail="project_id, chapter_number, optimized_content are required",
         )
 
-    project = await novel_service.ensure_project_owner(resolved_project_id, current_user.id)
+    access = await ProjectAccessService(session).require_project_write(resolved_project_id, current_user)
+    project = await novel_service.repo.get_by_id(access.project.id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
 
     chapter = next(
         (ch for ch in project.chapters if ch.chapter_number == resolved_chapter_number),
@@ -526,7 +533,7 @@ async def apply_optimization(
     await novel_service._touch_project(resolved_project_id, auto_commit=False)
     await session.commit()
 
-    updated_chapter = await novel_service.get_chapter_schema(
+    updated_chapter = await novel_service.get_chapter_schema_for_member(
         resolved_project_id,
         current_user.id,
         resolved_chapter_number,

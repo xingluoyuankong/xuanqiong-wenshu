@@ -1,11 +1,11 @@
 # AIMETA P=小说仓库_小说和章节数据访问|R=小说CRUD_章节CRUD|NR=不含业务逻辑|E=NovelRepository|X=internal|A=仓库类|D=sqlalchemy|S=db|RD=./README.ai
 from typing import Iterable, Optional
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import selectinload
 
 from .base import BaseRepository
-from ..models import Chapter, NovelProject
+from ..models import Chapter, NovelProject, ProjectMember
 
 
 class NovelRepository(BaseRepository[NovelProject]):
@@ -34,7 +34,20 @@ class NovelRepository(BaseRepository[NovelProject]):
     async def list_by_user(self, user_id: int) -> Iterable[NovelProject]:
         result = await self.session.execute(
             select(NovelProject)
-            .where(NovelProject.user_id == user_id)
+            .outerjoin(
+                ProjectMember,
+                and_(
+                    ProjectMember.project_id == NovelProject.id,
+                    ProjectMember.user_id == user_id,
+                    ProjectMember.deleted_at.is_(None),
+                ),
+            )
+            .where(
+                or_(
+                    NovelProject.user_id == user_id,
+                    ProjectMember.id.is_not(None),
+                )
+            )
             .order_by(NovelProject.updated_at.desc())
             .options(
                 selectinload(NovelProject.blueprint),

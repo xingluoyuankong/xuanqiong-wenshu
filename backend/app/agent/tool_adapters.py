@@ -72,6 +72,7 @@ async def execute_project_context(*, session, user_id: int, project_id: str | No
 
 async def execute_entity_inspect(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     """Read only the user-selected project entities; never bulk-dumps project prose."""
+    await _require_project_read(session, project_id, user_id)
     if not project_id:
         raise ValueError("project-scoped tool requires project_id")
     rows = (arguments or {}).get("entity_refs")
@@ -99,8 +100,6 @@ async def execute_entity_inspect(*, session, user_id: int, project_id: str | Non
         if model is None:
             raise ValueError(f"unsupported entity context kind: {kind}")
         filters = [model.id == entity_id, model.project_id == project_id]
-        if model is ResearchArtifact:
-            filters.append(ResearchArtifact.user_id == user_id)
         entity = await session.scalar(select(model).where(*filters))
         if entity is None:
             raise ValueError(f"{kind} entity is unavailable for this project")
@@ -120,6 +119,7 @@ async def execute_entity_inspect(*, session, user_id: int, project_id: str | Non
 
 async def execute_quality_finding_inspect(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     """Read only selected relational quality findings; never expose evidence/prose payloads."""
+    await _require_project_read(session, project_id, user_id)
     if not project_id:
         raise ValueError("project-scoped tool requires project_id")
     rows = (arguments or {}).get("quality_finding_refs")
@@ -142,11 +142,8 @@ async def execute_quality_finding_inspect(*, session, user_id: int, project_id: 
             .where(
                 QualityFinding.finding_id == finding_id,
                 QualityResult.run_id == AgentArtifactRef.run_id,
-                QualityResult.user_id == user_id,
                 QualityResult.project_id == project_id,
-                AgentArtifactRef.user_id == user_id,
                 AgentArtifactRef.project_id == project_id,
-                AgentRun.user_id == user_id,
                 AgentRun.project_id == project_id,
             )
         )
@@ -293,7 +290,12 @@ async def execute_outline_inspect(*, session, user_id: int, project_id: str | No
 async def execute_quality_inspect(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     if not project_id:
         raise ValueError("project-scoped tool requires project_id")
-    section = _plain(await NovelService(session).get_section_data(project_id, user_id, NovelSectionType.CHAPTERS))
+    section = _plain(await _readable_project_section(
+        session=session,
+        project_id=project_id,
+        user_id=user_id,
+        section=NovelSectionType.CHAPTERS,
+    ))
     chapters = section.get("data", {}).get("chapters", []) if isinstance(section, dict) else []
     observed = []
     for chapter in chapters if isinstance(chapters, list) else []:
@@ -304,7 +306,8 @@ async def execute_quality_inspect(*, session, user_id: int, project_id: str | No
 
 
 async def execute_quality_retest(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Re-run the structural quality gate for an owned ChapterVersion without writes."""
+    """Re-run the structural quality gate for a readable project ChapterVersion."""
+    await _require_project_read(session, project_id, user_id)
     if not project_id:
         raise ValueError("project-scoped tool requires project_id")
     arguments = arguments or {}
@@ -321,7 +324,6 @@ async def execute_quality_retest(*, session, user_id: int, project_id: str | Non
             Chapter.project_id == project_id,
             Chapter.chapter_number == chapter_number,
             ChapterVersion.id == version_id,
-            NovelProject.user_id == user_id,
         )
     )
     row = (await session.execute(stmt)).first()
@@ -363,7 +365,8 @@ async def execute_quality_retest(*, session, user_id: int, project_id: str | Non
 
 
 async def execute_quality_rewrite_instructions(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Return safe rewrite proposals for one owned candidate Artifact without exposing its prose."""
+    """Return safe rewrite proposals for one readable project Artifact without exposing its prose."""
+    await _require_project_read(session, project_id, user_id)
     if not project_id:
         raise ValueError("project-scoped tool requires project_id")
     artifact_id = str((arguments or {}).get("artifact_id") or "").strip()
@@ -374,9 +377,7 @@ async def execute_quality_rewrite_instructions(*, session, user_id: int, project
         .join(NovelProject, NovelProject.id == AgentArtifactRef.project_id)
         .where(
             AgentArtifactRef.id == artifact_id,
-            AgentArtifactRef.user_id == user_id,
             AgentArtifactRef.project_id == project_id,
-            NovelProject.user_id == user_id,
         )
     )).scalar_one_or_none()
     if artifact is None:

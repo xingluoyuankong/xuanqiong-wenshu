@@ -1811,7 +1811,10 @@ class NovelService:
         user_id: int,
         section: NovelSectionType,
     ) -> NovelSectionResponse:
-        project = await self.ensure_project_owner(project_id, user_id)
+        await ProjectAccessService(self.session).require_project_read(project_id, user_id)
+        project = await self.repo.get_by_id(project_id)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在")
         if section in {NovelSectionType.CHARACTERS, NovelSectionType.RELATIONSHIPS}:
             return await self._build_dynamic_section_response(project, section)
         return self._build_section_response(project, section)
@@ -1822,7 +1825,10 @@ class NovelService:
         user_id: int,
         chapter_number: int,
     ) -> ChapterSchema:
-        project = await self.ensure_project_owner(project_id, user_id)
+        await ProjectAccessService(self.session).require_project_read(project_id, user_id)
+        project = await self.repo.get_by_id(project_id)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在")
         return self._build_chapter_schema(project, chapter_number)
 
     async def get_chapter_schema_for_member(

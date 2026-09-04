@@ -47,6 +47,7 @@ from ...services.task_runtime import (
     TaskRuntimeService,
 )
 from ...services.prompt_service import PromptService
+from ...services.project_access_service import ProjectAccessService
 from ...services.pipeline_orchestrator import PipelineOrchestrator
 from ...utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
 
@@ -3371,7 +3372,7 @@ async def get_quality_trend(
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Return redacted, cross-chapter quality metrics from existing version metadata."""
-    await get_project_owner_guard(project_id, session, current_user)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
     rows = list((await session.execute(
         select(Chapter, ChapterVersion)
         .outerjoin(ChapterVersion, Chapter.selected_version_id == ChapterVersion.id)
@@ -3583,7 +3584,7 @@ async def get_chapter(
     user_id = int(current_user.id)
     novel_service = NovelService(session)
     logger.info("用户 %s 获取项目 %s 第 %s 章", user_id, project_id, chapter_number)
-    return await novel_service.get_chapter_schema(project_id, user_id, chapter_number)
+    return await novel_service.get_chapter_schema_for_member(project_id, user_id, chapter_number)
 
 
 @router.get("/{project_id}/export/txt")
@@ -3593,7 +3594,7 @@ async def export_novel_as_txt(
     current_user: UserInDB = Depends(get_current_user),
 ):
     """导出小说为 TXT 格式"""
-    await get_project_owner_guard(project_id, session, current_user)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
 
 
 
@@ -3618,7 +3619,7 @@ async def preflight_export_novel(
     """导出前预检：告诉用户缺章、未定稿或空版本，而不是直接下载失败。"""
 
 
-    await get_project_owner_guard(project_id, session, current_user)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
 
     export_service = ExportService(session)
     return await export_service.preflight_export(project_id)
@@ -3633,7 +3634,7 @@ async def export_novel_as_docx(
     """导出小说为 DOCX 格式"""
 
 
-    await get_project_owner_guard(project_id, session, current_user)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
 
     export_service = ExportService(session)
     content = await export_service.export_novel_as_docx(project_id)
@@ -3676,7 +3677,7 @@ async def converse_with_concept(
     prompt_service = PromptService(session)
     llm_service = LLMService(session)
 
-    project = await novel_service.ensure_project_owner(project_id, user_id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     history_records = await novel_service.list_conversations(project_id)
     logger.info(
@@ -4097,7 +4098,6 @@ async def _load_active_blueprint_job_from_db(
             select(BlueprintGenerationJob)
             .where(
                 BlueprintGenerationJob.project_id == project_id,
-                BlueprintGenerationJob.user_id == user_id,
                 BlueprintGenerationJob.status.in_(_BLUEPRINT_ACTIVE_STATUSES),
             )
             .order_by(BlueprintGenerationJob.updated_at.desc())
@@ -4390,7 +4390,7 @@ async def start_blueprint_generation(
     """Start blueprint generation as a background job; poll /status for result."""
     user_id = int(current_user.id)
     novel_service = NovelService(session)
-    await get_project_owner_guard(project_id, session, current_user)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     force_stage_raw = payload.get("force_stage") if isinstance(payload, dict) else None
     force_stage = str(force_stage_raw).strip().lower() if isinstance(force_stage_raw, str) and force_stage_raw.strip() else None
@@ -4399,6 +4399,7 @@ async def start_blueprint_generation(
 
     existing = await _load_latest_blueprint_job(project_id, session)
     if existing and existing.get("status") in _BLUEPRINT_ACTIVE_STATUSES:
+        execution_owner_id = int(existing.get("user_id") or user_id)
         existing_force_stage_raw = existing.get("force_stage")
         existing_force_stage = (
             str(existing_force_stage_raw).strip().lower()
@@ -4414,7 +4415,7 @@ async def start_blueprint_generation(
             await _schedule_persisted_blueprint_recovery_if_needed(
                 existing,
                 project_id=project_id,
-                user_id=user_id,
+                user_id=execution_owner_id,
                 background_tasks=background_tasks,
             )
             return _serialize_blueprint_job(existing)
@@ -4423,7 +4424,7 @@ async def start_blueprint_generation(
             recovered_success = await _recover_finished_blueprint_job_from_project(
                 project_id,
                 session,
-                user_id,
+                execution_owner_id,
                 existing,
             )
             if recovered_success is not None:
@@ -4441,7 +4442,7 @@ async def start_blueprint_generation(
             await _schedule_persisted_blueprint_recovery_if_needed(
                 existing,
                 project_id=project_id,
-                user_id=user_id,
+                user_id=execution_owner_id,
                 background_tasks=background_tasks,
             )
             return _serialize_blueprint_job(existing)
@@ -4492,10 +4493,11 @@ async def get_blueprint_generation_status(
     """Return the latest blueprint generation job status for a project."""
     user_id = int(current_user.id)
     novel_service = NovelService(session)
-    await get_project_owner_guard(project_id, session, current_user)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
 
     persisted = await _load_latest_blueprint_job(project_id, session)
     if persisted:
+        execution_owner_id = int(persisted.get("user_id") or user_id)
         async with _BLUEPRINT_JOB_LOCK:
             run_id = persisted.get("run_id") or _BLUEPRINT_PROJECT_RUNS.get(project_id)
             memory_job = _BLUEPRINT_JOBS.get(run_id or "")
@@ -4523,7 +4525,7 @@ async def get_blueprint_generation_status(
         # TaskRuntime 是运行状态唯一真相源；内存快照只保留编排句柄和兼容元数据。
         # 查询时重新读取同一 run 的持久化任务，避免旧 worker 的内存状态覆盖取消/失败/恢复状态。
         if run_id:
-            runtime_task = await _blueprint_runtime_task(run_id, user_id)
+            runtime_task = await _blueprint_runtime_task(run_id, execution_owner_id)
             if runtime_task is not None:
                 current["_runtime_status"] = runtime_task.status
                 runtime_to_legacy = {
@@ -4544,7 +4546,7 @@ async def get_blueprint_generation_status(
             recovered_success = await _recover_finished_blueprint_job_from_project(
                 project_id,
                 session,
-                user_id,
+                execution_owner_id,
                 current,
             )
             if recovered_success is not None:
@@ -4556,7 +4558,7 @@ async def get_blueprint_generation_status(
                 return _serialize_blueprint_job(recovered_success)
 
             if run_id and not memory_job:
-                runtime_task = await _blueprint_runtime_task(run_id, user_id)
+                runtime_task = await _blueprint_runtime_task(run_id, execution_owner_id)
                 if runtime_task is not None and runtime_task.status in {
                     TaskRuntimeStatus.QUEUED.value,
                     TaskRuntimeStatus.STALE.value,
@@ -4564,7 +4566,7 @@ async def get_blueprint_generation_status(
                     await _schedule_blueprint_recovery(
                         run_id,
                         project_id,
-                        user_id,
+                        execution_owner_id,
                         current.get("force_stage"),
                         background_tasks,
                     )
@@ -4607,7 +4609,7 @@ async def cancel_blueprint_generation(
     """Cancel the latest queued/running blueprint generation job when possible."""
     user_id = int(current_user.id)
     novel_service = NovelService(session)
-    await get_project_owner_guard(project_id, session, current_user)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     persisted = await _load_latest_blueprint_job(project_id, session)
     if not persisted:
@@ -4620,9 +4622,10 @@ async def cancel_blueprint_generation(
         )
 
     run_id = str(persisted.get("run_id") or "")
+    execution_owner_id = int(persisted.get("user_id") or user_id)
     runtime_status = ""
     if run_id and hasattr(session, "execute"):
-        runtime_task = await _blueprint_runtime_task(run_id, user_id)
+        runtime_task = await _blueprint_runtime_task(run_id, execution_owner_id)
         runtime_status = str(getattr(runtime_task, "status", "") or "")
     async with _BLUEPRINT_JOB_LOCK:
         job = _BLUEPRINT_JOBS.get(run_id or "")
@@ -4660,7 +4663,7 @@ async def cancel_blueprint_generation(
             try:
                 await TaskRuntimeService(runtime_session).request_cancel(
                     run_id,
-                    owner_user_id=user_id,
+                    owner_user_id=execution_owner_id,
                     finalize_unclaimed=runtime_status == TaskRuntimeStatus.QUEUED.value,
                 )
             except TaskRuntimeNotFound:
@@ -4684,7 +4687,9 @@ async def _generate_blueprint_impl(
     llm_service = LLMService(session)
     user_id = int(current_user if isinstance(current_user, int) else current_user.id)
 
-    project = await novel_service.ensure_project_owner(project_id, user_id)
+    project = await novel_service.repo.get_by_id(project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在")
     logger.info("项目 %s 开始生成蓝图", project_id)
 
     existing_blueprint: Blueprint | None = None
@@ -4993,7 +4998,8 @@ async def save_blueprint(
     """保存蓝图信息，可用于手动覆盖自动生成结果。"""
     user_id = int(current_user.id)
     novel_service = NovelService(session)
-    project = await novel_service.ensure_project_owner(project_id, user_id)
+    access = await ProjectAccessService(session).require_project_write(project_id, current_user)
+    project = access.project
 
     if blueprint_data:
         await novel_service.replace_blueprint(project_id, blueprint_data)
@@ -5018,7 +5024,7 @@ async def patch_blueprint(
     """局部更新蓝图字段，对世界观或角色做微调。"""
     user_id = int(current_user.id)
     novel_service = NovelService(session)
-    project = await novel_service.ensure_project_owner(project_id, user_id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     update_data = payload.model_dump(exclude_unset=True)
     await novel_service.patch_blueprint(project_id, update_data)

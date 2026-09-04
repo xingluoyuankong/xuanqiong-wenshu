@@ -50,11 +50,11 @@ async def _seed_chapter(task_session):
 async def test_manual_edit_creates_child_version_without_mutating_parent(task_session, monkeypatch):
     user, project, chapter, original = await _seed_chapter(task_session)
 
-    async def fake_schema(_self, _project_id, _chapter_number):
+    async def fake_schema(_self, _project_id, _user_id, _chapter_number):
         return SimpleNamespace(selected_version_id=chapter.selected_version_id)
 
     monkeypatch.setattr(
-        "app.services.novel_service.NovelService.get_chapter_schema_for_admin",
+        "app.services.novel_service.NovelService.get_chapter_schema_for_member",
         fake_schema,
     )
     await edit_chapter_content_fast(
@@ -85,11 +85,11 @@ async def test_manual_edit_creates_child_version_without_mutating_parent(task_se
 async def test_manual_edit_rejects_stale_base_revision_without_creating_version(task_session, monkeypatch):
     user, project, chapter, _original = await _seed_chapter(task_session)
 
-    async def fake_schema(_self, _project_id, _chapter_number):
+    async def fake_schema(_self, _project_id, _user_id, _chapter_number):
         return SimpleNamespace(selected_version_id=chapter.selected_version_id)
 
     monkeypatch.setattr(
-        "app.services.novel_service.NovelService.get_chapter_schema_for_admin",
+        "app.services.novel_service.NovelService.get_chapter_schema_for_member",
         fake_schema,
     )
     with pytest.raises(HTTPException) as error:

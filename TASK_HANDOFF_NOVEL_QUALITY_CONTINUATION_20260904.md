@@ -2274,3 +2274,552 @@ app/services/test_generation_run_rebind.py
 已启动子智能体：3 个（HTTP 验收、后台身份、权限全面扫描）
 当前接续原则：不创建新 Codex task；子智能体只在当前代码任务的分工范围内工作；任何阻塞由主任务重新分派并继续推进。
 ```
+
+## 2026-09-04 接续回写：Writer 后台身份一致性专项完成
+
+### A. 已落地改动
+
+本批围绕 Writer 后台恢复与执行身份一致性完成收口，生产代码文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\writer.py
+```
+
+新增/调整的核心规则：
+
+1. `TaskRuntime.owner_user_id` 在持久化任务存在时作为唯一 `execution_owner_id` 来源；调用层传入的临时用户 ID 仅作为兼容回退。
+2. outline / rewrite-outline worker 在跨 `AsyncSession` 恢复时重新加载完整 `UserInDB`，保留：
+   - `id`
+   - `username`
+   - `email`
+   - `hashed_password`
+   - `is_admin`
+   - `is_active`
+3. outline recovery 调度、claim、heartbeat、停止检查、终态事件统一使用 `execution_owner_id`。
+4. chapter generation worker 的 TaskRuntime lease、Pipeline `user_id`、TaskRuntime 进度/终态事件统一使用持久化 `execution_owner_id`。
+5. 项目成员的读取/写入授权与后台任务的执行归属保持分离：
+   - `actor_user_id`：当前请求操作者；
+   - `execution_owner_id`：Run/lease/retry/终态事件的持久化执行归属。
+
+### B. 新增专项测试
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_writer_worker_identity_invariants.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_writer_outline_worker_identity.py
+```
+
+覆盖：
+
+- 管理员与普通成员的 `UserInDB` 完整身份恢复；
+- outline worker 不再信任恢复调用方 ID，而以 TaskRuntime owner 为准；
+- chapter worker 的 lease owner、事件 owner 与 Pipeline user_id 不漂移；
+- 缺失后台用户时返回明确 404；
+- 原始任务执行归属不被协作成员读取身份覆盖。
+
+### C. 定向验证
+
+执行：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu
+.\backend\.venv\Scripts\python.exe -m pytest -q `
+  backend/app/api/routers/test_writer_worker_identity_invariants.py `
+  backend/app/api/routers/test_writer_outline_worker_identity.py
+```
+
+结果：
+
+```text
+6 passed in 5.43s
+```
+
+同批 Writer 相关回归集合：
+
+```text
+24 passed in 12.14s
+```
+
+成员写入、生成控制、finalize、outline 控制集合：
+
+```text
+51 passed in 21.69s
+```
+
+合计本次同步定向验证：
+
+```text
+81 passed
+```
+
+静态检查：
+
+```text
+python -m py_compile backend/app/api/routers/writer.py      → 通过
+git diff --check -- backend/app/api/routers/writer.py       → 通过
+```
+
+### D. 当前剩余验证
+
+1. 完整后端/前端门禁需在本批 Writer 改动全部稳定后重新执行，不能沿用修改前的历史数字。
+2. 需要重启真实 backend/frontend 进程，验证新 worker 代码已加载。
+3. 仍需真实隔离 SQLite + JWT/HTTP 链路验证 Editor/Admin 的 generate、cancel、resume、SSE cursor/replay 与跨项目隔离。
+4. `legacy outline DB fallback` 的 active/terminal/idle 语义与 `edit-fast` 成员 serializer 仍列为后续 P1/P2 收口项。
+
+### E. 接续计划更新
+
+当前优先级调整为：
+
+```text
+P0：真实多用户 HTTP/JWT Writer 执行链与新 worker 重启验收
+P1：legacy outline fallback 状态语义收口
+P1：真实 generation/cancel/resume/SSE cursor 端到端证据
+P2：edit-fast 成员读取 serializer 命名与权限语义清理
+P2：全部改动完成后的后端、前端、构建、smoke 全量门禁
+```
+
+## 2026-09-04 当前 task 追加验证回写
+
+### Writer 执行身份一致性批次
+
+已完成并保留以下工作树改动：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\writer.py
+D:\小说写作\xuanqiong-wenshu\backend\app\services\novel_service.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_writer_worker_identity_invariants.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_writer_outline_worker_identity.py
+```
+
+关键不变量：
+
+- 后台 worker 从持久化用户恢复完整 `UserInDB`，保留 `is_admin`、`is_active`、`username`、`email` 与密码哈希字段。
+- outline generation/rewrite recovery 以 `TaskRuntime.owner_user_id` 作为执行归属，不沿用恢复请求方的临时操作者 ID。
+- chapter generation 的 claim、lease、终态事件和 Pipeline user context 使用同一持久化 execution owner。
+- 项目成员的 HTTP actor 权限与后台 execution owner 分离，协作成员执行链不再被旧 `NovelProject.user_id` 二次截断。
+
+### 最新可复现实测
+
+Writer worker identity 专项：
+
+```text
+6 passed in 5.89s
+```
+
+全部 `test_writer*.py`：
+
+```text
+78 passed in 35.70s
+```
+
+项目成员 Writer 专项集合：
+
+```text
+69 passed in 24.95s
+```
+
+novels.py 成员访问专项：
+
+```text
+30 passed in 13.38s
+```
+
+静态检查：
+
+```text
+git diff --check → 通过
+```
+
+### 下一步
+
+1. 保持现有未提交改动和运行工件，不执行批量清理或强制重置。
+2. 对 `novels.py`、`optimizer.py`、`writing_skills.py` 继续按成员 read/write 矩阵补齐缺口，并为每个生产修复增加回归测试。
+3. 在 Writer 代码稳定后重新执行完整后端、前端、build、smoke 与真实服务重启验收。
+4. 继续补 Agent legacy projection、TaskRuntime 通用成员读取与 HTTP accept 路径的缺口。
+
+## 2026-09-04 接续回写：legacy outline fallback 状态语义收口
+
+### A. 已落地改动
+
+生产文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\writer.py
+```
+
+新增 `_legacy_outline_job_is_active()` 并收紧 `_load_active_outline_job_from_db(project_id)`：
+
+- 仅将 `queued`、`generating`、`running`、`outline_context`、`outline_chapter_skeleton`、`outline_rewrite`、`saving` 视为可恢复中的任务；
+- `idle`、`successful`、`succeeded`、`completed`、`failed`、`cancelled` 视为终态/空闲；
+- 最新有效 outline 快照为 terminal/idle 时直接结束恢复，不再向后扫描并复活旧 active 快照；
+- 状态缺失时仅允许由明确的 active `progress_stage` 推断 active；
+- 项目读取边界仍由 `ProjectAccessService.require_project_read()` 负责，历史记录的 `user_id` 只保留审计意义。
+
+### B. 新增专项测试
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_writer_legacy_outline_state.py
+```
+
+覆盖：
+
+1. 最新 active legacy snapshot 可恢复；
+2. 最新 `successful` snapshot 不复活旧 active run；
+3. 最新 `idle` snapshot 不投影为 active；
+4. 最新 `cancelled` snapshot 保持终态，不返回可恢复任务。
+
+### C. 验证结果
+
+先红灯验证（修复前）：
+
+```text
+1 passed, 3 failed
+```
+
+失败准确命中旧逻辑把 terminal/idle 记录直接返回的问题。
+
+修复后：
+
+```text
+4 passed in 3.88s
+```
+
+反向验证：临时移除 active 状态门后：
+
+```text
+REVERSE_EXIT=1
+1 passed, 3 failed
+```
+
+恢复后的再次回归：
+
+```text
+4 passed in 3.88s
+```
+
+静态验证：
+
+```text
+python -m py_compile app/api/routers/writer.py → 通过
+git diff --check → 通过
+```
+
+### D. 接续状态
+
+```text
+Writer 后台身份专项：完成，6 passed
+Writer 成员读取/流/写入/控制/终态专项：完成，75 passed
+legacy outline fallback：完成，4 passed
+当前总任务：active
+下一优先：真实重启后的多用户 HTTP/JWT Writer 执行链，随后重跑完整后端/前端质量门禁。
+```
+
+## 2026-09-04 接续回写：Writer 隔离 HTTP/JWT 验收完成
+
+### A. 验收工件
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_writer_member_http_acceptance.py
+```
+
+该测试使用真实 FastAPI 路由、真实 Bearer JWT 登录和隔离 AsyncSession/SQLite fixture，不写入主运行数据库；Writer 的 `AsyncSessionLocal` 在测试边界绑定到隔离会话。
+
+### B. 已验证合同
+
+- Owner / Editor / Viewer / Admin 读取项目成员列表与章节状态；
+- Owner 创建的 `TaskRuntime` 通过 `project_id + chapter_id + run_id` 绑定；
+- Viewer 与 Editor 读取 Owner 创建的章节状态、大纲状态、rewrite-outline 状态；
+- Viewer 通过 chapter stream 接收 durable `content_delta` 与 `task_completed` 事件；
+- Editor 使用 `after_event_id` 只接收游标后的终态事件；
+- 项目外成员访问项目资源返回 403；
+- 其他项目任务不会污染当前项目的 SSE；
+- Bearer token 的实际身份优先于客户端传入或伪造的用户上下文。
+
+### C. 实测结果
+
+执行：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q app/api/routers/test_writer_member_http_acceptance.py
+```
+
+结果：
+
+```text
+2 passed in 12.42s
+```
+
+当前本机服务监听状态（仅作环境记录）：
+
+```text
+127.0.0.1:8013 → backend
+127.0.0.1:5174 → frontend
+```
+
+本次测试以隔离 ASGI 栈完成，尚未替代真实重启进程后的外部 HTTP `generate/cancel/resume` worker 执行验收。
+
+### D. 当前计划调整
+
+```text
+已完成：Writer 成员读/流/写/控制/终态定向回归
+已完成：后台 execution_owner 身份与 lease 不漂移定向回归
+已完成：legacy outline active/terminal/idle fallback 语义回归
+已完成：隔离真实 JWT/HTTP 状态与 SSE 验收
+待完成：真实重启进程下的 generate/cancel/resume worker 链
+待完成：完整后端/前端/type-check/build/smoke 全量门禁替换当前基线
+```
+
+### Optimizer 成员写权限批次
+
+新增并验证：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_optimizer_member_access.py
+```
+
+实现范围：
+
+- `optimizer.optimize` 使用 `ProjectAccessService.require_project_write`，Editor/Owner/Admin 可执行，Viewer/非成员在读取章节前返回 403。
+- `optimizer.apply-optimization` 使用项目 write gate，Editor 可对共享项目写入优化版本，Viewer/非成员无法修改。
+- apply 响应使用成员可读章节 serializer，避免成功写入后因 legacy Owner-only serializer 产生错误。
+
+专项结果：
+
+```text
+4 passed in 5.35s
+```
+
+静态检查：
+
+```text
+python -m py_compile backend/app/api/routers/optimizer.py → 通过
+git diff --check -- optimizer.py / test_optimizer_member_access.py → 通过
+```
+
+### Writing Skills 成员写权限批次
+
+新增并验证：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_writing_skills_member_access.py
+```
+
+实现范围：
+
+- 项目作用域的 `writing-skills/skills/{skill_id}/execute` 改用 `ProjectAccessService.require_project_write`。
+- Editor/Owner/Admin 可执行项目作用域技能。
+- Viewer 与非成员在技能服务实例化前返回 403，避免越权访问项目上下文或消耗执行资源。
+- 不带 `project_id` 的技能执行保持既有个人作用域语义。
+
+专项结果：
+
+```text
+3 passed in 5.15s
+```
+
+### 成员访问聚合回归
+
+当前工作树的成员访问与 Writer 执行身份聚合集合已重新运行：
+
+```text
+115 passed in 56.49s
+```
+
+集合包含：
+
+- novels.py 项目读取、质量趋势、章节详情、导出、概念会话；
+- optimizer 项目优化与应用；
+- writing-skills 项目技能执行；
+- Writer 生成控制、读取、写入、finalize、SSE、HTTP/JWT；
+- outline worker 与 chapter worker 执行身份一致性。
+
+`git diff --check` 对本批修改通过；现有运行二进制工件保持未跟踪状态，未执行批量删除或强制重置。
+
+
+## 2026-09-04 当前会话接续复审：TaskRuntime 成员边界与 Writer 执行身份收口
+
+### A. 本批完成项
+
+1. **Writer outline/worker 执行身份**
+
+   - outline/rewrite-outline worker 从持久化 `TaskRuntime.owner_user_id` 解析不可变 execution owner；
+   - 后台用户跨 session 重建使用 `_load_worker_user()`，保留真实 `username`、`email`、`hashed_password`、`is_admin`、`is_active`；
+   - Admin 创建的 outline Run 不再因 worker 重建成普通用户而被旧权限门截断；
+   - outline recovery 可复用请求 session，隔离数据库与真实进程均保持同一 Runtime 查询边界。
+
+2. **通用 TaskRuntime 项目成员闭环**
+
+   文件：
+
+   ```text
+   backend/app/api/routers/task_runtime.py
+   backend/app/api/routers/test_task_runtime_member_access.py
+   ```
+
+   当前语义：
+
+   ```text
+   项目任务创建：ProjectAccessService.require_project_write(actor)
+   项目任务详情/列表/事件/SSE：ProjectAccessService.require_project_read(actor)
+   项目任务取消/重试：项目 write + 原 TaskRuntime.owner_user_id 执行
+   claim/ recover/ heartbeat/ progress/ metrics/ append-event：继续原始 owner/lease 围栏
+   projectless 任务：继续创建者私有，越权读取隐藏为 404
+   ```
+
+   新增回归覆盖：
+
+   ```text
+   Editor 创建共享项目 Runtime；Viewer/Admin/Editor 读取 Owner Runtime；非成员 403；
+   projectless Runtime 越权读取 404；项目事件列表可读；Editor 取消 Owner Runtime；
+   owner_user_id、lease_owner、lease_generation 保持不变；项目 Runtime SSE 回放终态事件。
+   ```
+
+3. **项目发现与 novels 读取边界**
+
+   - `NovelRepository.list_by_user()` 已改为 owner 或 active `ProjectMember` 可发现；
+   - `novels.py` 的 quality trend、章节详情、TXT/DOCX 导出与预检改为项目 read；
+   - concept 对话、蓝图生成、蓝图保存与 patch 使用项目 write；
+   - `NovelService.get_chapter_schema_for_member()` 提供语义明确的成员读取序列化入口。
+
+### B. 本批验证证据
+
+```text
+outline/worker/restart 定向回归：30 passed
+TaskRuntime 成员路由/服务回归：7 passed
+novels + TaskRuntime P1 定向回归：35 passed
+Writer HTTP/JWT/SSE 验收：2 passed
+前端成员定向测试：24 passed
+隔离文件 SQLite 真实 HTTP 验收脚本：SMOKE_PASSED，31 checks
+
+正确工作目录 backend 的一次完整后端门禁：1655 passed，2 个旧 Agent 质量工具测试与并行测试断言更新重叠；
+两项失败随后按当前工作树单独复跑：2 passed。
+
+git diff --check：通过（当前已修改文件）
+```
+
+### C. 当前剩余边界
+
+1. `task_runtime.py` 的项目成员读取与 cancel/retry 已有路由回归，但真实 HTTP/JWT 的通用 TaskRuntime 路由矩阵仍需在隔离文件库脚本中补齐；
+2. `optimizer.py` 的 optimize/apply、`writing_skills.py` 的 execute_skill 仍需按 read/write 产品语义补齐成员矩阵；
+3. Agent 旧 projection、provider usage、approval、Artifact accept、通用任务 worker 控制仍需继续检查是否误用创建者过滤；
+4. 最新工作树改动完成后，必须重新执行 backend 全量、frontend type-check/Vitest/build、服务重启 smoke 和真实多用户执行链，替换旧质量基线。
+
+### D. 下一批执行顺序
+
+| 优先级 | 批次 | 当前动作 | 证据 |
+|---|---|---|---|
+| P0 | optimizer | 分离项目 read 与 apply write，补 Editor/Viewer/Admin/非成员回归 | 无 LLM 单测 + HTTP |
+| P0 | writing skills | 区分只读技能与写技能，收口成员权限与后台身份 | 无 LLM 单测 |
+| P1 | TaskRuntime HTTP | 在隔离文件 SQLite + JWT 中覆盖项目任务读/列/事件/SSE/cancel/retry | 真实请求链 |
+| P1 | Agent 旧投影 | 统一 readable Run、provider usage、approval、Artifact accept 边界 | 定向回归 + 反向验证 |
+| P2 | 完整门禁 | 重跑后端、前端、构建、重启 smoke 与 acceptance 脚本 | 新最终基线 |
+
+总任务继续保持 `active`；当前工作在本 task 和当前工作树中推进，不返回历史卡住会话，不创建新的 Codex task。
+
+## 2026-09-04 当前会话接续回写：权限残留第二批收口与真实验收基线
+
+### A. 本批新增修复
+
+本批在当前任务工作区完成，不回到历史会话执行，也未创建新的 Codex task。已完成：
+
+- `novels.py`：质量趋势、章节详情、TXT/DOCX 导出与预检、概念会话、蓝图启动/状态/取消/保存/局部更新统一接入项目成员 read/write 策略。
+- `novel_service.py`：`get_section_data()`、`get_chapter_schema()` 使用成员读权限；新增 `get_chapter_schema_for_member()`，替代协作写入路径上的 admin-named serializer。
+- `writer.py`：后台 generation/outline/rewrite worker 统一区分 actor 与 execution owner；从用户表完整恢复 `is_admin`、`is_active` 等字段；`edit-fast` 使用成员 serializer。
+- `task_runtime.py`：创建任务区分 `actor_user_id` 与 `execution_owner_id`，项目任务先过成员写权限；兼容旧 `owner_user_id`。
+- `task_runtime` 路由：项目任务列表、详情、事件、SSE 和控制操作按成员项目范围处理；Viewer 只读；projectless task 保留创建者边界。
+- `novel_repository.py`：项目列表包含 owner 或 active member，排除已删除成员和非成员。
+- Agent 工具：Provider usage、quality retest、rewrite instructions、quality inspect、entity inspect、finding inspect 接入项目读策略并移除错误的创建者截断。
+- `optimizer.py`、`writing_skills.py`：项目上下文操作接入成员策略。
+
+### B. 新增/更新验证工件
+
+- `backend/scripts/run_writer_member_acceptance.py`：每次创建独立 SQLite，执行真实 FastAPI ASGI、真实 JWT 登录和确定性本地桩，覆盖 31 项 Writer 成员执行链检查。
+- `backend/app/api/routers/test_writer_member_http_acceptance.py`：隔离 JWT/HTTP/SSE 回归。
+- `backend/app/api/routers/test_novels_member_access.py`、`test_novels_blueprint_member_access.py`：小说路由与蓝图成员矩阵。
+- `backend/app/api/routers/test_task_runtime_member_routes.py`、`backend/app/services/test_task_runtime_member_access.py`：通用任务运行时成员读写、SSE、执行归属和项目发现。
+- `backend/app/agent/test_member_tool_access_sweep.py`：Agent 工具共享项目读取和非成员隔离。
+- `docs/reports/collaborative-access-sweep-20260905.md`：全仓残余旧 Owner gate 扫描与缺口清单。
+
+### C. 本批实际验证
+
+定向组合：
+
+```text
+129 passed in 57.06s
+```
+
+其中包含 Writer worker identity、小说路由、Agent 工具、TaskRuntime 成员访问、隔离 JWT/HTTP 回归和既有相关工具测试。
+
+真实隔离验收：
+
+```text
+SMOKE_PASSED {"checks": 31, "dispatch_kinds": ["generate", "generate", "finalize", "outline"], "finalize_status": 200, "generate_status": 200, "outline_status": 200, "resume_status": 200}
+```
+
+该脚本结束后自动删除临时数据库，主运行数据库未写入。专项 Agent 旧断言已同步到 HTTP 403 契约，`app/agent/test_tool_adapters.py` 当前 26 passed。Python 编译检查已通过。
+
+### D. 当前审计结论与剩余优先级
+
+确定性旧 Owner gate 已显著收口。审计仍提示以下后续面：
+
+1. `agent.py` 中部分历史事件、context snapshot、plan revision、conversation summary、approval、step、artifact 路径需逐一核对成员读语义与创建者边界，不能仅凭名称批量迁移。
+2. `task_runtime` 通用路由与 Worker 的项目任务控制已完成首批成员化，但需在完整门禁后进行真实重启进程 TCP 验收。
+3. 前端成员面板已有组件/API 测试；仍需补正确 Vitest 参数下的成员 403/404、restore/remove 即时失效和多角色浏览器级证据。
+4. `NovelService.ensure_project_owner()` 保留给真实 owner-only 业务与兼容测试；后续继续清点调用点，避免新成员业务误用。
+5. 代码批次合并后必须重跑完整后端、前端 type-check/Vitest/build-only、重启 smoke，并更新本文件权威基线。
+
+### E. 当前任务状态
+
+```text
+总任务：active
+本批状态：成员权限残留第二批已实现，定向测试与隔离 HTTP smoke 通过
+下一批：完整后端/前端质量门禁 + 重启后 TCP HTTP/SSE + Agent 历史投影逐项审查
+运行工件：未跟踪二进制保留原状，不提交、不批量清理
+```
+
+### Agent legacy projection 成员读取批次
+
+新增可读投影接口与专项测试：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_legacy_projection_member_access.py
+```
+
+实现范围：
+
+- 项目成员可读取 Owner 创建 Run 的事件、步骤、审批和 Artifact 列表。
+- 读取路径统一先经过 `get_readable_run` / `get_session_readable`，再按 Run 绑定读取完整共享记录。
+- 非成员在投影查询前返回 403。
+- projectless Run 保持创建者私有；非创建者按历史隐藏语义返回 404。
+- 保留原有 Owner-only 写入、审批决定、执行和 Artifact 创建方法，不扩大成员写权限。
+
+专项结果：
+
+```text
+9 passed in 6.98s
+```
+
+Agent/TaskRuntime 成员相关组合结果：
+
+```text
+40 passed in 16.71s
+```
+
+### 当前成员访问聚合门禁
+
+本批受影响的 Agent、TaskRuntime、novels、optimizer、writing-skills 与 Writer 成员测试全部通过：
+
+```text
+159 passed in 66.06s
+```
+
+`git diff --check` 通过；未执行强制重置、批量删除或清理现有运行工件。
+
+### 当前待办调整
+
+1. 对真实服务重启后的 Agent/Writer 成员 HTTP 链路执行 health、OpenAPI、JWT 与 SSE 验收。
+2. 继续补齐 `novels.py` 蓝图成员矩阵、optimizer/writing-skills HTTP 级验证与跨请求成员移除即时失效测试。
+3. 评估 Agent audit、context snapshot、plan revision、conversation summary 和 provider usage 的统一 readable projection，保持写入方法的 owner/actor 边界不变。
+4. 所有生产修复稳定后重跑完整后端、前端、构建和 smoke 门禁。

@@ -27,6 +27,7 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -34,6 +35,7 @@ from ...core.config import settings
 from ...core.dependencies import get_current_user, get_project_owner_guard
 from ...db.session import AsyncSessionLocal, get_session
 from ...models.novel import Chapter, ChapterOutline, ChapterVersion, ChapterEvaluation, NovelProject
+from ...models.user import User
 from ...models.task_runtime import TaskRuntime
 from ...models.project_memory import ProjectMemory
 from ...schemas.novel import (
@@ -1663,8 +1665,38 @@ async def _persist_outline_job_state(job: Dict[str, Any]) -> None:
     except Exception:
         logger.exception("保存章节大纲任务状态失败：project=%s run_id=%s", job.get("project_id"), job.get("run_id"))
 
+_OUTLINE_LEGACY_TERMINAL_STATUSES = {
+    "idle",
+    "successful",
+    "succeeded",
+    "completed",
+    "failed",
+    "cancelled",
+}
+
+
+def _legacy_outline_job_is_active(
+    payload: Dict[str, Any], metadata: Dict[str, Any] | None = None
+) -> bool:
+    """Return whether one legacy conversation snapshot represents active work.
+
+    The newest outline snapshot is authoritative.  A terminal or idle snapshot
+    must never resurrect an older active run after the in-memory indexes vanish.
+    """
+    metadata = metadata if isinstance(metadata, dict) else {}
+    status = str(payload.get("status") or metadata.get("status") or "").strip().lower()
+    if status in _OUTLINE_LEGACY_TERMINAL_STATUSES:
+        return False
+    if status == "running":
+        return True
+    if status in _OUTLINE_ACTIVE_STATUSES:
+        return True
+    stage = str(payload.get("progress_stage") or "").strip().lower()
+    return not status and stage in _OUTLINE_ACTIVE_STATUSES
+
+
 async def _load_active_outline_job_from_db(project_id: str) -> Dict[str, Any] | None:
-    """Load legacy outline state by project after the route checked read access."""
+    """Load only the newest active legacy outline state for a project."""
     async with AsyncSessionLocal() as session:
         records = await NovelService(session).list_conversations(project_id)
     for record in reversed(records):
@@ -1675,8 +1707,11 @@ async def _load_active_outline_job_from_db(project_id: str) -> Dict[str, Any] | 
             payload = json.loads(record.content)
         except (TypeError, ValueError):
             continue
-        if isinstance(payload, dict):
-            return payload
+        if not isinstance(payload, dict):
+            continue
+        # The newest valid outline snapshot closes the legacy run when it is
+        # terminal/idle; do not scan backward and resurrect stale work.
+        return payload if _legacy_outline_job_is_active(payload, metadata) else None
     return None
 
 _OUTLINE_RUNTIME_ACTIVE_STATUSES = {
@@ -1898,6 +1933,41 @@ async def _finish_outline_runtime(
         except (TaskRuntimeNotFound, TaskRuntimeConflict):
             logger.warning("章节大纲任务终态未写入：run_id=%s status=%s", run_id, status)
 
+async def _resolve_runtime_execution_owner(
+    session: Any,
+    run_id: str,
+    fallback_user_id: int,
+) -> int:
+    """Resolve the immutable execution owner from TaskRuntime, never the project owner.
+
+    ``fallback_user_id`` is retained only for compatibility with legacy test doubles
+    and pre-runtime callers. Once a durable task exists, its owner is authoritative
+    for lease, retry, accounting, terminal events, and downstream user context.
+    """
+    try:
+        task = await TaskRuntimeService(session).get_task(str(run_id))
+    except (TaskRuntimeNotFound, AttributeError, SQLAlchemyError):
+        return int(fallback_user_id)
+    owner_user_id = getattr(task, "owner_user_id", None)
+    return int(owner_user_id) if owner_user_id is not None else int(fallback_user_id)
+
+
+async def _load_worker_user(
+    session: Any,
+    execution_owner_id: int,
+    *,
+    purpose: str,
+) -> UserInDB:
+    """Load the complete durable user identity used by a background Writer job."""
+    result = await session.execute(select(User).where(User.id == int(execution_owner_id)))
+    user = result.scalars().first()
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"后台{purpose}执行用户不存在")
+    identity = UserInDB.model_validate(user)
+    identity.must_change_password = False
+    return identity
+
+
 async def _schedule_outline_recovery(
     run_id: str,
     project_id: str,
@@ -1906,16 +1976,26 @@ async def _schedule_outline_recovery(
     background_tasks: BackgroundTasks | None,
     *,
     rewrite: bool = False,
+    runtime_session: Any | None = None,
 ) -> None:
-    """将持久化的大纲任务在当前进程中只调度一次。"""
+    """将持久化的大纲任务在当前进程中只调度一次，并恢复原始 execution owner。"""
     if background_tasks is None or run_id in _OUTLINE_SCHEDULED_RUNS:
         return
+    if runtime_session is None:
+        async with AsyncSessionLocal() as runtime_session:
+            execution_owner_id = await _resolve_runtime_execution_owner(
+                runtime_session, run_id, user_id
+            )
+    else:
+        execution_owner_id = await _resolve_runtime_execution_owner(
+            runtime_session, run_id, user_id
+        )
     _OUTLINE_SCHEDULED_RUNS.add(run_id)
     background_tasks.add_task(
         _run_outline_rewrite_job if rewrite else _run_outline_generation_job,
         run_id,
         project_id,
-        user_id,
+        execution_owner_id,
         request_payload,
     )
 
@@ -1925,12 +2005,16 @@ async def _run_outline_generation_job(
     user_id: int,
     request_payload: Dict[str, Any],
 ) -> None:
-    if not await _claim_outline_runtime(run_id, user_id):
+    async with AsyncSessionLocal() as runtime_session:
+        execution_owner_id = await _resolve_runtime_execution_owner(
+            runtime_session, run_id, user_id
+        )
+    if not await _claim_outline_runtime(run_id, execution_owner_id):
         logger.info("章节大纲任务未获得持久化租约，跳过执行：run_id=%s", run_id)
         return
 
     async def set_stage(stage: str, message: str, *, status: str = "generating") -> Dict[str, Any]:
-        if await _outline_runtime_should_stop(run_id, user_id):
+        if await _outline_runtime_should_stop(run_id, execution_owner_id):
             raise asyncio.CancelledError()
         state = await _set_outline_job_state(
             run_id,
@@ -1938,7 +2022,7 @@ async def _run_outline_generation_job(
             progress_stage=stage,
             progress_message=message,
         )
-        await _outline_runtime_heartbeat(run_id, user_id, stage, message)
+        await _outline_runtime_heartbeat(run_id, execution_owner_id, stage, message)
         return state
 
     async def heartbeat() -> None:
@@ -1953,17 +2037,19 @@ async def _run_outline_generation_job(
                     return
                 stage = str(job.get("progress_stage") or "outline_chapter_skeleton")
                 message = str(job.get("progress_message") or "章节大纲生成中")
-            if await _outline_runtime_should_stop(run_id, user_id):
+            if await _outline_runtime_should_stop(run_id, execution_owner_id):
                 return
-            await _outline_runtime_heartbeat(run_id, user_id, stage, message)
+            await _outline_runtime_heartbeat(run_id, execution_owner_id, stage, message)
         logger.warning("Outline job heartbeat maxed out: run_id=%s, job assumed timed out", run_id)
 
     heartbeat_task = asyncio.create_task(heartbeat())
     try:
         await set_stage("outline_context", "正在整理蓝图、已有章节和目标篇幅")
         request = GenerateOutlineRequest(**request_payload)
-        current_user = UserInDB(id=user_id, username=f"outline-job-{user_id}", email=None, hashed_password="")
         async with AsyncSessionLocal() as job_session:
+            current_user = await _load_worker_user(
+                job_session, execution_owner_id, purpose="章节大纲生成"
+            )
             await set_stage("outline_chapter_skeleton", "正在分批生成可执行章节大纲")
             project_schema = await generate_chapters_outline(
                 project_id=project_id,
@@ -1972,7 +2058,7 @@ async def _run_outline_generation_job(
                 current_user=current_user,
             )
 
-        if await _outline_runtime_should_stop(run_id, user_id):
+        if await _outline_runtime_should_stop(run_id, execution_owner_id):
             return
 
         await set_stage("saving", "正在保存章节大纲并更新项目状态", status="saving")
@@ -1986,7 +2072,7 @@ async def _run_outline_generation_job(
         )
         await _finish_outline_runtime(
             run_id,
-            user_id,
+            execution_owner_id,
             status=TaskRuntimeStatus.SUCCEEDED.value,
             event_type=TaskRuntimeEventType.TASK_COMPLETED.value,
             stage="successful",
@@ -2001,7 +2087,7 @@ async def _run_outline_generation_job(
         )
         await _finish_outline_runtime(
             run_id,
-            user_id,
+            execution_owner_id,
             status=TaskRuntimeStatus.CANCELLED.value,
             event_type=TaskRuntimeEventType.TASK_CANCELLED.value,
             stage="cancelled",
@@ -2030,7 +2116,7 @@ async def _run_outline_generation_job(
         )
         await _finish_outline_runtime(
             run_id,
-            user_id,
+            execution_owner_id,
             status=TaskRuntimeStatus.FAILED.value,
             event_type=TaskRuntimeEventType.TASK_FAILED.value,
             stage="failed",
@@ -2053,7 +2139,7 @@ async def _run_outline_generation_job(
         )
         await _finish_outline_runtime(
             run_id,
-            user_id,
+            execution_owner_id,
             status=TaskRuntimeStatus.FAILED.value,
             event_type=TaskRuntimeEventType.TASK_FAILED.value,
             stage="failed",
@@ -2074,11 +2160,15 @@ async def _run_outline_rewrite_job(
     user_id: int,
     request_payload: Dict[str, Any],
 ) -> None:
-    if not await _claim_outline_runtime(run_id, user_id):
+    async with AsyncSessionLocal() as runtime_session:
+        execution_owner_id = await _resolve_runtime_execution_owner(
+            runtime_session, run_id, user_id
+        )
+    if not await _claim_outline_runtime(run_id, execution_owner_id):
         logger.info("章节大纲重写任务未获得持久化租约，跳过执行：run_id=%s", run_id)
         return
     try:
-        if await _outline_runtime_should_stop(run_id, user_id):
+        if await _outline_runtime_should_stop(run_id, execution_owner_id):
             raise asyncio.CancelledError()
         state = await _set_outline_job_state(
             run_id,
@@ -2089,8 +2179,10 @@ async def _run_outline_rewrite_job(
         if state.get("status") == "cancelled":
             return
         request = RewriteChapterOutlineRequest(**request_payload)
-        current_user = UserInDB(id=user_id, username=f"outline-rewrite-job-{user_id}", email=None, hashed_password="")
         async with AsyncSessionLocal() as job_session:
+            current_user = await _load_worker_user(
+                job_session, execution_owner_id, purpose="章节大纲重写"
+            )
             project_schema = await rewrite_chapter_outline(
                 project_id=project_id,
                 request=request,
@@ -2098,7 +2190,7 @@ async def _run_outline_rewrite_job(
                 current_user=current_user,
             )
 
-        if await _outline_runtime_should_stop(run_id, user_id):
+        if await _outline_runtime_should_stop(run_id, execution_owner_id):
             return
 
         await _set_outline_job_state(
@@ -2117,7 +2209,7 @@ async def _run_outline_rewrite_job(
         )
         await _finish_outline_runtime(
             run_id,
-            user_id,
+            execution_owner_id,
             status=TaskRuntimeStatus.SUCCEEDED.value,
             event_type=TaskRuntimeEventType.TASK_COMPLETED.value,
             stage="successful",
@@ -2132,7 +2224,7 @@ async def _run_outline_rewrite_job(
         )
         await _finish_outline_runtime(
             run_id,
-            user_id,
+            execution_owner_id,
             status=TaskRuntimeStatus.CANCELLED.value,
             event_type=TaskRuntimeEventType.TASK_CANCELLED.value,
             stage="cancelled",
@@ -2161,7 +2253,7 @@ async def _run_outline_rewrite_job(
         )
         await _finish_outline_runtime(
             run_id,
-            user_id,
+            execution_owner_id,
             status=TaskRuntimeStatus.FAILED.value,
             event_type=TaskRuntimeEventType.TASK_FAILED.value,
             stage="failed",
@@ -2179,7 +2271,7 @@ async def _run_outline_rewrite_job(
         )
         await _finish_outline_runtime(
             run_id,
-            user_id,
+            execution_owner_id,
             status=TaskRuntimeStatus.FAILED.value,
             event_type=TaskRuntimeEventType.TASK_FAILED.value,
             stage="failed",
@@ -3111,13 +3203,18 @@ async def _generate_chapter_async(
             # 章节 worker 必须先领取持久化租约，再写 started/running 事件。
             # 否则取消接口会把正在执行的任务误判为“未领取队列任务”，
             # 重启巡检也无法区分活 worker 与孤儿任务。
+            actor_user_id = int(user_id)
+            execution_owner_id = actor_user_id
             if hasattr(session, "execute"):
+                execution_owner_id = await _resolve_runtime_execution_owner(
+                    session, run_id, actor_user_id
+                )
                 try:
                     await TaskRuntimeService(session).claim(
                         run_id,
                         lease_owner=f"chapter-worker:{run_id}",
                         stale_after_seconds=CHAPTER_STALE_TIMEOUT.seconds,
-                        owner_user_id=int(user_id),
+                        owner_user_id=execution_owner_id,
                     )
                 except (TaskRuntimeNotFound, TaskRuntimeConflict):
                     logger.info("章节 worker 未获得持久化租约，跳过执行：run_id=%s", run_id)
@@ -3145,7 +3242,7 @@ async def _generate_chapter_async(
                 await _append_chapter_task_event(
                     run_id,
                     event_type=event_type,
-                    owner_user_id=user_id,
+                    owner_user_id=execution_owner_id,
                     status=status,
                     stage=stage,
                     progress=progress,
@@ -3187,7 +3284,7 @@ async def _generate_chapter_async(
                     from ..services.blueprint_service import BlueprintService
                     llm_svc = LLMService(session)
                     blueprint_svc = BlueprintService(session, llm_svc)
-                    await blueprint_svc.generate_all_blueprints(project_id, user_id=user_id)
+                    await blueprint_svc.generate_all_blueprints(project_id, user_id=execution_owner_id)
                     logger.info("Auto-generated blueprint for project=%s", project_id)
             except Exception as bp_exc:
                 logger.warning("Could not auto-generate blueprint: %s - continuing without", bp_exc)
@@ -3206,7 +3303,7 @@ async def _generate_chapter_async(
                         project_id=project_id,
                         chapter_number=chapter_number,
                         writing_notes=writing_notes,
-                        user_id=user_id,
+                        user_id=execution_owner_id,
                         flow_config=flow_config,
                         generation_run_id=run_id,
                         runtime_event_callback=on_pipeline_runtime_event,
@@ -5045,6 +5142,7 @@ async def start_chapters_outline_generation(
         int(current_user.id),
         request.model_dump(),
         background_tasks,
+        runtime_session=session,
     )
     return _serialize_outline_job(job)
 
@@ -5100,6 +5198,7 @@ async def get_chapters_outline_generation_status(
                     dict(from_runtime.get("request") or {}),
                     background_tasks,
                     rewrite=str(from_runtime.get("task_type") or "") == "chapter_outline_rewrite",
+                    runtime_session=session,
                 )
             return _serialize_outline_job(from_runtime)
 
@@ -5127,6 +5226,7 @@ async def get_chapters_outline_generation_status(
                 dict(from_runtime.get("request") or {}),
                 background_tasks,
                 rewrite=str(from_runtime.get("task_type") or "") == "chapter_outline_rewrite",
+                runtime_session=session,
             )
         return _serialize_outline_job(from_runtime)
 
@@ -5691,7 +5791,9 @@ async def edit_chapter_content_fast(
         current_user.id,
     )
 
-    return await novel_service.get_chapter_schema_for_admin(project_id, request.chapter_number)
+    return await novel_service.get_chapter_schema_for_member(
+        project_id, current_user.id, request.chapter_number
+    )
 
 # ==================== SSE Streaming Endpoint ====================
 from fastapi.responses import StreamingResponse

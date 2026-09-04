@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.task_runtime import TaskRuntime, TaskRuntimeEvent
+from .project_access_service import ProjectAccessService
 from ..schemas.task_runtime import (
     TaskRuntimeEventChannel,
     TaskRuntimeEventType,
@@ -213,6 +214,8 @@ class TaskRuntimeService:
         owner_user_id: Optional[int] = None,
         project_id: Optional[str] = None,
         chapter_id: Optional[str] = None,
+        actor_user_id: Optional[int] = None,
+        execution_owner_id: Optional[int] = None,
         payload: Optional[dict[str, Any]] = None,
         correlation_id: Optional[str] = None,
         max_retries: int = 3,
@@ -221,6 +224,23 @@ class TaskRuntimeService:
         artifact_ref: Optional[str] = None,
         artifact_revision: Optional[str] = None,
     ) -> TaskRuntime:
+        # ``actor_user_id`` is the request principal and is used only for the
+        # project write gate. ``execution_owner_id`` is the durable task owner
+        # used by workers, retries, leases, and terminal events. The historical
+        # ``owner_user_id`` argument remains the compatibility alias for the
+        # execution owner so existing projectless and background callers keep
+        # their behavior.
+        if execution_owner_id is not None and owner_user_id is not None and execution_owner_id != owner_user_id:
+            raise TaskRuntimeConflict("owner_user_id and execution_owner_id disagree")
+        resolved_execution_owner_id = (
+            execution_owner_id if execution_owner_id is not None else owner_user_id
+        )
+        if project_id is not None and actor_user_id is not None:
+            await ProjectAccessService(self.session).require_project_write(
+                project_id,
+                actor_user_id,
+            )
+
         if idempotency_key:
             existing = (
                 await self.session.execute(
@@ -228,7 +248,7 @@ class TaskRuntimeService:
                 )
             ).scalar_one_or_none()
             if existing is not None:
-                if existing.task_type != task_type or existing.owner_user_id != owner_user_id:
+                if existing.task_type != task_type or existing.owner_user_id != resolved_execution_owner_id:
                     raise TaskRuntimeConflict("idempotency_key is already used by another task")
                 return existing
 
@@ -239,7 +259,7 @@ class TaskRuntimeService:
             task_id=resolved_task_id,
             task_type=task_type,
             idempotency_key=idempotency_key,
-            owner_user_id=owner_user_id,
+            owner_user_id=resolved_execution_owner_id,
             input_hash=input_hash,
             config_snapshot_id=config_snapshot_id,
             artifact_ref=artifact_ref,
@@ -264,7 +284,7 @@ class TaskRuntimeService:
                     )
                 ).scalar_one_or_none()
                 if existing is not None:
-                    if existing.task_type != task_type or existing.owner_user_id != owner_user_id:
+                    if existing.task_type != task_type or existing.owner_user_id != resolved_execution_owner_id:
                         raise TaskRuntimeConflict("idempotency_key is already used by another task")
                     return existing
             raise
