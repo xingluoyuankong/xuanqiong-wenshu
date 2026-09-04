@@ -11,8 +11,8 @@ import hashlib
 import time
 from copy import deepcopy
 from datetime import datetime, timezone
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import asdict, dataclass
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import HTTPException
@@ -36,11 +36,13 @@ from ..services.chapter_guardrails import ChapterGuardrails
 from ..services.consistency_service import ConsistencyService, ViolationSeverity
 from ..services.enhanced_writing_flow import EnhancedWritingFlow
 from ..services.enrichment_service import EnrichmentService
+from ..services.generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text
 from ..services.llm_config_service import LLMConfigService
 from ..services.llm_service import LLMService
 from ..services.knowledge_retrieval_service import KnowledgeRetrievalService, FilteredContext
 from ..services.memory_layer_service import MemoryLayerService
 from ..services.novel_service import NovelService
+from ..services.longform_context_service import LongformContextPackage, LongformContextService
 from ..services.preview_generation_service import PreviewGenerationService
 from ..services.prompt_service import PromptService
 from ..services.reader_simulator_service import ReaderSimulatorService, ReaderType
@@ -55,6 +57,16 @@ DEFAULT_GENERATED_VERSION_COUNT = 1  # 默认生成1个版本
 MIN_GENERATED_VERSION_COUNT = 1
 MAX_GENERATED_VERSION_COUNT = 4  # 最多生成4个版本
 MAX_STORED_CHAPTER_VERSIONS = 4  # 最多保存4个版本
+
+
+CHAPTER_DRAFT_SUPPORTED_RANGE = {
+    "min": 500,
+    "standard_high_quality_min": 2500,
+    "standard_high_quality_max": 7000,
+    "long_chapter_max": 15000,
+    "experimental_max": 30000,
+    "supported_max": 50000,
+}
 
 
 def _clamp_generated_version_count(value: int) -> int:
@@ -83,11 +95,15 @@ class PipelineConfig:
     rag_mode: str = "simple"
     enable_foreshadowing: bool = False
     enable_faction: bool = False
-    target_word_count: int = 5000
-    min_word_count: int = 4500
+    target_word_count: int = 2500
+    min_word_count: int = 500
     max_enrich_iterations: int = 2
-    allow_truncated_response: bool = False
-    enforce_min_word_count: bool = False
+    allow_truncated_response: bool = True
+    enforce_min_word_count: bool = True
+    # 长章节多轮补充策略：当单轮生成字数不足时，自动触发续写
+    enable_multi_round_fallback: bool = True
+    multi_round_max_rounds: int = 5
+    multi_round_min_increment: int = 400  # 每轮最低增量字数
 
 
 class PipelineOrchestrator:
@@ -105,12 +121,13 @@ class PipelineOrchestrator:
         self.llm_service = LLMService(session)
         self.prompt_service = PromptService(session)
         self.novel_service = NovelService(session)
+        self.longform_context_service = LongformContextService(session)
         self.context_builder = WriterContextBuilder()
         self.guardrails = ChapterGuardrails()
         self.cache_service = CacheService(getattr(settings, "redis_url", "redis://localhost:6379/0"))
         if PipelineOrchestrator._generation_semaphore is None:
             limit = max(1, int(getattr(settings, "writer_chapter_versions", 1) or 1))
-            PipelineOrchestrator._generation_semaphore = asyncio.Semaphore(min(2, limit))
+            PipelineOrchestrator._generation_semaphore = asyncio.Semaphore(max(2, min(8, limit)))
 
     def _create_llm_config_service(self) -> LLMConfigService:
         return LLMConfigService(self.session)
@@ -388,12 +405,16 @@ class PipelineOrchestrator:
         violations: Optional[List[Dict[str, Any]]],
         chapter_mission: Optional[dict],
         story_guard_key: str = "story_progression_guard",
+        target_word_count: int = 3000,
+        min_word_count: int = 2000,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         summaries = dict(review_summaries or {})
         story_guard = cls._score_story_quality_candidate(
             content=content,
             violations=list(violations or []),
             chapter_mission=chapter_mission,
+            target_word_count=target_word_count,
+            min_word_count=min_word_count,
         )
         summaries[story_guard_key] = story_guard
         gate_input = dict(summaries)
@@ -415,6 +436,10 @@ class PipelineOrchestrator:
         "dialogue_pressure_weak": "对白攻防不足",
         "mission_progression_weak": "本章目标命中不足",
         "word_count_far_below_target": "字数离目标过远",
+        "event_density_weak": "事件密度不足",
+        "state_change_interval_weak": "状态变化间隔过长",
+        "scene_structure_weak": "场景结构证据不足",
+        "long_chapter_event_density_weak": "长章事件密度不足",
     }
 
     QUALITY_ISSUE_HINTS = {
@@ -427,6 +452,10 @@ class PipelineOrchestrator:
         "critical_consistency_unresolved": "优先修复前后文事实冲突，再继续润色。",
         "major_consistency_unresolved": "补齐承接关系和未闭环钩子，避免章节断裂。",
         "word_count_far_below_target": "扩写只能补行动、对话、后果和短余波，不能用空泛描写凑字。",
+        "event_density_weak": "把篇幅写到事件链里：行动、阻碍、反击、发现、代价和关系变化必须持续出现。",
+        "state_change_interval_weak": "每个长段落窗口都要有可见变化，不能连续停在解释、回忆或氛围里。",
+        "scene_structure_weak": "按目标、阻碍、转折、结果/压力逐场补齐，避免只点到场景关键词。",
+        "long_chapter_event_density_weak": "长章需要更多有效场次和状态变化，不能把少量事件拉成一大章。",
     }
 
     @classmethod
@@ -458,19 +487,40 @@ class PipelineOrchestrator:
         for code in reason_codes or []:
             add(str(code or ""))
 
-        guard = story_guard or {}
-        if guard.get("static_description_risk"):
-            add("static_description_risk")
-        if guard.get("expected_dialogue") and int(guard.get("dialogue_marker_count") or 0) < 4 and int(guard.get("word_count") or 0) >= 1500:
-            add("insufficient_dialogue_pressure")
-        if int(guard.get("word_count") or 0) >= 1500 and int(guard.get("mission_hit_count") or 0) < 2:
-            add("chapter_progression_weak")
-        if int(guard.get("scene_count") or 0) > 0 and float(guard.get("scene_fulfillment_rate") or 1.0) < 0.75:
-            add("scene_fulfillment_weak")
-        if guard.get("expected_dialogue") and "dialogue_changes_state" in guard and not guard.get("dialogue_changes_state", True):
-            add("dialogue_does_not_change_state")
-        if int(guard.get("word_count") or 0) >= 1200 and not guard.get("ending_pressure_passed", guard.get("ending_hook_detected", True)):
-            add("ending_pressure_missing")
+        if blockers is None and reason_codes is None:
+            guard = story_guard or {}
+            rich_progression_evidence = (
+                float(guard.get("scene_fulfillment_rate") or 0.0) >= 0.75
+                and float(guard.get("scene_structure_rate") or 0.0) >= 0.7
+                and bool(guard.get("dialogue_changes_state", True))
+                and bool(guard.get("ending_pressure_passed", guard.get("ending_hook_detected", True)))
+                and bool(guard.get("event_density_passed", True))
+                and bool(guard.get("state_change_interval_passed", True))
+            )
+            if guard.get("static_description_risk"):
+                add("static_description_risk")
+            if guard.get("expected_dialogue") and int(guard.get("dialogue_marker_count") or 0) < 4 and int(guard.get("word_count") or 0) >= 1500:
+                add("insufficient_dialogue_pressure")
+            if (
+                int(guard.get("word_count") or 0) >= 1500
+                and int(guard.get("mission_hit_count") or 0) < 2
+                and not rich_progression_evidence
+            ):
+                add("chapter_progression_weak")
+            if int(guard.get("scene_count") or 0) > 0 and float(guard.get("scene_fulfillment_rate") or 1.0) < 0.75:
+                add("scene_fulfillment_weak")
+            if int(guard.get("scene_count") or 0) > 0 and float(guard.get("scene_structure_rate") or 1.0) < 0.55:
+                add("scene_structure_weak")
+            if guard.get("expected_dialogue") and "dialogue_changes_state" in guard and not guard.get("dialogue_changes_state", True):
+                add("dialogue_does_not_change_state")
+            if int(guard.get("word_count") or 0) >= 1200 and not guard.get("ending_pressure_passed", guard.get("ending_hook_detected", True)):
+                add("ending_pressure_missing")
+            if int(guard.get("word_count") or 0) >= 1800 and guard.get("event_density_passed") is False:
+                add("event_density_weak")
+            if int(guard.get("word_count") or 0) >= 2500 and guard.get("state_change_interval_passed") is False:
+                add("state_change_interval_weak")
+            if int(guard.get("word_count") or 0) >= 7000 and guard.get("long_chapter_density_passed") is False:
+                add("long_chapter_event_density_weak")
 
         tone = "success"
         if len(items) >= 2 or any(item["code"] in {"static_description_risk", "critical_consistency_unresolved"} for item in items):
@@ -488,10 +538,79 @@ class PipelineOrchestrator:
         }
 
     @classmethod
+    def _attach_quality_gate_status_to_guard(
+        cls,
+        story_guard: Dict[str, Any],
+        structural_quality_gate: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        guard = deepcopy(story_guard or {})
+        gate_passed = bool(structural_quality_gate.get("passed", True))
+        gate_summary = {
+            "passed": gate_passed,
+            "codes": list(structural_quality_gate.get("quality_issue_codes") or []),
+            "labels": list(structural_quality_gate.get("quality_issue_labels") or []),
+            "blocker_count": len(structural_quality_gate.get("blockers") or []),
+        }
+        guard["quality_gate_passed"] = gate_passed
+        guard["quality_gate_summary"] = gate_summary
+        guard["quality_gate_codes"] = gate_summary["codes"]
+        guard["quality_gate_labels"] = gate_summary["labels"]
+
+        snapshot = dict(guard.get("quality_metric_snapshot") or {})
+        raw_summary = snapshot.get("quality_issue_summary") or guard.get("quality_issue_summary")
+        if gate_passed and isinstance(raw_summary, dict) and not raw_summary.get("passed", True):
+            warning_summary = deepcopy(raw_summary)
+            guard["quality_rule_warnings"] = warning_summary
+            snapshot["quality_rule_warnings"] = warning_summary
+            clean_summary = {
+                "passed": True,
+                "tone": "success",
+                "count": 0,
+                "codes": [],
+                "labels": [],
+                "items": [],
+            }
+            guard["quality_issue_summary"] = clean_summary
+            guard["quality_issue_codes"] = []
+            guard["quality_issue_labels"] = []
+            snapshot["quality_issue_summary"] = clean_summary
+            snapshot["quality_issue_codes"] = []
+            snapshot["quality_issue_labels"] = []
+        if snapshot:
+            snapshot["quality_gate_passed"] = gate_passed
+            snapshot["quality_gate_summary"] = gate_summary
+            guard["quality_metric_snapshot"] = snapshot
+        return guard
+
+    @classmethod
     def _build_structural_quality_gate(cls, review_summaries: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         summaries = review_summaries or {}
         critique_summary, critique_source = cls._select_quality_gate_critique_summary(summaries)
         consistency_summary = summaries.get("consistency_repair") or summaries.get("consistency") or {}
+        ai_review_summary = summaries.get("ai_review") if isinstance(summaries.get("ai_review"), dict) else {}
+        ai_review_text = " ".join(
+            str(ai_review_summary.get(key) or "")
+            for key in ("evaluation", "suggestions", "final_recommendation", "status")
+        )
+        ai_scene_supports_pass = any(
+            marker in ai_review_text
+            for marker in (
+                "基本兑现",
+                "结构兑现",
+                "结构兑现度高",
+                "兑现了导演脚本",
+                "导演脚本兑现",
+                "完成度较高",
+                "推进清晰",
+                "四场戏推进清晰",
+                "结构清晰",
+                "能直接上正稿",
+                "可用",
+                "结尾",
+                "压给下一章",
+                "递给下一章",
+            )
+        )
         unresolved_consistency = cls._collect_unresolved_consistency_violations(consistency_summary)
         critical_consistency = [item for item in unresolved_consistency if item.get("severity") == "critical"]
         major_consistency = [item for item in unresolved_consistency if item.get("severity") == "major"]
@@ -543,11 +662,31 @@ class PipelineOrchestrator:
             story_word_count = int(story_guard.get("word_count") or 0)
             story_dialogue_markers = int(story_guard.get("dialogue_marker_count") or 0)
             story_mission_hits = int(story_guard.get("mission_hit_count") or 0)
+            scene_count = int(story_guard.get("scene_count") or 0)
+            scene_rate = float(story_guard.get("scene_fulfillment_rate") or 1.0)
+            scene_structure_rate = float(story_guard.get("scene_structure_rate") or 1.0)
+            rich_progression_evidence = (
+                scene_count > 0
+                and scene_rate >= 0.75
+                and scene_structure_rate >= 0.7
+                and story_dialogue_markers >= 8
+                and not story_guard.get("static_description_risk")
+                and story_guard.get("dialogue_changes_state", True)
+                and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
+                and story_guard.get("event_density_passed", True)
+                and story_guard.get("state_change_interval_passed", True)
+            )
             if story_guard.get("static_description_risk"):
                 blockers.append({
                     "source": "story_progression_guard",
                     "code": "static_description_risk",
                     "message": "章节主体缺少有效对话/动作承压，存在大段静态描写硬撑篇幅的风险。",
+                })
+            if story_guard.get("chapter_artifact_markers"):
+                blockers.append({
+                    "source": "story_progression_guard",
+                    "code": "chapter_artifact_markers",
+                    "message": "章节正文含有提纲/标记残留，不能作为成品章节放行。",
                 })
             if story_guard.get("expected_dialogue") and story_word_count >= 1500 and story_dialogue_markers < 4:
                 blockers.append({
@@ -555,16 +694,37 @@ class PipelineOrchestrator:
                     "code": "insufficient_dialogue_pressure",
                     "message": "导演脚本要求存在对话/攻防，但正文里的有效对白痕迹过少，局势博弈不足。",
                 })
-            if story_word_count >= 1500 and story_mission_hits < 2:
+            progression_soft_pass = (
+                story_dialogue_markers >= 8
+                and not story_guard.get("static_description_risk")
+                and story_guard.get("dialogue_changes_state", False)
+                and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", False))
+                and critique_critical == 0
+                and (critique_score is None or critique_score >= 70)
+                and len(critical_consistency) == 0
+                and len(major_consistency) < 2
+            )
+            if (
+                story_word_count >= 1500
+                and story_mission_hits < 2
+                and not progression_soft_pass
+                and not rich_progression_evidence
+            ):
                 blockers.append({
                     "source": "story_progression_guard",
                     "code": "chapter_progression_weak",
                     "message": "正文对本章目标、冲突、转折的命中不足，容易读起来像铺陈多、实质推进少。",
                 })
-            scene_count = int(story_guard.get("scene_count") or 0)
-            scene_rate = float(story_guard.get("scene_fulfillment_rate") or 1.0)
             scene_soft_pass = (
-                story_mission_hits >= 4
+                (
+                    story_mission_hits >= 3
+                    or (
+                        ai_scene_supports_pass
+                        and story_mission_hits >= 2
+                        and story_dialogue_markers >= 8
+                        and (critique_score is None or critique_score >= 70)
+                    )
+                )
                 and story_dialogue_markers >= 4
                 and not story_guard.get("static_description_risk")
                 and story_guard.get("dialogue_changes_state", True)
@@ -573,6 +733,31 @@ class PipelineOrchestrator:
                 and (critique_score is None or critique_score >= 60)
                 and not critical_consistency
             )
+            semantic_scene_soft_pass = (
+                ai_scene_supports_pass
+                and progression_soft_pass
+                and story_dialogue_markers >= 10
+                and story_guard.get("event_density_passed", True)
+                and story_guard.get("state_change_interval_passed", True)
+                and critique_critical == 0
+                and critique_major < 8
+                and not critical_consistency
+                and len(major_consistency) < 2
+            )
+            dense_scene_soft_pass = (
+                scene_rate >= 0.75
+                and story_dialogue_markers >= 8
+                and not story_guard.get("static_description_risk")
+                and story_guard.get("dialogue_changes_state", True)
+                and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
+                and story_guard.get("event_density_passed", True)
+                and story_guard.get("state_change_interval_passed", True)
+                and critique_critical == 0
+                and (critique_score is None or critique_score >= 70)
+                and not critical_consistency
+                and len(major_consistency) < 2
+            )
+            scene_soft_pass = bool(scene_soft_pass or semantic_scene_soft_pass or dense_scene_soft_pass)
             if (
                 story_word_count >= 1200
                 and scene_count > 0
@@ -584,6 +769,18 @@ class PipelineOrchestrator:
                     "source": "story_progression_guard",
                     "code": "scene_fulfillment_weak",
                     "message": "正文对导演脚本 scene_list 的目标、阻碍、转折、钩子兑现不足，章节像散段而不是完整戏剧单元。",
+                })
+            if (
+                story_word_count >= 1800
+                and scene_count > 0
+                and "scene_structure_rate" in story_guard
+                and scene_structure_rate < 0.45
+                and not scene_soft_pass
+            ):
+                blockers.append({
+                    "source": "story_progression_guard",
+                    "code": "scene_structure_weak",
+                    "message": "正文虽然可能点到了场景关键词，但缺少目标、阻碍、转折、结果/压力的结构证据。",
                 })
             if (
                 story_guard.get("expected_dialogue")
@@ -604,6 +801,43 @@ class PipelineOrchestrator:
                     "source": "story_progression_guard",
                     "code": "ending_pressure_missing",
                     "message": "章节结尾没有把压力、危险、误会、证据或后果递给下一章，容易平收。",
+                })
+            density_soft_pass = (
+                story_dialogue_markers >= 8
+                and story_mission_hits >= 3
+                and story_guard.get("dialogue_changes_state", True)
+                and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
+                and not story_guard.get("static_description_risk")
+            )
+            if (
+                story_word_count >= 1800
+                and story_guard.get("event_density_passed") is False
+                and not density_soft_pass
+            ):
+                blockers.append({
+                    "source": "story_progression_guard",
+                    "code": "event_density_weak",
+                    "message": "正文篇幅没有稳定长在行动、对话、发现、代价和关系变化上，存在低事件密度风险。",
+                })
+            if (
+                story_word_count >= 2500
+                and story_guard.get("state_change_interval_passed") is False
+                and not density_soft_pass
+            ):
+                blockers.append({
+                    "source": "story_progression_guard",
+                    "code": "state_change_interval_weak",
+                    "message": "章节中存在过长区间没有可见状态变化，读感容易变成解释或氛围拉长。",
+                })
+            if (
+                story_word_count >= 7000
+                and story_guard.get("long_chapter_density_passed") is False
+                and not density_soft_pass
+            ):
+                blockers.append({
+                    "source": "story_progression_guard",
+                    "code": "long_chapter_event_density_weak",
+                    "message": "长章目标下事件密度和状态变化窗口不足，不能把少量事件拉成长章静默放行。",
                 })
 
         quality_issue_summary = cls._build_quality_issue_summary(
@@ -688,6 +922,15 @@ class PipelineOrchestrator:
                 "problem": "导演脚本场景兑现不足，目标、阻碍、转折或钩子没有逐场落地。",
                 "suggestion": "按 scene_list 补齐目标->阻碍->反应->转折->后果，不能只做句子润色。",
                 "example": "每一场至少写出一个明确变化：信息量、主动权、关系、风险或下一步选择。",
+            })
+        if guard.get("event_density_passed") is False or guard.get("state_change_interval_passed") is False:
+            issues.append({
+                "dimension": "pacing",
+                "severity": "major",
+                "location": "正文中段",
+                "problem": "事件密度或状态变化间隔不足，篇幅没有稳定长在剧情推进上。",
+                "suggestion": "把空转段改成行动、阻碍、反制、发现、代价、关系变化或短余波决策。",
+                "example": "每个长窗口至少出现一次新信息、主动权变化、风险升级或伏笔兑现。",
             })
         if guard.get("expected_dialogue") and not guard.get("dialogue_changes_state", True):
             issues.append({
@@ -867,6 +1110,16 @@ class PipelineOrchestrator:
             "level": event.get("level", "info"),
             "message": cls._truncate_runtime_text(event.get("message"), 360),
         }
+        for key in ("kind", "title", "summary", "content_preview"):
+            value = event.get(key)
+            if value:
+                compact_event[key] = cls._truncate_runtime_text(value, 520 if key == "content_preview" else 220)
+        if event.get("progress_percent") is not None:
+            compact_event["progress_percent"] = event.get("progress_percent")
+        for key in ("metrics", "artifact_refs"):
+            value = event.get(key)
+            if isinstance(value, (dict, list)) and value:
+                compact_event[key] = cls._compact_runtime_value(value)
         metadata = event.get("metadata")
         if isinstance(metadata, dict) and metadata:
             compact_event["metadata"] = cls._compact_runtime_value(metadata)
@@ -907,6 +1160,77 @@ class PipelineOrchestrator:
         return compact
 
     @staticmethod
+    def _resolve_chapter_draft_contract(target_word_count: int, min_word_count: Optional[int] = None) -> Dict[str, Any]:
+        target = max(CHAPTER_DRAFT_SUPPORTED_RANGE["min"], int(target_word_count or 0))
+        minimum = max(200, int(min_word_count if min_word_count is not None else int(target * 0.5)))
+        if minimum > target:
+            minimum = target
+
+        if target < 1200:
+            tier = "short"
+            strategy = "single_pass_compact"
+            scene_min, scene_max = 1, 2
+        elif target < 2500:
+            tier = "lean"
+            strategy = "single_pass_scene_led"
+            scene_min, scene_max = 2, 3
+        elif target < 4500:
+            tier = "standard"
+            strategy = "single_pass_scene_led"
+            scene_min, scene_max = 3, 4
+        elif target < 7000:
+            tier = "rich"
+            strategy = "single_pass_scene_led_with_retry_gate"
+            scene_min, scene_max = 4, 5
+        elif target < 10000:
+            tier = "long"
+            strategy = "single_pass_grouped_scenes_with_fusion_check"
+            scene_min, scene_max = 5, 7
+        elif target < 20000:
+            tier = "extra_long"
+            strategy = "single_pass_grouped_scenes_with_strict_fusion_check"
+            scene_min, scene_max = 6, 8
+        elif target < 35000:
+            tier = "ultra_long"
+            strategy = "multi_pass_segmented_with_bridge_continuity"
+            scene_min, scene_max = 8, 14
+        else:
+            tier = "mega_long"
+            strategy = "multi_pass_segmented_with_dedicated_continuity_gates"
+            scene_min, scene_max = 12, 20
+
+        return {
+            "target_word_count": target,
+            "min_word_count": minimum,
+            "supported_range": dict(CHAPTER_DRAFT_SUPPORTED_RANGE),
+            "tier": tier,
+            "generation_strategy": strategy,
+            "recommended_scene_count_min": scene_min,
+            "recommended_scene_count_max": scene_max,
+            "preferred_floor": max(minimum, int(target * 0.92)),
+            "retry_floor": max(minimum, int(target * (0.9 if target >= 4500 else 0.86))),
+            "quality_policy": "first_draft_must_carry_length_with_scene_action_dialogue_and_turns",
+        }
+
+    @classmethod
+    def _format_chapter_draft_contract_for_prompt(cls, target_word_count: int, min_word_count: int) -> str:
+        contract = cls._resolve_chapter_draft_contract(target_word_count, min_word_count)
+        supported = contract["supported_range"]
+        return (
+            "CHAPTER_DRAFT_CONTRACT\n"
+            f"- target_chars: {contract['target_word_count']}; minimum_chars: {contract['min_word_count']}; "
+            f"preferred_floor: {contract['preferred_floor']}.\n"
+            f"- supported_range_chars: {supported['min']}-{supported['experimental_max']} "
+            f"(standard high-quality range {supported['standard_high_quality_min']}-{supported['standard_high_quality_max']}, "
+            f"long chapter range up to {supported['long_chapter_max']}).\n"
+            f"- generation_strategy: {contract['generation_strategy']}; tier: {contract['tier']}.\n"
+            f"- recommended_scene_count: {contract['recommended_scene_count_min']}-{contract['recommended_scene_count_max']} "
+            "real scenes or scene groups. Do not pad with static scenery, repeated thoughts, or synopsis.\n"
+            "- Every 900-1500 chars should contain a concrete state change: action pressure, dialogue leverage, discovery, cost, relationship shift, or payoff.\n"
+            "- For long chapters, keep one continuous chapter voice: grouped scenes are planning units, not separate disconnected fragments."
+        )
+
+    @staticmethod
     def _resolve_chapter_generation_timeout(target_word_count: int) -> float:
         """Scale the main chapter LLM timeout to the requested length.
 
@@ -916,14 +1240,34 @@ class PipelineOrchestrator:
         """
         words = max(500, int(target_word_count or 0))
         if words < 1200:
-            return 180.0
+            return 120.0
         if words < 2500:
-            return 300.0
+            return 200.0
         if words < 4000:
             return 600.0
         if words < 5500:
             return 900.0
-        return 1200.0
+        if words < 7500:
+            return 1200.0
+        if words < 10000:
+            return 1800.0
+        if words < 12500:
+            return 2400.0
+        return 3000.0
+
+    @staticmethod
+    def _resolve_chapter_generation_soft_timeout(target_word_count: int) -> Optional[float]:
+        """Abort a single provider attempt before the whole background task looks frozen."""
+        words = max(500, int(target_word_count or 0))
+        if words < 4000:
+            return None
+        if words < 7500:
+            return 540.0
+        if words < 10000:
+            return 720.0
+        if words < 12500:
+            return 900.0
+        return 1080.0
 
     @staticmethod
     def _resolve_chapter_mission_timeout(target_word_count: int) -> float:
@@ -936,35 +1280,240 @@ class PipelineOrchestrator:
         """
         words = max(500, int(target_word_count or 0))
         if words < 1200:
-            return 45.0
+            return 30.0
         if words < 2500:
-            return 60.0
+            return 45.0
         if words < 4000:
             return 90.0
         if words < 5500:
             return 120.0
-        return 150.0
+        if words < 7500:
+            return 180.0
+        if words < 10000:
+            return 240.0
+        return 300.0
 
+    @staticmethod
+    @staticmethod
+    def _resolve_chapter_mission_max_tokens(target_word_count: int) -> int:
+        words = max(500, int(target_word_count or 0))
+        if words < 2500:
+            return 3200
+        if words < 5500:
+            return 4800
+        if words < 9000:
+            return 6400
+        return 8000
+    @staticmethod
+    def _build_chapter_mission_schema() -> Dict[str, Any]:
+        string_array = {"type": "array", "items": {"type": "string"}}
+        nullable_string = {"type": ["string", "null"]}
+        scene_schema = {
+            "type": "object",
+            "required": [
+                "scene",
+                "goal",
+                "conflict",
+                "turn",
+                "outcome",
+                "payoff",
+                "bridge",
+                "dialogue_value",
+                "end_hook",
+                "word_budget",
+            ],
+            "properties": {
+                "scene": {"type": "string"},
+                "goal": {"type": "string"},
+                "conflict": {"type": "string"},
+                "turn": {"type": "string"},
+                "outcome": {"type": "string"},
+                "payoff": {"type": "string"},
+                "bridge": {"type": "string"},
+                "dialogue_value": {"type": "string"},
+                "end_hook": {"type": "string"},
+                "word_budget": {"type": "integer"},
+                "characters": string_array,
+                "foreshadowing_task": nullable_string,
+            },
+        }
+        return {
+            "type": "object",
+            "required": [
+                "macro_beat",
+                "chapter_purpose",
+                "character_arc_task",
+                "continuity_anchor",
+                "dialogue_strategy",
+                "scene_list",
+                "foreshadowing_tasks",
+            ],
+            "properties": {
+                "macro_beat": {"type": "string"},
+                "chapter_purpose": {"type": "string"},
+                "pov": nullable_string,
+                "character_focus": string_array,
+                "character_arc_task": {"type": "string"},
+                "continuity_anchor": {
+                    "type": "object",
+                    "required": ["inherit_from_previous", "deliver_to_next"],
+                    "properties": {
+                        "inherit_from_previous": string_array,
+                        "deliver_to_next": string_array,
+                    },
+                },
+                "dialogue_strategy": {
+                    "type": "object",
+                    "required": ["purpose", "subtext", "pressure_change"],
+                    "properties": {
+                        "purpose": string_array,
+                        "subtext": string_array,
+                        "pressure_change": {"type": "string"},
+                    },
+                },
+                "scene_list": {
+                    "type": "array",
+                    "items": scene_schema,
+                },
+                "foreshadowing_tasks": {
+                    "type": "object",
+                    "required": ["must_resolve", "should_reinforce", "may_plant", "avoid_forgetting"],
+                    "properties": {
+                        "must_resolve": string_array,
+                        "should_reinforce": string_array,
+                        "may_plant": string_array,
+                        "avoid_forgetting": string_array,
+                    },
+                },
+                "sequel_required": {"type": "boolean"},
+                "sequel_description": nullable_string,
+            },
+        }
+
+    @classmethod
+    def _normalize_chapter_mission(cls, mission: Dict[str, Any], target_word_count: int) -> Dict[str, Any]:
+        normalized = dict(mission or {})
+        draft_contract = cls._resolve_chapter_draft_contract(target_word_count, max(500, int(target_word_count * 0.9)))
+
+        continuity = normalized.get("continuity_anchor")
+        if not isinstance(continuity, dict):
+            continuity = {}
+        continuity["inherit_from_previous"] = [
+            str(item).strip()
+            for item in (continuity.get("inherit_from_previous") or [])
+            if str(item).strip()
+        ][:5]
+        continuity["deliver_to_next"] = [
+            str(item).strip()
+            for item in (continuity.get("deliver_to_next") or [])
+            if str(item).strip()
+        ][:5]
+        normalized["continuity_anchor"] = continuity
+
+        dialogue_strategy = normalized.get("dialogue_strategy")
+        if not isinstance(dialogue_strategy, dict):
+            dialogue_strategy = {}
+        for key in ("purpose", "subtext"):
+            value = dialogue_strategy.get(key)
+            if isinstance(value, str):
+                dialogue_strategy[key] = [value]
+            elif isinstance(value, list):
+                dialogue_strategy[key] = [str(item).strip() for item in value if str(item).strip()][:5]
+            else:
+                dialogue_strategy[key] = []
+        dialogue_strategy["pressure_change"] = str(dialogue_strategy.get("pressure_change") or "对白必须改变主动权、信息量或风险").strip()
+        normalized["dialogue_strategy"] = dialogue_strategy
+
+        foreshadowing_tasks = normalized.get("foreshadowing_tasks")
+        if not isinstance(foreshadowing_tasks, dict):
+            foreshadowing_tasks = {}
+        for key in ("must_resolve", "should_reinforce", "may_plant", "avoid_forgetting"):
+            value = foreshadowing_tasks.get(key)
+            if isinstance(value, str):
+                foreshadowing_tasks[key] = [value]
+            elif isinstance(value, list):
+                foreshadowing_tasks[key] = [str(item).strip() for item in value if str(item).strip()][:6]
+            else:
+                foreshadowing_tasks[key] = []
+        normalized["foreshadowing_tasks"] = foreshadowing_tasks
+
+        raw_scenes = normalized.get("scene_list")
+        scenes = [scene for scene in raw_scenes if isinstance(scene, dict)] if isinstance(raw_scenes, list) else []
+        if not scenes:
+            scenes = [
+                {
+                    "scene": "1",
+                    "goal": normalized.get("chapter_purpose") or "推进本章核心目标",
+                    "conflict": "制造正面阻碍",
+                    "turn": "让局势发生实质变化",
+                    "outcome": "交出本场后果",
+                    "payoff": "兑现本章线索或情绪压力",
+                    "bridge": "自然推向下一场或章末压力",
+                    "dialogue_value": "对话承担试探、压迫或反制职责",
+                    "end_hook": "把压力递到下一段或下一章",
+                }
+            ]
+        ratios = cls._resolve_scene_execution_ratios(len(scenes), sequel_required=bool(normalized.get("sequel_required")))
+        normalized_scenes: List[Dict[str, Any]] = []
+        for index, scene in enumerate(scenes[:10]):
+            item = dict(scene)
+            item["scene"] = str(item.get("scene") or index + 1)
+            item["goal"] = str(item.get("goal") or item.get("must_happen") or normalized.get("chapter_purpose") or "推进本章核心目标").strip()
+            item["conflict"] = str(item.get("conflict") or "制造明确阻碍").strip()
+            item["turn"] = str(item.get("turn") or "让局势发生变化").strip()
+            item["outcome"] = str(item.get("outcome") or item.get("pressure_shift") or "交出行动后果").strip()
+            item["payoff"] = str(item.get("payoff") or item.get("foreshadowing_task") or "兑现一处线索、关系或压力").strip()
+            item["bridge"] = str(item.get("bridge") or "吃住上一场后果并推出下一场").strip()
+            item["dialogue_value"] = str(item.get("dialogue_value") or "对话必须改变主动权、信息量或风险").strip()
+            item["end_hook"] = str(item.get("end_hook") or "留下下一段压力").strip()
+            try:
+                word_budget = int(item.get("word_budget") or item.get("scene_word_goal") or 0)
+            except (TypeError, ValueError):
+                word_budget = 0
+            if word_budget <= 0:
+                ratio = ratios[index] if index < len(ratios) else max(0.1, 1 / max(1, len(scenes)))
+                word_budget = max(220, int(max(500, target_word_count) * ratio))
+            item["word_budget"] = word_budget
+            if isinstance(item.get("characters"), list):
+                item["characters"] = [str(value).strip() for value in item["characters"] if str(value).strip()][:8]
+            else:
+                item["characters"] = []
+            normalized_scenes.append(item)
+        normalized["scene_list"] = normalized_scenes
+        normalized["chapter_draft_contract"] = draft_contract
+        normalized["schema_version"] = "chapter_mission.v2"
+        return normalized
+
+    @staticmethod
     @staticmethod
     def _resolve_chapter_generation_max_tokens(target_word_count: int) -> int:
         words = max(500, int(target_word_count or 0))
         if words < 1200:
-            return 2800
+            return 3200
         if words < 2500:
-            return 5200
+            return 6400
         if words < 4000:
-            return 7800
+            return 9600
         if words < 5500:
-            return 11000
-        return min(16000, max(12000, int(words * 2.2)))
-
+            return 18000
+        if words < 7500:
+            return max(24000, int(words * 3.8))
+        if words < 10000:
+            return max(32000, int(words * 3.9))
+        if words < 12500:
+            return max(42000, int(words * 4.0))
+        if words < 20000:
+            return max(56000, int(words * 3.5))
+        if words < 35000:
+            return max(72000, int(words * 3.0))
+        return min(100000, max(96000, int(words * 2.8)))
     @staticmethod
     def _estimate_remaining_seconds(stage: str, target_word_count: int) -> int:
         target_word_count = max(1200, int(target_word_count or 0))
         preparing_budget = max(50, min(180, 24 + int(target_word_count / 100) * 2))
-        generating_budget = max(120, min(900, 60 + int(target_word_count / 100) * 12))
-        review_budget = max(40, min(240, 30 + int(target_word_count / 100) * 2))
-        enrichment_budget = max(30, min(300, 18 + int(target_word_count / 100) * 3))
+        generating_budget = max(120, min(1800, 60 + int(target_word_count / 100) * 14))
+        review_budget = max(40, min(360, 30 + int(target_word_count / 100) * 2))
+        enrichment_budget = max(30, min(540, 18 + int(target_word_count / 100) * 4))
         stage_remaining = {
             "queued": preparing_budget + generating_budget + review_budget + enrichment_budget + 36,
             "prepare_context": generating_budget + review_budget + enrichment_budget + 28,
@@ -982,14 +1531,19 @@ class PipelineOrchestrator:
     def _infer_stage_progress_percent(stage: str) -> int:
         stage_progress = {
             "queued": 4,
-            "generate_mission": 18,
-            "prepare_context": 28,
+            "prepare_context": 8,
+            "audit_context": 11,
+            "cast_plan": 14,
+            "foreshadowing_plan": 17,
+            "generate_mission": 22,
+            "longform_context": 26,
             "generate_variants": 62,
             "review": 72,
             "ai_review": 72,
             "self_critique": 84,
             "reader_simulator": 86,
             "consistency": 90,
+            "continuity_gate": 91,
             "persist_versions": 97,
             "waiting_for_confirm": 100,
             "failed": 100,
@@ -1006,6 +1560,12 @@ class PipelineOrchestrator:
         progress_percent: int,
         level: str = "info",
         extra: Optional[Dict[str, Any]] = None,
+        event_kind: Optional[str] = None,
+        title: Optional[str] = None,
+        summary: Optional[str] = None,
+        content_preview: Optional[str] = None,
+        metrics: Optional[Dict[str, Any]] = None,
+        artifact_refs: Optional[Dict[str, Any]] = None,
     ) -> None:
         if not generation_run_id:
             return
@@ -1025,6 +1585,18 @@ class PipelineOrchestrator:
             "message": message,
             "progress_percent": max(0, min(100, int(progress_percent))),
         }
+        if event_kind:
+            event["kind"] = event_kind
+        if title:
+            event["title"] = title
+        if summary:
+            event["summary"] = summary
+        if content_preview:
+            event["content_preview"] = content_preview
+        if metrics:
+            event["metrics"] = self._compact_runtime_value(metrics)
+        if artifact_refs:
+            event["artifact_refs"] = self._compact_runtime_value(artifact_refs)
         if extra:
             compact_extra = {key: value for key, value in extra.items() if value is not None}
             if compact_extra:
@@ -1070,6 +1642,89 @@ class PipelineOrchestrator:
             logger.warning("会话回滚失败：reason=%s error=%s", reason, rollback_exc)
         else:
             logger.warning("降级阶段失败后已完成会话回滚：reason=%s", reason)
+
+    async def _persist_quality_gate_blocked_versions(
+        self,
+        *,
+        chapter: Chapter,
+        generation_run_id: Optional[str],
+        versions: List[Dict[str, Any]],
+        best_version_index: int,
+        best_content: str,
+        review_summaries: Dict[str, Any],
+        structural_quality_gate: Dict[str, Any],
+        longform_context: Optional[LongformContextPackage],
+    ) -> Dict[str, Any]:
+        if not versions:
+            return {"persisted": False, "reason": "no_candidate_versions"}
+
+        try:
+            await self._assert_generation_active(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="quality_gate_blocked_persist",
+            )
+        except HTTPException as exc:
+            return {
+                "persisted": False,
+                "reason": "generation_not_active",
+                "detail": self._truncate_runtime_text(exc.detail),
+            }
+
+        quality_payload = {
+            "passed": False,
+            "codes": list(structural_quality_gate.get("quality_issue_codes") or []),
+            "labels": list(structural_quality_gate.get("quality_issue_labels") or []),
+            "blockers": list(structural_quality_gate.get("blockers") or []),
+            "failed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        annotated_contents: List[str] = []
+        annotated_metadata: List[Dict[str, Any]] = []
+        best_version_index = max(0, min(best_version_index, len(versions) - 1))
+        for index, item in enumerate(versions):
+            content = best_content if index == best_version_index else str(item.get("content") or "")
+            metadata = dict(item.get("metadata") or {})
+            metadata["blocked_by_quality_gate"] = True
+            metadata["quality_gate"] = quality_payload
+            if generation_run_id:
+                metadata["generation_run_id"] = generation_run_id
+            if index == best_version_index:
+                story_guard = structural_quality_gate.get("story_progression_guard") or {}
+                metadata["review_summaries"] = review_summaries
+                metadata["story_progression_guard"] = story_guard
+                metadata["quality_metrics"] = story_guard.get("quality_metric_snapshot", story_guard)
+                if longform_context:
+                    metadata["longform_context"] = longform_context.to_metadata()
+            annotated_contents.append(content)
+            annotated_metadata.append(metadata)
+
+        try:
+            version_models = await self.novel_service.append_chapter_versions(
+                chapter,
+                annotated_contents,
+                annotated_metadata,
+                max_versions=MAX_STORED_CHAPTER_VERSIONS,
+                expected_generation_run_id=generation_run_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - failure to keep rejected draft should not mask the gate result
+            await self._safe_session_rollback("quality_gate_blocked_persist")
+            logger.warning(
+                "质量门拒稿候选落库失败：project=%s chapter=%s error=%s",
+                chapter.project_id,
+                chapter.chapter_number,
+                exc,
+            )
+            return {
+                "persisted": False,
+                "reason": "persist_failed",
+                "detail": self._truncate_runtime_text(exc),
+            }
+
+        return {
+            "persisted": True,
+            "version_ids": [item.id for item in version_models if item.id is not None],
+            "version_count": len(version_models),
+        }
 
     async def _assert_generation_active(
         self,
@@ -1132,6 +1787,9 @@ class PipelineOrchestrator:
                 stage=stage_name,
                 message=runtime_detail,
                 progress_percent=self._infer_stage_progress_percent(stage_name),
+                event_kind="progress",
+                title=f"{stage_name} 完成",
+                summary=runtime_detail,
                 extra={
                     "stage_duration_ms": duration_ms,
                     "stage_duration_seconds": round(duration_ms / 1000, 2),
@@ -1161,6 +1819,17 @@ class PipelineOrchestrator:
         runtime_metadata["provider_preflight"] = await self._ensure_provider_ready(user_id)
         runtime_metadata["target_word_count"] = config.target_word_count
         runtime_metadata["min_word_count"] = config.min_word_count
+        runtime_metadata["chapter_draft_contract"] = self._resolve_chapter_draft_contract(
+            config.target_word_count,
+            config.min_word_count,
+        )
+        runtime_metadata["chapter_generation_limits"] = {
+            "timeout_seconds": self._resolve_chapter_generation_timeout(config.target_word_count),
+            "soft_timeout_seconds": self._resolve_chapter_generation_soft_timeout(config.target_word_count),
+            "max_tokens": self._resolve_chapter_generation_max_tokens(config.target_word_count),
+            "mission_timeout_seconds": self._resolve_chapter_mission_timeout(config.target_word_count),
+            "mission_max_tokens": self._resolve_chapter_mission_max_tokens(config.target_word_count),
+        }
         project = await self.novel_service.ensure_project_owner(project_id, user_id)
 
         outline = await self.novel_service.get_outline(project_id, chapter_number)
@@ -1184,6 +1853,8 @@ class PipelineOrchestrator:
                 "target_word_count": config.target_word_count,
                 "min_word_count": config.min_word_count,
                 "generation_mode": config.preset,
+                "chapter_draft_contract": runtime_metadata["chapter_draft_contract"],
+                "chapter_generation_limits": runtime_metadata["chapter_generation_limits"],
             },
         )
         await self._assert_generation_active(
@@ -1264,6 +1935,78 @@ class PipelineOrchestrator:
             len(forbidden_characters),
         )
 
+        longform_context: Optional[LongformContextPackage] = None
+        longform_context_started_at = time.perf_counter()
+        try:
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="audit_context",
+                message="正在审计长期记忆、章节快照、时间线与知识图谱",
+                progress_percent=11,
+                extra={
+                    "context_stage": "audit_context",
+                    "context_stage_label": "长期上下文审计",
+                },
+            )
+            await self._assert_generation_active(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="audit_context",
+            )
+            longform_context = await self.longform_context_service.build_context_package(
+                project=project,
+                outline=outline,
+                chapter_number=chapter_number,
+                writing_notes=writing_notes,
+                chapter_mission=chapter_mission,
+                allowed_new_characters=allowed_new_characters,
+            )
+            runtime_metadata["longform_context"] = longform_context.to_metadata()
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="cast_plan",
+                message="正在装配角色规模、登场层级、势力归属和动态角色规则",
+                progress_percent=14,
+                extra={
+                    "target_character_count": longform_context.cast_plan.target_character_count,
+                    "planned_character_count": longform_context.cast_plan.planned_character_count,
+                    "chapter_focus_names": longform_context.cast_plan.chapter_focus_names,
+                },
+            )
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="foreshadowing_plan",
+                message="正在规划本章伏笔回收、强化、禁忘和可新增线索",
+                progress_percent=17,
+                extra={
+                    "must_resolve_count": len(longform_context.foreshadowing_task.must_resolve),
+                    "should_reinforce_count": len(longform_context.foreshadowing_task.should_reinforce),
+                    "avoid_forgetting_count": len(longform_context.foreshadowing_task.avoid_forgetting),
+                    "active_clue_count": len(longform_context.foreshadowing_task.active_clues),
+                },
+            )
+            await mark_stage("longform_context", longform_context_started_at, detail="长篇上下文包装配完成")
+        except Exception as exc:  # noqa: BLE001 - longform context should improve generation, not take the writer down.
+            runtime_metadata["degraded_stages"].append({"stage": "longform_context", "reason": str(exc)})
+            if isinstance(exc, SQLAlchemyError):
+                await self._safe_session_rollback("longform_context")
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="audit_context",
+                message="长篇上下文装配已降级跳过，继续使用基础上下文生成",
+                progress_percent=17,
+                level="warning",
+                extra={
+                    "degraded_stage": "longform_context",
+                    "degraded_reason": self._truncate_runtime_text(exc),
+                },
+            )
+            logger.warning("长篇上下文装配已降级：project=%s chapter=%s error=%s", project_id, chapter_number, exc)
+
         enhanced_flow = None
         enhanced_context = None
         if config.enable_constitution or config.enable_persona or config.enable_foreshadowing or config.enable_faction:
@@ -1331,11 +2074,13 @@ class PipelineOrchestrator:
             raise HTTPException(status_code=500, detail="缺少写作提示词，请联系管理员配置")
 
         prompt_sections = self._build_prompt_sections(
+            preset=requested_preset,
             writer_blueprint=writer_blueprint,
             previous_summary=history_context["previous_summary"],
             previous_tail=history_context["previous_tail"],
             chapter_mission=chapter_mission,
             macro_continuity_context=macro_continuity_context,
+            longform_context_text=longform_context.prompt_text if longform_context else None,
             rag_context=rag_context,
             knowledge_context=knowledge_context,
             outline_title=outline_title,
@@ -1403,6 +2148,30 @@ class PipelineOrchestrator:
             },
         )
         generation_variants_started_at = time.perf_counter()
+
+        async def report_generation_call_progress(stage: str, message: str) -> None:
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage=stage,
+                message=message,
+                progress_percent=self._infer_stage_progress_percent(stage),
+                event_kind="progress",
+                title="Provider 等待中",
+                summary=message,
+                extra={
+                    "provider_waiting": True,
+                    "target_word_count": config.target_word_count,
+                    "min_word_count": config.min_word_count,
+                    "soft_timeout_seconds": self._resolve_chapter_generation_soft_timeout(config.target_word_count),
+                },
+            )
+            await self._assert_generation_active(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage=f"{stage}_provider_wait",
+            )
+
         for attempt_idx, attempt_config in enumerate(attempt_configs):
             version_count = attempt_config.version_count
             version_style_hints = self._resolve_style_hints(enhanced_context, version_count)
@@ -1431,10 +2200,15 @@ class PipelineOrchestrator:
                             analysis_guidance_context=analysis_guidance_context,
                             enhanced_context=enhanced_context,
                             config=attempt_config,
+                            progress_callback=report_generation_call_progress,
                         )
                     )
                 )
 
+            # 在LLM调用前强制提交并释放数据库session锁，允许其他请求在生成期间读取
+            await self.session.commit()
+            await self.session.flush()
+            self.session.expire_all()
             generation_results = await asyncio.gather(*generation_tasks, return_exceptions=True)
             generation_attempt_duration_ms = round((time.perf_counter() - generation_attempt_started_at) * 1000, 2)
             await self._assert_generation_active(
@@ -1502,6 +2276,18 @@ class PipelineOrchestrator:
                     stage="review",
                     message="候选草稿已生成，正在执行 AI 评审与最佳版本筛选",
                     progress_percent=62,
+                    event_kind="content",
+                    title="候选草稿已生成",
+                    summary=f"本轮生成 {len(attempt_versions)} 个候选版本，开始评审筛选。",
+                    content_preview=self._truncate_runtime_text(
+                        (attempt_versions[0].get("content") or "") if attempt_versions else "",
+                        420,
+                    ),
+                    metrics={
+                        "generated_version_count": len(attempt_versions),
+                        "failed_versions": len(attempt_errors),
+                        "target_word_count": config.target_word_count,
+                    },
                     extra={
                         "generated_version_count": len(attempt_versions),
                         "stable_retry_used": runtime_metadata["stable_retry_used"],
@@ -1594,10 +2380,93 @@ class PipelineOrchestrator:
                 },
             )
 
+        # ── Multi-round continuation for long chapters (free API workaround) ──
+        if config.enable_multi_round_fallback and versions:
+            best_initial = max(
+                versions,
+                key=lambda v: len(v.get("content") or ""),
+            )
+            best_content_initial = best_initial.get("content") or ""
+            initial_words = len(best_content_initial.replace(chr(10), ""))
+            target_words = config.target_word_count
+
+            continuation_rounds = 0
+            while (initial_words < target_words * 0.6
+                   and continuation_rounds < config.multi_round_max_rounds):
+                continuation_rounds += 1
+                await self._update_generation_runtime(
+                    chapter,
+                    generation_run_id=generation_run_id,
+                    stage="multi_round_continuation",
+                    message=f"字数不足（{initial_words}/{target_words}），启动第{continuation_rounds}轮续写...",
+                    progress_percent=min(62 + continuation_rounds * 3, 68),
+                    event_kind="progress",
+                    title=f"多轮续写 第{continuation_rounds}轮",
+                )
+
+                continuation_prompt = (
+                    f"【续写指令】请紧接着上面的内容继续写下去，保持同样的风格、视角和节奏。"
+                    f"当前已写{initial_words}字，目标{target_words}字，还需要至少{int(target_words * 0.6) - initial_words}字。"
+                    f"不要重复已写内容，直接接续结尾继续推进剧情。"
+                )
+
+                try:
+                    cont_result = await call_generation_text(
+                        llm_service=self.llm_service,
+                        system_prompt=writer_prompt,
+                        conversation_history=[
+                            {"role": "user", "content": prompt_input},
+                            {"role": "assistant", "content": best_content_initial[-800:]},
+                            {"role": "user", "content": continuation_prompt},
+                        ],
+                        temperature=0.75,
+                        user_id=user_id,
+                        timeout=self._resolve_chapter_generation_timeout(config.target_word_count),
+                        policy=GenerationCallPolicy(
+                            stage_label=f"续写轮{continuation_rounds}",
+                            progress_stage="multi_round_continuation",
+                            retry_attempts=1,
+                            max_tokens=self._resolve_chapter_generation_max_tokens(target_words),
+                            allow_truncated_response=True,
+                        ),
+                    )
+                    if cont_result and cont_result.text:
+                        new_content = best_content_initial + "\n\n" + cont_result.text
+                        best_initial["content"] = new_content
+                        best_initial["word_count"] = len(new_content.replace(chr(10), ""))
+                        best_content_initial = new_content
+                        initial_words = best_initial["word_count"]
+                        logger.info(
+                            "Continuation round %s: words -> %s",
+                            continuation_rounds,
+                            initial_words,
+                        )
+                    else:
+                        logger.warning("Continuation round %s returned empty", continuation_rounds)
+                        break
+                except Exception as exc:
+                    logger.warning("Continuation round %s failed: %s", continuation_rounds, exc)
+                    runtime_metadata["degraded_stages"].append({
+                        "stage": f"multi_round_continuation_{continuation_rounds}",
+                        "reason": str(exc),
+                    })
+                    break
+
+            if continuation_rounds > 0:
+                runtime_metadata["continuation"] = {
+                    "rounds": continuation_rounds,
+                    "final_words": initial_words,
+                    "target_words": target_words,
+                }
+
         review_started_at = time.perf_counter()
+        review_chapter_mission = self._build_ai_review_mission(
+            chapter_mission=chapter_mission,
+            longform_context=longform_context,
+        )
         best_version_index, ai_review_result = await self._run_ai_review(
             versions=versions,
-            chapter_mission=chapter_mission,
+            chapter_mission=review_chapter_mission,
             user_id=user_id,
         )
         await mark_stage("ai_review", review_started_at, detail="AI 评审阶段完成")
@@ -1608,6 +2477,14 @@ class PipelineOrchestrator:
             stage="review",
             message="AI 评审完成，正在整理增强处理结果",
             progress_percent=72,
+            event_kind="review",
+            title="AI 评审完成",
+            summary=f"最佳候选：第 {best_version_index + 1} 版；状态：{runtime_metadata['review_status']}",
+            metrics={
+                "best_version_index": best_version_index,
+                "candidate_count": len(versions),
+                "review_status": runtime_metadata["review_status"],
+            },
             extra={
                 "best_version_index": best_version_index,
                 "review_status": runtime_metadata["review_status"],
@@ -1858,6 +2735,7 @@ class PipelineOrchestrator:
                             issues=reader_fix_issues,
                             context=reader_context,
                             user_id=user_id,
+                            allow_stagewide=False,
                         )
                         if polished_content and polished_content != best_content:
                             next_content, content_guard = self._preserve_non_regressive_content(
@@ -1935,6 +2813,7 @@ class PipelineOrchestrator:
                             issues=consistency_fix_issues,
                             context=repair_context,
                             user_id=user_id,
+                            allow_stagewide=False,
                         )
                         if repaired_content and repaired_content != best_content:
                             rechecked_content, repaired_report = await self._run_consistency_check(
@@ -1972,6 +2851,46 @@ class PipelineOrchestrator:
                     await mark_stage("consistency", consistency_started_at, detail="一致性校验阶段完成")
                     runtime_metadata["consistency_status"] = consistency_report.get("status", "unknown")
                     review_summaries["consistency"] = consistency_report
+                    repair_attempts = consistency_report.get("repair_attempts")
+                    if not isinstance(repair_attempts, list):
+                        repair_attempts = []
+                    unresolved_consistency_issues = self._normalize_consistency_issues_for_local_fix(consistency_report)
+                    if repair_attempts or unresolved_consistency_issues:
+                        manual_confirmation_required = any(
+                            bool(item.get("manual_confirmation_required"))
+                            for item in repair_attempts
+                            if isinstance(item, dict)
+                        )
+                        await self._update_generation_runtime(
+                            chapter,
+                            generation_run_id=generation_run_id,
+                            stage="consistency",
+                            message=(
+                                "一致性局部修复已完成，仍有问题需按局部补丁处理"
+                                if unresolved_consistency_issues
+                                else "一致性局部修复已完成，未触发整章自动替换"
+                            ),
+                            progress_percent=91,
+                            level="warning" if unresolved_consistency_issues else "info",
+                            event_kind="continuity",
+                            title="一致性局部修复结果",
+                            summary=(
+                                f"局部修复尝试 {len(repair_attempts)} 次，未解决问题 {len(unresolved_consistency_issues)} 项；"
+                                "整章候选需要人工确认。"
+                                if manual_confirmation_required
+                                else f"局部修复尝试 {len(repair_attempts)} 次，未解决问题 {len(unresolved_consistency_issues)} 项。"
+                            ),
+                            metrics={
+                                "repair_attempt_count": len(repair_attempts),
+                                "unresolved_consistency_issues": len(unresolved_consistency_issues),
+                                "auto_fix_accepted": bool(consistency_report.get("auto_fix_accepted")),
+                            },
+                            extra={
+                                "repair_attempts": repair_attempts[:3],
+                                "manual_stagewide_confirmation_required": manual_confirmation_required,
+                                "manual_patch_suggestions": unresolved_consistency_issues[:5],
+                            },
+                        )
                 except Exception as exc:  # noqa: BLE001 - degraded stage should not fail whole request
                     runtime_metadata["degraded_stages"].append({"stage": "consistency", "reason": str(exc)})
                     if isinstance(exc, SQLAlchemyError):
@@ -2047,6 +2966,17 @@ class PipelineOrchestrator:
                 )
                 runtime_metadata["quality_gates"]["structural_gate"] = structural_quality_gate
                 if not structural_quality_gate.get("passed", True):
+                    blocked_candidate_refs = await self._persist_quality_gate_blocked_versions(
+                        chapter=chapter,
+                        generation_run_id=generation_run_id,
+                        versions=versions,
+                        best_version_index=best_version_index,
+                        best_content=best_content,
+                        review_summaries=review_summaries,
+                        structural_quality_gate=structural_quality_gate,
+                        longform_context=longform_context,
+                    )
+                    runtime_metadata["quality_gate_blocked_versions"] = blocked_candidate_refs
                     await self._update_generation_runtime(
                         chapter,
                         generation_run_id=generation_run_id,
@@ -2054,6 +2984,17 @@ class PipelineOrchestrator:
                         message="结构质量闸门未通过，已阻止低质量章节进入确认阶段",
                         progress_percent=91,
                         level="warning",
+                        event_kind="quality_gate",
+                        title="质量门拦截候选稿",
+                        summary="候选稿已保留供查看，但不会静默定稿；请按拦截原因重试或人工确认。",
+                        content_preview=self._truncate_runtime_text(best_content, 520),
+                        metrics={
+                            "actual_word_count": self._count_words(best_content),
+                            "candidate_count": len(versions),
+                            "quality_issue_codes": structural_quality_gate.get("quality_issue_codes", []),
+                            "quality_issue_labels": structural_quality_gate.get("quality_issue_labels", []),
+                        },
+                        artifact_refs=blocked_candidate_refs if blocked_candidate_refs.get("persisted") else None,
                         extra={
                             "quality_gate_failed": True,
                             "quality_gate": structural_quality_gate,
@@ -2104,6 +3045,16 @@ class PipelineOrchestrator:
                         target_word_count=active_config.target_word_count,
                         min_word_count=active_config.min_word_count,
                         max_iterations=active_config.max_enrich_iterations,
+                        context={
+                            "chapter_mission": chapter_mission,
+                            "previous_summary": history_context["previous_summary"],
+                            "previous_tail": history_context.get("previous_tail"),
+                            "previous_chapter_bundle": history_context.get("previous_chapter_bundle"),
+                            "recent_track": history_context.get("recent_track"),
+                            "plot_arc_digest": history_context.get("plot_arc_digest"),
+                            "project_memory": project_memory_text,
+                            "longform_context": longform_context.to_optimizer_payload(max_prompt_chars=2600) if longform_context else None,
+                        },
                     )
                     if enrichment_summary is not None:
                         best_content, content_guard = self._preserve_non_regressive_content(
@@ -2142,6 +3093,17 @@ class PipelineOrchestrator:
             )
             runtime_metadata["quality_gates"]["structural_gate"] = structural_quality_gate
             if not structural_quality_gate.get("passed", True):
+                blocked_candidate_refs = await self._persist_quality_gate_blocked_versions(
+                    chapter=chapter,
+                    generation_run_id=generation_run_id,
+                    versions=versions,
+                    best_version_index=best_version_index,
+                    best_content=best_content,
+                    review_summaries=review_summaries,
+                    structural_quality_gate=structural_quality_gate,
+                    longform_context=longform_context,
+                )
+                runtime_metadata["quality_gate_blocked_versions"] = blocked_candidate_refs
                 await self._update_generation_runtime(
                     chapter,
                     generation_run_id=generation_run_id,
@@ -2149,6 +3111,17 @@ class PipelineOrchestrator:
                     message="结构质量闸门未通过，已阻止低质量章节进入确认阶段",
                     progress_percent=91,
                     level="warning",
+                    event_kind="quality_gate",
+                    title="质量门拦截候选稿",
+                    summary="候选稿已保留供查看，但不会静默定稿；请按拦截原因重试或人工确认。",
+                    content_preview=self._truncate_runtime_text(best_content, 520),
+                    metrics={
+                        "actual_word_count": self._count_words(best_content),
+                        "candidate_count": len(versions),
+                        "quality_issue_codes": structural_quality_gate.get("quality_issue_codes", []),
+                        "quality_issue_labels": structural_quality_gate.get("quality_issue_labels", []),
+                    },
+                    artifact_refs=blocked_candidate_refs if blocked_candidate_refs.get("persisted") else None,
                     extra={
                         "quality_gate_failed": True,
                         "quality_gate": structural_quality_gate,
@@ -2174,7 +3147,47 @@ class PipelineOrchestrator:
                 violations=guardrail_violations,
                 chapter_mission=chapter_mission,
             )
+            final_quality_guard = self._attach_quality_gate_status_to_guard(
+                final_quality_guard,
+                structural_quality_gate,
+            )
             review_summaries["final_quality_metrics"] = final_quality_guard.get("quality_metric_snapshot", final_quality_guard)
+            continuity_gate_started_at = time.perf_counter()
+            longform_continuity_gate = self.longform_context_service.evaluate_continuity_quality(
+                content=best_content,
+                package=longform_context,
+                chapter_mission=chapter_mission,
+            )
+            longform_continuity_payload = asdict(longform_continuity_gate)
+            review_summaries["longform_continuity_gate"] = longform_continuity_payload
+            runtime_metadata["quality_gates"]["longform_continuity_gate"] = longform_continuity_payload
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="continuity_gate",
+                message=(
+                    "长篇连续性检查完成"
+                    if longform_continuity_gate.passed
+                    else "长篇连续性检查发现需要局部补丁的问题，已写入候选版本报告"
+                ),
+                progress_percent=91,
+                level="info" if longform_continuity_gate.passed else "warning",
+                event_kind="continuity",
+                title="连续性质量门完成",
+                summary=(
+                    "跨章节角色、时间线、伏笔和线索检查通过"
+                    if longform_continuity_gate.passed
+                    else "发现需要局部补丁处理的连续性风险"
+                ),
+                metrics=longform_continuity_gate.metrics,
+                extra={
+                    "longform_gate_passed": longform_continuity_gate.passed,
+                    "longform_gate_blockers": longform_continuity_gate.blockers,
+                    "longform_gate_warnings": longform_continuity_gate.warnings,
+                    "longform_gate_metrics": longform_continuity_gate.metrics,
+                },
+            )
+            await mark_stage("continuity_gate", continuity_gate_started_at, detail="长篇连续性质量门完成")
             runtime_metadata["actual_word_count"] = final_word_count
             runtime_metadata["word_requirement_met"] = final_word_count >= active_config.min_word_count
             if runtime_metadata["word_requirement_met"]:
@@ -2225,6 +3238,8 @@ class PipelineOrchestrator:
             best_version_metadata["review_summaries"] = review_summaries
             best_version_metadata["story_progression_guard"] = final_quality_guard
             best_version_metadata["quality_metrics"] = final_quality_guard.get("quality_metric_snapshot", final_quality_guard)
+            if longform_context:
+                best_version_metadata["longform_context"] = longform_context.to_metadata()
             if review_summaries.get("self_critique"):
                 self_critique_payload = review_summaries.get("self_critique") or {}
                 best_version_metadata["chapter_overview"] = self_critique_payload.get("overview_bundle")
@@ -2241,6 +3256,14 @@ class PipelineOrchestrator:
             stage="persist_versions",
             message="正在写入候选版本并准备进入确认阶段",
             progress_percent=92,
+            event_kind="save",
+            title="正在保存候选版本",
+            summary="正文、评审结果和连续性检查结果正在一起落库。",
+            content_preview=self._truncate_runtime_text(best_content, 420),
+            metrics={
+                "actual_word_count": runtime_metadata["actual_word_count"],
+                "candidate_count": len(versions),
+            },
             extra={
                 "actual_word_count": runtime_metadata["actual_word_count"],
                 "word_requirement_met": runtime_metadata["word_requirement_met"],
@@ -2297,6 +3320,27 @@ class PipelineOrchestrator:
             stage="waiting_for_confirm",
             message="候选版本已准备完成，等待确认最终版本",
             progress_percent=97,
+            event_kind="content",
+            title="候选版本可确认",
+            summary=f"已生成 {len(variants)} 个候选版本，推荐第 {best_version_index + 1} 版。",
+            content_preview=self._truncate_runtime_text(
+                (variants[best_version_index].get("content") or "") if 0 <= best_version_index < len(variants) else best_content,
+                520,
+            ),
+            metrics={
+                "actual_word_count": runtime_metadata["actual_word_count"],
+                "generated_version_count": len(variants),
+                "best_version_index": best_version_index,
+                "pipeline_total_duration_ms": runtime_metadata["pipeline_total_duration_ms"],
+            },
+            artifact_refs={
+                "version_ids": [item.get("version_id") for item in variants if item.get("version_id")],
+                "best_version_id": (
+                    variants[best_version_index].get("version_id")
+                    if 0 <= best_version_index < len(variants)
+                    else None
+                ),
+            },
             extra={
                 "actual_word_count": runtime_metadata["actual_word_count"],
                 "word_requirement_met": runtime_metadata["word_requirement_met"],
@@ -2348,7 +3392,7 @@ class PipelineOrchestrator:
         )
         config.max_enrich_iterations = self._coerce_positive_int(
             flow_config.get("max_enrich_iterations"),
-            default=4 if config.target_word_count >= 4500 else 2,
+            default=8 if config.target_word_count >= 10000 else 6 if config.target_word_count >= 7000 else 4 if config.target_word_count >= 4500 else 2,
             minimum=1,
         )
         if config.min_word_count > config.target_word_count:
@@ -2388,7 +3432,7 @@ class PipelineOrchestrator:
             if flow_config.get("target_word_count") is None:
                 config.target_word_count = 5000
             if flow_config.get("min_word_count") is None:
-                config.min_word_count = max(4500, int(config.target_word_count * 0.9))
+                config.min_word_count = max(800, int(config.target_word_count * 0.9))
 
         if preset == "basic":
             config.enable_rag = True
@@ -2445,19 +3489,9 @@ class PipelineOrchestrator:
                 return metadata
 
             enabled_profiles = [profile for profile in user_config.llm_provider_profiles if getattr(profile, "enabled", True)]
-            if len(enabled_profiles) == 1:
-                active_profile = enabled_profiles[0]
-                metadata["checked"] = False
-                metadata["reason"] = "single_profile_locked_skip_preflight"
-                metadata["current_profile_id"] = active_profile.id
-                metadata["current_profile_name"] = active_profile.name
-                metadata["active_profile_id"] = active_profile.id
-                metadata["active_profile_name"] = active_profile.name
-                metadata["has_usable_profile"] = True
-                metadata["recommended_profile_id"] = active_profile.id
-                metadata["recommended_profile_name"] = active_profile.name
+            if not enabled_profiles:
+                metadata["reason"] = "no_enabled_profiles"
                 return metadata
-
             health = await config_service.run_health_check(user_id=user_id, include_disabled=True)
             metadata["checked"] = True
             metadata["current_profile_id"] = health.current_profile_id
@@ -2833,6 +3867,7 @@ class PipelineOrchestrator:
             previous_tail,
             recent_track,
             plot_arc_digest,
+            str(max(500, int(target_word_count or 0))),
             json.dumps(introduced_characters, ensure_ascii=False),
             json.dumps(planned_characters, ensure_ascii=False),
             json.dumps(all_characters, ensure_ascii=False),
@@ -2881,25 +3916,41 @@ class PipelineOrchestrator:
 目标字数：{target_word_count}
 建议最低完成度：{max(int(target_word_count * 0.92), max(1200, int(target_word_count * 0.75)))}
 
+[CHAPTER_DRAFT_CONTRACT]
+{self._format_chapter_draft_contract_for_prompt(target_word_count, max(int(target_word_count * 0.9), 500))}
+
 [首稿执行要求]
 - 规划出来的 scene_list 必须能直接拿去写正文，不要只给抽象氛围词。
 - 每个场景都尽量体现：目标、阻碍、转折、情绪变化、对话职责、收尾钩子。
 - 第一场必须尽快落到动作目标或冲突，不要把前 15% 篇幅浪费在纯描写。
 - 如果本章预计字数较长，请提前把篇幅分配到场景推进和对话攻防，不要把补字数任务留给后处理。
+- scene_list 数量必须服务章节长度：短章 1-3 场，中等章节 3-5 场，7000 字以上建议 5-7 个真实场景或场景组，10000 字以上建议 6-8 个场景组；每场都要有 goal/conflict/turn/payoff/bridge，不要机械碎切正文。
+- 输出必须是合法 JSON 对象，至少包含 macro_beat、chapter_purpose、character_arc_task、continuity_anchor、dialogue_strategy、foreshadowing_tasks、scene_list。
+- scene_list 每场必须包含 scene、goal、conflict、turn、outcome、payoff、bridge、dialogue_value、end_hook、word_budget；word_budget 要服务目标字数，不要所有场景平均敷衍。
 """
 
         try:
-            response = await self.llm_service.get_llm_response(
+            json_result = await call_generation_json(
+                llm_service=self.llm_service,
                 system_prompt=plan_prompt,
                 conversation_history=[{"role": "user", "content": plan_input}],
                 temperature=0.3,
                 user_id=user_id,
                 timeout=self._resolve_chapter_mission_timeout(target_word_count),
-                response_format=None,
+                policy=GenerationCallPolicy(
+                    stage_label="章节导演脚本",
+                    progress_stage="generate_mission",
+                    retry_attempts=1,
+                    response_format="json_object",
+                    json_schema=self._build_chapter_mission_schema(),
+                    json_schema_name="chapter_mission",
+                    json_schema_strict=False,
+                    max_tokens=self._resolve_chapter_mission_max_tokens(target_word_count),
+                    retry_same_model_once=True,
+                    json_repair_attempts=2,
+                ),
             )
-            cleaned = remove_think_tags(response)
-            normalized = unwrap_markdown_json(cleaned)
-            mission = json.loads(normalized)
+            mission = self._normalize_chapter_mission(json_result.data, target_word_count)
             await self._cache_set(cache_key, mission, expire=600)
             logger.info("章节导演脚本生成完成: macro_beat=%s", mission.get("macro_beat"))
             return mission
@@ -3049,7 +4100,7 @@ class PipelineOrchestrator:
             return cached
 
         project_schema = await self.novel_service._serialize_project(project)
-        blueprint = self._normalize_blueprint(project_schema.blueprint.model_dump())
+        blueprint = self._normalize_blueprint(project_schema.blueprint.model_dump() if project_schema.blueprint else {})
         await self._cache_set(cache_key, blueprint, expire=300)
         return blueprint
 
@@ -3190,7 +4241,7 @@ class PipelineOrchestrator:
 
     @staticmethod
     def _resolve_scene_execution_ratios(scene_count: int, sequel_required: bool = False) -> List[float]:
-        normalized_count = max(1, min(int(scene_count or 1), 6))
+        normalized_count = max(1, min(int(scene_count or 1), 10))
         presets = {
             1: [1.0],
             2: [0.42, 0.58],
@@ -3198,11 +4249,19 @@ class PipelineOrchestrator:
             4: [0.18, 0.26, 0.27, 0.29],
             5: [0.15, 0.2, 0.21, 0.21, 0.23],
             6: [0.12, 0.17, 0.18, 0.18, 0.17, 0.18],
+            7: [0.1, 0.14, 0.15, 0.15, 0.15, 0.15, 0.16],
+            8: [0.09, 0.12, 0.13, 0.13, 0.13, 0.13, 0.13, 0.14],
         }
-        ratios = list(presets.get(normalized_count, presets[3]))
+        if normalized_count in presets:
+            ratios = list(presets[normalized_count])
+        else:
+            raw = [1.0 + (0.04 if index in {normalized_count - 1, normalized_count} else 0.0) for index in range(1, normalized_count + 1)]
+            total = sum(raw)
+            ratios = [round(item / total, 4) for item in raw]
         if sequel_required and ratios:
-            ratios = [round(item * 0.92, 4) for item in ratios]
-        return ratios
+            ratios = [round(item * 0.94, 4) for item in ratios]
+        total = sum(ratios) or 1.0
+        return [round(item / total, 4) for item in ratios]
 
     @staticmethod
     def _build_scene_execution_ledger(
@@ -3222,6 +4281,7 @@ class PipelineOrchestrator:
 
         target_word_count = max(0, int(target_word_count or 0))
         min_word_count = max(0, int(min_word_count or 0))
+        draft_contract = PipelineOrchestrator._resolve_chapter_draft_contract(target_word_count, min_word_count)
         preferred_floor = max(min_word_count, int(target_word_count * 0.92)) if target_word_count else min_word_count
         sequel_required = bool(chapter_mission.get("sequel_required"))
         dialogue_expected = PipelineOrchestrator._chapter_mission_expects_dialogue(chapter_mission)
@@ -3232,10 +4292,16 @@ class PipelineOrchestrator:
             f"本章标题：{outline_title}",
             f"本章摘要：{outline_summary}",
             f"目标字数：尽量写到 {target_word_count} 字，至少不要低于 {min_word_count} 字，优先冲到 {preferred_floor} 字以上。",
+            f"生成策略：{draft_contract['generation_strategy']}；建议场景/场景组数量 {draft_contract['recommended_scene_count_min']}-{draft_contract['recommended_scene_count_max']}，场景组只是规划单位，正文必须保持整章连续。",
             f"开篇推进时限：前 {opening_limit} 字左右内，必须让读者看见本章动作目标和第一层阻碍，禁止把开场耗在纯氛围、纯回忆、纯解释上。",
             "段落推进规则：每 2-3 段至少发生一次可感知变化（动作推进 / 对话攻防 / 信息释放 / 关系变化 / 风险升级），不要连续空转。",
+            "长章密度规则：每 900-1500 字至少有一次实质状态变化，不能连续用解释、背景介绍或同义心理独白凑篇幅。",
             "场景衔接规则：下一段必须吃住上一段留下的动作、情绪或风险，不要只靠关键词拼接。",
         ]
+        if len(scene_list) < int(draft_contract["recommended_scene_count_min"]):
+            lines.append(
+                "场景数量偏少时的补强规则：不要新增无关支线，必须把现有场景扩成更完整的攻防回合、试探、反击、代价、余波和过渡。"
+            )
         if dialogue_expected:
             lines.append("对话硬要求：只要进入对话场，至少两轮来回，其中一轮必须改变主动权、信息量或风险级别。")
 
@@ -3292,6 +4358,7 @@ class PipelineOrchestrator:
             "[当前章节目标]": 0,
             "[章节导演脚本](JSON)": 1,
             "[长线连续性摘要](安全压缩)": 2,
+            "[长篇上下文包](角色/伏笔/时间线)": 2.5,
             "[上一章摘要]": 3,
             "[上一章结尾]": 4,
             "[连续性硬性约束]": 5,
@@ -3338,6 +4405,7 @@ class PipelineOrchestrator:
     @staticmethod
     def _build_prompt_sections(
         *,
+        preset: str = "quality",
         writer_blueprint: Dict[str, Any],
         previous_summary: str,
         previous_tail: str,
@@ -3355,6 +4423,7 @@ class PipelineOrchestrator:
         style_context: Optional[str],
         target_word_count: int,
         min_word_count: int,
+        longform_context_text: Optional[str] = None,
     ) -> List[Tuple[str, str]]:
         blueprint_text = json.dumps(writer_blueprint, ensure_ascii=False, indent=2)
         scene_execution_ledger = PipelineOrchestrator._build_scene_execution_ledger(
@@ -3367,6 +4436,10 @@ class PipelineOrchestrator:
         mission_text = json.dumps(chapter_mission, ensure_ascii=False, indent=2) if chapter_mission else "无导演脚本"
         forbidden_text = json.dumps(forbidden_characters, ensure_ascii=False) if forbidden_characters else "无"
 
+        draft_contract_rules = PipelineOrchestrator._format_chapter_draft_contract_for_prompt(
+            target_word_count,
+            min_word_count,
+        )
         continuity_rules = (
             "- 开篇必须承接上一章结尾，禁止无过渡时间跳跃。\n"
             "- 角色认知边界要与前文一致，不能突然知道未知信息。\n"
@@ -3382,6 +4455,7 @@ class PipelineOrchestrator:
             "- 章末钩子要与主线相关，禁止新开无关支线；可以留压力，但不能让本章像没发生真正事件。"
         )
         length_rules = (
+            f"{draft_contract_rules}\n"
             f"- 目标字数约 {target_word_count} 字，硬性底线为 {min_word_count} 字。\n"
             f"- 优先保证承接、推进、转折、余波和章末牵引完整；在此基础上必须尽量逼近目标字数，不能主动提前收笔。\n"
             f"- 若篇幅不足，优先补足当前章既有冲突内的场景推进、心理变化、动作过程、对话博弈、局势反噬与余波，不要用独立景物描写或总结句拉长。\n"
@@ -3394,6 +4468,8 @@ class PipelineOrchestrator:
         ]
         if macro_continuity_context:
             sections.append(("[长线连续性摘要](安全压缩)", macro_continuity_context))
+        if longform_context_text:
+            sections.append(("[长篇上下文包](角色/伏笔/时间线)", longform_context_text))
         if scene_execution_ledger:
             sections.append(("[SCENE_EXECUTION_LEDGER]", scene_execution_ledger))
         sections.extend(
@@ -3424,6 +4500,15 @@ class PipelineOrchestrator:
             sections.append(("[检索到的剧情上下文](Markdown)", rag_chunks_text))
 
         sections.append(("[世界蓝图](JSON，已裁剪)", blueprint_text))
+
+        # lightweight/basic preset: strip non-essential sections to reduce prompt size for constrained APIs
+        if preset in ("basic", "lightweight", "fast"):
+            essential_keys = {
+                "[当前章节目标]", "[章节导演脚本](JSON)", "[上一章摘要]",
+                "[上一章结尾]", "[连续性硬性约束]", "[章节长度约束]", "[禁止角色](本章不允许提及)",
+                "[世界蓝图](JSON，已裁剪)",
+            }
+            sections = [(k, v) for k, v in sections if k in essential_keys]
         return sections
 
     @staticmethod
@@ -3464,8 +4549,28 @@ class PipelineOrchestrator:
         )
         target_word_count = max(0, int(target_word_count or 0))
         min_word_count = max(0, int(min_word_count or 0))
-        preferred_floor = max(min_word_count, int(target_word_count * 0.88)) if target_word_count else min_word_count
+        draft_contract = cls._resolve_chapter_draft_contract(target_word_count, min_word_count)
+        preferred_floor = int(draft_contract.get("retry_floor") or max(min_word_count, int(target_word_count * 0.88))) if target_word_count else min_word_count
+        scene_floor = 0.72 if target_word_count >= 4500 else 0.58
         dialogue_floor = max(4, len((chapter_mission or {}).get("scene_list") or []) * 2)
+        scene_soft_pass = bool(
+            (
+                int(story_guard.get("mission_hit_count") or 0) >= 3
+                or float(story_guard.get("scene_fulfillment_rate") or 0) >= 0.75
+            )
+            and int(story_guard.get("dialogue_marker_count") or 0) >= 4
+            and not story_guard.get("static_description_risk")
+            and story_guard.get("dialogue_changes_state", True)
+            and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
+            and story_guard.get("event_density_passed", True)
+        )
+        density_soft_pass = bool(
+            int(story_guard.get("mission_hit_count") or 0) >= 4
+            and int(story_guard.get("dialogue_marker_count") or 0) >= 8
+            and story_guard.get("dialogue_changes_state", True)
+            and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
+            and not story_guard.get("static_description_risk")
+        )
 
         reasons: List[str] = []
         if story_guard.get("static_description_risk"):
@@ -3474,14 +4579,44 @@ class PipelineOrchestrator:
             reasons.append("dialogue_pressure_weak")
         if int(story_guard.get("mission_hit_count") or 0) < 2:
             reasons.append("mission_progression_weak")
-        if int(story_guard.get("scene_count") or 0) > 0 and float(story_guard.get("scene_fulfillment_rate") or 1.0) < 0.5:
+        if (
+            int(story_guard.get("scene_count") or 0) > 0
+            and float(story_guard.get("scene_fulfillment_rate") or 1.0) < scene_floor
+            and not scene_soft_pass
+        ):
             reasons.append("scene_fulfillment_weak")
+        if (
+            int(story_guard.get("scene_count") or 0) > 0
+            and float(story_guard.get("scene_structure_rate") or 1.0) < (0.58 if target_word_count >= 4500 else 0.45)
+            and not scene_soft_pass
+        ):
+            reasons.append("scene_structure_weak")
         if story_guard.get("expected_dialogue") and not story_guard.get("dialogue_changes_state", True):
             reasons.append("dialogue_does_not_change_state")
         if int(story_guard.get("word_count") or 0) >= 1200 and not story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected")):
             reasons.append("ending_pressure_missing")
         if preferred_floor and int(story_guard.get("word_count") or 0) < preferred_floor:
             reasons.append("word_count_far_below_target")
+        if (
+            int(story_guard.get("word_count") or 0) >= 1800
+            and story_guard.get("event_density_passed") is False
+            and not density_soft_pass
+        ):
+            reasons.append("event_density_weak")
+        if (
+            int(story_guard.get("word_count") or 0) >= 2500
+            and story_guard.get("state_change_interval_passed") is False
+            and not density_soft_pass
+        ):
+            reasons.append("state_change_interval_weak")
+        if target_word_count >= 7000 and int(story_guard.get("paragraph_count") or 0) < 10:
+            reasons.append("long_chapter_scene_density_weak")
+        if (
+            target_word_count >= 7000
+            and story_guard.get("long_chapter_density_passed") is False
+            and not density_soft_pass
+        ):
+            reasons.append("long_chapter_event_density_weak")
         return bool(reasons), story_guard, reasons
 
     @classmethod
@@ -3502,6 +4637,11 @@ class PipelineOrchestrator:
             "dialogue_does_not_change_state": "上一版对白没有造成主动权、信息量、风险或关系状态变化。",
             "ending_pressure_missing": "上一版结尾没有把压力、后果或危险递给下一章，收得太平。",
             "word_count_far_below_target": "上一版字数离目标差距过大，很多该展开的场景没有写满。",
+            "long_chapter_scene_density_weak": "上一版是长章目标，但段落/场景密度不足，像把少量内容拉长而不是写出足够事件。",
+            "event_density_weak": "上一版事件密度不足，正文没有稳定出现行动、阻碍、反击、发现、代价或关系变化。",
+            "state_change_interval_weak": "上一版存在过长区间没有状态变化，容易读成解释、回忆或气氛拉长。",
+            "scene_structure_weak": "上一版点到了场景词，但缺少目标、阻碍、转折、结果/压力的完整场景结构。",
+            "long_chapter_event_density_weak": "上一版按长章目标生成，但没有提供足够多的有效事件和状态变化。",
         }
         mission_keywords = story_guard.get("mission_hits") or cls._collect_fallback_mission_keywords(chapter_mission)[:8]
         focus_text = " / ".join(str(item) for item in mission_keywords[:6]) if mission_keywords else "本章目标、冲突、转折、章末压力"
@@ -3512,6 +4652,7 @@ class PipelineOrchestrator:
             f"必须重点命中：{focus_text}",
             "如果进入对话场，至少两轮来回，其中一轮必须让主动权、信息量或风险发生变化。",
             "请把字数主要补在场景执行里：动作回合、试探压迫、因果后果、关系变化，不要补成纯景物描写。",
+            "每 900-1500 字至少交出一次可见状态变化：新信息、代价、关系转向、风险升级、行动结果或伏笔兑现。",
             "",
             "上一版主要问题：",
         ]
@@ -3540,6 +4681,7 @@ class PipelineOrchestrator:
         analysis_guidance_context: Optional[str],
         enhanced_context: Optional[Dict[str, Any]],
         config: PipelineConfig,
+        progress_callback: Optional[Callable[[str, str], Awaitable[None]]] = None,
     ) -> Dict[str, Any]:
         with LLMService.daily_limit_scope(f"writer_version:{project_id}:{chapter_number}:{index}:{user_id}"):
             version_started_at = time.perf_counter()
@@ -3562,6 +4704,7 @@ class PipelineOrchestrator:
                     f"\n\n[本次输出红线]\n"
                     f"- 直接输出完整章节正文，不要解释。\n"
                     f"- 先保证承接、冲突推进、角色变化、局势反转与章末牵引完整，再追求文气。\n"
+                    f"- {self._format_chapter_draft_contract_for_prompt(config.target_word_count, config.min_word_count)}\n"
                     f"- 目标字数：{config.target_word_count}；最低字数：{config.min_word_count}。不要刚过底线就提前收束，要把该展开的场景写满。\n"
                     f"- 字数优先写在场景执行里：对话攻防、动作过程、因果后果、关系变化、短余波，不要写成纯描写补字数。\n"
                 )
@@ -3574,16 +4717,28 @@ class PipelineOrchestrator:
 
                 generation_started_at = time.perf_counter()
                 try:
-                    response = await self.llm_service.get_llm_response(
+                    text_result = await call_generation_text(
+                        llm_service=self.llm_service,
                         system_prompt=writer_prompt,
                         conversation_history=[{"role": "user", "content": final_prompt_input}],
                         temperature=temperature,
                         user_id=user_id,
                         timeout=self._resolve_chapter_generation_timeout(config.target_word_count),
-                        max_tokens=self._resolve_chapter_generation_max_tokens(config.target_word_count),
-                        response_format=None,
-                        allow_truncated_response=config.allow_truncated_response,
+                        policy=GenerationCallPolicy(
+                            stage_label=f"章节正文候选 {index + 1}",
+                            progress_stage="generate_variants",
+                            retry_attempts=2,
+                            response_format=None,
+                            max_tokens=self._resolve_chapter_generation_max_tokens(config.target_word_count),
+                            prompt_cache_key=f"xq:{project_id}:{chapter_number}:draft",
+                            allow_truncated_response=config.allow_truncated_response,
+                            retry_same_model_once=True,
+                            heartbeat_interval_seconds=60.0,
+                            soft_timeout_seconds=self._resolve_chapter_generation_soft_timeout(config.target_word_count),
+                        ),
+                        progress_callback=progress_callback,
                     )
+                    response = text_result.text
                 except HTTPException:
                     raise
                 except (httpx.HTTPError, APIConnectionError, APITimeoutError, APIError) as exc:
@@ -3658,6 +4813,7 @@ class PipelineOrchestrator:
                     analysis_guidance_context=analysis_guidance_context,
                     style_hint=style_hint,
                     enhanced_context=enhanced_context,
+                    target_word_count=config.target_word_count,
                     user_id=user_id,
                 )
                 generation_duration_ms = round((time.perf_counter() - preview_started_at) * 1000, 2)
@@ -3671,6 +4827,7 @@ class PipelineOrchestrator:
                     f"\n\n[本次输出红线]\n"
                     f"- 直接输出完整章节正文，不要解释。\n"
                     f"- 先保证剧情承接、冲突推进、角色变化与章末牵引完整。\n"
+                    f"- {self._format_chapter_draft_contract_for_prompt(config.target_word_count, config.min_word_count)}\n"
                     f"- 目标字数约 {config.target_word_count}；最低字数：{config.min_word_count}。在保证质量的前提下，必须尽量逼近目标字数，不能写到刚过底线就提前收束。"
                 )
                 if style_hint:
@@ -3678,16 +4835,28 @@ class PipelineOrchestrator:
 
                 generation_started_at = time.perf_counter()
                 try:
-                    response = await self.llm_service.get_llm_response(
+                    text_result = await call_generation_text(
+                        llm_service=self.llm_service,
                         system_prompt=writer_prompt,
                         conversation_history=[{"role": "user", "content": final_prompt_input}],
                         temperature=0.9,
                         user_id=user_id,
                         timeout=self._resolve_chapter_generation_timeout(config.target_word_count),
-                        max_tokens=self._resolve_chapter_generation_max_tokens(config.target_word_count),
-                        response_format=None,
-                        allow_truncated_response=config.allow_truncated_response,
+                        policy=GenerationCallPolicy(
+                            stage_label=f"章节正文候选 {index + 1} 兜底生成",
+                            progress_stage="generate_variants",
+                            retry_attempts=2,
+                            response_format=None,
+                            max_tokens=self._resolve_chapter_generation_max_tokens(config.target_word_count),
+                            prompt_cache_key=f"xq:{project_id}:{chapter_number}:draft",
+                            allow_truncated_response=config.allow_truncated_response,
+                            retry_same_model_once=True,
+                            heartbeat_interval_seconds=60.0,
+                            soft_timeout_seconds=self._resolve_chapter_generation_soft_timeout(config.target_word_count),
+                        ),
+                        progress_callback=progress_callback,
                     )
+                    response = text_result.text
                 except HTTPException:
                     raise
                 except (httpx.HTTPError, APIConnectionError, APITimeoutError, APIError) as exc:
@@ -3780,6 +4949,10 @@ class PipelineOrchestrator:
                 )
                 retry_score = int(retry_story_guard.get("score") or 0)
                 current_score = int(initial_story_guard.get("score") or 0)
+                retry_word_count = int(retry_story_guard.get("word_count") or 0)
+                initial_word_count = int(initial_story_guard.get("word_count") or 0)
+                meaningful_word_gain = max(300, int(config.target_word_count * (0.06 if config.target_word_count >= 7000 else 0.08)))
+                retry_reaches_floor = retry_word_count >= max(config.min_word_count, int(config.target_word_count * 0.9))
                 accept_retry = bool(
                     retry_score >= current_score + 120
                     or (
@@ -3788,7 +4961,13 @@ class PipelineOrchestrator:
                     )
                     or (
                         retry_story_guard.get("mission_hit_count", 0) >= initial_story_guard.get("mission_hit_count", 0)
-                        and retry_story_guard.get("word_count", 0) >= initial_story_guard.get("word_count", 0) + 300
+                        and retry_word_count >= initial_word_count + meaningful_word_gain
+                    )
+                    or (
+                        retry_reaches_floor
+                        and retry_story_guard.get("mission_hit_count", 0) >= initial_story_guard.get("mission_hit_count", 0)
+                        and retry_score >= current_score - 80
+                        and not retry_story_guard.get("static_description_risk")
                     )
                 )
                 first_draft_retry_metadata.update(
@@ -3844,6 +5023,7 @@ class PipelineOrchestrator:
         analysis_guidance_context: Optional[str],
         style_hint: Optional[str],
         enhanced_context: Optional[Dict[str, Any]],
+        target_word_count: int,
         user_id: int,
     ) -> Tuple[str, Dict[str, Any]]:
         preview_service = PreviewGenerationService(self.session, self.llm_service, self.prompt_service)
@@ -3866,6 +5046,7 @@ class PipelineOrchestrator:
             blueprint_context=blueprint_context,
             emotion_context=analysis_guidance_context or "（无额外角色/伏笔/线索指导）",
             memory_context=memory_context or "（无记忆层上下文）",
+            target_word_count=target_word_count,
             style_hint=style_hint or "",
             user_id=user_id,
         )
@@ -3897,19 +5078,87 @@ class PipelineOrchestrator:
 """
 
         try:
-            response = await self.llm_service.get_llm_response(
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
                 system_prompt=rewrite_prompt,
                 conversation_history=[{"role": "user", "content": rewrite_input}],
                 temperature=0.3,
                 user_id=user_id,
                 timeout=120.0,
-                response_format=None,
+                policy=GenerationCallPolicy(
+                    stage_label="章节护栏局部修复",
+                    progress_stage="consistency",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=8000,
+                    retry_same_model_once=True,
+                ),
             )
-            cleaned = remove_think_tags(response)
+            cleaned = remove_think_tags(text_result.text)
+            guard_failure = self._guardrail_rewrite_guard_failure(original_text, cleaned, chapter_mission=chapter_mission)
+            if guard_failure:
+                logger.warning("Chapter guardrail rewrite rejected by continuity guard: reason=%s", guard_failure)
+                return original_text
             return cleaned
         except Exception as exc:
             logger.warning("自动修复失败，返回原文: %s", exc)
             return original_text
+
+    @staticmethod
+    def _guardrail_rewrite_guard_failure(
+        original_text: str,
+        rewritten_text: str,
+        chapter_mission: Optional[dict] = None,
+    ) -> Optional[str]:
+        original = str(original_text or "").strip()
+        rewritten = str(rewritten_text or "").strip()
+        if not rewritten:
+            return "empty_rewrite"
+        if rewritten.startswith("{") and "content" in rewritten[:240].lower():
+            return "raw_json_returned"
+
+        original_compact = re.sub(r"\s+", "", original)
+        rewritten_compact = re.sub(r"\s+", "", rewritten)
+        if len(original_compact) >= 1200 and len(rewritten_compact) < int(len(original_compact) * 0.72):
+            return "rewrite_shrank_too_much"
+        if len(original_compact) >= 400 and len(rewritten_compact) < int(len(original_compact) * 0.58):
+            return "rewrite_lost_too_much"
+
+        original_paragraphs = [part.strip() for part in re.split(r"\n\s*\n", original) if part.strip()]
+        rewritten_paragraphs = [part.strip() for part in re.split(r"\n\s*\n", rewritten) if part.strip()]
+        if len(original_paragraphs) >= 6 and len(rewritten_paragraphs) < max(3, len(original_paragraphs) // 3):
+            return "rewrite_collapsed_paragraph_structure"
+
+        anchors: List[str] = []
+        if original_paragraphs:
+            first = re.sub(r"\s+", "", original_paragraphs[0])
+            last = re.sub(r"\s+", "", original_paragraphs[-1])
+            if len(first) >= 16:
+                anchors.append(first[:24])
+            if len(last) >= 16:
+                anchors.append(last[-24:])
+        if len(anchors) >= 2 and all(anchor not in rewritten_compact for anchor in anchors):
+            return "rewrite_lost_front_and_back_anchors"
+        if isinstance(chapter_mission, dict):
+            mission_keywords = PipelineOrchestrator._collect_fallback_mission_keywords(chapter_mission)
+            if mission_keywords:
+                original_lower = original.lower()
+                rewritten_lower = rewritten.lower()
+                required: List[str] = []
+                for keyword in mission_keywords:
+                    for token in PipelineOrchestrator._extract_quality_tokens(keyword):
+                        normalized = str(token or "").strip().lower()
+                        if len(normalized) < 3:
+                            continue
+                        if normalized in original_lower and normalized not in required:
+                            required.append(normalized)
+                    if len(required) >= 12:
+                        break
+                if len(required) >= 2:
+                    kept = [token for token in required if token in rewritten_lower]
+                    if len(kept) < max(1, len(required) // 2):
+                        return "rewrite_lost_mission_continuity_terms"
+        return None
 
     @staticmethod
     def _extract_text(value: object) -> Optional[str]:
@@ -4009,19 +5258,32 @@ class PipelineOrchestrator:
         text = str(value).strip()
         if not text:
             return []
-        tokens = [text] if 2 <= len(text) <= 32 else []
+        stop_tokens = {
+            "本章", "主角", "目标", "冲突", "转折", "压力", "下一章", "下一场",
+            "必须", "不能", "需要", "继续", "同时", "最终", "真正", "方式",
+        }
+        tokens = [text] if 2 <= len(text) <= 32 and text not in stop_tokens else []
         for token in re.split(r"[，。；、！？：:\s/|,.;!?()\[\]{}<>《》“”\"'\\-]+", text):
             token = token.strip()
             if 2 <= len(token) <= 12:
                 tokens.append(token)
+            compact = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", token)
+            if 5 <= len(compact) <= 18:
+                # 章节任务常把“潮宗正式发缉印令”这类动作+名词写成一整句，
+                # 正文更可能只落到“缉印令”。补充较短的命名片段，减少硬关键词误杀。
+                for size in (5, 4, 3):
+                    for start in range(0, max(0, len(compact) - size + 1)):
+                        piece = compact[start:start + size]
+                        if piece and piece not in stop_tokens:
+                            tokens.append(piece)
 
         deduped: List[str] = []
         seen = set()
         for token in tokens:
-            if token not in seen:
+            if token not in seen and token not in stop_tokens:
                 seen.add(token)
                 deduped.append(token)
-        return deduped[:12]
+        return deduped[:20]
 
     @classmethod
     def _score_text_hits(cls, value: Any, condensed_text: str) -> Tuple[int, List[str]]:
@@ -4033,16 +5295,42 @@ class PipelineOrchestrator:
     def _evaluate_scene_fulfillment(cls, chapter_mission: Optional[dict], condensed_text: str) -> Dict[str, Any]:
         scene_list = (chapter_mission or {}).get("scene_list") if isinstance(chapter_mission, dict) else []
         if not isinstance(scene_list, list) or not scene_list:
-            return {"scene_count": 0, "fulfilled_scene_count": 0, "scene_fulfillment_rate": 1.0, "scene_details": []}
+            return {
+                "scene_count": 0,
+                "fulfilled_scene_count": 0,
+                "scene_fulfillment_rate": 1.0,
+                "structure_passed_scene_count": 0,
+                "scene_structure_rate": 1.0,
+                "scene_details": [],
+            }
 
-        tracked_keys = ("goal", "conflict", "turn", "must_happen", "outcome", "pressure_shift", "dialogue_value", "end_hook")
+        tracked_keys = (
+            "goal",
+            "conflict",
+            "turn",
+            "must_happen",
+            "outcome",
+            "pressure_shift",
+            "dialogue_value",
+            "end_hook",
+            "payoff",
+            "bridge",
+        )
+        structure_groups = {
+            "goal": ("goal", "must_happen"),
+            "conflict": ("conflict", "dialogue_value"),
+            "turn": ("turn", "outcome", "pressure_shift", "payoff"),
+            "bridge": ("bridge", "end_hook"),
+        }
         details: List[Dict[str, Any]] = []
         fulfilled_count = 0
+        structure_passed_count = 0
         for index, scene in enumerate(scene_list[:8], start=1):
             if not isinstance(scene, dict):
                 continue
             required_fields = 0
             hit_fields = 0
+            hit_by_key: Dict[str, bool] = {}
             field_results = []
             for key in tracked_keys:
                 value = scene.get(key)
@@ -4052,11 +5340,21 @@ class PipelineOrchestrator:
                 hit_count, hits = cls._score_text_hits(value, condensed_text)
                 field_hit = hit_count > 0
                 hit_fields += 1 if field_hit else 0
+                hit_by_key[key] = field_hit
                 field_results.append({"field": key, "hit": field_hit, "hits": hits})
 
             required_to_pass = max(1, min(3, math.ceil(required_fields * 0.45)))
             fulfilled = bool(required_fields == 0 or hit_fields >= required_to_pass)
+            structure_hits = 0
+            structure_results: Dict[str, bool] = {}
+            for group_name, keys in structure_groups.items():
+                group_hit = any(hit_by_key.get(key) for key in keys)
+                structure_results[group_name] = group_hit
+                structure_hits += 1 if group_hit else 0
+            structure_required = 2 if required_fields <= 3 else 3
+            structure_passed = bool(required_fields == 0 or structure_hits >= structure_required)
             fulfilled_count += 1 if fulfilled else 0
+            structure_passed_count += 1 if structure_passed else 0
             details.append(
                 {
                     "scene_index": index,
@@ -4064,6 +5362,10 @@ class PipelineOrchestrator:
                     "hit_fields": hit_fields,
                     "required_to_pass": required_to_pass,
                     "fulfilled": fulfilled,
+                    "structure_hits": structure_hits,
+                    "structure_required": structure_required,
+                    "structure_passed": structure_passed,
+                    "structure_results": structure_results,
                     "fields": field_results,
                 }
             )
@@ -4073,7 +5375,110 @@ class PipelineOrchestrator:
             "scene_count": scene_count,
             "fulfilled_scene_count": fulfilled_count,
             "scene_fulfillment_rate": round(fulfilled_count / max(1, scene_count), 4),
+            "structure_passed_scene_count": structure_passed_count,
+            "scene_structure_rate": round(structure_passed_count / max(1, scene_count), 4),
             "scene_details": details,
+        }
+
+    STORY_PROGRESSION_MARKERS = (
+        "逼问", "质问", "追问", "反问", "试探", "压迫", "威胁", "拒绝", "反制", "让步",
+        "改口", "承认", "暴露", "揭开", "揭露", "证实", "发现", "意识到", "明白", "决定",
+        "选择", "交换", "代价", "风险", "危险", "失控", "反转", "翻脸", "背叛", "线索",
+        "证据", "期限", "后果", "付出", "受伤", "倒下", "失去", "得到", "夺回", "打开",
+        "推开", "抓住", "按住", "拔出", "砸开", "冲进", "闯入", "逃出", "追上", "救下",
+        "杀", "死", "活", "必须", "否则", "来不及", "下一步", "转而", "却", "但", "然而",
+    )
+
+    @classmethod
+    def _story_units(cls, text: str) -> List[str]:
+        units = [unit.strip() for unit in re.split(r"[。！？!?\n]+", str(text or "")) if unit.strip()]
+        expanded: List[str] = []
+        for unit in units:
+            if len(unit) <= 180:
+                expanded.append(unit)
+                continue
+            for index in range(0, len(unit), 140):
+                chunk = unit[index:index + 140].strip()
+                if chunk:
+                    expanded.append(chunk)
+        return expanded
+
+    @classmethod
+    def _unit_has_progression(cls, unit: str) -> bool:
+        if not unit:
+            return False
+        if any(mark in unit for mark in ("“", "”", "「", "」", "『", "』", '"')):
+            return True
+        return any(marker in unit for marker in cls.STORY_PROGRESSION_MARKERS)
+
+    @classmethod
+    def _evaluate_event_density(cls, text: str, *, word_count: int) -> Dict[str, Any]:
+        if word_count < 800:
+            return {
+                "event_density_passed": True,
+                "long_chapter_density_passed": True,
+                "state_change_interval_passed": True,
+                "progression_unit_count": 0,
+                "story_unit_count": 0,
+                "progression_unit_rate": 1.0,
+                "event_density_per_1000": 0.0,
+                "state_change_window_pass_rate": 1.0,
+                "max_plain_unit_run": 0,
+            }
+
+        units = cls._story_units(text)
+        progression_flags = [cls._unit_has_progression(unit) for unit in units]
+        progression_count = sum(1 for item in progression_flags if item)
+        story_unit_count = len(units)
+        max_plain_run = 0
+        current_plain_run = 0
+        for flag in progression_flags:
+            if flag:
+                current_plain_run = 0
+            else:
+                current_plain_run += 1
+                max_plain_run = max(max_plain_run, current_plain_run)
+
+        condensed = "".join(str(text or "").split())
+        window_size = 1200 if word_count >= 7000 else 950
+        windows = [condensed[index:index + window_size] for index in range(0, len(condensed), window_size)] or [condensed]
+        window_hits = sum(1 for window in windows if cls._unit_has_progression(window))
+        window_pass_rate = round(window_hits / max(1, len(windows)), 4)
+
+        density_per_1000 = round(progression_count / max(1.0, word_count / 1000), 4)
+        progression_rate = round(progression_count / max(1, story_unit_count), 4)
+        density_floor = 1.0 if word_count < 2500 else 1.25 if word_count < 7000 else 1.45
+        unit_rate_floor = 0.16 if word_count < 2500 else 0.2 if word_count < 7000 else 0.22
+        window_floor = 0.6 if word_count < 2500 else 0.68 if word_count < 7000 else 0.74
+        plain_run_limit = 5 if word_count < 7000 else 4
+
+        state_interval_passed = bool(window_pass_rate >= window_floor)
+        dense_progression_override = bool(
+            state_interval_passed
+            and density_per_1000 >= density_floor * 2
+            and progression_rate >= unit_rate_floor * 1.6
+        )
+        event_density_passed = bool(
+            density_per_1000 >= density_floor
+            and progression_rate >= unit_rate_floor
+            and (max_plain_run <= plain_run_limit or dense_progression_override)
+        )
+        long_chapter_passed = True
+        if word_count >= 7000:
+            long_chapter_passed = bool(event_density_passed and state_interval_passed and progression_count >= 12)
+
+        return {
+            "event_density_passed": event_density_passed,
+            "long_chapter_density_passed": long_chapter_passed,
+            "state_change_interval_passed": state_interval_passed,
+            "progression_unit_count": progression_count,
+            "story_unit_count": story_unit_count,
+            "progression_unit_rate": progression_rate,
+            "event_density_per_1000": density_per_1000,
+            "state_change_window_count": len(windows),
+            "state_change_window_hit_count": window_hits,
+            "state_change_window_pass_rate": window_pass_rate,
+            "max_plain_unit_run": max_plain_run,
         }
 
     @staticmethod
@@ -4107,6 +5512,25 @@ class PipelineOrchestrator:
         continuity = (chapter_mission or {}).get("continuity_anchor") if isinstance(chapter_mission, dict) else {}
         deliver_to_next = continuity.get("deliver_to_next") if isinstance(continuity, dict) else []
         _, deliver_hits = cls._score_text_hits(deliver_to_next, ending_excerpt)
+        mission_hook_sources: List[Any] = []
+        if isinstance(chapter_mission, dict):
+            for key in (
+                "suspense_hook",
+                "chapter_role",
+                "chapter_purpose",
+                "payoff_window",
+                "conflict_escalation",
+                "foreshadowing_tasks",
+            ):
+                if chapter_mission.get(key):
+                    mission_hook_sources.append(chapter_mission.get(key))
+            scene_list = chapter_mission.get("scene_list")
+            if isinstance(scene_list, list) and scene_list:
+                last_scene = scene_list[-1] if isinstance(scene_list[-1], dict) else {}
+                for key in ("end_hook", "bridge", "outcome", "pressure_shift", "payoff", "turn"):
+                    if last_scene.get(key):
+                        mission_hook_sources.append(last_scene.get(key))
+        _, mission_hook_hits = cls._score_text_hits(mission_hook_sources, ending_excerpt)
         hook_markers = (
             "却", "突然", "忽然", "门外", "脚步", "消息", "期限", "代价", "危险",
             "线索", "证据", "下一刻", "来不及", "问题", "？", "?", "！", "!",
@@ -4118,14 +5542,22 @@ class PipelineOrchestrator:
             "\u538b\u529b", "\u4ee3\u4ef7", "\u540e\u679c", "\u8bc1\u636e",
             "\u7ebf\u7d22", "\u5f02\u5e38", "\u4e0d\u81ea\u7136",
             "\u6765\u4e0d\u53ca", "\u5fc5\u987b", "\u5426\u5219",
+            "\u9000\u8def", "\u5c01\u9501", "\u7f09\u5370\u4ee4", "\u901a\u7f09",
+            "\u5012\u8ba1\u65f6", "\u8ffd\u7d22", "\u8ffd\u6740", "\u903c\u8fd1",
+            "\u5835\u6b7b", "\u9501\u6b7b", "\u53ea\u80fd", "\u4e0d\u5f97\u4e0d",
             "\u4f1a\u5148\u6b7b", "\u6b7b\u5728", "\u65e7\u6728\u7247",
+            "\u6b7b\u4eba", "\u4f1a\u6b7b\u4eba", "\u771f\u4f1a\u6b7b",
+            "\u65e7\u5357\u6e20", "\u836f\u6e23", "\u836f\u5473", "\u836f\u8017",
+            "\u89c1\u4e86\u5730", "\u4eba\u547d", "\u75c5\u4eba",
         )
         hook_hits = [marker for marker in (*hook_markers, *zh_hook_markers) if marker in ending_excerpt]
         closure_hits = [marker for marker in closure_markers if marker in ending_excerpt]
-        passed = bool((deliver_hits or len(hook_hits) >= 2) and not closure_hits)
+        mission_hook_pass = bool(mission_hook_hits and hook_hits)
+        passed = bool((deliver_hits or len(hook_hits) >= 2 or mission_hook_pass) and not closure_hits)
         return {
             "ending_pressure_passed": passed,
-            "ending_pressure_hits": (deliver_hits + hook_hits)[:8],
+            "ending_pressure_hits": (deliver_hits + mission_hook_hits + hook_hits)[:10],
+            "mission_hook_hits": mission_hook_hits[:6],
             "flat_closure_markers": closure_hits[:4],
         }
 
@@ -4157,6 +5589,15 @@ class PipelineOrchestrator:
         text = str(content or "")
         condensed = "".join(text.split())
         word_count = len(condensed)
+        target_floor = max(0, int(target_word_count or 0))
+        minimum_floor = max(0, int(min_word_count or 0))
+        if target_floor and minimum_floor > target_floor:
+            minimum_floor = target_floor
+        preferred_floor = max(minimum_floor, int(target_floor * 0.92)) if target_floor else minimum_floor
+        word_count_below_min = bool(minimum_floor and word_count < minimum_floor)
+        word_count_far_below_target = bool(preferred_floor and word_count < preferred_floor)
+        upper_target = int(target_floor * 1.25) if target_floor else 0
+        word_count_far_above_target = bool(upper_target and word_count > upper_target)
         paragraphs = [segment for segment in text.splitlines() if segment.strip()]
         paragraph_count = len(paragraphs)
         dialogue_markers = sum(text.count(marker) for marker in ("“", "”", "「", "」", "『", "』", '"'))
@@ -4190,6 +5631,43 @@ class PipelineOrchestrator:
             "static_description_risk": static_description_risk,
         }
 
+    @staticmethod
+    def _detect_chapter_artifact_markers(text):
+        """Detect chapter artifact markers in content."""
+        if not text:
+            return {"chapter_artifact_markers": False, "chapter_artifact_marker_count": 0, "chapter_artifact_marker_examples": []}
+        
+        import re
+        patterns = [
+            re.compile(r'^\s*#{1,6}\s*(?:场景|scene|扩写|修订|完整章节正文|本章正文|章节大纲|章节导演)\s*\d*\s*[|\uff5c:\uff1a\u3011]?\s*\S*', re.IGNORECASE | re.MULTILINE),
+            re.compile(r'^\s*(?:【|\*\*【)?\s*场景\s*\d+\s*(?:[|\uff5c:\uff1a\u3011]|$)', re.MULTILINE),
+            re.compile(r'^\s*(?:【|\*\*【)?\s*扩写部分\s*\d*\s*(?:[|\uff5c:\uff1a\u3011]|$)', re.MULTILINE),
+            re.compile(r'^\s*(?:修改说明|修订说明|以下是|本章正文|完整章节正文)\s*[:\uff1a]', re.MULTILINE),
+            re.compile(r'(?:写作指令|写作要求|质量方向|基础质量底线|首稿执行要求)\s*[:\uff1a]'),
+            re.compile(r'约\s*\d+\s*字'),
+        ]
+        
+        examples = []
+        for p in patterns:
+            for m in p.finditer(text):
+                example = m.group(0).strip()
+                if example and len(example) <= 100:
+                    examples.append(example)
+                    if len(examples) >= 5:
+                        break
+            if len(examples) >= 5:
+                break
+        
+        # Also check for structural bold headings
+        for m in re.finditer(r'\*\*(.+?)\*\*', text):
+            s = m.group(1)
+            if any(kw in s for kw in ['场景', '章节', '扩写', '修订']):
+                examples.append(m.group(0).strip())
+                if len(examples) >= 5:
+                    break
+        
+        return {"chapter_artifact_markers": len(examples) > 0, "chapter_artifact_marker_count": len(examples), "chapter_artifact_marker_examples": examples[:5]}
+
     @classmethod
     def _score_story_quality_candidate(
         cls,
@@ -4197,6 +5675,8 @@ class PipelineOrchestrator:
         content: str,
         violations: List[Dict[str, Any]],
         chapter_mission: Optional[dict],
+        target_word_count: Optional[int] = None,
+        min_word_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         text = str(content or "")
         condensed = "".join(text.split())
@@ -4216,11 +5696,15 @@ class PipelineOrchestrator:
         ending_pressure = cls._evaluate_ending_pressure(condensed, chapter_mission)
         ending_hook = bool(ending_pressure.get("ending_pressure_passed"))
         static_runs = cls._estimate_static_description_runs(paragraphs)
+        event_density = cls._evaluate_event_density(text, word_count=word_count)
+        artifact_markers = cls._detect_chapter_artifact_markers(text)
         static_description_risk = bool(
             (dialogue_markers == 0 and paragraph_count <= 4 and word_count >= 1800)
             or (word_count >= 1500 and static_runs.get("max_static_run", 0) >= 3)
+            or (word_count >= 2500 and event_density.get("event_density_passed") is False and static_runs.get("max_static_run", 0) >= 2)
         )
         scene_rate = float(scene_fulfillment.get("scene_fulfillment_rate", 1.0) or 0)
+        scene_structure_rate = float(scene_fulfillment.get("scene_structure_rate", 1.0) or 0)
         scene_count = int(scene_fulfillment.get("scene_count") or 0)
 
         score = 0
@@ -4228,8 +5712,13 @@ class PipelineOrchestrator:
         score += min(paragraph_count, 12) * 18
         score += min(dialogue_markers, 10) * 12
         score += int(scene_rate * 280) if scene_count else 80
+        score += int(scene_structure_rate * 140) if scene_count else 40
         score += 140 if dialogue_state.get("dialogue_changes_state") else -140
         score += 140 if ending_hook else -120
+        score += min(int(event_density.get("progression_unit_count") or 0), 18) * 16
+        score += 80 if event_density.get("event_density_passed") else -180
+        score += 60 if event_density.get("state_change_interval_passed") else -130
+        score += 90 if event_density.get("long_chapter_density_passed") else -180
         score += min(word_count, 2400) // 50
         score -= len(violations) * 500
         score -= 260 if static_description_risk else 0
@@ -4241,12 +5730,25 @@ class PipelineOrchestrator:
             "scene_fulfillment_rate": scene_rate,
             "fulfilled_scene_count": scene_fulfillment.get("fulfilled_scene_count", 0),
             "scene_count": scene_count,
+            "scene_structure_rate": scene_structure_rate,
+            "structure_passed_scene_count": scene_fulfillment.get("structure_passed_scene_count", 0),
             "dialogue_changes_state": bool(dialogue_state.get("dialogue_changes_state")),
             "dialogue_state_change_markers": dialogue_state.get("state_change_marker_count", 0),
             "ending_pressure_passed": ending_hook,
             "static_description_risk": static_description_risk,
             "static_paragraph_count": static_runs.get("static_paragraph_count", 0),
             "max_static_run": static_runs.get("max_static_run", 0),
+            "event_density_passed": bool(event_density.get("event_density_passed")),
+            "chapter_artifact_markers": artifact_markers.get("chapter_artifact_markers"),
+            "chapter_artifact_marker_examples": artifact_markers.get("chapter_artifact_marker_examples", []),
+            "long_chapter_density_passed": bool(event_density.get("long_chapter_density_passed")),
+            "state_change_interval_passed": bool(event_density.get("state_change_interval_passed")),
+            "progression_unit_count": event_density.get("progression_unit_count", 0),
+            "story_unit_count": event_density.get("story_unit_count", 0),
+            "progression_unit_rate": event_density.get("progression_unit_rate", 0),
+            "event_density_per_1000": event_density.get("event_density_per_1000", 0),
+            "state_change_window_pass_rate": event_density.get("state_change_window_pass_rate", 0),
+            "max_plain_unit_run": event_density.get("max_plain_unit_run", 0),
         }
         quality_issue_summary = cls._build_quality_issue_summary(story_guard=quality_metric_snapshot)
         quality_metric_snapshot["quality_issue_summary"] = quality_issue_summary
@@ -4267,16 +5769,26 @@ class PipelineOrchestrator:
             "scene_fulfillment_rate": scene_rate,
             "fulfilled_scene_count": scene_fulfillment.get("fulfilled_scene_count", 0),
             "scene_count": scene_count,
+            "scene_structure_rate": scene_structure_rate,
+            "structure_passed_scene_count": scene_fulfillment.get("structure_passed_scene_count", 0),
             "scene_fulfillment": scene_fulfillment,
             "dialogue_changes_state": dialogue_state.get("dialogue_changes_state"),
             "dialogue_state_change_markers": dialogue_state.get("state_change_marker_count", 0),
             "ending_pressure_passed": ending_pressure.get("ending_pressure_passed"),
             "ending_pressure": ending_pressure,
             "static_description_runs": static_runs,
+            "event_density": event_density,
+            "event_density_passed": event_density.get("event_density_passed"),
+            "long_chapter_density_passed": event_density.get("long_chapter_density_passed"),
+            "state_change_interval_passed": event_density.get("state_change_interval_passed"),
+            "progression_unit_count": event_density.get("progression_unit_count", 0),
+            "event_density_per_1000": event_density.get("event_density_per_1000", 0),
+            "state_change_window_pass_rate": event_density.get("state_change_window_pass_rate", 0),
             "quality_issue_summary": quality_issue_summary,
             "quality_issue_codes": quality_issue_summary.get("codes", []),
             "quality_issue_labels": quality_issue_summary.get("labels", []),
             "quality_metric_snapshot": quality_metric_snapshot,
+            **artifact_markers,
         }
 
     @classmethod
@@ -4377,6 +5889,35 @@ class PipelineOrchestrator:
             "fallback_candidate": fallback_candidate,
         }
 
+    @staticmethod
+    def _build_ai_review_mission(
+        *,
+        chapter_mission: Optional[dict],
+        longform_context: Optional[LongformContextPackage],
+    ) -> Optional[dict]:
+        if not isinstance(chapter_mission, dict) and not longform_context:
+            return None
+
+        review_mission = deepcopy(chapter_mission) if isinstance(chapter_mission, dict) else {}
+        review_mission.setdefault("review_quality_rules", [])
+        review_mission["review_quality_rules"] = list(review_mission.get("review_quality_rules") or []) + [
+            "候选稿必须承接前文角色状态、时间线、知识边界和章末压力。",
+            "必须检查本章伏笔/线索任务是否被看见、强化或回收，不能只按文风选稿。",
+            "如果候选稿需要修补，优先输出局部锚点补丁建议，不把优化阶段导向默认整章重写。",
+        ]
+
+        if longform_context:
+            optimizer_payload = longform_context.to_optimizer_payload(max_prompt_chars=3200)
+            review_mission["longform_review_context"] = {
+                "chapter_number": optimizer_payload.get("chapter_number"),
+                "prompt_digest": optimizer_payload.get("prompt_digest"),
+                "cast_plan": optimizer_payload.get("cast_plan"),
+                "foreshadowing_task": optimizer_payload.get("foreshadowing_task"),
+                "memory_digest": optimizer_payload.get("memory_digest"),
+                "timeline_digest": optimizer_payload.get("timeline_digest"),
+            }
+        return review_mission
+
     async def _run_ai_review(
         self,
         *,
@@ -4384,6 +5925,28 @@ class PipelineOrchestrator:
         chapter_mission: Optional[dict],
         user_id: int,
     ) -> Tuple[int, Optional[Dict[str, Any]]]:
+        if len(versions) <= 1:
+            candidate = versions[0] if versions else {}
+            candidate.setdefault("metadata", {})["ai_review"] = {
+                "is_best": True,
+                "scores": {},
+                "evaluation": None,
+                "flaws": [],
+                "suggestions": "",
+                "status": "single_candidate_rule_review",
+                "skip_reason": "single_candidate_no_selection_needed",
+            }
+            return 0, {
+                "best_version_index": 0,
+                "scores": {},
+                "evaluation": "单候选直接采用，无需 AI 评审选择。",
+                "flaws": [],
+                "suggestions": "",
+                "status": "single_candidate_rule_review",
+                "skip_reason": "single_candidate_no_selection_needed",
+                "fallback_summary": None,
+            }
+
         contents = [v.get("content", "") for v in versions]
         fallback_index, fallback_summary = self._fallback_select_best_version(
             versions,
@@ -4529,7 +6092,8 @@ class PipelineOrchestrator:
             phase = str(metadata.get("phase") or "strategy_start")
             phase_message_map = {
                 "strategy_start": f"{base_message}（进入策略子阶段）",
-                "stagewide_primary": f"{base_message}（执行整段/整章重写）",
+                "localized_primary": f"{base_message}（优先局部连续窗口修补）",
+                "stagewide_primary": f"{base_message}（例外路径：连续性整合候选）",
                 "aggregate_retry": f"{base_message}（根据聚合反馈重试）",
             }
             await self._update_generation_runtime(
@@ -4609,6 +6173,21 @@ class PipelineOrchestrator:
         if final_content == chapter_content and critique.get("final_content", chapter_content) != chapter_content and not accepted_revision:
             summary_status = "reverted_to_original"
             summary_improvement = 0
+        manual_patch_suggestions: List[Dict[str, Any]] = []
+        stagewide_deferred_count = 0
+        for optimization_log in critique.get("optimization_logs", []) or []:
+            for strategy_log in optimization_log.get("strategy_logs", []) or []:
+                for attempt in strategy_log.get("attempts", []) or []:
+                    if attempt.get("mode") != "stagewide" or not attempt.get("manual_confirmation_required"):
+                        continue
+                    stagewide_deferred_count += 1
+                    for suggestion in attempt.get("patch_suggestions") or []:
+                        if isinstance(suggestion, dict):
+                            manual_patch_suggestions.append({
+                                **suggestion,
+                                "stage": optimization_log.get("stage"),
+                                "strategy": strategy_log.get("strategy"),
+                            })
         return final_content, {
             "iterations": len(critique.get("iterations", [])),
             "final_score": final_critique.get("weighted_score", critique.get("final_score", 0)),
@@ -4620,6 +6199,9 @@ class PipelineOrchestrator:
             "priority_fixes": final_critique.get("priority_fixes", []),
             "final_critique": final_critique,
             "optimization_logs": critique.get("optimization_logs", []),
+            "manual_stagewide_confirmation_required": stagewide_deferred_count > 0,
+            "stagewide_deferred_count": stagewide_deferred_count,
+            "manual_patch_suggestions": manual_patch_suggestions[:12],
             "accepted_revision": accepted_revision,
             "acceptance_reason": acceptance_reason,
             "before_revision_stats": before_stats,
@@ -4845,6 +6427,15 @@ class PipelineOrchestrator:
                                 report["auto_fix_acceptance_reason"] = retry_reason
                                 return retry_fixed, report
                     return chapter_text, report
+                report["repair_attempts"].append({
+                    "attempt": 1,
+                    "mode": "local_patch",
+                    "accepted": False,
+                    "acceptance_reason": "local_repair_failed_full_chapter_deferred",
+                    "content_changed": False,
+                    "full_chapter_fallback_deferred": True,
+                    "manual_confirmation_required": True,
+                })
 
             return chapter_text, report
 
@@ -4890,14 +6481,24 @@ class PipelineOrchestrator:
                     ),
                 }
                 try:
-                    response = await self.llm_service.get_llm_response(
+                    text_result = await call_generation_text(
+                        llm_service=self.llm_service,
                         system_prompt=prompt,
                         conversation_history=[{"role": "user", "content": json.dumps(optimize_input, ensure_ascii=False)}],
                         temperature=0.55,
                         user_id=user_id,
                         timeout=600.0,
+                        policy=GenerationCallPolicy(
+                            stage_label=f"局部优化维度 {dimension}",
+                            progress_stage="optimize_content",
+                            retry_attempts=2,
+                            response_format="json_object",
+                            max_tokens=8000,
+                            retry_same_model_once=True,
+                            json_repair_attempts=0,
+                        ),
                     )
-                    cleaned = remove_think_tags(response)
+                    cleaned = remove_think_tags(text_result.text)
                     normalized = unwrap_markdown_json(cleaned)
                     try:
                         parsed = json.loads(normalized)
@@ -4935,6 +6536,7 @@ class PipelineOrchestrator:
         target_word_count: int = 3000,
         min_word_count: Optional[int] = None,
         max_iterations: int = 2,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Tuple[str, Optional[Dict[str, Any]]]:
         original_word_count = self._count_words(chapter_content)
         should_enrich, effective_min = self._should_run_enrichment(
@@ -4961,6 +6563,7 @@ class PipelineOrchestrator:
             target_word_count=target_word_count,
             user_id=user_id,
             max_iterations=max_iterations,
+            context=context,
         )
         enriched_word_count = self._count_words(enriched_text)
         if enriched_word_count <= original_word_count:
@@ -5074,3 +6677,5 @@ class PipelineOrchestrator:
 
 
 __all__ = ["PipelineOrchestrator", "PipelineConfig"]
+
+# force reload

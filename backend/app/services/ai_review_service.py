@@ -13,6 +13,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from ..services.generation_call_service import GenerationCallPolicy, call_generation_text
 from ..services.llm_service import LLMService
 from ..services.prompt_service import PromptService
 from ..utils.json_utils import remove_think_tags, unwrap_markdown_json
@@ -84,14 +85,23 @@ class AIReviewService:
             review_input = self._build_review_input(versions, chapter_mission)
 
             try:
-                response = await self.llm_service.get_llm_response(
+                text_result = await call_generation_text(
+                    llm_service=self.llm_service,
                     system_prompt=review_prompt,
                     conversation_history=[{"role": "user", "content": review_input}],
                     temperature=0.3,
                     user_id=user_id,
                     timeout=180.0,
+                    policy=GenerationCallPolicy(
+                        stage_label="多候选版本 AI 评审",
+                        progress_stage="review",
+                        retry_attempts=2,
+                        response_format="json_object",
+                        max_tokens=5000,
+                        retry_same_model_once=True,
+                    ),
                 )
-                cleaned = remove_think_tags(response)
+                cleaned = remove_think_tags(text_result.text)
                 normalized = unwrap_markdown_json(cleaned)
 
                 result = self._parse_review_response(normalized)
@@ -261,6 +271,35 @@ class AIReviewService:
                         beats.append(f"{label}={value}")
                 if beats:
                     lines.append(f"- 场景{index}: " + "；".join(str(item) for item in beats))
+
+        review_rules = chapter_mission.get("review_quality_rules") or []
+        if isinstance(review_rules, list):
+            for rule in review_rules[:6]:
+                if rule:
+                    lines.append(f"- 评审硬规则：{rule}")
+
+        longform_context = chapter_mission.get("longform_review_context")
+        if isinstance(longform_context, dict):
+            cast_plan = longform_context.get("cast_plan") or {}
+            foreshadowing_task = longform_context.get("foreshadowing_task") or {}
+            focus_names = cast_plan.get("chapter_focus_names") or []
+            must_resolve = foreshadowing_task.get("must_resolve") or []
+            should_reinforce = foreshadowing_task.get("should_reinforce") or []
+            avoid_forgetting = foreshadowing_task.get("avoid_forgetting") or []
+            if focus_names:
+                lines.append(
+                    "- 长篇角色连续性：必须检查本章焦点角色 "
+                    + ", ".join(str(item) for item in focus_names[:8])
+                    + " 的状态承接和变化。"
+                )
+            if must_resolve or should_reinforce or avoid_forgetting:
+                lines.append(
+                    "- 伏笔/线索账本："
+                    f" must_resolve={len(must_resolve)},"
+                    f" should_reinforce={len(should_reinforce)},"
+                    f" avoid_forgetting={len(avoid_forgetting)}；"
+                    "选稿时必须优先看是否兑现这些任务。"
+                )
 
         return "\n".join(lines)
 
@@ -485,14 +524,23 @@ class AIReviewService:
 
         review_input = self._build_single_review_input(version, chapter_mission)
         try:
-            response = await self.llm_service.get_llm_response(
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
                 system_prompt=review_prompt,
                 conversation_history=[{"role": "user", "content": review_input}],
                 temperature=0.25,
                 user_id=user_id,
                 timeout=180.0,
+                policy=GenerationCallPolicy(
+                    stage_label="单候选版本 AI 评审",
+                    progress_stage="review",
+                    retry_attempts=2,
+                    response_format="json_object",
+                    max_tokens=4000,
+                    retry_same_model_once=True,
+                ),
             )
-            cleaned = remove_think_tags(response)
+            cleaned = remove_think_tags(text_result.text)
             normalized = unwrap_markdown_json(cleaned)
             result = self._parse_review_response(normalized)
             result.raw_response = cleaned

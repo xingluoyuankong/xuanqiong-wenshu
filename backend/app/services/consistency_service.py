@@ -25,6 +25,8 @@ from ..models.memory_layer import CharacterState
 from ..models.novel import NovelBlueprint
 from ..models.project_memory import ProjectMemory
 from ..utils.json_utils import remove_think_tags, unwrap_markdown_json
+from .continuity_guard_utils import continuity_terms_guard_failure
+from .generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text
 from .llm_service import LLMService
 
 logger = logging.getLogger(__name__)
@@ -281,13 +283,24 @@ class ConsistencyService:
                 chapter_text=self._excerpt_chapter_for_check(chapter_text),
             )
             try:
-                response = await self.llm_service.generate(
-                    prompt=prompt,
-                    user_id=user_id,
-                    max_tokens=2000,
+                json_result = await call_generation_json(
+                    llm_service=self.llm_service,
+                    system_prompt="你是一位长篇小说连续性审校，必须只输出 JSON。",
+                    conversation_history=[{"role": "user", "content": prompt}],
                     temperature=0.2,
+                    user_id=user_id,
+                    timeout=120.0,
+                    policy=GenerationCallPolicy(
+                        stage_label="跨章节一致性检查",
+                        progress_stage="continuity_gate",
+                        retry_attempts=2,
+                        response_format="json_object",
+                        max_tokens=2200,
+                        retry_same_model_once=True,
+                        json_repair_attempts=1,
+                    ),
                 )
-                result = self._parse_check_response(response)
+                result = self._parse_check_response(json.dumps(json_result.data, ensure_ascii=False))
                 result.check_time_ms = int((time.time() - started_at) * 1000)
                 return result
             except Exception as exc:
@@ -365,13 +378,23 @@ class ConsistencyService:
 7. 必须把修复落到正文动作、证据或说法上，不要只抽象解释“这里存在问题”。
 """
         try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
-                user_id=user_id,
-                max_tokens=2500,
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
+                system_prompt="你是一位只做局部补丁的长篇小说连续性编辑。",
+                conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.35,
+                user_id=user_id,
+                timeout=150.0,
+                policy=GenerationCallPolicy(
+                    stage_label="局部一致性修复",
+                    progress_stage="consistency",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=2500,
+                    retry_same_model_once=True,
+                ),
             )
-            cleaned = remove_think_tags(response).strip() if response else ""
+            cleaned = remove_think_tags(text_result.text).strip() if text_result.text else ""
             if not cleaned:
                 return None
 
@@ -386,7 +409,12 @@ class ConsistencyService:
                 rebuilt.append(paragraph)
             if not inserted:
                 return None
-            return "\n\n".join(part.strip() for part in rebuilt if part.strip())
+            rebuilt_text = "\n\n".join(part.strip() for part in rebuilt if part.strip())
+            guard_failure = self._fix_continuity_guard_failure(chapter_text, rebuilt_text, context=context)
+            if guard_failure:
+                logger.warning("Local consistency fix rejected by continuity guard: reason=%s", guard_failure)
+                return None
+            return rebuilt_text
         except Exception as exc:
             logger.warning("局部一致性修复失败: %s", exc)
             return None
@@ -397,6 +425,8 @@ class ConsistencyService:
         chapter_text: str,
         violations: List[ConsistencyViolation],
         user_id: int,
+        *,
+        allow_full_chapter_fallback: bool = False,
     ) -> Optional[str]:
         with LLMService.daily_limit_scope(f"consistency_fix:{project_id}:{user_id}:{len(chapter_text or '')}"):
             if not violations:
@@ -411,6 +441,14 @@ class ConsistencyService:
             )
             if localized_fixed and localized_fixed != chapter_text:
                 return localized_fixed
+
+            if not allow_full_chapter_fallback:
+                logger.info(
+                    "一致性局部修复未产出可接受补丁，已跳过整章兜底: project=%s violations=%s",
+                    project_id,
+                    len(violations),
+                )
+                return None
 
             violations_text = "\n".join(
                 f"- [{v.severity.value}] {v.category}: {v.description}"
@@ -433,17 +471,85 @@ class ConsistencyService:
                 global_summary=self._truncate_text(context.get("global_summary"), 1200),
             )
             try:
-                response = await self.llm_service.generate(
-                    prompt=prompt,
-                    user_id=user_id,
-                    max_tokens=8000,
+                text_result = await call_generation_text(
+                    llm_service=self.llm_service,
+                    system_prompt="你是一位长篇小说修复编辑。默认只做必要补丁，保持既有剧情和连续性。",
+                    conversation_history=[{"role": "user", "content": prompt}],
                     temperature=0.5,
+                    user_id=user_id,
+                    timeout=240.0,
+                    policy=GenerationCallPolicy(
+                        stage_label="一致性补丁兜底",
+                        progress_stage="consistency",
+                        retry_attempts=2,
+                        response_format=None,
+                        max_tokens=8000,
+                        retry_same_model_once=True,
+                    ),
                 )
-                cleaned = remove_think_tags(response) if response else ""
-                return cleaned.strip() if cleaned else None
+                cleaned = remove_think_tags(text_result.text).strip() if text_result.text else ""
+                if not cleaned:
+                    return None
+                guard_failure = self._fix_continuity_guard_failure(chapter_text, cleaned, context=context)
+                if guard_failure:
+                    logger.warning(
+                        "Consistency fallback fix rejected by continuity guard: project=%s reason=%s",
+                        project_id,
+                        guard_failure,
+                    )
+                    return None
+                return cleaned
             except Exception as exc:
                 logger.error("自动修复失败: %s", exc)
                 return None
+
+    def _fix_continuity_guard_failure(
+        self,
+        original: str,
+        fixed: str,
+        *,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
+        original_clean = str(original or "").strip()
+        fixed_clean = str(fixed or "").strip()
+        if not fixed_clean:
+            return "empty_fixed_content"
+        if fixed_clean.startswith("{") and "fixed" in fixed_clean[:240].lower():
+            return "raw_json_returned"
+        original_len = len(re.sub(r"\s+", "", original_clean))
+        fixed_len = len(re.sub(r"\s+", "", fixed_clean))
+        if original_len >= 1200 and fixed_len < int(original_len * 0.72):
+            return f"fixed_content_shrank_too_much:{fixed_len}/{original_len}"
+        if original_len >= 400 and fixed_len < int(original_len * 0.58):
+            return f"fixed_content_lost_too_much:{fixed_len}/{original_len}"
+
+        original_paragraphs = self._split_paragraphs(original_clean)
+        fixed_paragraphs = self._split_paragraphs(fixed_clean)
+        if len(original_paragraphs) >= 6 and len(fixed_paragraphs) < max(3, len(original_paragraphs) // 3):
+            return f"fixed_content_collapsed_paragraphs:{len(fixed_paragraphs)}/{len(original_paragraphs)}"
+
+        anchors: List[str] = []
+        if original_paragraphs:
+            first = re.sub(r"\s+", "", original_paragraphs[0])
+            last = re.sub(r"\s+", "", original_paragraphs[-1])
+            if len(first) >= 16:
+                anchors.append(first[:24])
+            if len(last) >= 16:
+                anchors.append(last[-24:])
+        if len(anchors) >= 2:
+            compact_fixed = re.sub(r"\s+", "", fixed_clean)
+            missing = [anchor for anchor in anchors if anchor and anchor not in compact_fixed]
+            if len(missing) == len(anchors):
+                return "lost_front_and_back_anchors"
+        term_failure = continuity_terms_guard_failure(
+            original=original_clean,
+            candidate=fixed_clean,
+            context=context,
+            reason_code="fixed_lost_continuity_terms",
+        )
+        if term_failure:
+            return term_failure
+        return None
 
     async def check_and_fix(
         self,
@@ -451,6 +557,8 @@ class ConsistencyService:
         chapter_text: str,
         user_id: int,
         auto_fix_threshold: ViolationSeverity = ViolationSeverity.CRITICAL,
+        *,
+        allow_full_chapter_fallback: bool = False,
     ) -> Dict[str, Any]:
         with LLMService.daily_limit_scope(f"consistency_check_fix:{project_id}:{user_id}:{len(chapter_text or '')}"):
             check_result = await self.check_consistency(project_id=project_id, chapter_text=chapter_text, user_id=user_id)
@@ -474,6 +582,7 @@ class ConsistencyService:
                     chapter_text=chapter_text,
                     violations=violations_to_fix,
                     user_id=user_id,
+                    allow_full_chapter_fallback=allow_full_chapter_fallback,
                 )
 
             result["needs_manual_review"] = any(

@@ -17,6 +17,7 @@ from ...db.session import get_session
 from ...models.foreshadowing import Foreshadowing as ForeshadowingModel
 from ...models.novel import Chapter, ChapterOutline, ChapterVersion, NovelProject
 from ...schemas.user import UserInDB
+from ...services.generation_call_service import GenerationCallPolicy, call_generation_json
 from ...services.llm_service import LLMService
 from ...services.prompt_service import PromptService
 
@@ -585,17 +586,21 @@ async def analyze_emotion_with_ai(
 
     try:
         with LLMService.daily_limit_scope(f"analytics_emotion:{novel_id}:{current_user.id}"):
-            response = await llm_service.get_llm_response(
+            result = await call_generation_json(
+                llm_service=llm_service,
                 system_prompt="你是一个专业的小说情感分析师。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.3,
-                user_id=current_user.id
+                user_id=current_user.id,
+                timeout=90.0,
+                policy=GenerationCallPolicy(
+                    stage_label="情感曲线分析",
+                    progress_stage="analytics_emotion_curve",
+                    retry_attempts=2,
+                    json_repair_attempts=1,
+                ),
             )
-        # 解析JSON
-        import json
-        from ...utils.json_utils import unwrap_markdown_json
-        cleaned = unwrap_markdown_json(response)
-        data = json.loads(cleaned)
+        data = result.data
         
         emotion_points = []
         emotion_counts = {}

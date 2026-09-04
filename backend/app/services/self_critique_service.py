@@ -10,6 +10,8 @@ import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .continuity_guard_utils import continuity_terms_guard_failure
+from .generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text
 from .llm_service import LLMService
 from .prompt_service import PromptService
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
@@ -135,7 +137,11 @@ class SelfCritiqueService:
     ]
     DIMENSION_ENUM_MAP: Dict[str, CritiqueDimension] = {dimension.value: dimension for dimension in CritiqueDimension}
     EXECUTION_REQUIREMENT_LIMIT = 10
-    MAX_STAGEWIDE_REWRITES_PER_ITERATION = 1
+    # Automatic optimization must preserve continuity. Whole-chapter candidates
+    # are kept behind an explicit/manual path; normal generation uses anchored
+    # local patches and reports deferred broad fixes instead of silently
+    # replacing the chapter.
+    MAX_STAGEWIDE_REWRITES_PER_ITERATION = 0
     MAX_DEFERRED_STAGE_DRAIN_ITERATIONS = 1
     STAGEWIDE_SAFETY_DIMENSIONS: List[CritiqueDimension] = [
         CritiqueDimension.CONTINUITY,
@@ -680,18 +686,25 @@ class SelfCritiqueService:
   "summary": "一句话总结"
 }}"""
         try:
-            response = await self.llm_service.get_llm_response(
+            json_result = await call_generation_json(
+                llm_service=self.llm_service,
                 system_prompt=f"你是一位专注于{stage_name}阶段审查的严格长篇小说编辑。请聚合输出问题，避免拆成多次独立诊断。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.2,
                 user_id=user_id,
                 timeout=180.0,
+                policy=GenerationCallPolicy(
+                    stage_label=f"{stage_name} 聚合诊断",
+                    progress_stage="diagnose_once",
+                    retry_attempts=2,
+                    response_format="json_object",
+                    max_tokens=2600,
+                    retry_same_model_once=True,
+                    json_repair_attempts=1,
+                ),
             )
-            content = sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(response)))
-            json_start = content.find("{")
-            json_end = content.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                result = json.loads(content[json_start:json_end])
+            result = json_result.data
+            if result:
                 issues = []
                 for issue in result.get("issues", []) or []:
                     if not isinstance(issue, dict):
@@ -921,6 +934,81 @@ class SelfCritiqueService:
             ),
         )
 
+    def _should_attempt_stagewide_rewrite(
+        self,
+        *,
+        before_counts: Dict[str, int],
+        strategy_issues: List[Dict[str, Any]],
+        best_content_changed: bool,
+    ) -> bool:
+        if int(before_counts.get("critical") or 0) > 0:
+            return True
+        if any(self._issue_indicates_structure_residue(issue) for issue in strategy_issues):
+            return True
+        # Major-only feedback should be handled by local windows. If the local pass
+        # cannot produce a safe change, keep the original content instead of
+        # escalating to a continuity-risky whole-chapter candidate.
+        return False
+
+    @staticmethod
+    def _stagewide_rewrite_explicitly_confirmed(context: Optional[Dict[str, Any]]) -> bool:
+        """Only a manual, explicit caller opt-in may unlock whole-chapter rewrite.
+
+        The automatic optimization path is deliberately local-patch first. Even
+        when a caller passes allow_stagewide=True, that is treated as a request,
+        not permission, unless the context carries a manual confirmation flag.
+        """
+
+        if not isinstance(context, dict):
+            return False
+        for key in (
+            "manual_stagewide_rewrite",
+            "manual_whole_chapter_rewrite",
+            "stagewide_rewrite_confirmed",
+        ):
+            value = context.get(key)
+            if isinstance(value, dict):
+                if value.get("confirmed") or value.get("allow") or value.get("enabled"):
+                    return True
+            elif value is True:
+                return True
+        return False
+
+    def _build_stagewide_deferred_patch_suggestions(
+        self,
+        issues: List[Dict[str, Any]],
+        *,
+        strategy_key: str,
+        limit: int = 6,
+    ) -> List[Dict[str, Any]]:
+        suggestions: List[Dict[str, Any]] = []
+        requirements = self._build_issue_execution_requirements(
+            issues,
+            strategy_key=strategy_key,
+            limit=limit,
+        )
+        for index, issue in enumerate(issues[:limit]):
+            suggestions.append({
+                "mode": "local_patch_or_manual_confirm",
+                "dimension": issue.get("dimension"),
+                "severity": issue.get("severity"),
+                "location": issue.get("location") or "unspecified",
+                "problem": issue.get("problem") or issue.get("description") or "",
+                "suggestion": issue.get("suggestion") or issue.get("suggested_fix") or "",
+                "execution_requirement": requirements[index] if index < len(requirements) else None,
+            })
+        if not suggestions and requirements:
+            suggestions.append({
+                "mode": "local_patch_or_manual_confirm",
+                "dimension": strategy_key,
+                "severity": "major",
+                "location": "unspecified",
+                "problem": "broad stage issue needs explicit human confirmation before whole-chapter rewrite",
+                "suggestion": requirements[0],
+                "execution_requirement": requirements[0],
+            })
+        return suggestions
+
     def _split_paragraphs(self, chapter_content: str) -> List[str]:
         paragraphs = [part.strip() for part in re.split(r"\n\s*\n", chapter_content) if part.strip()]
         return paragraphs or [chapter_content]
@@ -1001,11 +1089,17 @@ class SelfCritiqueService:
             str(issue.get(key) or "")
             for key in ("location", "problem")
         )
-        residue_markers = (
-            "重复", "再次", "重新", "首次", "第一次", "两次", "双版本", "拼接", "回卷", "时间线", "认知重置",
-            "来源不一致", "重复发现", "重复开场", "多次呈现为第一次", "前后不一致",
+        hard_residue_markers = (
+            "双版本", "拼接", "回卷", "时间线", "认知重置", "来源不一致",
+            "重复发现", "重复开场", "多次呈现为第一次", "前后不一致",
         )
-        return any(marker in haystack for marker in residue_markers)
+        if any(marker in haystack for marker in hard_residue_markers):
+            return True
+        repeat_markers = ("重复", "再次", "重新", "首次", "第一次", "两次")
+        structural_markers = ("时间", "事件", "发现", "认知", "开场", "版本", "进入", "抵达")
+        return any(marker in haystack for marker in repeat_markers) and any(
+            marker in haystack for marker in structural_markers
+        )
 
     def _resolve_window_indexes(
         self,
@@ -1324,6 +1418,7 @@ class SelfCritiqueService:
             "strategy_instruction": strategy["instruction"],
             "rewrite_mode": rewrite_mode,
             "residue_hints": self._build_residue_hints(localized_issues),
+            "context": context or {},
         }
 
     def _local_cohesion_failure_reason(self, plan: Dict[str, Any], localized_text: str) -> Optional[str]:
@@ -1354,6 +1449,14 @@ class SelfCritiqueService:
             return "head_copies_prev_anchor"
         if last_line.endswith(("……", "——")) and not next_anchor:
             return "dangling_ending_without_next_anchor"
+        term_failure = continuity_terms_guard_failure(
+            original="\n\n".join(str(item) for item in target_paragraphs),
+            candidate=localized,
+            context=plan.get("context") if isinstance(plan.get("context"), dict) else None,
+            reason_code="localized_lost_continuity_terms",
+        )
+        if term_failure:
+            return term_failure
         return None
 
     def _passes_local_cohesion_check(self, plan: Dict[str, Any], localized_text: str) -> bool:
@@ -1390,7 +1493,14 @@ class SelfCritiqueService:
             return None
         return repaired
 
-    def _stagewide_revision_guard_failure_reason(self, original_content: str, revised_content: str, *, residue_cleanup_mode: bool) -> Optional[str]:
+    def _stagewide_revision_guard_failure_reason(
+        self,
+        original_content: str,
+        revised_content: str,
+        *,
+        residue_cleanup_mode: bool,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
         original = str(original_content or "").strip()
         revised = str(revised_content or "").strip()
         if not original:
@@ -1410,6 +1520,14 @@ class SelfCritiqueService:
             return f"too_few_paragraphs:{len(revised_paragraphs)}<{min_paragraphs}"
         if revised.endswith(("，", "、", "：", "；", "（", "[", "{", "“", "‘", "—", "-")):
             return "dangling_ending_punctuation"
+        term_failure = continuity_terms_guard_failure(
+            original=original,
+            candidate=revised,
+            context=context,
+            reason_code="stagewide_lost_continuity_terms",
+        )
+        if term_failure:
+            return term_failure
         return None
 
     def _passes_stagewide_revision_guard(self, original_content: str, revised_content: str, *, residue_cleanup_mode: bool) -> bool:
@@ -1463,19 +1581,28 @@ class SelfCritiqueService:
 {length_guidance}
 7. 不要为了修文新增无关设定、无关角色或跳出当前 POV 的解释性旁白。"""
         try:
-            response = await self.llm_service.get_llm_response(
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
                 system_prompt="你是一位擅长整章强修的白金网文作者，能在不跑偏主线的前提下重构问题段落并保留连载张力。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.45,
                 user_id=user_id,
                 timeout=240.0,
-                retry_same_model_once=False,
+                policy=GenerationCallPolicy(
+                    stage_label=f"{strategy.get('label', '强修')}候选补丁",
+                    progress_stage="optimize_content",
+                    retry_attempts=1,
+                    response_format=None,
+                    max_tokens=12000,
+                    retry_same_model_once=False,
+                ),
             )
-            revised = remove_think_tags(response).strip()
+            revised = remove_think_tags(text_result.text).strip()
             failure_reason = self._stagewide_revision_guard_failure_reason(
                 chapter_content,
                 revised,
                 residue_cleanup_mode=residue_cleanup_mode,
+                context=context,
             )
             if failure_reason is not None:
                 logger.info(
@@ -1553,15 +1680,23 @@ class SelfCritiqueService:
 7. 如果同一事件、线索、对话或发现动作在片段里出现了两个版本，只保留一个正式版本，删掉被废弃版本，不要并排保留。
 8. 如果人物在前文已经确认某个事实，本次片段不得再写成“第一次发现/第一次核对/第一次得知”。"""
         try:
-            response = await self.llm_service.get_llm_response(
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
                 system_prompt="你是一位擅长局部修文的白金网文作者，能在不跑偏剧情的前提下只重写必要片段。",
                 conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.55,
                 user_id=user_id,
                 timeout=180.0,
-                retry_same_model_once=False,
+                policy=GenerationCallPolicy(
+                    stage_label=f"{strategy_label}局部补丁",
+                    progress_stage="optimize_content",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=5000,
+                    retry_same_model_once=False,
+                ),
             )
-            localized = remove_think_tags(response).strip()
+            localized = remove_think_tags(text_result.text).strip()
             if not localized:
                 return chapter_content
             failure_reason = self._local_cohesion_failure_reason(plan, localized)
@@ -1610,12 +1745,13 @@ class SelfCritiqueService:
         user_id: int = 0,
         *,
         return_diagnostics: bool = False,
-        allow_stagewide: bool = True,
+        allow_stagewide: bool = False,
         strategy_progress_callback: Optional[Callable[[str, Dict[str, Any]], Awaitable[None]]] = None,
     ) -> Any:
         if not issues:
             return (chapter_content, []) if return_diagnostics else chapter_content
         current_content = chapter_content
+        stagewide_confirmed = bool(allow_stagewide and self._stagewide_rewrite_explicitly_confirmed(context))
         strategy_logs: List[Dict[str, Any]] = []
         for strategy_key, strategy_issues in self._cluster_issues_by_strategy(issues):
             if strategy_progress_callback is not None:
@@ -1636,6 +1772,16 @@ class SelfCritiqueService:
             stagewide_safety_before: Optional[Dict[str, int]] = None
             attempts: List[Dict[str, Any]] = []
 
+            if strategy_progress_callback is not None:
+                await strategy_progress_callback(
+                    strategy_key,
+                    {
+                        "phase": "localized_primary",
+                        "issue_count": len(strategy_issues),
+                        "allow_stagewide": stagewide_confirmed,
+                        "stagewide_requested": allow_stagewide,
+                    },
+                )
             localized_content = await self._revise_chapter_locally(current_content, strategy_issues, context=context, user_id=user_id, strategy_key=strategy_key)
             if localized_content and localized_content != current_content:
                 localized_after = await self._critique_strategy_snapshot(localized_content, strategy_key=strategy_key, context=context, user_id=user_id, focus_issues=strategy_issues)
@@ -1706,18 +1852,24 @@ class SelfCritiqueService:
                     len(strategy_issues),
                     len((current_content or "").strip()),
                 )
-            needs_stagewide = not skip_stagewide and (
-                best_content == current_content
-                or any(self._issue_indicates_structure_residue(issue) for issue in strategy_issues)
-                or before_counts["major"] >= 3
+            needs_stagewide = not skip_stagewide and self._should_attempt_stagewide_rewrite(
+                before_counts=before_counts,
+                strategy_issues=strategy_issues,
+                best_content_changed=best_content != current_content,
             )
             if needs_stagewide:
-                if not allow_stagewide:
+                if not stagewide_confirmed:
                     attempts.append({
                         "mode": "stagewide",
                         "changed": False,
                         "accepted": False,
                         "reason": "stagewide_deferred",
+                        "manual_confirmation_required": True,
+                        "stagewide_requested": allow_stagewide,
+                        "patch_suggestions": self._build_stagewide_deferred_patch_suggestions(
+                            strategy_issues,
+                            strategy_key=strategy_key,
+                        ),
                         "before": before_counts,
                         "after": best_after_counts or before_counts,
                         "content_fingerprint": self._content_fingerprint(best_content),
@@ -1729,7 +1881,8 @@ class SelfCritiqueService:
                             {
                                 "phase": "stagewide_primary",
                                 "issue_count": len(strategy_issues),
-                                "allow_stagewide": allow_stagewide,
+                                "allow_stagewide": stagewide_confirmed,
+                                "stagewide_requested": allow_stagewide,
                             },
                         )
                     stagewide_content = await self._revise_chapter_stagewide(current_content, strategy_issues, context=context, user_id=user_id, strategy_key=strategy_key)
@@ -1910,7 +2063,11 @@ class SelfCritiqueService:
                 "selected_after": best_after_counts or before_counts,
                 "content_changed": before_fingerprint != self._content_fingerprint(best_content),
                 "accepted": best_after_counts is not None,
-                "stagewide_allowed": allow_stagewide,
+                "stagewide_allowed": stagewide_confirmed,
+                "stagewide_requested": allow_stagewide,
+                "manual_stagewide_confirmation_required": any(
+                    item.get("manual_confirmation_required") for item in stagewide_attempts
+                ),
                 "stagewide_attempted": bool(stagewide_attempts),
                 "stagewide_accepted": any(item.get("accepted") for item in stagewide_attempts),
                 "stagewide_deferred": any(item.get("reason") == "stagewide_deferred" for item in stagewide_attempts),
@@ -2005,9 +2162,15 @@ class SelfCritiqueService:
                     )
                     changed = current_content != before_content
                     any_stage_changed = any_stage_changed or changed
+                    stagewide_attempted = any(
+                        log.get("stagewide_attempted")
+                        or log.get("stagewide_accepted")
+                        or log.get("stagewide_deferred")
+                        for log in strategy_logs
+                    )
                     stagewide_accepted = any(log.get("stagewide_accepted") for log in strategy_logs)
                     stagewide_deferred = any(log.get("stagewide_deferred") for log in strategy_logs)
-                    if stagewide_accepted and stagewide_budget > 0:
+                    if stagewide_attempted and stagewide_budget > 0:
                         stagewide_budget -= 1
                     if stagewide_deferred and stage_name not in next_deferred_stage_names:
                         next_deferred_stage_names.append(stage_name)
@@ -2093,18 +2256,24 @@ class SelfCritiqueService:
   "pass": true
 }}"""
             try:
-                response = await self.llm_service.get_llm_response(
+                json_result = await call_generation_json(
+                    llm_service=self.llm_service,
                     system_prompt="你是一位快速审稿编辑，请简洁指出最关键的问题。",
                     conversation_history=[{"role": "user", "content": prompt}],
                     temperature=0.2,
                     user_id=user_id,
                     timeout=60.0,
+                    policy=GenerationCallPolicy(
+                        stage_label="快速质量复核",
+                        progress_stage="review",
+                        retry_attempts=2,
+                        response_format="json_object",
+                        max_tokens=1200,
+                        retry_same_model_once=True,
+                        json_repair_attempts=1,
+                    ),
                 )
-                content = sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(response)))
-                json_start = content.find("{")
-                json_end = content.rfind("}") + 1
-                if json_start >= 0 and json_end > json_start:
-                    return json.loads(content[json_start:json_end])
+                return json_result.data
             except Exception as exc:
                 logger.warning("Quick critique failed: %s", exc)
             return {"quick_score": 70, "critical_issues": [], "ai_words_found": [], "has_hook": True, "pass": True}

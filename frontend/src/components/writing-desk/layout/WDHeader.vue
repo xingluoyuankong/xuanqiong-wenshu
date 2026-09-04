@@ -30,13 +30,7 @@
       <div class="wd-header-main">
         <div class="wd-header-lead">
           <button type="button" class="wd-icon-btn" title="返回项目列表" @click="$emit('goBack')">
-            <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-              <path
-                fill-rule="evenodd"
-                d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 111.414 1.414L4.414 9H17a1 1 0 110 2H4.414l5.293 5.293a1 1 0 010 1.414z"
-                clip-rule="evenodd"
-              />
-            </svg>
+            <ArrowLeft class="h-5 w-5" aria-hidden="true" />
           </button>
 
           <div class="min-w-0 flex-1">
@@ -61,13 +55,18 @@
         </div>
 
         <div class="wd-header-actions">
-          <button type="button" class="wd-utility-btn wd-utility-btn--accent" @click="$emit('toggleHeaderCollapse')">收起顶部</button>
+          <button type="button" class="wd-utility-btn wd-utility-btn--accent" @click="$emit('toggleHeaderCollapse')">
+            <PanelTopClose class="wd-btn-icon" aria-hidden="true" />
+            收起顶部
+          </button>
           <button
             type="button"
             class="wd-utility-btn wd-utility-btn--accent"
             :title="sidebarOpen ? '收起目录' : '展开目录'"
             @click="$emit('toggleSidebar')"
           >
+            <PanelLeftClose v-if="sidebarOpen" class="wd-btn-icon" aria-hidden="true" />
+            <PanelLeftOpen v-else class="wd-btn-icon" aria-hidden="true" />
             {{ sidebarOpen ? '收起目录' : '展开目录' }}
           </button>
           <details ref="utilityMenuRef" class="wd-utility-menu" @keydown.esc="closeUtilityMenu">
@@ -124,7 +123,7 @@
       <div class="wd-command-bar">
         <div class="wd-command-copy">
           <div class="wd-command-copy__item">
-            <span class="wd-command-copy__label">当前焦点</span>
+            <span class="wd-command-copy__label">选中章节</span>
             <strong>{{ focusText }}</strong>
           </div>
           <div class="wd-command-copy__item">
@@ -143,23 +142,40 @@
 
         <div class="wd-command-actions">
           <div class="wd-command-group wd-command-group--nav">
-            <button type="button" class="wd-action wd-action--nav" :disabled="!canPrevChapter" @click="$emit('prevChapter')">上一章</button>
-            <button type="button" class="wd-action wd-action--nav" :disabled="!canNextChapter" @click="$emit('nextChapter')">下一章</button>
+            <button type="button" class="wd-action wd-action--nav" :disabled="!canPrevChapter" @click="$emit('prevChapter')">
+              <ChevronLeft class="wd-btn-icon" aria-hidden="true" />
+              上一章
+            </button>
+            <button type="button" class="wd-action wd-action--nav" :disabled="!canNextChapter" @click="$emit('nextChapter')">
+              下一章
+              <ChevronRight class="wd-btn-icon" aria-hidden="true" />
+            </button>
           </div>
 
           <div class="wd-command-group wd-command-group--core">
-            <button v-if="canOpenVersionsCurrent" type="button" class="wd-action wd-action--panel" @click="$emit('openVersionsCurrent')">查看候选版本</button>
+            <button v-if="canOpenVersionsCurrent" type="button" class="wd-action wd-action--panel" @click="$emit('openVersionsCurrent')">
+              <Files class="wd-btn-icon" aria-hidden="true" />
+              查看候选版本
+            </button>
             <button
               v-if="reviewActionVisible"
               type="button"
               class="wd-action wd-action--accent"
               @click="reviewActionMode === 'all' ? $emit('reviewAllVersionsCurrent') : $emit('evaluateCurrent')"
             >
+              <ListChecks class="wd-btn-icon" aria-hidden="true" />
               {{ reviewActionLabel }}
             </button>
-            <button v-if="canConfirmCurrent" type="button" class="wd-action wd-action--tonal wd-action--key" @click="$emit('confirmCurrent')">确认版本</button>
-            <button v-if="canTerminateCurrent" type="button" class="wd-action wd-action--danger" @click="$emit('terminateCurrent')">终止处理</button>
+            <button v-if="canConfirmCurrent" type="button" class="wd-action wd-action--tonal wd-action--key" @click="$emit('confirmCurrent')">
+              <Check class="wd-btn-icon" aria-hidden="true" />
+              确认版本
+            </button>
+            <button v-if="canTerminateCurrent" type="button" class="wd-action wd-action--danger" @click="$emit('terminateCurrent')">
+              <Square class="wd-btn-icon" aria-hidden="true" />
+              终止处理
+            </button>
             <button v-if="canGenerateCurrent" type="button" class="wd-action wd-action--primary wd-action--key" @click="$emit('generateCurrent')">
+              <Play class="wd-btn-icon" aria-hidden="true" />
               {{ primaryActionLabel }}
             </button>
           </div>
@@ -176,6 +192,19 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import {
+  ArrowLeft,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Files,
+  ListChecks,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelTopClose,
+  Play,
+  Square,
+} from 'lucide-vue-next'
 import type { GenerationRuntime, NovelProject, WorkspaceSummary } from '@/api/novel'
 import { stripThinkTags } from '@/utils/safeMarkdown'
 import { buildChapterTaskUiModel, normalizeRuntimeStage } from '@/utils/chapterGeneration'
@@ -429,6 +458,12 @@ const collapsedSubtitle = computed(() => {
   color: #0f172a;
 }
 
+.wd-btn-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
 .wd-brand-pill,
 .wd-state-pill,
 .wd-meta-pill,
@@ -457,6 +492,9 @@ const collapsedSubtitle = computed(() => {
 }
 
 .wd-utility-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-height: 32px;
   padding: 0 12px;
   font-size: 0.76rem;
@@ -466,6 +504,10 @@ const collapsedSubtitle = computed(() => {
 }
 
 .wd-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   min-height: 40px;
   padding: 0 16px;
   font-size: 0.86rem;
@@ -507,7 +549,7 @@ const collapsedSubtitle = computed(() => {
   display: grid;
   gap: 6px;
   padding: 10px;
-  border-radius: 18px;
+  border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 18px 38px rgba(15, 23, 42, 0.12);
@@ -537,7 +579,7 @@ const collapsedSubtitle = computed(() => {
 .wd-task-panel,
 .wd-header-collapsed-bar {
   border: 1px solid rgba(99, 102, 241, 0.15);
-  border-radius: 16px;
+  border-radius: 8px;
   background: linear-gradient(180deg, rgba(245, 247, 255, 0.98), rgba(238, 244, 255, 0.95));
   padding: 8px 10px;
 }

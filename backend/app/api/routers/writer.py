@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -65,12 +65,13 @@ from ...services.ai_review_service import AIReviewService
 from ...services.cache_service import CacheService
 from ...services.finalize_service import FinalizeService
 from ...services.foreshadowing_service import ForeshadowingService
-from ...services.generation_call_service import GenerationCallPolicy, GenerationJSONDecodeError, call_generation_json
+from ...services.clue_tracker_service import ClueTrackerService
+from ...services.knowledge_graph_service import KnowledgeGraphService
+from ...services.generation_call_service import GenerationCallPolicy, GenerationJSONDecodeError, call_generation_json, call_generation_text
 from ...services.enrichment_service import EnrichmentService
 from ...services.memory_layer_service import MemoryLayerService
-from ...utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
+from ...utils.json_utils import remove_think_tags, unwrap_markdown_json
 from ...services.pipeline_orchestrator import PipelineOrchestrator
-from .novels import _call_llm_with_stage_retries
 
 router = APIRouter(prefix="/api/writer", tags=["Writer"])
 logger = logging.getLogger(__name__)
@@ -126,6 +127,313 @@ def _build_busy_progress_stage(status_value: str) -> str:
     if status_value == ChapterGenerationStatus.SELECTING.value:
         return "selecting"
     return "generating"
+
+
+def _review_context_value(item: Any, key: str, default: Any = None) -> Any:
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
+def _review_context_text(value: Any, *, limit: int = 360) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        text = value
+    elif isinstance(value, (list, tuple, set)):
+        text = "；".join(_review_context_text(item, limit=120) for item in value if item)
+    elif isinstance(value, dict):
+        try:
+            text = json.dumps(value, ensure_ascii=False)
+        except TypeError:
+            text = str(value)
+    else:
+        text = str(value)
+    text = " ".join(text.replace("\r", "\n").split())
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit].rstrip()}..."
+
+
+def _review_content_text(value: Any, *, limit: int = 50000) -> str:
+    if value is None:
+        return ""
+    text = str(value).replace("\r", "\n").strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit].rstrip()}..."
+
+
+def _review_context_real_summary(value: Any) -> str:
+    text = _review_context_text(value, limit=420)
+    if not text:
+        return ""
+    if text.startswith("{") and "generation_runtime" in text[:120]:
+        return ""
+    return text
+
+
+def _build_completed_chapter_review_context(
+    chapters: List[Any],
+    current_chapter_number: int,
+    *,
+    limit: int = 8,
+) -> List[Dict[str, Any]]:
+    """Build a compact previous-chapter package for multi-version review.
+
+    The reviewer needs cross-chapter anchors, but not the full manuscript. Keep the
+    latest previous chapters with summaries and ending anchors so it can judge
+    continuity without bloating the review prompt.
+    """
+    previous: List[Any] = []
+    for chapter in chapters or []:
+        try:
+            chapter_number = int(_review_context_value(chapter, "chapter_number", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if chapter_number <= 0 or chapter_number >= current_chapter_number:
+            continue
+        previous.append(chapter)
+
+    result: List[Dict[str, Any]] = []
+    for chapter in sorted(previous, key=lambda item: int(_review_context_value(item, "chapter_number", 0) or 0))[-limit:]:
+        raw_content = _review_context_text(_review_context_value(chapter, "content"), limit=20000)
+        ending_anchor = _review_context_text(raw_content[-360:] if raw_content else "", limit=360)
+        summary = _review_context_text(_review_context_value(chapter, "summary"), limit=360)
+        real_summary = _review_context_real_summary(_review_context_value(chapter, "real_summary"))
+        continuity_notes = _review_context_value(chapter, "continuity_notes", []) or []
+        foreshadowing_tasks = _review_context_value(chapter, "foreshadowing_tasks", {}) or {}
+        cast_delta = _review_context_value(chapter, "cast_delta", {}) or {}
+        character_focus = _review_context_value(chapter, "character_focus", []) or []
+        result.append(
+            {
+                "chapter_number": int(_review_context_value(chapter, "chapter_number", 0) or 0),
+                "title": _review_context_text(_review_context_value(chapter, "title"), limit=80),
+                "summary": summary,
+                "real_summary": real_summary,
+                "ending_anchor": ending_anchor,
+                "word_count": int(_review_context_value(chapter, "word_count", 0) or 0),
+                "generation_status": str(_review_context_value(chapter, "generation_status", "") or ""),
+                "character_focus": character_focus,
+                "cast_delta": cast_delta,
+                "continuity_notes": continuity_notes,
+                "foreshadowing_tasks": foreshadowing_tasks,
+            }
+        )
+    return result
+
+
+def _review_context_list(value: Any, *, limit: int = 8) -> List[Any]:
+    if not value:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        items = list(value)
+    else:
+        items = [value]
+    normalized: List[Any] = []
+    for item in items[:limit]:
+        if isinstance(item, dict):
+            normalized.append(item)
+        else:
+            normalized.append(_review_context_text(item, limit=220))
+    return [item for item in normalized if item]
+
+
+def _review_context_dict(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if hasattr(value, "model_dump"):
+        try:
+            dumped = value.model_dump()
+            return dict(dumped) if isinstance(dumped, dict) else {}
+        except Exception:  # noqa: BLE001 - review context should degrade quietly.
+            return {}
+    if hasattr(value, "dict"):
+        try:
+            dumped = value.dict()
+            return dict(dumped) if isinstance(dumped, dict) else {}
+        except Exception:  # noqa: BLE001 - review context should degrade quietly.
+            return {}
+    return {}
+
+
+def _build_outline_review_payload(outline: Any) -> Dict[str, Any]:
+    metadata = _review_context_dict(_review_context_value(outline, "metadata", {}) or {})
+
+    def pick(key: str, default: Any = None) -> Any:
+        value = _review_context_value(outline, key, None)
+        if value not in (None, "", [], {}):
+            return value
+        return metadata.get(key, default)
+
+    return {
+        "chapter_number": int(_review_context_value(outline, "chapter_number", 0) or 0),
+        "title": _review_context_text(_review_context_value(outline, "title"), limit=100),
+        "summary": _review_context_text(_review_context_value(outline, "summary"), limit=520),
+        "chapter_role": _review_context_text(pick("chapter_role"), limit=260),
+        "suspense_hook": _review_context_text(pick("suspense_hook"), limit=220),
+        "emotional_progression": _review_context_text(pick("emotional_progression"), limit=220),
+        "character_focus": _review_context_list(pick("character_focus"), limit=8),
+        "cast_delta": _review_context_dict(pick("cast_delta", {})),
+        "conflict_escalation": _review_context_list(pick("conflict_escalation"), limit=8),
+        "continuity_notes": _review_context_list(pick("continuity_notes"), limit=8),
+        "foreshadowing_tasks": _review_context_dict(pick("foreshadowing_tasks", {})),
+        "payoff_window": _review_context_text(pick("payoff_window"), limit=180),
+    }
+
+
+def _build_blueprint_review_context(
+    project_schema: NovelProjectSchema,
+    current_chapter_number: int,
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    blueprint = getattr(project_schema, "blueprint", None)
+    if not blueprint:
+        return {
+            "title": "",
+            "genre": "",
+            "style": "",
+            "tone": "",
+            "world_setting": {},
+            "characters": [],
+            "nearby_outlines": [],
+        }, None
+
+    characters: List[Dict[str, Any]] = []
+    for raw in list(getattr(blueprint, "characters", []) or [])[:24]:
+        if not isinstance(raw, dict):
+            continue
+        characters.append(
+            {
+                "name": _review_context_text(raw.get("name"), limit=80),
+                "role": _review_context_text(raw.get("role") or raw.get("identity"), limit=120),
+                "personality": _review_context_text(raw.get("personality"), limit=220),
+                "motivation": _review_context_text(raw.get("motivation") or raw.get("goal"), limit=220),
+                "background": _review_context_text(raw.get("background"), limit=260),
+                "faction": _review_context_text(raw.get("faction") or raw.get("affiliation"), limit=120),
+            }
+        )
+
+    current_outline: Optional[Dict[str, Any]] = None
+    nearby_outlines: List[Dict[str, Any]] = []
+    for outline in list(getattr(blueprint, "chapter_outline", []) or []):
+        try:
+            number = int(_review_context_value(outline, "chapter_number", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        payload = _build_outline_review_payload(outline)
+        if number == current_chapter_number:
+            current_outline = payload
+        if current_chapter_number - 2 <= number <= current_chapter_number + 2:
+            nearby_outlines.append(payload)
+
+    context = {
+        "title": _review_context_text(getattr(blueprint, "title", ""), limit=100),
+        "genre": _review_context_text(getattr(blueprint, "genre", ""), limit=100),
+        "style": _review_context_text(getattr(blueprint, "style", ""), limit=160),
+        "tone": _review_context_text(getattr(blueprint, "tone", ""), limit=160),
+        "one_sentence_summary": _review_context_text(getattr(blueprint, "one_sentence_summary", ""), limit=260),
+        "full_synopsis": _review_context_text(getattr(blueprint, "full_synopsis", ""), limit=700),
+        "world_setting": _review_context_dict(getattr(blueprint, "world_setting", {}) or {}),
+        "characters": characters,
+        "nearby_outlines": nearby_outlines,
+        "foreshadowing_system": _review_context_list(getattr(blueprint, "foreshadowing_system", []) or [], limit=12),
+    }
+    return context, current_outline
+
+
+def _build_version_review_content_payload(version: Any, *, long_threshold: int = 5200) -> Dict[str, Any]:
+    content = _review_content_text(_review_context_value(version, "content"), limit=50000)
+    total_chars = len(content)
+    payload: Dict[str, Any] = {
+        "version_id": _review_context_value(version, "id"),
+        "style": _review_context_text(
+            _review_context_value(version, "version_label")
+            or _review_context_value(version, "style")
+            or "draft",
+            limit=100,
+        ),
+        "word_count": int(_review_context_value(version, "word_count", 0) or 0),
+        "total_chars": total_chars,
+        "metadata": _review_context_dict(_review_context_value(version, "metadata", {}) or {}),
+    }
+    if total_chars <= long_threshold:
+        payload["content"] = content
+    else:
+        middle_start = max(total_chars // 2 - 900, 0)
+        head = content[:2200]
+        middle = content[middle_start: middle_start + 1800]
+        tail = content[-1800:]
+        payload["content_excerpt"] = {
+            "head": head,
+            "middle": middle,
+            "tail": tail,
+            "note": "Long chapter excerpt keeps head/middle/tail so the reviewer can judge continuity, density and ending pressure.",
+        }
+        payload["content"] = f"[head]\n{head}\n\n[middle]\n{middle}\n\n[tail]\n{tail}"
+    return payload
+
+
+def _build_single_chapter_evaluation_input(
+    project_schema: NovelProjectSchema,
+    chapter: Chapter,
+    version: ChapterVersion,
+    chapter_number: int,
+) -> str:
+    blueprint_context, current_outline = _build_blueprint_review_context(project_schema, chapter_number)
+    chapter_title = (
+        (current_outline or {}).get("title")
+        or _review_context_text(_review_context_value(chapter, "title"), limit=100)
+        or f"Chapter {chapter_number}"
+    )
+    payload = {
+        "review_mode": "single_version_cross_chapter_quality_review",
+        "review_rules": [
+            "Judge this as a formal candidate chapter, not an isolated prose fragment.",
+            "Use completed_chapters ending anchors, current_outline, character_focus, cast_delta and foreshadowing_tasks to check cross-chapter continuity.",
+            "Prioritize event density, dialogue that changes the situation, visible consequences, character state changes and ending pressure.",
+            "If the chapter needs repair, propose local anchored patches first; do not recommend whole-chapter rewrite unless the user explicitly confirms a structural rewrite.",
+        ],
+        "novel_blueprint": blueprint_context,
+        "completed_chapters": _build_completed_chapter_review_context(
+            list(getattr(project_schema, "chapters", []) or []),
+            chapter_number,
+        ),
+        "current_chapter_outline": current_outline,
+        "content_to_evaluate": {
+            "chapter_number": chapter_number,
+            "chapter_title": chapter_title,
+            "generation_status": str(_review_context_value(chapter, "generation_status", "") or ""),
+            "version": _build_version_review_content_payload(version),
+        },
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _resolve_outline_generation_goal(
+    *,
+    start_chapter: int,
+    num_chapters: int,
+    target_total_chapters: Optional[int],
+    target_total_words: Optional[int],
+    chapter_word_target: Optional[int],
+) -> Tuple[int, Optional[int]]:
+    if target_total_chapters is not None and target_total_chapters < start_chapter:
+        raise HTTPException(status_code=400, detail="target_total_chapters 不能小于 start_chapter")
+    if target_total_words is not None and target_total_words < 1000:
+        raise HTTPException(status_code=400, detail="target_total_words 不能小于 1000")
+    if chapter_word_target is not None and chapter_word_target < 500:
+        raise HTTPException(status_code=400, detail="chapter_word_target 不能小于 500")
+
+    effective_target_total_chapters = (
+        target_total_chapters
+        if target_total_chapters is not None
+        else max(start_chapter + num_chapters + 30, 60)
+    )
+
+    if chapter_word_target is None and target_total_words:
+        chapter_word_target = max(500, math.ceil(target_total_words / max(1, effective_target_total_chapters)))
+
+    return effective_target_total_chapters, chapter_word_target
 
 
 async def _resolve_chapter_version(
@@ -231,6 +539,7 @@ def _build_failed_generation_runtime_state(
     reason: str,
     cancel_requested: bool = False,
     level: str = "error",
+    allowed_actions: Optional[List[str]] = None,
 ) -> str:
     payload = _load_generation_runtime_state(chapter)
     runtime = payload.get("generation_runtime") if isinstance(payload.get("generation_runtime"), dict) else {}
@@ -250,7 +559,7 @@ def _build_failed_generation_runtime_state(
         "progress_stage": "failed",
         "progress_message": reason,
         "progress_percent": 100,
-        "allowed_actions": ["refresh_status", "retry_generation"],
+        "allowed_actions": allowed_actions or ["refresh_status", "retry_generation"],
         "started_at": runtime.get("started_at") or now_iso,
         "updated_at": now_iso,
         "heartbeat_at": now_iso,
@@ -259,6 +568,96 @@ def _build_failed_generation_runtime_state(
         "events": [*events[-199:], event],
     }
     return json.dumps({"generation_runtime": normalized_runtime}, ensure_ascii=False)
+
+
+def _truncate_runtime_text(value: Any, limit: int = 420) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "..."
+
+
+def _append_generation_runtime_event(
+    chapter: Optional[Chapter],
+    *,
+    stage: str,
+    message: str,
+    level: str = "info",
+    event_kind: str = "ledger",
+    title: Optional[str] = None,
+    summary: Optional[str] = None,
+    progress_percent: Optional[int] = None,
+    content_preview: Optional[str] = None,
+    metrics: Optional[Dict[str, Any]] = None,
+    artifact_refs: Optional[Dict[str, Any]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    if chapter is None:
+        return
+    payload = _load_generation_runtime_state(chapter)
+    runtime = payload.get("generation_runtime") if isinstance(payload.get("generation_runtime"), dict) else {}
+    now_iso = datetime.now(timezone.utc).isoformat()
+    events = runtime.get("events") if isinstance(runtime.get("events"), list) else []
+    event: Dict[str, Any] = {
+        "at": now_iso,
+        "stage": stage,
+        "level": level,
+        "kind": event_kind,
+        "message": message,
+        "title": title or message,
+        "summary": summary or message,
+    }
+    if content_preview:
+        event["content_preview"] = _truncate_runtime_text(content_preview)
+    if metrics:
+        event["metrics"] = metrics
+    if artifact_refs:
+        event["artifact_refs"] = artifact_refs
+    if metadata:
+        event["metadata"] = metadata
+
+    normalized_runtime: Dict[str, Any] = {
+        **runtime,
+        "progress_stage": stage,
+        "progress_message": message,
+        "progress_percent": progress_percent if progress_percent is not None else runtime.get("progress_percent", 100),
+        "updated_at": now_iso,
+        "heartbeat_at": now_iso,
+        "chapter_number": chapter.chapter_number,
+        "events": [*events[-199:], event],
+    }
+    chapter.real_summary = json.dumps({"generation_runtime": normalized_runtime}, ensure_ascii=False)
+
+
+def _build_memory_layer_runtime_summary(memory_result: Dict[str, Any]) -> str:
+    if not isinstance(memory_result, dict):
+        return "记忆层已尝试同步，结果结构异常，保留原文并等待后续重试。"
+
+    dynamic_names = [
+        str(name).strip()
+        for name in (memory_result.get("dynamic_character_names") or [])
+        if str(name).strip()
+    ]
+    pieces: List[str] = []
+    character_count = int(memory_result.get("character_states_updated") or 0)
+    timeline_count = int(memory_result.get("timeline_events_added") or 0)
+    causal_count = int(memory_result.get("causal_chains_added") or 0)
+    dynamic_count = int(memory_result.get("dynamic_characters_created") or len(dynamic_names) or 0)
+
+    if character_count:
+        pieces.append(f"角色状态 {character_count} 条")
+    if timeline_count:
+        pieces.append(f"时间线事件 {timeline_count} 条")
+    if causal_count:
+        pieces.append(f"因果链 {causal_count} 条")
+    if dynamic_count:
+        shown_names = "、".join(dynamic_names[:5]) if dynamic_names else f"{dynamic_count} 个新角色"
+        suffix = "等" if len(dynamic_names) > 5 else ""
+        pieces.append(f"动态角色入池：{shown_names}{suffix}")
+
+    if not pieces:
+        return "记忆层已检查本章，没有发现必须新增的角色状态、时间线或因果账本。"
+    return "已写入" + "，".join(pieces) + "。"
 
 
 def _get_generation_run_id(chapter: Optional[Chapter]) -> Optional[str]:
@@ -364,12 +763,30 @@ async def _mark_busy_chapter_evaluation_failed(
             _get_generation_run_id(chapter),
         )
         return
+    version_count = 0
+    try:
+        count_result = await session.execute(
+            select(func.count(ChapterVersion.id)).where(ChapterVersion.chapter_id == chapter.id)
+        )
+        version_count = int(count_result.scalar_one() or 0)
+    except Exception as exc:  # noqa: BLE001 - action hint only
+        logger.warning(
+            "Failed to count blocked candidate versions: project=%s chapter=%s error=%s",
+            chapter.project_id,
+            chapter.chapter_number,
+            exc,
+        )
     chapter.status = ChapterGenerationStatus.EVALUATION_FAILED.value
     chapter.real_summary = _build_failed_generation_runtime_state(
         chapter,
         run_id=run_id or _get_generation_run_id(chapter) or "unknown",
         cancel_requested=_is_generation_cancel_requested(chapter, run_id),
         reason=reason,
+        allowed_actions=(
+            ["refresh_status", "confirm_version", "review_versions", "retry_generation", "view_error"]
+            if version_count > 0
+            else ["refresh_status", "retry_generation", "view_error"]
+        ),
     )
     session.add(
         ChapterEvaluation(
@@ -402,6 +819,8 @@ async def _bounded_task_slot(semaphore: asyncio.Semaphore):
 def _resolve_quality_candidate_version_count(*, preset: str, target_word_count: int) -> int:
     normalized_preset = str(preset or "basic").strip() or "basic"
     target = max(500, int(target_word_count or 0))
+    if target >= 10000:
+        return 4
     if target >= 6500:
         return 3
     if normalized_preset in {"ultimate", "longform", "enhanced"} and target >= 4500:
@@ -420,6 +839,7 @@ def _compose_generation_writing_notes(
         "本章必须至少完成一个清晰的局势升级或局部反转，并通过至少两轮有效对话攻防或同等级动作博弈推动局势。",
         "正文要尽量一开始就进入本章目标与阻碍，不能把大半篇幅耗在纯氛围、纯感受、纯回忆上。",
         "如果字数较长，优先把篇幅写在场景执行、动作过程、对话压力、因果后果和章末传压上，不要靠描述性补字数。",
+        "单章字数契约：短章可以紧凑，但 4500 字以上必须有多场景推进；7000 字以上必须用场景组承载事件密度，10000 字以上要保持整章融合感，不能写成松散片段合集。",
         "结尾必须留下与当前主线直接相关的压力、误会、危险、悬念或回收后的新问题，不能平着收束。",
     ]
     if writing_notes and writing_notes.strip():
@@ -471,6 +891,7 @@ def _build_advanced_background_flow_config(request: AdvancedGenerateRequest) -> 
     )
     if min_word_count > target_word_count:
         min_word_count = target_word_count
+    draft_contract = PipelineOrchestrator._resolve_chapter_draft_contract(target_word_count, min_word_count)
 
     preset = str(raw_config.get("preset") or "basic").strip() or "basic"
     default_versions = _resolve_quality_candidate_version_count(
@@ -487,6 +908,8 @@ def _build_advanced_background_flow_config(request: AdvancedGenerateRequest) -> 
         "versions": versions,
         "target_word_count": target_word_count,
         "min_word_count": min_word_count,
+        "chapter_draft_contract": draft_contract,
+        "generation_strategy": draft_contract["generation_strategy"],
         "enforce_min_word_count": True,
         "advanced_background_mode": True,
         "async_finalize": False,
@@ -515,7 +938,7 @@ def _build_advanced_background_flow_config(request: AdvancedGenerateRequest) -> 
     if raw_config.get("rag_mode"):
         config["rag_mode"] = raw_config.get("rag_mode")
     if raw_config.get("max_enrich_iterations") is not None:
-        config["max_enrich_iterations"] = min(6, max(1, _coerce_positive_int(raw_config.get("max_enrich_iterations"), 1)))
+        config["max_enrich_iterations"] = min(8, max(1, _coerce_positive_int(raw_config.get("max_enrich_iterations"), 1)))
 
     return config
 
@@ -543,7 +966,7 @@ def _build_compat_generate_flow_config(request: GenerateChapterRequest) -> Dict[
     requires_word_enforcement = explicit_target or explicit_min
     requested_target = max(target_word_count, min_word_count)
     if requested_target >= 6500:
-        enrich_iterations = 6
+        enrich_iterations = 8 if requested_target >= 10000 else 6
     elif requested_target >= 4500:
         enrich_iterations = 5
     elif requested_target >= 1200 and requires_word_enforcement:
@@ -561,6 +984,7 @@ def _build_compat_generate_flow_config(request: GenerateChapterRequest) -> Dict[
         preset=preset,
         target_word_count=requested_target,
     )
+    draft_contract = PipelineOrchestrator._resolve_chapter_draft_contract(target_word_count, min_word_count)
 
     config: Dict[str, Any] = {
         "preset": preset,
@@ -568,6 +992,8 @@ def _build_compat_generate_flow_config(request: GenerateChapterRequest) -> Dict[
         "allow_truncated_response": False,
         "target_word_count": target_word_count,
         "min_word_count": min_word_count,
+        "chapter_draft_contract": draft_contract,
+        "generation_strategy": draft_contract["generation_strategy"],
         "max_enrich_iterations": enrich_iterations,
         "enforce_min_word_count": True,
         "compat_short_chapter_mode": is_short_chapter,
@@ -662,11 +1088,15 @@ def _validate_outline_item_executability(
     emotional_progression = str(item.get("emotional_progression") or "").strip()
     narrative_phase = str(item.get("narrative_phase") or "").strip()
     character_focus = _normalize_outline_string_list(item.get("character_focus"), limit=4)
+    cast_delta = item.get("cast_delta") if isinstance(item.get("cast_delta"), dict) else {}
     conflict_escalation = _normalize_outline_string_list(item.get("conflict_escalation"), limit=5)
     continuity_notes = _normalize_outline_string_list(item.get("continuity_notes"), limit=5)
 
     raw_foreshadowing = item.get("foreshadowing")
     foreshadowing = raw_foreshadowing if isinstance(raw_foreshadowing, dict) else {}
+    raw_foreshadowing_tasks = item.get("foreshadowing_tasks")
+    foreshadowing_tasks = raw_foreshadowing_tasks if isinstance(raw_foreshadowing_tasks, dict) else {}
+    payoff_window = str(item.get("payoff_window") or "").strip()
 
     goal_markers = ("想", "要", "必须", "决定", "试图", "寻找", "确认", "逼问", "救", "夺", "查", "进入")
     conflict_markers = ("却", "但", "阻", "拒绝", "威胁", "反制", "冲突", "误会", "压迫", "遭到", "敌")
@@ -709,11 +1139,167 @@ def _validate_outline_item_executability(
         "suspense_hook": suspense_hook or None,
         "emotional_progression": emotional_progression or None,
         "character_focus": character_focus,
+        "cast_delta": cast_delta,
         "conflict_escalation": conflict_escalation,
         "continuity_notes": continuity_notes,
         "foreshadowing": foreshadowing,
+        "foreshadowing_tasks": foreshadowing_tasks,
+        "payoff_window": payoff_window or None,
     }
     return not reasons, reasons, normalized
+
+
+OUTLINE_EXECUTION_METADATA_KEYS = (
+    "narrative_phase",
+    "chapter_role",
+    "suspense_hook",
+    "emotional_progression",
+    "character_focus",
+    "cast_delta",
+    "conflict_escalation",
+    "continuity_notes",
+    "foreshadowing",
+    "foreshadowing_tasks",
+    "payoff_window",
+)
+
+
+def _outline_item_json_schema(*, require_chapter_number: bool = False) -> Dict[str, Any]:
+    string_array = {"type": "array", "items": {"type": "string"}}
+    cast_delta_schema = {
+        "type": "object",
+        "required": ["new", "returning", "exit_or_absent", "faction_roles"],
+        "properties": {
+            "new": string_array,
+            "returning": string_array,
+            "exit_or_absent": string_array,
+            "faction_roles": string_array,
+        },
+    }
+    foreshadowing_schema = {
+        "type": "object",
+        "required": ["plant", "payoff"],
+        "properties": {
+            "plant": string_array,
+            "payoff": string_array,
+        },
+    }
+    foreshadowing_tasks_schema = {
+        "type": "object",
+        "required": ["plant", "reinforce", "payoff", "avoid_forgetting"],
+        "properties": {
+            "plant": string_array,
+            "reinforce": string_array,
+            "payoff": string_array,
+            "avoid_forgetting": string_array,
+        },
+    }
+    required = [
+        "title",
+        "summary",
+        "narrative_phase",
+        "chapter_role",
+        "suspense_hook",
+        "emotional_progression",
+        "character_focus",
+        "cast_delta",
+        "conflict_escalation",
+        "continuity_notes",
+        "foreshadowing",
+        "foreshadowing_tasks",
+        "payoff_window",
+    ]
+    properties: Dict[str, Any] = {
+        "title": {"type": "string"},
+        "summary": {"type": "string"},
+        "narrative_phase": {"type": "string"},
+        "chapter_role": {"type": "string"},
+        "suspense_hook": {"type": "string"},
+        "emotional_progression": {"type": "string"},
+        "character_focus": string_array,
+        "cast_delta": cast_delta_schema,
+        "conflict_escalation": string_array,
+        "continuity_notes": string_array,
+        "foreshadowing": foreshadowing_schema,
+        "foreshadowing_tasks": foreshadowing_tasks_schema,
+        "payoff_window": {"type": "string"},
+    }
+    if require_chapter_number:
+        required = ["chapter_number", *required]
+        properties["chapter_number"] = {"type": "integer"}
+    return {"type": "object", "required": required, "properties": properties}
+
+
+def _outline_batch_json_schema() -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "required": ["chapters"],
+        "properties": {
+            "chapters": {
+                "type": "array",
+                "items": _outline_item_json_schema(require_chapter_number=True),
+            }
+        },
+    }
+
+
+def _unwrap_outline_payload_root(payload: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    chapter_payload = payload.get("chapter")
+    if isinstance(chapter_payload, dict):
+        return {**payload, **chapter_payload}
+    return payload
+
+
+def _build_rewritten_outline_metadata(
+    *,
+    parsed_payload: Dict[str, Any],
+    existing_metadata: Optional[Dict[str, Any]],
+    chapter_no: int,
+    title: str,
+    summary: str,
+    direction: str,
+) -> Dict[str, Any]:
+    """Merge a rewritten outline back into the existing execution metadata."""
+
+    old_metadata = dict(existing_metadata or {})
+    parsed = _unwrap_outline_payload_root(parsed_payload)
+    merged_for_gate = {
+        **old_metadata,
+        **parsed,
+        "title": title,
+        "summary": summary,
+    }
+    valid, rejection_reasons, normalized = _validate_outline_item_executability(
+        merged_for_gate,
+        chapter_no=chapter_no,
+        summary_min_chars=120,
+        summary_max_chars=420,
+    )
+
+    metadata = dict(old_metadata)
+    for key in OUTLINE_EXECUTION_METADATA_KEYS:
+        value = normalized.get(key)
+        if value not in (None, "", [], {}):
+            metadata[key] = value
+
+    metadata["outline_quality"] = {
+        **(old_metadata.get("outline_quality") if isinstance(old_metadata.get("outline_quality"), dict) else {}),
+        "rewrite_executability_gate_passed": valid,
+        "rewrite_rejection_reasons": rejection_reasons,
+        "rewrite_checked_at": datetime.now(timezone.utc).isoformat(),
+    }
+    metadata["last_rewrite"] = {
+        "direction": direction,
+        "preserved_existing_metadata": bool(old_metadata),
+        "updated_fields": [
+            key
+            for key in OUTLINE_EXECUTION_METADATA_KEYS
+            if key in parsed and parsed.get(key) not in (None, "", [], {})
+        ],
+    }
+    return metadata
 
 
 def _truncate_text(text: Optional[str], limit: int) -> str:
@@ -923,6 +1509,7 @@ async def _finalize_chapter_async(
                 user_id=user_id,
                 skip_vector_update=skip_vector_update,
                 refresh_memory_layer=True,
+                chapter=chapter,
             )
     except Exception as exc:
         logger.warning(
@@ -931,6 +1518,63 @@ async def _finalize_chapter_async(
             chapter_number,
             exc,
         )
+        await _record_background_finalize_failure(
+            project_id=project_id,
+            chapter_number=chapter_number,
+            error=exc,
+        )
+
+
+async def _record_background_finalize_failure(
+    *,
+    project_id: str,
+    chapter_number: int,
+    error: Exception,
+) -> None:
+    """Mark async finalize as degraded so the UI does not wait forever."""
+    try:
+        async with AsyncSessionLocal() as session:
+            stmt = select(Chapter).where(
+                Chapter.project_id == project_id,
+                Chapter.chapter_number == chapter_number,
+            )
+            result = await session.execute(stmt)
+            chapter = result.scalars().first()
+            if not chapter:
+                return
+            _append_generation_runtime_event(
+                chapter,
+                stage="finalized",
+                message="定稿正文已保存，账本同步降级",
+                level="warning",
+                progress_percent=100,
+                event_kind="ledger",
+                title="定稿降级完成",
+                summary="后台账本更新遇到异常，已保留选中正文；可稍后重试账本同步。",
+                metadata={"error": str(error)[:300]},
+            )
+            await session.commit()
+    except Exception as record_exc:
+        logger.warning(
+            "记录后台定稿降级状态失败: project=%s chapter=%s error=%s",
+            project_id,
+            chapter_number,
+            record_exc,
+        )
+
+
+async def _refresh_chapter_runtime_state(session: AsyncSession, chapter: Optional[Chapter]) -> None:
+    if chapter is None:
+        return
+    refresh = getattr(session, "refresh", None)
+    if not callable(refresh):
+        return
+    try:
+        await refresh(chapter, attribute_names=["real_summary", "chapter_number"])
+    except TypeError:
+        await refresh(chapter)
+    except Exception:
+        logger.debug("刷新章节运行态失败，继续使用当前内存值", exc_info=True)
 
 
 async def _run_finalize_pipeline(
@@ -942,8 +1586,26 @@ async def _run_finalize_pipeline(
     user_id: int,
     skip_vector_update: bool = False,
     refresh_memory_layer: bool = True,
+    chapter: Optional[Chapter] = None,
 ) -> Dict[str, Any]:
     llm_service = LLMService(session)
+    selected_content = getattr(selected_version, "content", None) or ""
+    selected_version_id = getattr(selected_version, "id", None)
+    selected_chapter_id = getattr(selected_version, "chapter_id", None)
+
+    if chapter is not None:
+        _append_generation_runtime_event(
+            chapter,
+            stage="finalize",
+            message="正在确认定稿并更新故事账本",
+            progress_percent=98,
+            event_kind="ledger",
+            title="定稿闭环开始",
+            summary="将同步章节摘要、角色状态、伏笔/线索和知识图谱。",
+            content_preview=selected_content,
+            metrics={"selected_version_id": selected_version_id},
+        )
+        await session.commit()
 
     vector_store = None
     if settings.vector_store_enabled and not skip_vector_update:
@@ -956,11 +1618,28 @@ async def _run_finalize_pipeline(
     finalize_result = await finalize_service.finalize_chapter(
         project_id=project_id,
         chapter_number=chapter_number,
-        chapter_text=selected_version.content,
+        chapter_text=selected_content,
         user_id=user_id,
         skip_vector_update=skip_vector_update,
     )
     result: Dict[str, Any] = {"finalize": finalize_result}
+
+    if chapter is not None:
+        await _refresh_chapter_runtime_state(session, chapter)
+        finalize_success = bool(finalize_result.get("success", True)) if isinstance(finalize_result, dict) else True
+        _append_generation_runtime_event(
+            chapter,
+            stage="finalize",
+            message="定稿摘要和章节快照已处理" if finalize_success else "定稿摘要或章节快照处理降级",
+            level="info" if finalize_success else "warning",
+            progress_percent=98,
+            event_kind="ledger",
+            title="定稿快照完成" if finalize_success else "定稿快照降级",
+            summary="全局摘要、剧情线和章节快照已写入或尝试写入。",
+            metrics=(finalize_result.get("updates") if isinstance(finalize_result, dict) else None),
+            content_preview=selected_content,
+        )
+        await session.commit()
 
     if not refresh_memory_layer:
         return result
@@ -986,11 +1665,29 @@ async def _run_finalize_pipeline(
         memory_result = await memory_service.update_memory_after_chapter(
             project_id=project_id,
             chapter_number=chapter_number,
-            chapter_content=selected_version.content,
+            chapter_content=selected_content,
             character_names=character_names,
             user_id=user_id,
         )
         result["memory_layer"] = memory_result
+        if chapter is not None:
+            await _refresh_chapter_runtime_state(session, chapter)
+            memory_summary = _build_memory_layer_runtime_summary(memory_result)
+            _append_generation_runtime_event(
+                chapter,
+                stage="ledger_memory",
+                message="角色状态、时间线和因果账本更新完成",
+                progress_percent=99,
+                event_kind="ledger",
+                title="记忆层更新完成",
+                summary=memory_summary,
+                metrics=memory_result,
+                artifact_refs={
+                    "dynamic_character_names": memory_result.get("dynamic_character_names", []),
+                    "dynamic_characters_created": memory_result.get("dynamic_characters_created", 0),
+                },
+            )
+            await session.commit()
     except Exception as exc:
         await session.rollback()
         logger.warning(
@@ -1002,6 +1699,146 @@ async def _run_finalize_pipeline(
             "success": False,
             "error": str(exc)[:200],
         }
+        if chapter is not None:
+            await _refresh_chapter_runtime_state(session, chapter)
+            _append_generation_runtime_event(
+                chapter,
+                stage="ledger_memory",
+                message="记忆层更新降级，定稿正文已保留",
+                level="warning",
+                progress_percent=99,
+                event_kind="ledger",
+                title="记忆层更新降级",
+                summary="角色状态或时间线抽取失败，后续可重试账本同步。",
+                metadata={"error": str(exc)[:300]},
+            )
+            await session.commit()
+
+    try:
+        foreshadowing_service = ForeshadowingService(session)
+        foreshadowing_result = await foreshadowing_service.auto_resolve_from_chapter(
+            project_id=project_id,
+            chapter_id=selected_chapter_id,
+            chapter_number=chapter_number,
+            chapter_content=selected_content,
+        )
+        auto_collect_result = await foreshadowing_service.auto_collect_from_chapter(
+            project_id=project_id,
+            chapter_id=selected_chapter_id,
+            chapter_number=chapter_number,
+            chapter_content=selected_content,
+            max_items=6,
+        )
+        total_chapters = await session.scalar(
+            select(func.count(ChapterOutline.id)).where(ChapterOutline.project_id == project_id)
+        )
+        reminders = await foreshadowing_service.check_and_create_reminders(
+            project_id=project_id,
+            current_chapter_number=chapter_number,
+            total_chapters=max(int(total_chapters or chapter_number), chapter_number),
+        )
+        await session.commit()
+        result["foreshadowing_closure"] = {
+            **foreshadowing_result,
+            "auto_collected": auto_collect_result,
+            "active_reminders_checked": len(reminders),
+        }
+        if chapter is not None:
+            await _refresh_chapter_runtime_state(session, chapter)
+            _append_generation_runtime_event(
+                chapter,
+                stage="ledger_foreshadowing",
+                message="伏笔回收和新伏笔抽取完成",
+                progress_percent=99,
+                event_kind="ledger",
+                title="伏笔闭环完成",
+                summary=(
+                    f"回收 {foreshadowing_result.get('resolved', 0)} 条，强化 "
+                    f"{foreshadowing_result.get('reinforced', 0)} 条，新增 "
+                    f"{auto_collect_result.get('created', 0) if isinstance(auto_collect_result, dict) else 0} 条。"
+                ),
+                metrics=result["foreshadowing_closure"],
+                artifact_refs={
+                    "resolution_ids": foreshadowing_result.get("resolution_ids", []),
+                    "reinforced_ids": foreshadowing_result.get("reinforced_ids", []),
+                    "unresolved_due_ids": foreshadowing_result.get("unresolved_due_ids", []),
+                },
+            )
+            await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        logger.warning(
+            "章节 %s 伏笔写后闭环失败，已保留定稿结果: %s",
+            chapter_number,
+            exc,
+        )
+        result["foreshadowing_closure"] = {
+            "success": False,
+            "error": str(exc)[:200],
+        }
+        if chapter is not None:
+            await _refresh_chapter_runtime_state(session, chapter)
+            _append_generation_runtime_event(
+                chapter,
+                stage="ledger_foreshadowing",
+                message="伏笔闭环降级，定稿正文已保留",
+                level="warning",
+                progress_percent=99,
+                event_kind="ledger",
+                title="伏笔闭环降级",
+                summary="伏笔回收或新伏笔抽取失败，后续可重试账本同步。",
+                metadata={"error": str(exc)[:300]},
+            )
+            await session.commit()
+
+    try:
+        clue_result = await ClueTrackerService(session).sync_from_foreshadowings(project_id)
+        graph_result = await KnowledgeGraphService(session).sync_from_story_memory(project_id)
+        result["ledger_sync"] = {
+            "clues": clue_result,
+            "knowledge_graph": graph_result,
+        }
+        if chapter is not None:
+            await _refresh_chapter_runtime_state(session, chapter)
+            _append_generation_runtime_event(
+                chapter,
+                stage="ledger_graph",
+                message="线索和知识图谱同步完成",
+                progress_percent=100,
+                event_kind="ledger",
+                title="线索/图谱同步完成",
+                summary="已把伏笔线索、角色状态和时间线同步进故事账本。",
+                metrics={
+                    "clues": clue_result if isinstance(clue_result, dict) else {},
+                    "knowledge_graph": graph_result if isinstance(graph_result, dict) else {},
+                },
+            )
+            await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        logger.warning(
+            "章节 %s 线索/知识图谱同步失败，已保留定稿结果: %s",
+            chapter_number,
+            exc,
+        )
+        result["ledger_sync"] = {
+            "success": False,
+            "error": str(exc)[:200],
+        }
+        if chapter is not None:
+            await _refresh_chapter_runtime_state(session, chapter)
+            _append_generation_runtime_event(
+                chapter,
+                stage="ledger_graph",
+                message="线索/知识图谱同步降级，定稿正文已保留",
+                level="warning",
+                progress_percent=100,
+                event_kind="ledger",
+                title="线索/图谱同步降级",
+                summary="线索或知识图谱同步失败，章节正文和其他账本结果不受影响。",
+                metadata={"error": str(exc)[:300]},
+            )
+            await session.commit()
 
     try:
         cache_service = CacheService()
@@ -1015,6 +1852,27 @@ async def _run_finalize_pipeline(
     except Exception as exc:
         logger.warning("清理分析缓存失败，已保留定稿结果: %s", exc)
         result["analysis_cache"] = {"success": False, "error": str(exc)[:200]}
+
+    if chapter is not None:
+        await _refresh_chapter_runtime_state(session, chapter)
+        memory_layer_result = result.get("memory_layer") if isinstance(result.get("memory_layer"), dict) else {}
+        _append_generation_runtime_event(
+            chapter,
+            stage="finalized",
+            message="定稿闭环完成",
+            progress_percent=100,
+            event_kind="ledger",
+            title="定稿闭环完成",
+            summary="正文已确认，记忆、伏笔、线索和知识图谱同步结果已写入运行日志。",
+            metrics={
+                "memory_success": bool((result.get("memory_layer") or {}).get("success", True)),
+                "foreshadowing_success": bool((result.get("foreshadowing_closure") or {}).get("success", True)),
+                "ledger_sync_success": bool((result.get("ledger_sync") or {}).get("success", True)),
+                "dynamic_characters_created": memory_layer_result.get("dynamic_characters_created", 0),
+                "dynamic_character_names": memory_layer_result.get("dynamic_character_names", []),
+            },
+        )
+        await session.commit()
 
     return result
 
@@ -1341,6 +2199,8 @@ async def advanced_generate_chapter(
             "version_count": flow_config["versions"],
             "target_word_count": flow_config["target_word_count"],
             "min_word_count": flow_config["min_word_count"],
+            "chapter_draft_contract": flow_config.get("chapter_draft_contract"),
+            "generation_strategy": flow_config.get("generation_strategy"),
             "timeout_seconds": _calculate_generation_timeout_seconds(flow_config),
             "status": "queued",
             "advanced_background_mode": True,
@@ -1393,6 +2253,7 @@ async def finalize_chapter(
         user_id=current_user.id,
         skip_vector_update=request.skip_vector_update or False,
         refresh_memory_layer=True,
+        chapter=chapter,
     )
 
     return FinalizeChapterResponse(
@@ -1568,6 +2429,8 @@ async def generate_chapter(
             "version_count": flow_config["versions"],
             "target_word_count": flow_config["target_word_count"],
             "min_word_count": flow_config["min_word_count"],
+            "chapter_draft_contract": flow_config.get("chapter_draft_contract"),
+            "generation_strategy": flow_config.get("generation_strategy"),
             "timeout_seconds": _calculate_generation_timeout_seconds(flow_config),
             "status": "queued",
         },
@@ -1657,6 +2520,7 @@ async def select_chapter_version(
         require_content=True,
     )
     chapter.selected_version_id = selected_version.id
+    chapter.selected_version = selected_version
     chapter.status = ChapterGenerationStatus.SUCCESSFUL.value
     chapter.word_count = len(selected_version.content or "")
     await novel_service._touch_project(project_id, auto_commit=False)
@@ -1833,12 +2697,30 @@ async def evaluate_chapter(
             return await _load_project_schema(novel_service, project_id, current_user.id)
 
         with LLMService.daily_limit_scope(f"chapter_review_single:{project_id}:{request.chapter_number}:{current_user.id}"):
-            evaluation_raw = await llm_service.get_llm_response(
+            project_schema = await novel_service._serialize_project(project)
+            eval_input_text = _build_single_chapter_evaluation_input(
+                project_schema,
+                chapter,
+                version_to_evaluate,
+                request.chapter_number,
+            )
+            evaluation_result = await call_generation_text(
+                llm_service=llm_service,
                 system_prompt=eval_prompt,
-                conversation_history=[{"role": "user", "content": version_to_evaluate.content}],
+                conversation_history=[{"role": "user", "content": eval_input_text}],
                 temperature=0.3,
                 user_id=current_user.id,
+                timeout=180.0,
+                policy=GenerationCallPolicy(
+                    stage_label="单版本章节评审",
+                    progress_stage="review",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=4000,
+                    retry_same_model_once=True,
+                ),
             )
+            evaluation_raw = evaluation_result.text
         evaluation_text = remove_think_tags(evaluation_raw)
 
         if not evaluation_text or len(evaluation_text.strip()) == 0:
@@ -1922,6 +2804,7 @@ async def _evaluate_all_versions(
 
         # 构建多版本评审输入
         project_schema = await novel_service._serialize_project(project)
+        blueprint_review_context, current_outline = _build_blueprint_review_context(project_schema, chapter_number)
 
         # 构建蓝图上下文
         blueprint_context = {
@@ -1955,25 +2838,34 @@ async def _evaluate_all_versions(
                     })
 
         # 构建待评估内容
+        blueprint_context = blueprint_review_context
+        current_outline_title = (current_outline or {}).get("title") or current_outline_title
+
         versions_content = []
         version_indices = []  # 记录有效版本的编号
         for idx, version in valid_versions:
-            content = version.content
+            version_payload = _build_version_review_content_payload(version, long_threshold=3000)
+            content = version_payload["content"]
             # 截断过长的内容
             if len(content) > 3000:
                 content = content[:1800] + "\n...\n" + content[-1200:]
             version_number = idx + 1  # 版本编号从1开始
-            versions_content.append({
+            version_payload.update({
                 "version_index": version_number,
                 "style": version.version_label or f"版本{version_number}",
                 "content": content,
             })
+            versions_content.append(version_payload)
             version_indices.append(version_number)
 
         # 构建评审输入
         eval_input = {
             "novel_blueprint": blueprint_context,
-            "completed_chapters": [],  # TODO: 可以添加前序章节摘要
+            "completed_chapters": _build_completed_chapter_review_context(
+                list(getattr(project_schema, "chapters", []) or []),
+                chapter_number,
+            ),
+            "current_chapter_outline": current_outline,
             "content_to_evaluate": {
                 "chapter_title": current_outline_title or f"第{chapter_number}章",
                 "total_versions": len(versions_content),  # 明确告诉AI有多少个版本
@@ -1990,13 +2882,23 @@ async def _evaluate_all_versions(
         )
 
         with LLMService.daily_limit_scope(f"chapter_review_all:{project_id}:{chapter_number}:{user_id}"):
-            evaluation_raw = await llm_service.get_llm_response(
+            evaluation_result = await call_generation_text(
+                llm_service=llm_service,
                 system_prompt=eval_prompt,
                 conversation_history=[{"role": "user", "content": eval_input_text}],
                 temperature=0.3,
                 user_id=user_id,
                 timeout=180.0,
+                policy=GenerationCallPolicy(
+                    stage_label="多版本章节评审",
+                    progress_stage="review",
+                    retry_attempts=2,
+                    response_format="json_object",
+                    max_tokens=6000,
+                    retry_same_model_once=True,
+                ),
             )
+            evaluation_raw = evaluation_result.text
         evaluation_text = remove_think_tags(evaluation_raw)
 
         if not evaluation_text or len(evaluation_text.strip()) == 0:
@@ -2124,12 +3026,18 @@ async def rewrite_chapter_outline(
     rewrite_prompt = await prompt_service.get_prompt("outline_rewrite")
     if not rewrite_prompt:
         rewrite_prompt = (
-            "你是顶级网文编辑，请在不改变主线剧情的前提下，重写章节标题与章节摘要。"
-            "要求：更抓人、更有冲突、更有悬念、可直接用于正文写作。"
-            "只输出 JSON：{\"title\":\"...\",\"summary\":\"...\"}"
+            "你是顶级网文编辑，请在不改变主线剧情的前提下，重写章节标题、章节摘要与执行字段。"
+            "要求：更抓人、更有冲突、更有悬念、可直接用于正文写作，并保留角色、伏笔和连续性承接。"
+            "只输出 JSON 对象。"
         )
 
     direction = (request.direction or "").strip() or "无额外方向"
+    existing_metadata = dict(getattr(outline, "metadata", None) or {})
+    metadata_context = (
+        json.dumps(existing_metadata, ensure_ascii=False, indent=2)
+        if existing_metadata
+        else "暂无执行 metadata"
+    )
     neighbor_lines = []
     for candidate in sorted(getattr(project, "outlines", []) or [], key=lambda item: item.chapter_number):
         if abs(candidate.chapter_number - request.chapter_number) <= 2 and candidate.chapter_number != request.chapter_number:
@@ -2154,12 +3062,18 @@ async def rewrite_chapter_outline(
 [相邻章节连续性锚点]
 {neighbor_context}
 
+[当前执行字段 metadata]
+{metadata_context}
+
 [硬性要求]
 1. 标题更有辨识度，建议 8-22 字。
 2. 摘要长度 160-360 字，必须包含：本章冲突、角色目标/阻碍、关键转折、章尾钩子。
 3. 保持与前后章节连续，不得胡乱跳剧情。
 4. 不要改变本章在前后两章之间承担的因果位置，不要新增无法承接的支线。
-5. 只输出 JSON，不要附加说明。
+5. 同步输出可执行字段：narrative_phase、chapter_role、suspense_hook、emotional_progression、character_focus、cast_delta、conflict_escalation、continuity_notes、foreshadowing、foreshadowing_tasks、payoff_window。
+6. cast_delta 要说明新增/回归/退出角色如何进入角色池、势力或功能路人规划；foreshadowing_tasks 要说明本章回收、强化、禁忘和可新增伏笔。
+7. 只输出 JSON，不要附加说明。格式：
+{{"title":"...","summary":"...","narrative_phase":"...","chapter_role":"...","suspense_hook":"...","emotional_progression":"...","character_focus":["..."],"cast_delta":{{"new":[],"returning":[],"exit_or_absent":[],"faction_roles":[]}},"conflict_escalation":["..."],"continuity_notes":["..."],"foreshadowing":{{"plant":[],"payoff":[]}},"foreshadowing_tasks":{{"plant":[],"reinforce":[],"payoff":[],"avoid_forgetting":[]}},"payoff_window":"..."}}
 """
 
     try:
@@ -2175,11 +3089,14 @@ async def rewrite_chapter_outline(
                     stage_label="章节大纲重写",
                     retry_attempts=3,
                     response_format="json_object",
+                    json_schema=_outline_item_json_schema(),
+                    json_schema_name="chapter_outline_rewrite",
+                    json_schema_strict=False,
                     allow_truncated_response=True,
-                    json_repair_attempts=1,
+                    json_repair_attempts=2,
                 ),
             )
-        parsed = json_result.data
+        parsed = _unwrap_outline_payload_root(json_result.data)
 
         rewritten_title = str(parsed.get("title") or request.title).strip()
         rewritten_summary = str(parsed.get("summary") or request.summary).strip()
@@ -2190,6 +3107,14 @@ async def rewrite_chapter_outline(
 
         outline.title = rewritten_title
         outline.summary = rewritten_summary
+        outline.metadata = _build_rewritten_outline_metadata(
+            parsed_payload=parsed,
+            existing_metadata=existing_metadata,
+            chapter_no=request.chapter_number,
+            title=rewritten_title,
+            summary=rewritten_summary,
+            direction=direction,
+        )
         await session.commit()
     except GenerationJSONDecodeError as exc:
         logger.warning(
@@ -2247,21 +3172,13 @@ async def generate_chapters_outline(
     target_total_words = request.target_total_words
     chapter_word_target = request.chapter_word_target
 
-    if target_total_chapters is not None and target_total_chapters < request.start_chapter:
-        raise HTTPException(status_code=400, detail="target_total_chapters 不能小于 start_chapter")
-    if target_total_words is not None and target_total_words < 10000:
-        raise HTTPException(status_code=400, detail="target_total_words 不能小于 10000")
-    if chapter_word_target is not None and chapter_word_target < 500:
-        raise HTTPException(status_code=400, detail="chapter_word_target 不能小于 500")
-
-    effective_target_total_chapters = (
-        target_total_chapters
-        if target_total_chapters is not None
-        else max(request.start_chapter + request.num_chapters + 30, 60)
+    effective_target_total_chapters, chapter_word_target = _resolve_outline_generation_goal(
+        start_chapter=request.start_chapter,
+        num_chapters=request.num_chapters,
+        target_total_chapters=target_total_chapters,
+        target_total_words=target_total_words,
+        chapter_word_target=chapter_word_target,
     )
-
-    if chapter_word_target is None and target_total_words:
-        chapter_word_target = max(500, math.ceil(target_total_words / max(1, effective_target_total_chapters)))
 
     summary_min_chars = 140
     summary_max_chars = 260
@@ -2364,7 +3281,7 @@ async def generate_chapters_outline(
 {retry_hint}
 
 [硬性要求]
-1. 只输出 JSON 对象：{{"chapters":[{{"chapter_number":数字,"title":"标题","summary":"摘要","narrative_phase":"阶段","chapter_role":"职责","suspense_hook":"钩子","emotional_progression":"情绪变化","character_focus":["角色"],"conflict_escalation":["升级点"],"continuity_notes":["承接/递进说明"],"foreshadowing":{{"plant":["伏笔"],"payoff":["回收" ]}}}}]}}
+1. 只输出 JSON 对象：{{"chapters":[{{"chapter_number":数字,"title":"标题","summary":"摘要","narrative_phase":"阶段","chapter_role":"职责","suspense_hook":"钩子","emotional_progression":"情绪变化","character_focus":["角色"],"cast_delta":{{"new":[],"returning":[],"exit_or_absent":[],"faction_roles":[]}},"conflict_escalation":["升级点"],"continuity_notes":["承接/递进说明"],"foreshadowing":{{"plant":["伏笔"],"payoff":["回收"]}},"foreshadowing_tasks":{{"plant":[],"reinforce":[],"payoff":[],"avoid_forgetting":[]}},"payoff_window":"回收窗口"}}]}}
 2. chapter_number 必须只来自本次要求的章节号，不得跳号、重号、缺号。
 3. 每章 summary 必须具体可写，不得空泛，长度控制在 {summary_min_chars}-{summary_max_chars} 字之间。
 4. 每章 summary 必须包含：本章核心冲突、人物目标/阻碍、关键转折、章尾钩子。
@@ -2372,28 +3289,36 @@ async def generate_chapters_outline(
 6. 每章必须有人物焦点与情绪推进，禁止只有事件流水账。
 7. {ending_constraint}
 8. 与已有章节保持连续，避免剧情断层。
-9. 代码会拒绝缺少 chapter_role / suspense_hook / conflict_escalation / continuity_notes 的空泛章节；请一次生成可直接进入正文写作的执行型大纲。
+9. cast_delta 必须说明本章新增/回归/退出角色如何落入角色池、势力或功能性路人规则；不能凭空出现又消失。
+10. foreshadowing_tasks 必须说明本章回收、强化、禁忘和可新增伏笔，不能只写“埋伏笔”。
+11. 代码会拒绝缺少 chapter_role / suspense_hook / conflict_escalation / continuity_notes 的空泛章节；请一次生成可直接进入正文写作的执行型大纲。
 """
 
-                response = await _call_llm_with_stage_retries(
-                    llm_service=llm_service,
-                    system_prompt=outline_prompt,
-                    conversation_history=[{"role": "user", "content": prompt_input}],
-                    temperature=0.7,
-                    user_id=current_user.id,
-                    allow_truncated_response=True,
-                    timeout=180.0,
-                    stage_label="章节大纲分批生成",
-                    retry_attempts=3,
-                )
-
-                cleaned = remove_think_tags(response)
-                normalized = unwrap_markdown_json(cleaned)
-                sanitized = sanitize_json_like_text(normalized)
                 try:
-                    data = json.loads(sanitized)
+                    json_result = await call_generation_json(
+                        llm_service=llm_service,
+                        system_prompt=outline_prompt,
+                        conversation_history=[{"role": "user", "content": prompt_input}],
+                        temperature=0.7,
+                        user_id=current_user.id,
+                        timeout=180.0,
+                        policy=GenerationCallPolicy(
+                            stage_label="章节大纲分批生成",
+                            progress_stage="outline_chapter_skeleton",
+                            retry_attempts=3,
+                            response_format="json_object",
+                            json_schema=_outline_batch_json_schema(),
+                            json_schema_name="chapter_outline_batch",
+                            json_schema_strict=False,
+                            max_tokens=5000,
+                            allow_truncated_response=True,
+                            retry_same_model_once=True,
+                            json_repair_attempts=2,
+                        ),
+                    )
+                    data = json_result.data
                 except Exception as exc:
-                    logger.warning("大纲生成分批第 %s 次解析失败: %s", attempt + 1, exc)
+                    logger.warning("大纲生成分批第 %s 次生成/解析失败: %s", attempt + 1, exc)
                     continue
 
                 chapters_payload = []
@@ -2490,9 +3415,12 @@ async def generate_chapters_outline(
                 "suspense_hook": item.get("suspense_hook"),
                 "emotional_progression": item.get("emotional_progression"),
                 "character_focus": item.get("character_focus") or [],
+                "cast_delta": item.get("cast_delta") or {},
                 "conflict_escalation": item.get("conflict_escalation") or [],
                 "continuity_notes": item.get("continuity_notes") or [],
                 "foreshadowing": item.get("foreshadowing") or {},
+                "foreshadowing_tasks": item.get("foreshadowing_tasks") or {},
+                "payoff_window": item.get("payoff_window"),
                 "outline_quality": {
                     "accepted_by_executability_gate": True,
                     "rejection_reasons": [],

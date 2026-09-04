@@ -19,6 +19,8 @@ from ...schemas.novel import Chapter as ChapterSchema
 from ...schemas.user import UserInDB
 from ...services.llm_service import LLMService
 from ...services.generation_call_service import GenerationCallPolicy, GenerationJSONDecodeError, call_generation_json
+from ...services.continuity_guard_utils import continuity_terms_guard_failure
+from ...services.longform_context_service import LongformContextService
 from ...services.novel_service import NovelService
 from ...services.prompt_service import PromptService
 
@@ -111,6 +113,56 @@ def _compact_len(text: str) -> int:
     return len("".join((text or "").split()))
 
 
+def _optimizer_response_schema() -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "required": ["optimized_content", "optimization_notes"],
+        "properties": {
+            "optimized_content": {"type": "string"},
+            "optimization_notes": {"type": "string"},
+        },
+    }
+
+
+def _anchor_overlap_count(original_sample: str, optimized_content: str, *, chunk_size: int = 16) -> int:
+    sample = "".join((original_sample or "").split())
+    optimized = "".join((optimized_content or "").split())
+    if not sample or not optimized:
+        return 0
+    if len(sample) <= chunk_size:
+        return 1 if sample in optimized else 0
+    hits = 0
+    seen: set[str] = set()
+    step = max(8, chunk_size)
+    for start in range(0, max(1, len(sample) - chunk_size + 1), step):
+        chunk = sample[start:start + chunk_size]
+        if len(chunk) < chunk_size or chunk in seen:
+            continue
+        seen.add(chunk)
+        if chunk in optimized:
+            hits += 1
+    return hits
+
+
+CONTINUITY_MOTIF_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("old_south_canal", ("\u65e7\u5357\u6e20", "\u5357\u6e20")),
+    ("medicine_trace", ("\u836f\u6e23", "\u836f\u5473", "\u836f\u8017", "\u836f\u65b9", "\u836f\u884c")),
+    ("death_risk", ("\u6b7b\u4eba", "\u4eba\u547d", "\u4f1a\u6b7b", "\u771f\u4f1a\u6b7b")),
+    ("jingzhe_gap", ("\u60ca\u86f0",)),
+    ("ledger_evidence", ("\u8d26\u518c", "\u8d26\u672c", "\u8d26\u9875", "\u7a7a\u8d26")),
+)
+
+
+def _extract_required_motif_groups(text: str) -> list[Dict[str, Any]]:
+    source = str(text or "")
+    required: list[Dict[str, Any]] = []
+    for label, markers in CONTINUITY_MOTIF_GROUPS:
+        present_markers = [marker for marker in markers if marker in source]
+        if present_markers:
+            required.append({"label": label, "markers": list(markers), "present_markers": present_markers})
+    return required
+
+
 def _build_nearby_outline_context(project: Any, chapter_number: int, *, radius: int = 2) -> list[Dict[str, Any]]:
     outlines = sorted(getattr(project, "outlines", []) or [], key=lambda item: item.chapter_number)
     payload: list[Dict[str, Any]] = []
@@ -150,23 +202,30 @@ def _build_nearby_chapter_state(project: Any, chapter_number: int, *, radius: in
 
 def _build_continuity_contract(project: Any, request: OptimizeRequest, original_content: str) -> Dict[str, Any]:
     return {
-        "mode": "continuity_preserving_full_chapter_optimization",
+        "mode": "local_window_with_anchors_return_full_chapter",
         "chapter_number": request.chapter_number,
         "dimension": request.dimension,
         "nearby_outlines": _build_nearby_outline_context(project, request.chapter_number),
         "nearby_chapter_state": _build_nearby_chapter_state(project, request.chapter_number),
         "original_opening_sample": original_content[:700],
         "original_ending_sample": original_content[-700:],
+        "required_motif_groups": _extract_required_motif_groups(original_content),
         "hard_rules": [
-            "必须返回完整章节正文，不要只返回被修改片段。",
+            "优先只修改问题片段，用前后锚点把局部改动缝回原文；最后必须返回完整章节正文，便于系统保存。",
             "保留原章节的事件顺序、因果链、角色目标、章尾钩子和上下章承接点。",
             "只在当前优化维度上改写表达，不新增无法在相邻章节承接的新支线。",
             "可以润色句段和补强细节，但不能把连续场景切碎成互不相连的短块。",
+            "除非原文存在严重结构断裂，不要重写整章；扩展修补范围必须让连续性更清楚。",
         ],
     }
 
 
-def _continuity_guard_failure(original_content: str, optimized_content: str) -> Optional[str]:
+def _continuity_guard_failure(
+    original_content: str,
+    optimized_content: str,
+    *,
+    context: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
     original_len = _compact_len(original_content)
     optimized_len = _compact_len(optimized_content)
     if optimized_len < 80:
@@ -178,6 +237,29 @@ def _continuity_guard_failure(original_content: str, optimized_content: str) -> 
     stripped = (optimized_content or "").strip()
     if stripped.startswith("{") and "optimized_content" in stripped[:300]:
         return "optimized content still looks like raw JSON"
+    if original_len >= 500:
+        opening_hits = _anchor_overlap_count(original_content[:360], optimized_content)
+        ending_hits = _anchor_overlap_count(original_content[-360:], optimized_content)
+        if opening_hits == 0 and ending_hits == 0:
+            return "optimized content lost both opening and ending continuity anchors"
+    missing_motif_groups = []
+    for group in _extract_required_motif_groups(original_content):
+        markers = group.get("markers") or []
+        if not any(str(marker) in optimized_content for marker in markers):
+            missing_motif_groups.append(str(group.get("label") or "unknown"))
+    if missing_motif_groups:
+        return "optimized content lost critical continuity motifs: " + ", ".join(missing_motif_groups[:6])
+    term_failure = continuity_terms_guard_failure(
+        original=original_content,
+        candidate=optimized_content,
+        context=context,
+        extra_sources=[(context or {}).get("continuity_contract")],
+        reason_code="optimized_content_lost_continuity_terms",
+        min_required_terms=2,
+        keep_ratio=0.55,
+    )
+    if term_failure:
+        return term_failure
     return None
 
 
@@ -209,29 +291,29 @@ async def optimize_chapter(
     # 确定要优化的内容来源
     original_content = None
 
-    # ?? A: ??????? ID / ??????
+    # 路径 A：使用指定版本 ID 或版本序号
     if request.version_id is not None or request.version_index is not None:
         versions = sorted(list(chapter.versions or []), key=lambda v: (v.created_at, v.id))
         if not versions:
-            raise HTTPException(status_code=400, detail="????????????")
+            raise HTTPException(status_code=400, detail="该章节没有可优化的候选版本")
         selected_version = None
         if request.version_id is not None:
             selected_version = next((version for version in versions if version.id == request.version_id), None)
             if selected_version is None:
-                raise HTTPException(status_code=400, detail="????????????????????")
+                raise HTTPException(status_code=400, detail="未找到指定的章节版本，无法优化")
         else:
             if request.version_index is None or request.version_index < 0 or request.version_index >= len(versions):
-                raise HTTPException(status_code=400, detail=f"???? {request.version_index} ??")
+                raise HTTPException(status_code=400, detail=f"版本序号 {request.version_index} 无效")
             selected_version = versions[request.version_index]
         if not selected_version.content:
-            raise HTTPException(status_code=400, detail="?????????")
+            raise HTTPException(status_code=400, detail="所选版本内容为空，无法优化")
         original_content = selected_version.content
 
-    # ?? B: ??????
+    # 路径 B：使用已选定稿版本
     if not original_content and chapter.selected_version and chapter.selected_version.content:
         original_content = chapter.selected_version.content
 
-    # ?? C: ??????
+    # 路径 C：没有可用内容
     if not original_content:
         raise HTTPException(status_code=400, detail="章节尚未生成内容，无法进行优化")
     
@@ -270,6 +352,25 @@ async def optimize_chapter(
         "additional_notes": request.additional_notes or "无额外指令",
         "continuity_contract": _build_continuity_contract(project, request, original_content),
     }
+    try:
+        outline = next((item for item in getattr(project, "outlines", []) or [] if item.chapter_number == request.chapter_number), None)
+        longform_package = await LongformContextService(session).build_context_package(
+            project=project,
+            outline=outline,
+            chapter_number=request.chapter_number,
+            writing_notes=request.additional_notes,
+            chapter_mission=None,
+            allowed_new_characters=[],
+        )
+        optimize_input["longform_continuity_package"] = longform_package.to_optimizer_payload()
+    except Exception as exc:  # noqa: BLE001 - optimization should keep working with nearby anchors.
+        logger.warning(
+            "章节优化长篇上下文包装配失败，继续使用相邻章节锚点: project=%s chapter=%s error=%s",
+            request.project_id,
+            request.chapter_number,
+            exc,
+        )
+        optimize_input["longform_continuity_package_error"] = str(exc)[:200]
     
     # 如果是心理活动优化，添加角色DNA信息
     if character_dna:
@@ -300,14 +401,22 @@ async def optimize_chapter(
                     stage_label="章节优化",
                     retry_attempts=3,
                     response_format="json_object",
+                    json_schema=_optimizer_response_schema(),
+                    json_schema_name="chapter_optimization",
+                    json_schema_strict=False,
                     allow_truncated_response=True,
-                    json_repair_attempts=1,
+                    json_repair_attempts=2,
                 ),
             )
         result = json_result.data
         optimized_content = str(result.get("optimized_content") or "").strip()
         optimization_notes = str(result.get("optimization_notes") or "优化完成").strip()
-        guard_failure = _continuity_guard_failure(original_content, optimized_content)
+        guard_context = {
+            "continuity_contract": optimize_input.get("continuity_contract"),
+            "longform_context": optimize_input.get("longform_continuity_package"),
+            "chapter_mission": optimize_input.get("continuity_contract"),
+        }
+        guard_failure = _continuity_guard_failure(original_content, optimized_content, context=guard_context)
         if guard_failure:
             logger.warning(
                 "章节优化结果未通过连续性保护，返回原文: project=%s chapter=%s dimension=%s reason=%s",
@@ -411,8 +520,10 @@ async def apply_optimization(
     await session.flush()
 
     chapter.selected_version_id = optimized_version.id
+    chapter.selected_version = optimized_version
     chapter.status = "successful"
     chapter.word_count = len(resolved_optimized_content or "")
+    await novel_service._touch_project(resolved_project_id, auto_commit=False)
     await session.commit()
 
     updated_chapter = await novel_service.get_chapter_schema(

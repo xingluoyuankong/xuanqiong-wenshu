@@ -36,17 +36,9 @@
         </div>
       </div>
 
-      <button
-        v-if="canGenerate"
-        type="button"
-        class="ce-primary"
-        :disabled="generatingChapter === chapterNumber"
-        @click="$emit('generateChapter', chapterNumber)"
-      >
-        {{ generatingChapter === chapterNumber ? '生成中...' : `开始生成第 ${chapterNumber} 章` }}
-      </button>
-
-      <div v-else class="ce-lock">请按顺序推进章节</div>
+      <div :class="['ce-command-note', canGenerate ? 'ce-command-note--ready' : 'ce-command-note--locked']">
+        {{ canGenerate ? '请使用顶部主命令栏开始生成，避免同一页面出现重复按钮。' : '请按顺序推进章节' }}
+      </div>
     </section>
   </div>
 </template>
@@ -74,11 +66,9 @@ defineEmits(['generateChapter'])
   display: grid;
   gap: 20px;
   padding: clamp(24px, 4vw, 38px);
-  border-radius: 34px;
+  border-radius: 8px;
   border: 1px solid rgba(107, 155, 235, 0.2);
   background:
-    radial-gradient(circle at 10% 12%, rgba(107, 155, 235, 0.22), transparent 32%),
-    radial-gradient(circle at 92% 18%, rgba(168, 85, 247, 0.12), transparent 28%),
     linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(241, 247, 255, 0.94));
   box-shadow: 0 26px 72px rgba(37, 99, 235, 0.12);
 }
@@ -89,7 +79,7 @@ defineEmits(['generateChapter'])
   height: 78px;
   display: grid;
   place-items: center;
-  border-radius: 26px;
+  border-radius: 8px;
   background: linear-gradient(135deg, #eef6ff, #ffffff);
   box-shadow: inset 0 0 0 1px rgba(107, 155, 235, 0.18), 0 18px 42px rgba(107, 155, 235, 0.16);
 }
@@ -97,7 +87,7 @@ defineEmits(['generateChapter'])
 .ce-orbit span {
   position: absolute;
   inset: 10px;
-  border-radius: 22px;
+  border-radius: 8px;
   border: 1px dashed rgba(37, 99, 235, 0.35);
 }
 
@@ -147,7 +137,7 @@ defineEmits(['generateChapter'])
   align-items: center;
   min-height: 82px;
   padding: 14px;
-  border-radius: 22px;
+  border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: rgba(255, 255, 255, 0.72);
 }
@@ -158,7 +148,7 @@ defineEmits(['generateChapter'])
   height: 34px;
   display: grid;
   place-items: center;
-  border-radius: 14px;
+  border-radius: 8px;
   color: #475569;
   background: rgba(15, 23, 42, 0.06);
   font-weight: 900;
@@ -190,35 +180,22 @@ defineEmits(['generateChapter'])
   opacity: 0.72;
 }
 
-.ce-primary {
-  width: fit-content;
-  min-height: 44px;
-  padding: 0 20px;
-  border: 0;
-  border-radius: 999px;
-  color: #fff;
-  background: linear-gradient(135deg, #2563eb, #7c3aed);
-  font-weight: 850;
-  cursor: pointer;
-  box-shadow: 0 16px 36px rgba(37, 99, 235, 0.22);
-}
-
-.ce-primary:disabled {
-  opacity: 0.6;
-  cursor: wait;
-}
-
-.ce-lock {
+.ce-command-note {
   width: fit-content;
   display: inline-flex;
   align-items: center;
   min-height: 38px;
   padding: 0 16px;
-  border-radius: 999px;
+  border-radius: 8px;
   color: #475569;
   background: rgba(15, 23, 42, 0.06);
   font-size: 0.86rem;
   font-weight: 850;
+}
+
+.ce-command-note--ready {
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
 }
 
 @media (max-width: 720px) {

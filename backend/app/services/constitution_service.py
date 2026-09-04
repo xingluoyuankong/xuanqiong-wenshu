@@ -12,6 +12,7 @@ from sqlalchemy import select
 from ..models.constitution import NovelConstitution
 from .llm_service import LLMService
 from .prompt_service import PromptService
+from .generation_call_service import GenerationCallPolicy, call_generation_json
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
 
 
@@ -85,22 +86,23 @@ class ConstitutionService:
             prompt = prompt.replace("{{chapter_content}}", chapter_content)
 
             # 调用 LLM 进行检查
-            response = await self.llm_service.generate(
-                prompt=prompt,
-                system_prompt="你是一位严格的小说编辑，负责检查章节内容是否符合小说宪法。请以 JSON 格式输出检查结果。"
-            )
-
-            # 解析结果
             try:
-                content = sanitize_json_like_text(
-                    unwrap_markdown_json(remove_think_tags(response or ""))
+                result = await call_generation_json(
+                    llm_service=self.llm_service,
+                    system_prompt="你是一位严格的小说编辑，负责检查章节内容是否符合小说宪法。请以 JSON 格式输出检查结果。",
+                    conversation_history=[{"role": "user", "content": prompt}],
+                    temperature=0.2,
+                    user_id=0,
+                    timeout=90.0,
+                    policy=GenerationCallPolicy(
+                        stage_label="小说宪法-合规检查",
+                        progress_stage="constitution_check",
+                        retry_attempts=2,
+                        json_repair_attempts=1,
+                    ),
                 )
-                json_start = content.find("{")
-                json_end = content.rfind("}") + 1
-                if json_start >= 0 and json_end > json_start:
-                    result = json.loads(content[json_start:json_end])
-                    return result
-            except json.JSONDecodeError:
+                return result.data
+            except Exception:
                 pass
 
             return {

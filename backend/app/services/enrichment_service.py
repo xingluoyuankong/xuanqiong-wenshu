@@ -16,6 +16,8 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from .continuity_guard_utils import continuity_terms_guard_failure
+from .generation_call_service import GenerationCallPolicy, call_generation_text
 from .llm_service import LLMService
 from ..utils.json_utils import remove_think_tags
 
@@ -53,6 +55,8 @@ ENRICH_CHAPTER_PROMPT = """\
 - 每新增一段都必须回答：这一段让人物做了什么、对方如何反应、局势或信息发生了什么变化。
 - 如果某段新增内容删掉后剧情完全不变，说明它是水分，必须改成动作/对话/后果。
 - 章末只能加强压力交接，不能写总结、感悟、平静落幕或空泛抒情。
+- 保留原文开头、结尾、关键物件、关键地点、角色认知边界和事件顺序；只能在原有桥段之间补写。
+- 每补 900~1500 字，至少要有一次具体状态变化：信息变化、主动权变化、风险升级、关系变化、行动结果或伏笔回收/强化。
 
 ## 扩写原则（重要！）：
 1. **补足不补水**：优先补足当前章节里已经存在的冲突推进、试探压迫、动作过程、因果衔接与余波，不要把篇幅浪费在独立景物铺陈上。
@@ -198,7 +202,8 @@ class EnrichmentService:
         chapter_text: str,
         target_word_count: int,
         user_id: int,
-        threshold: float = 0.92
+        threshold: float = 0.92,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Optional[EnrichmentResult]:
         """
         检查字数并在需要时进行扩写
@@ -227,7 +232,8 @@ class EnrichmentService:
                 chapter_text=chapter_text,
                 target_word_count=target_word_count,
                 current_word_count=current_count,
-                user_id=user_id
+                user_id=user_id,
+                context=context,
             )
 
             if not enriched:
@@ -248,7 +254,8 @@ class EnrichmentService:
         chapter_text: str,
         target_word_count: int,
         user_id: int,
-        max_iterations: int = 3
+        max_iterations: int = 3,
+        context: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         迭代扩写直到达到目标字数
@@ -286,7 +293,8 @@ class EnrichmentService:
                     chapter_text=current_text,
                     target_word_count=target_word_count,
                     user_id=user_id,
-                    threshold=threshold
+                    threshold=threshold,
+                    context=context,
                 )
 
                 if not result or not result.enriched_content:
@@ -345,14 +353,31 @@ class EnrichmentService:
         )
         
         try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
+                system_prompt="你是一位擅长对话攻防扩写的小说编辑，只扩写当前片段，不改变剧情事实。",
+                conversation_history=[{"role": "user", "content": prompt}],
+                temperature=0.6,
                 user_id=user_id,
-                max_tokens=4000,
-                temperature=0.6
+                timeout=150.0,
+                policy=GenerationCallPolicy(
+                    stage_label="对话局部扩写",
+                    progress_stage="enrichment",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=4000,
+                    retry_same_model_once=True,
+                ),
             )
-            cleaned = remove_think_tags(response) if response else ""
-            return cleaned.strip() if cleaned else None
+            cleaned = remove_think_tags(text_result.text) if text_result.text else ""
+            normalized = cleaned.strip() if cleaned else ""
+            if not normalized:
+                return None
+            guard_failure = self._fragment_enrichment_guard_failure(dialogue_text, normalized)
+            if guard_failure:
+                logger.warning("Dialogue enrichment rejected by fragment continuity guard: reason=%s", guard_failure)
+                return None
+            return normalized
         except Exception as e:
             logger.error(f"对话扩写失败: {e}")
             return None
@@ -378,14 +403,31 @@ class EnrichmentService:
         )
         
         try:
-            response = await self.llm_service.generate(
-                prompt=prompt,
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
+                system_prompt="你是一位擅长场景细节补强的小说编辑，只做局部补写，不改变人物状态和事件顺序。",
+                conversation_history=[{"role": "user", "content": prompt}],
+                temperature=0.6,
                 user_id=user_id,
-                max_tokens=3000,
-                temperature=0.6
+                timeout=150.0,
+                policy=GenerationCallPolicy(
+                    stage_label="场景局部扩写",
+                    progress_stage="enrichment",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=3000,
+                    retry_same_model_once=True,
+                ),
             )
-            cleaned = remove_think_tags(response) if response else ""
-            return cleaned.strip() if cleaned else None
+            cleaned = remove_think_tags(text_result.text) if text_result.text else ""
+            normalized = cleaned.strip() if cleaned else ""
+            if not normalized:
+                return None
+            guard_failure = self._fragment_enrichment_guard_failure(scene_text, normalized)
+            if guard_failure:
+                logger.warning("Scene enrichment rejected by fragment continuity guard: reason=%s", guard_failure)
+                return None
+            return normalized
         except Exception as e:
             logger.error(f"场景扩写失败: {e}")
             return None
@@ -395,7 +437,8 @@ class EnrichmentService:
         chapter_text: str,
         target_word_count: int,
         current_word_count: int,
-        user_id: int
+        user_id: int,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """执行章节扩写"""
         enrichment_context = self._build_enrichment_context(
@@ -423,16 +466,29 @@ class EnrichmentService:
             elif gap >= 1200:
                 enrichment_timeout = 300.0
 
-            response = await self.llm_service.generate(
-                prompt=prompt,
-                user_id=user_id,
-                max_tokens=enrichment_max_tokens,
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
+                system_prompt="你是一位长篇小说补写编辑。保持整章事件链、前后锚点和角色状态，只把缺的回合补进正文。",
+                conversation_history=[{"role": "user", "content": prompt}],
                 temperature=0.55,
+                user_id=user_id,
                 timeout=enrichment_timeout,
-                allow_truncated_response=False
+                policy=GenerationCallPolicy(
+                    stage_label="章节连续性扩写",
+                    progress_stage="enrichment",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=enrichment_max_tokens,
+                    allow_truncated_response=False,
+                    retry_same_model_once=True,
+                ),
             )
-            normalized = remove_think_tags(response) if response else ""
+            normalized = remove_think_tags(text_result.text) if text_result.text else ""
             if not normalized:
+                return None
+            guard_failure = self._enrichment_continuity_guard_failure(chapter_text, normalized, context=context)
+            if guard_failure:
+                logger.warning("扩写结果未通过连续性保护，已放弃本次扩写: %s", guard_failure)
                 return None
             if self._count_words(normalized) <= current_word_count:
                 logger.warning("扩写结果未明显增长（%s -> %s）", current_word_count, self._count_words(normalized))
@@ -505,6 +561,233 @@ class EnrichmentService:
             "expansion_plan": expansion_plan,
             "focus_guidance": "\n".join(focus_items),
         }
+
+    def _enrichment_continuity_guard_failure(
+        self,
+        original: str,
+        enriched: str,
+        *,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
+        """Reject expansions that look like a fresh rewrite instead of anchored supplementation."""
+        original_clean = (original or "").strip()
+        enriched_clean = (enriched or "").strip()
+        artifact_markers = (
+            "【扩写部分",
+            "扩写部分",
+            "约120字",
+            "约 120 字",
+            "【修订",
+            "【修改",
+            "【场景",
+            "章节大纲",
+            "写作指令",
+            "写作要求",
+        )
+        for marker in artifact_markers:
+            if marker in enriched_clean:
+                return "enrichment_artifact_marker"
+        if re.search(r'【.*(?:扩写|修订|修改|场景).*】', enriched_clean):
+            return "enrichment_artifact_marker"
+        if re.search(r'^\s*(?:场景|scene)\s*\d+', enriched_clean, re.MULTILINE):
+            return "enrichment_artifact_marker"
+
+        if not original_clean or not enriched_clean:
+            return "empty_content"
+        if self._count_words(enriched_clean) < max(1, int(self._count_words(original_clean) * 0.9)):
+            return "shrinks_original"
+        original_paragraphs = [part.strip() for part in re.split(r"\n\s*\n", original_clean) if part.strip()]
+        enriched_paragraphs = [part.strip() for part in re.split(r"\n\s*\n", enriched_clean) if part.strip()]
+        if len(original_paragraphs) >= 3 and len(enriched_paragraphs) < max(2, len(original_paragraphs) // 2):
+            return "collapses_paragraph_structure"
+        anchors = []
+        if original_paragraphs:
+            anchors.append(original_paragraphs[0][:36])
+            anchors.append(original_paragraphs[-1][-36:])
+        missing = [anchor for anchor in anchors if anchor and anchor not in enriched_clean]
+        if len(missing) == len(anchors) and len(anchors) >= 2:
+            return "lost_front_and_back_anchors"
+        term_failure = continuity_terms_guard_failure(
+            original=original_clean,
+            candidate=enriched_clean,
+            context=context,
+            reason_code="enrichment_lost_continuity_terms",
+        )
+        if term_failure:
+            return term_failure
+        missing_motifs = self._missing_required_motifs(original_clean, enriched_clean)
+        if missing_motifs:
+            return "lost_required_motifs:" + ",".join(missing_motifs[:4])
+        anchor_failure = self._anchor_sequence_guard_failure(original_paragraphs, enriched_clean)
+        if anchor_failure:
+            return anchor_failure
+        original_progression = self._count_progression_markers(original_clean)
+        enriched_progression = self._count_progression_markers(enriched_clean)
+        growth = self._count_words(enriched_clean) - self._count_words(original_clean)
+        if growth >= 500 and enriched_progression < max(original_progression, 3):
+            return "enriched_without_new_progression_markers"
+        enriched_density = enriched_progression / max(1.0, self._count_words(enriched_clean) / 1000)
+        if self._count_words(enriched_clean) >= 1800 and enriched_density < 0.85:
+            return "enriched_event_density_too_low"
+        return None
+
+    def _fragment_enrichment_guard_failure(self, original: str, enriched: str) -> Optional[str]:
+        """Reject local fragment expansion that loses the original anchor window."""
+
+        original_clean = (original or "").strip()
+        enriched_clean = (enriched or "").strip()
+        if not original_clean or not enriched_clean:
+            return "empty_fragment"
+        if enriched_clean.startswith("{") and "content" in enriched_clean[:240].lower():
+            return "raw_json_returned"
+
+        original_count = self._count_words(original_clean)
+        enriched_count = self._count_words(enriched_clean)
+        if original_count >= 40 and enriched_count < max(1, int(original_count * 0.88)):
+            return "fragment_shrinks_original"
+        if original_count >= 80 and enriched_count <= original_count + 8:
+            return "fragment_has_no_effective_growth"
+
+        original_paragraphs = [part.strip() for part in re.split(r"\n\s*\n", original_clean) if part.strip()]
+        compact_enriched = re.sub(r"\s+", "", enriched_clean)
+        anchors: List[str] = []
+        if original_paragraphs:
+            first = re.sub(r"\s+", "", original_paragraphs[0])
+            last = re.sub(r"\s+", "", original_paragraphs[-1])
+            if len(first) >= 12:
+                anchors.append(first[:18])
+            if len(last) >= 12:
+                anchors.append(last[-18:])
+        if len(anchors) >= 2 and all(anchor not in compact_enriched for anchor in anchors):
+            return "fragment_lost_front_and_back_anchors"
+
+        anchor_failure = self._anchor_sequence_guard_failure(original_paragraphs, enriched_clean)
+        if anchor_failure:
+            return anchor_failure
+
+        missing_motifs = self._missing_required_motifs(original_clean, enriched_clean)
+        if missing_motifs:
+            return "fragment_lost_required_motifs:" + ",".join(missing_motifs[:4])
+        return None
+
+    @staticmethod
+    def _count_progression_markers(text: str) -> int:
+        markers = (
+            "逼问", "质问", "追问", "反问", "试探", "压迫", "威胁", "拒绝", "反制", "让步",
+            "改口", "承认", "暴露", "揭开", "证实", "发现", "意识到", "决定", "选择", "交换",
+            "代价", "风险", "危险", "失控", "反转", "翻脸", "线索", "证据", "期限", "后果",
+            "抓住", "按住", "推开", "冲进", "闯入", "逃出", "追上", "救下", "必须", "否则",
+        )
+        source = str(text or "")
+        dialogue_marks = sum(source.count(mark) for mark in ("“", "”", "「", "」", "『", "』", '"'))
+        return dialogue_marks + sum(source.count(marker) for marker in markers)
+
+    @staticmethod
+    def _missing_required_motifs(original: str, enriched: str) -> List[str]:
+        motif_groups = EnrichmentService._extract_required_motifs(original)
+        missing: List[str] = []
+        for label, markers in motif_groups:
+            if any(marker in original for marker in markers) and not any(marker in enriched for marker in markers):
+                missing.append(label)
+        return missing
+
+    @staticmethod
+    def _extract_required_motifs(text: str) -> List[tuple[str, tuple[str, ...]]]:
+        """Extract project-specific continuity motifs from the original text.
+
+        The guard must work for any story world, so it cannot know about a
+        particular sample project's locations, props, medicines, or artifacts.
+        Instead it derives compact motif candidates from quoted terms, named
+        places/factions/objects, numeric commitments, and repeated short terms.
+        """
+
+        source = str(text or "")
+        if not source.strip():
+            return []
+
+        motif_suffixes = (
+            "城", "镇", "村", "寨", "岛", "山", "岭", "谷", "河", "江", "湖", "海", "渠", "桥", "井", "塔", "碑", "墓", "坟",
+            "门", "宗", "派", "阁", "院", "府", "宫", "殿", "司", "局", "盟", "会", "帮", "堂", "楼", "馆", "铺", "坊", "行",
+            "军", "营", "队", "卫", "盟", "族", "国", "朝", "域", "界",
+            "剑", "刀", "枪", "弓", "珠", "戒", "镜", "鼎", "炉", "灯", "书", "册", "卷", "页", "图", "符", "印", "玺", "令", "牌",
+            "标", "药", "丹", "毒", "血", "骨", "契", "钥", "锁", "矿", "晶", "石", "阵", "术", "法", "诀", "经",
+        )
+        stopwords = {
+            "他们", "她们", "我们", "你们", "这里", "那里", "这个", "那个", "什么", "自己", "已经", "只是", "还是",
+            "因为", "所以", "但是", "然而", "必须", "立刻", "不能", "没有", "所有", "当前", "之后", "之前", "一页",
+        }
+        cjk = r"\u4e00-\u9fff"
+        candidates: Dict[str, tuple[str, ...]] = {}
+
+        def add_candidate(raw: str) -> None:
+            token = re.sub(r"\s+", "", str(raw or "")).strip("，。！？；：、,.!?;:（）()[]【】《》“”\"' ")
+            if len(token) < 2 or len(token) > 12 or token in stopwords:
+                return
+            if re.fullmatch(rf"[{cjk}]+", token) and len(token) > 8:
+                return
+            variants = {token}
+            if re.search(rf"[{cjk}]", token):
+                for size in (2, 3, 4, 5, 6):
+                    if len(token) >= size:
+                        variants.add(token[-size:])
+                for size in (2, 3, 4):
+                    if len(token) >= size:
+                        variants.add(token[:size])
+            candidates.setdefault(token, tuple(sorted(variants, key=lambda item: (-len(item), item))))
+
+        for match in re.finditer(r"[《“「『\"]([^》”」』\"]{2,16})[》”」』\"]", source):
+            add_candidate(match.group(1))
+
+        for match in re.finditer(r"\b[A-Za-z][A-Za-z0-9_-]{2,}\b", source):
+            add_candidate(match.group(0))
+
+        for match in re.finditer(r"\d{1,5}\s*(?:年|月|日|天|夜|章|回|层|阶|次|枚|块|页|卷|人|军|里|丈|息|刻|个)", source):
+            add_candidate(match.group(0))
+
+        suffix_pattern = "|".join(re.escape(item) for item in sorted(set(motif_suffixes), key=len, reverse=True))
+        for match in re.finditer(rf"[{cjk}]{{0,5}}(?:{suffix_pattern})", source):
+            add_candidate(match.group(0))
+        suffix_set = set(motif_suffixes)
+        for index, char in enumerate(source):
+            if char in suffix_set:
+                add_candidate(source[max(0, index - 5):index + 1])
+
+        compact = re.sub(r"\s+", "", source)
+        repeated_counts: Dict[str, int] = {}
+        for size in (2, 3, 4):
+            for index in range(0, max(0, len(compact) - size + 1)):
+                token = compact[index:index + size]
+                if not re.fullmatch(rf"[{cjk}]{{{size}}}", token) or token in stopwords:
+                    continue
+                repeated_counts[token] = repeated_counts.get(token, 0) + 1
+        for token, count in repeated_counts.items():
+            if count >= 2 and any(token.endswith(suffix) for suffix in motif_suffixes):
+                add_candidate(token)
+
+        return list(candidates.items())[:18]
+
+    @staticmethod
+    def _anchor_sequence_guard_failure(original_paragraphs: List[str], enriched: str) -> Optional[str]:
+        if len(original_paragraphs) < 4:
+            return None
+        anchors: List[str] = []
+        for paragraph in original_paragraphs:
+            compact = "".join(paragraph.split())
+            if len(compact) >= 14:
+                anchors.append(compact[:14])
+        if len(anchors) < 4:
+            return None
+        hit_positions: List[int] = []
+        compact_enriched = "".join(enriched.split())
+        for anchor in anchors[:10]:
+            position = compact_enriched.find(anchor)
+            if position >= 0:
+                hit_positions.append(position)
+        if len(hit_positions) < max(2, len(anchors[:10]) // 2):
+            return "lost_too_many_original_sequence_anchors"
+        if hit_positions != sorted(hit_positions):
+            return "original_sequence_reordered"
+        return None
     
     def _count_words(self, text: str) -> int:
         """计算中文字数"""

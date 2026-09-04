@@ -125,7 +125,7 @@ describe('ChapterGenerating', () => {
 
     const metaBlocks = wrapper.findAll('.cg-log-item__meta')
     expect(metaBlocks.length).toBeGreaterThan(0)
-    expect(metaBlocks[0].text()).toContain('查看附加信息')
+    expect(metaBlocks[0].text()).toContain('开发者详情')
     expect(metaBlocks[0].text()).toContain('是否切换稳定模式：是')
     expect(metaBlocks[0].text()).toContain('生成模式：stable')
   })
@@ -163,5 +163,165 @@ describe('ChapterGenerating', () => {
     expect(wrapper.text()).toContain('正文生成耗时：2000')
     expect(wrapper.text()).toContain('护栏检查耗时：200')
     expect(wrapper.text()).toContain('自动修复耗时：145')
+  })
+
+  it('账本闭环分组展示伏笔和记忆层事件', async () => {
+    const wrapper = shallowMount(ChapterGenerating, {
+      props: {
+        chapterNumber: 5,
+        generationRuntime: {
+          progress_stage: 'ledger_foreshadowing',
+          progress_message: '伏笔回收和新伏笔抽取完成',
+          events: [
+            {
+              at: '2026-04-21T08:00:00Z',
+              stage: 'ledger_memory',
+              kind: 'ledger',
+              level: 'info',
+              title: '记忆层更新完成',
+              summary: '已从定稿正文抽取角色状态、时间线和因果信息。',
+              metrics: {
+                character_states_updated: 3,
+                timeline_events_added: 2,
+                dynamic_characters_created: 1,
+                dynamic_character_names: ['林渡'],
+              },
+            },
+            {
+              at: '2026-04-21T08:00:01Z',
+              stage: 'ledger_foreshadowing',
+              kind: 'ledger',
+              level: 'info',
+              title: '伏笔闭环完成',
+              summary: '回收 1 条，强化 2 条。',
+              metrics: { resolved: 1, reinforced: 2 },
+              artifact_refs: { resolution_ids: [7] },
+            },
+            {
+              at: '2026-04-21T08:00:02Z',
+              stage: 'generate_variants',
+              kind: 'content',
+              level: 'info',
+              summary: '正文候选完成',
+            },
+          ],
+        },
+        progressStage: 'ledger_foreshadowing',
+        progressMessage: '伏笔回收和新伏笔抽取完成',
+        allowedActions: ['refresh_status'],
+      },
+    })
+
+    const tabs = wrapper.findAll('.cg-log-tab')
+    const ledgerTab = tabs.find((tab) => tab.text().includes('账本闭环'))
+    expect(ledgerTab).toBeTruthy()
+    await ledgerTab!.trigger('click')
+
+    expect(wrapper.text()).toContain('记忆层更新完成')
+    expect(wrapper.text()).toContain('伏笔闭环完成')
+    expect(wrapper.text()).toContain('更新角色状态数：3')
+    expect(wrapper.text()).toContain('动态角色入池数：1')
+    expect(wrapper.text()).toContain('动态入池角色：林渡')
+    expect(wrapper.text()).toContain('回收伏笔数：1')
+    expect(wrapper.text()).not.toContain('正文候选完成')
+  })
+
+  it('shows local patch guidance when a stagewide candidate requires manual confirmation', () => {
+    const wrapper = shallowMount(ChapterGenerating, {
+      props: {
+        chapterNumber: 9,
+        generationRuntime: {
+          progress_stage: 'optimize_structural',
+          progress_message: 'Optimization guard is protecting continuity',
+          events: [
+            {
+              at: '2026-04-21T08:00:00Z',
+              stage: 'optimize_structural',
+              kind: 'review',
+              level: 'warning',
+              title: 'Stagewide candidate deferred',
+              summary: 'Whole-chapter candidate was not applied automatically',
+              metadata: {
+                manual_stagewide_confirmation_required: true,
+                stagewide_deferred_count: 1,
+                manual_patch_suggestions: [
+                  {
+                    stage: 'structural',
+                    strategy: 'structure_guardrail',
+                    location: 'mid-chapter turn',
+                    problem: 'Need a stronger confrontation before reveal',
+                    suggestion: 'Add a negotiation beat that changes the leverage.',
+                    execution_requirement: 'Patch only the negotiation window and keep both anchors',
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        progressStage: 'optimize_structural',
+        progressMessage: 'Optimization guard is protecting continuity',
+        allowedActions: ['refresh_status'],
+      },
+    })
+
+    expect(wrapper.find('.cg-log-item__notice').exists()).toBe(true)
+    expect(wrapper.find('.cg-log-item__patches').text()).toContain('Need a stronger confrontation before reveal')
+    expect(wrapper.find('.cg-log-item__patches').text()).toContain('Add a negotiation beat that changes the leverage.')
+    expect(wrapper.find('.cg-log-item__patches').text()).toContain('Patch only the negotiation window and keep both anchors')
+  })
+
+  it('shows consistency local-repair diagnostics without hiding patch suggestions', () => {
+    const wrapper = shallowMount(ChapterGenerating, {
+      props: {
+        chapterNumber: 10,
+        generationRuntime: {
+          progress_stage: 'consistency',
+          progress_message: '一致性局部修复已完成，仍有问题需按局部补丁处理',
+          events: [
+            {
+              at: '2026-04-21T08:00:00Z',
+              stage: 'consistency',
+              kind: 'continuity',
+              level: 'warning',
+              title: '一致性局部修复结果',
+              summary: '局部修复尝试 1 次，未解决问题 1 项；整章候选需要人工确认。',
+              metrics: {
+                repair_attempt_count: 1,
+                unresolved_consistency_issues: 1,
+                auto_fix_accepted: false,
+              },
+              metadata: {
+                manual_stagewide_confirmation_required: true,
+                repair_attempts: [
+                  {
+                    attempt: 1,
+                    mode: 'local_patch',
+                    full_chapter_fallback_deferred: true,
+                  },
+                ],
+                manual_patch_suggestions: [
+                  {
+                    dimension: 'continuity',
+                    location: '第2段',
+                    problem: '来源仍像两条并行事件链。',
+                    suggestion: '统一来源，只保留一个正式版本。',
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        progressStage: 'consistency',
+        progressMessage: '一致性局部修复已完成，仍有问题需按局部补丁处理',
+        allowedActions: ['refresh_status'],
+      },
+    })
+
+    expect(wrapper.text()).toContain('一致性局部修复结果')
+    expect(wrapper.text()).toContain('局部修复尝试数：1')
+    expect(wrapper.text()).toContain('未解决一致性问题数：1')
+    expect(wrapper.text()).toContain('自动局部修复已采纳：否')
+    expect(wrapper.find('.cg-log-item__notice').text()).toContain('整章候选没有自动套用')
+    expect(wrapper.find('.cg-log-item__patches').text()).toContain('来源仍像两条并行事件链')
   })
 })

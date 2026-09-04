@@ -71,13 +71,39 @@ describe('chapterGeneration utils', () => {
   })
 
   it('归一化兼容运行中阶段别名', () => {
-    expect(normalizeRuntimeStage('already_generating')).toBe('generating')
-    expect(normalizeRuntimeStage('in_progress')).toBe('generating')
-    expect(normalizeRuntimeStage('generate_variants')).toBe('generating')
-    expect(normalizeRuntimeStage('review')).toBe('evaluating')
-    expect(normalizeRuntimeStage('diagnose_once')).toBe('evaluating')
-    expect(normalizeRuntimeStage('optimize_delivery')).toBe('evaluating')
-    expect(normalizeRuntimeStage('persist_versions')).toBe('selecting')
+    expect(normalizeRuntimeStage('already_generating')).toBe('generate_variants')
+    expect(normalizeRuntimeStage('in_progress')).toBe('generate_variants')
+    expect(normalizeRuntimeStage('generate_variants')).toBe('generate_variants')
+    expect(normalizeRuntimeStage('review')).toBe('review')
+    expect(normalizeRuntimeStage('diagnose_once')).toBe('diagnose_once')
+    expect(normalizeRuntimeStage('optimize_delivery')).toBe('optimize_delivery')
+    expect(normalizeRuntimeStage('persist_versions')).toBe('persist_versions')
+    expect(normalizeRuntimeStage('ledger_foreshadowing')).toBe('ledger_foreshadowing')
+    expect(normalizeRuntimeStage('finalized')).toBe('finalized')
+  })
+
+  it('展示定稿后账本闭环阶段', () => {
+    expect(
+      buildChapterTaskUiModel({
+        progress_stage: 'ledger_foreshadowing',
+        progress_percent: 99,
+        progress_message: '伏笔回收和新伏笔抽取完成',
+      })
+    ).toMatchObject({
+      stageLabel: '伏笔闭环',
+      progress: 99,
+      displayMessage: '伏笔回收和新伏笔抽取完成',
+    })
+
+    expect(
+      buildChapterTaskUiModel({
+        progress_stage: 'finalized',
+        progress_percent: 100,
+      })
+    ).toMatchObject({
+      stageLabel: '定稿完成',
+      progress: 100,
+    })
   })
 
   it('为分阶段优化生成正确标签与摘要', () => {

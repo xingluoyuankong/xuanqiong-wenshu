@@ -71,7 +71,7 @@ const descriptions = computed<Record<MenuKey, string>>(() => ({
   diagnostics: pick('排查后端、接口和生成链路问题。', 'Investigate backend, API, and generation pipeline issues.'),
   prompts: pick('管理会影响生成链路的提示词。', 'Manage prompts that affect generation pipelines.'),
   novels: pick('后台查看和管理小说项目。', 'Inspect and manage novel projects.'),
-  'runtime-logs': pick('简略日志只看关键阶段；详细区直接看后台运行流水。', 'Brief logs show milestones; detailed area shows backend runtime stream.'),
+  'runtime-logs': pick('简略日志看关键阶段；详细区直接看生成状态、草稿片段、质量门和修补建议。', 'Brief logs show milestones; detailed area shows generation state, draft previews, quality gates, and patch suggestions.'),
   logs: pick('面向用户展示的更新说明。', 'User-facing update notes.'),
   settings: pick('和数据总览、故障诊断一样，属于管理后台并列入口。', 'Parallel admin entry for system configuration.'),
   'llm-settings': pick('和提示词管理、小说管理一样，属于管理后台并列入口。', 'Parallel admin entry for LLM configuration.'),

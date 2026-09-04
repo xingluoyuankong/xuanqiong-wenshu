@@ -150,7 +150,7 @@
           <div class="batch-plan-grid">
             <label class="field-block">
               <span>当前批次名称</span>
-              <input v-model.trim="batchLabel" type="text" class="form-input" placeholder="例如：第一卷前 12 章 / 中段对白批次" />
+              <input v-model.trim="batchLabel" type="text" class="form-input" placeholder="例如：第一卷首批章节 / 中段对白批次" />
             </label>
             <label class="field-block">
               <span>建议批量</span>

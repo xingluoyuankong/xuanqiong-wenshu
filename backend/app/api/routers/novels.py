@@ -2,6 +2,8 @@
 import asyncio
 import json
 import logging
+import math
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -30,8 +32,9 @@ from ...schemas.user import User as UserSchema, UserInDB
 from ...models import BlueprintGenerationJob, NovelProject
 from ...services.export_service import ExportService
 from ...services.import_service import ImportService
-from ...services.generation_call_service import GenerationCallPolicy, call_generation_text, is_retryable_http_exception
+from ...services.generation_call_service import GenerationCallPolicy, GenerationJSONDecodeError, call_generation_json, call_generation_text, is_retryable_http_exception
 from ...services.llm_service import LLMService
+from ...services.long_novel_outline_generator import LongNovelOutlineGenerator
 from ...services.novel_service import NovelService
 from ...services.prompt_service import PromptService
 from ...utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
@@ -45,7 +48,17 @@ _BLUEPRINT_PROJECT_RUNS: Dict[str, str] = {}
 _BLUEPRINT_JOB_LOCK = asyncio.Lock()
 _BLUEPRINT_JOB_STALE_SECONDS = 2 * 60 * 60
 _BLUEPRINT_JOB_HEARTBEAT_SECONDS = 45
-_BLUEPRINT_ACTIVE_STATUSES = {"queued", "generating", "polishing"}
+_BLUEPRINT_ACTIVE_STATUSES = {
+    "queued",
+    "generating",
+    "polishing",
+    "blueprint_concept",
+    "blueprint_setting_lock",
+    "blueprint_cast_plan",
+    "blueprint_plot_threads",
+    "blueprint_foreshadowing",
+    "blueprint_chapter_plan",
+}
 
 JSON_RESPONSE_INSTRUCTION = """
 IMPORTANT: 你的回复必须是合法的 JSON 对象，并严格包含以下字段：
@@ -290,7 +303,395 @@ def _build_story_constraint_profile(
         profile["checklist"] = checklist
     if existing_blueprint and getattr(existing_blueprint, "title", None):
         profile["existing_blueprint"] = existing_blueprint.model_dump(exclude_none=True)
+    length_contract = _build_length_contract(
+        formatted_history,
+        structured_dialogue,
+        project_title=project_title,
+        existing_blueprint=existing_blueprint,
+    )
+    if length_contract:
+        profile["length_contract"] = length_contract
+        profile["generation_principles"].append(
+            "如果用户明确给出章节数、篇幅或连载规模，必须尊重该篇幅契约；长篇能力是支撑能力，不是强行把短中篇扩写成超长篇。"
+        )
     return profile
+
+
+def _walk_text_fragments(value: Any) -> List[str]:
+    fragments: List[str] = []
+    if value is None:
+        return fragments
+    if isinstance(value, str):
+        text = value.strip()
+        if text:
+            fragments.append(text)
+        return fragments
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        fragments.append(str(value))
+        return fragments
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_text = str(key).strip()
+            for fragment in _walk_text_fragments(item):
+                fragments.append(f"{key_text}: {fragment}" if key_text else fragment)
+        return fragments
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            fragments.extend(_walk_text_fragments(item))
+    return fragments
+
+
+def _extract_requested_chapter_count(text: str) -> Optional[int]:
+    if not text:
+        return None
+    normalized = str(text)
+    patterns = [
+        r"(?:约|大约|大概|预计|计划|全书|总共|一共|around|about|roughly)?\s*(\d{1,4})\s*[-–—]?\s*(?:章|章节|回|集|chapters?)\s*(?:左右|上下|以内|内|around|about)?",
+        r"(?:章数|章节数|总章节|target[_\s-]*chapters?|chapter[_\s-]*count)\D{0,12}(\d{1,4})",
+    ]
+    matches: List[int] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, normalized, flags=re.IGNORECASE):
+            try:
+                value = int(match.group(1))
+            except (TypeError, ValueError):
+                continue
+            if 1 <= value <= 1000:
+                matches.append(value)
+    if not matches:
+        return None
+    return matches[-1]
+
+
+def _extract_requested_total_word_count(text: str) -> Optional[int]:
+    if not text:
+        return None
+    normalized = str(text).replace(",", "").replace("，", "")
+    if re.search(r"(?:百万字|一百万字|one\s+million\s+words?)", normalized, flags=re.IGNORECASE):
+        return 1_000_000
+
+    matches: List[int] = []
+    for match in re.finditer(r"(\d+(?:\.\d+)?)\s*万\s*字", normalized, flags=re.IGNORECASE):
+        try:
+            matches.append(int(float(match.group(1)) * 10_000))
+        except (TypeError, ValueError):
+            continue
+    for match in re.finditer(r"(\d+(?:\.\d+)?)\s*(?:k|千)\s*(?:字|words?)", normalized, flags=re.IGNORECASE):
+        try:
+            matches.append(int(float(match.group(1)) * 1_000))
+        except (TypeError, ValueError):
+            continue
+    for match in re.finditer(r"(\d{5,8})\s*(?:字|words?)", normalized, flags=re.IGNORECASE):
+        try:
+            matches.append(int(match.group(1)))
+        except (TypeError, ValueError):
+            continue
+    return matches[-1] if matches else None
+
+
+def _infer_target_chapter_count_from_fragments(fragments: List[str]) -> Optional[int]:
+    text = "\n".join(str(fragment or "") for fragment in fragments if str(fragment or "").strip())
+    if not text:
+        return None
+
+    word_count = _extract_requested_total_word_count(text)
+    lowered = text.lower()
+    is_short = any(marker in text for marker in ("短篇", "小短篇", "短故事", "短剧")) or any(
+        marker in lowered for marker in ("short story", "short novel")
+    )
+    is_mid = any(marker in text for marker in ("中篇", "中短篇")) or "novella" in lowered
+    is_long = any(
+        marker in text
+        for marker in ("长篇", "超长篇", "百万字", "连载", "网文", "玄幻", "仙侠", "修仙", "奇幻", "群像", "升级")
+    ) or any(marker in lowered for marker in ("longform", "serial", "epic fantasy"))
+
+    if word_count:
+        chapter_word_target = 3200 if is_short else 4500
+        if is_long and word_count >= 500_000:
+            chapter_word_target = 5000
+        inferred = max(1, int(round(word_count / chapter_word_target)))
+        return max(6 if is_short else 8, min(1000, inferred))
+
+    if is_short:
+        return 12
+    if is_mid:
+        return 36
+    if is_long:
+        return 120
+    return 60
+
+
+def _resolve_length_contract_defaults(target_chapter_count: int) -> Dict[str, int]:
+    if target_chapter_count <= 10:
+        stage_min, stage_max = 3, min(5, target_chapter_count)
+    elif target_chapter_count <= 16:
+        stage_min, stage_max = 4, min(6, target_chapter_count)
+    elif target_chapter_count <= 36:
+        stage_min, stage_max = 5, 8
+    elif target_chapter_count <= 80:
+        stage_min, stage_max = 7, 12
+    elif target_chapter_count <= 160:
+        stage_min, stage_max = 9, 16
+    elif target_chapter_count <= 320:
+        stage_min, stage_max = 12, 24
+    elif target_chapter_count <= 600:
+        stage_min, stage_max = 16, 32
+    else:
+        stage_min, stage_max = 20, 40
+
+    if target_chapter_count <= 60:
+        seed_count = target_chapter_count
+    elif target_chapter_count <= 120:
+        seed_count = 60
+    elif target_chapter_count <= 300:
+        seed_count = 80
+    elif target_chapter_count <= 600:
+        seed_count = 100
+    else:
+        seed_count = 120
+
+    return {
+        "stage_count_min": stage_min,
+        "stage_count_max": stage_max,
+        "chapter_outline_seed_count": seed_count,
+    }
+
+
+def _make_length_contract(target_chapter_count: int, *, source: str) -> Dict[str, Any]:
+    defaults = _resolve_length_contract_defaults(target_chapter_count)
+
+    return {
+        "target_chapter_count": target_chapter_count,
+        "stage_count_min": defaults["stage_count_min"],
+        "stage_count_max": defaults["stage_count_max"],
+        "chapter_outline_seed_count": defaults["chapter_outline_seed_count"],
+        "source": source,
+        "policy": "respect_explicit_length_without_compressing_longform_to_twelve",
+    }
+
+
+def _normalize_length_contract_candidate(candidate: Any, *, source: str) -> Dict[str, Any]:
+    if not isinstance(candidate, dict):
+        return {}
+    try:
+        target_chapter_count = int(candidate.get("target_chapter_count") or 0)
+    except (TypeError, ValueError):
+        return {}
+    if not 1 <= target_chapter_count <= 1000:
+        return {}
+
+    normalized = _make_length_contract(target_chapter_count, source=source)
+    defaults = _resolve_length_contract_defaults(target_chapter_count)
+    for key in ("stage_count_min", "stage_count_max", "chapter_outline_seed_count"):
+        try:
+            value = int(candidate.get(key))
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            normalized[key] = max(value, defaults[key])
+    if normalized["stage_count_min"] > normalized["stage_count_max"]:
+        normalized["stage_count_max"] = normalized["stage_count_min"]
+    normalized["chapter_outline_seed_count"] = min(
+        target_chapter_count,
+        max(defaults["chapter_outline_seed_count"], int(normalized["chapter_outline_seed_count"])),
+    )
+    normalized["source"] = source
+    return normalized
+
+
+def _extract_stored_length_contract(existing_blueprint: Blueprint | None) -> Dict[str, Any]:
+    if existing_blueprint is None:
+        return {}
+    try:
+        blueprint_data = existing_blueprint.model_dump(exclude_none=True)
+    except Exception:
+        return {}
+    if not isinstance(blueprint_data, dict):
+        return {}
+
+    world_setting = blueprint_data.get("world_setting") if isinstance(blueprint_data.get("world_setting"), dict) else {}
+    system_blueprint = (
+        world_setting.get("system_blueprint")
+        if isinstance(world_setting, dict) and isinstance(world_setting.get("system_blueprint"), dict)
+        else {}
+    )
+    candidates = [
+        blueprint_data.get("length_contract"),
+        world_setting.get("length_contract") if isinstance(world_setting, dict) else None,
+        system_blueprint.get("length_contract") if isinstance(system_blueprint, dict) else None,
+    ]
+    for candidate in candidates:
+        normalized = _normalize_length_contract_candidate(candidate, source="stored_blueprint_length_contract")
+        if normalized:
+            return normalized
+    return {}
+
+
+def _build_length_contract(
+    formatted_history: List[Dict[str, str]],
+    structured_dialogue: List[Dict[str, Any]],
+    *,
+    project_title: str,
+    existing_blueprint: Blueprint | None = None,
+) -> Dict[str, Any]:
+    primary_fragments: List[str] = [project_title]
+    primary_fragments.extend(
+        str(item.get("content") or "")
+        for item in formatted_history
+        if item.get("role") == "user" and str(item.get("content") or "").strip()
+    )
+    latest_state = _extract_latest_conversation_state(structured_dialogue)
+    if isinstance(latest_state, dict):
+        primary_fragments.extend(_walk_text_fragments(latest_state.get("collected_info")))
+        primary_fragments.extend(_walk_text_fragments(latest_state.get("checklist")))
+
+    target_chapter_count: Optional[int] = None
+    for fragment in primary_fragments:
+        extracted = _extract_requested_chapter_count(fragment)
+        if extracted:
+            target_chapter_count = extracted
+
+    if target_chapter_count:
+        return _make_length_contract(target_chapter_count, source="explicit_user_or_project_length")
+
+    stored_contract = _extract_stored_length_contract(existing_blueprint)
+    if stored_contract:
+        return stored_contract
+
+    inferred_chapter_count = _infer_target_chapter_count_from_fragments(primary_fragments)
+    if inferred_chapter_count:
+        return _make_length_contract(inferred_chapter_count, source="inferred_project_scale")
+
+    return {}
+
+
+def _attach_length_contract_to_blueprint(
+    blueprint_data: Dict[str, Any],
+    length_contract: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not length_contract:
+        return blueprint_data
+    world_setting = blueprint_data.get("world_setting")
+    if not isinstance(world_setting, dict):
+        world_setting = {}
+        blueprint_data["world_setting"] = world_setting
+    system_blueprint = world_setting.get("system_blueprint")
+    if not isinstance(system_blueprint, dict):
+        system_blueprint = {}
+        world_setting["system_blueprint"] = system_blueprint
+    system_blueprint["length_contract"] = dict(length_contract)
+    world_setting["length_contract"] = dict(length_contract)
+    return blueprint_data
+
+
+def _resolve_blueprint_length_contract(blueprint_data: Dict[str, Any]) -> Dict[str, Any]:
+    world_setting = blueprint_data.get("world_setting") if isinstance(blueprint_data.get("world_setting"), dict) else {}
+    candidates = [
+        blueprint_data.get("length_contract"),
+        world_setting.get("length_contract") if isinstance(world_setting, dict) else None,
+    ]
+    system_blueprint = world_setting.get("system_blueprint") if isinstance(world_setting, dict) else None
+    if isinstance(system_blueprint, dict):
+        candidates.append(system_blueprint.get("length_contract"))
+    for candidate in candidates:
+        if isinstance(candidate, dict):
+            target = candidate.get("target_chapter_count")
+            try:
+                target_int = int(target)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= target_int <= 1000:
+                return _normalize_length_contract_candidate(candidate, source=str(candidate.get("source") or "blueprint_length_contract"))
+    return {}
+
+
+def _format_length_contract_instruction(length_contract: Dict[str, Any]) -> str:
+    if not length_contract:
+        return "未检测到明确章节数；请按题材和蓝图自然规划，但不要为了长篇模板而机械扩容。"
+    target = int(length_contract["target_chapter_count"])
+    stage_min = int(length_contract.get("stage_count_min") or 4)
+    stage_max = int(length_contract.get("stage_count_max") or 12)
+    seed_count = int(length_contract.get("chapter_outline_seed_count") or _resolve_length_contract_defaults(target)["chapter_outline_seed_count"])
+    source = str(length_contract.get("source") or "")
+    prefix = "用户/项目已明确篇幅目标" if source != "inferred_project_scale" else "系统已按题材/篇幅自然推断目标"
+    return (
+        f"{prefix}：约 {target} 章。小说总纲阶段数应控制在 {stage_min}-{stage_max} 个，"
+        f"expected_chapter_range 必须连续覆盖第 1-{target} 章，不得扩写到 {target} 章之外；"
+        f"章节大纲首轮生成 {seed_count} 章。短篇不会被强行扩成长篇，长篇也不会被压缩成 12 章骨架；"
+        "超过首轮数量的章节后续按批次继续生成，不能让总纲只覆盖一个很薄的开头。"
+    )
+
+
+def _outline_exceeds_length_contract(outline: List[Dict[str, Any]], length_contract: Dict[str, Any]) -> bool:
+    target = int(length_contract.get("target_chapter_count") or 0)
+    if target <= 0:
+        return False
+    max_end = 0
+    for item in outline:
+        chapter_range = _parse_expected_chapter_range(item.get("expected_chapter_range"))
+        if chapter_range is None:
+            continue
+        max_end = max(max_end, chapter_range[1])
+    allowed_end = target + max(1, math.ceil(target * 0.1))
+    return max_end > allowed_end
+
+
+def _remap_outline_ranges_to_length_contract(
+    outline: List[Dict[str, Any]],
+    length_contract: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    target = int(length_contract.get("target_chapter_count") or 0)
+    if target <= 0 or not outline:
+        return outline
+    try:
+        stage_count_max = int(length_contract.get("stage_count_max") or len(outline))
+    except (TypeError, ValueError):
+        stage_count_max = len(outline)
+    stage_count = min(len(outline), target, max(1, stage_count_max))
+    if stage_count <= 0:
+        return outline
+    base = target // stage_count
+    remainder = target % stage_count
+    start = 1
+    remapped: List[Dict[str, Any]] = []
+    for index, item in enumerate(outline[:stage_count], start=1):
+        width = base + (1 if index <= remainder else 0)
+        end = start + max(1, width) - 1
+        updated = dict(item)
+        updated["stage"] = index
+        updated["expected_chapter_range"] = f"{start}-{end}章"
+        remapped.append(updated)
+        start = end + 1
+    return remapped
+
+
+def _resolve_blueprint_chapter_outline_count(blueprint_data: Dict[str, Any]) -> int:
+    length_contract = _resolve_blueprint_length_contract(blueprint_data)
+    if length_contract:
+        try:
+            target = int(length_contract.get("target_chapter_count") or 0)
+            default_seed = _resolve_length_contract_defaults(target)["chapter_outline_seed_count"] if target > 0 else 60
+            seed_count = int(length_contract.get("chapter_outline_seed_count") or default_seed)
+        except (TypeError, ValueError):
+            seed_count = 60
+        return max(1, min(120, seed_count))
+    return 60
+
+
+def _resolve_novel_outline_min_stage_count(blueprint_data: Dict[str, Any]) -> int:
+    length_contract = _resolve_blueprint_length_contract(blueprint_data)
+    if not length_contract:
+        return 4
+    try:
+        return max(1, int(length_contract.get("stage_count_min") or 4))
+    except (TypeError, ValueError):
+        return 4
+
+
+def _build_chapter_batches(total_chapters: int, *, batch_size: int = 4) -> List[tuple[int, int]]:
+    total = max(1, int(total_chapters or 1))
+    size = max(1, int(batch_size or 4))
+    return [(start, min(total, start + size - 1)) for start in range(1, total + 1, size)]
 
 
 def _has_substantive_value(value: Any) -> bool:
@@ -330,7 +731,9 @@ def _is_recoverable_for_requested_blueprint_stage(
     stage = str(requested_stage or "").strip().lower()
     if stage == "chapter_outline":
         chapter_outline = getattr(blueprint, "chapter_outline", None)
-        return isinstance(chapter_outline, list) and _has_complete_chapter_outline(chapter_outline)
+        blueprint_data = blueprint.model_dump(exclude_none=True) if hasattr(blueprint, "model_dump") else {}
+        expected_count = _resolve_blueprint_chapter_outline_count(blueprint_data) if isinstance(blueprint_data, dict) else None
+        return isinstance(chapter_outline, list) and _has_complete_chapter_outline(chapter_outline, expected_count)
     if stage == "novel_outline":
         novel_outline = getattr(blueprint, "novel_outline", None)
         return isinstance(novel_outline, list) and len(novel_outline) > 0
@@ -705,6 +1108,65 @@ async def _call_llm_with_stage_retries(
     return result.text
 
 
+async def _call_llm_json_with_stage_retries(
+    *,
+    llm_service: LLMService,
+    system_prompt: str,
+    conversation_history: List[Dict[str, str]],
+    temperature: float,
+    user_id: int,
+    timeout: float,
+    response_format: Optional[str] = "json_object",
+    max_tokens: Optional[int] = None,
+    top_p: Optional[float] = None,
+    allow_truncated_response: bool = False,
+    retry_same_model_once: bool = True,
+    stage_label: str,
+    progress_callback: Callable[[str, str], Awaitable[None]] | None = None,
+    progress_stage: str = "generating",
+    retry_attempts: int = 2,
+    json_repair_attempts: int = 1,
+) -> Dict[str, Any]:
+    try:
+        result = await call_generation_json(
+            llm_service=llm_service,
+            system_prompt=system_prompt,
+            conversation_history=conversation_history,
+            temperature=temperature,
+            user_id=user_id,
+            timeout=timeout,
+            policy=GenerationCallPolicy(
+                stage_label=stage_label,
+                progress_stage=progress_stage,
+                retry_attempts=retry_attempts,
+                response_format=response_format,
+                max_tokens=max_tokens,
+                top_p=top_p,
+                allow_truncated_response=allow_truncated_response,
+                retry_same_model_once=retry_same_model_once,
+                json_repair_attempts=json_repair_attempts,
+            ),
+            progress_callback=progress_callback,
+        )
+    except GenerationJSONDecodeError as exc:
+        logger.warning(
+            "Blueprint generation JSON repair failed: stage=%s normalized=%s",
+            stage_label,
+            exc.normalized_text[:500],
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "GENERATION_JSON_REPAIR_FAILED",
+                "message": f"{stage_label} 返回格式仍不可解析，请重试。",
+                "hint": "系统已尝试自动格式修复，但模型返回内容仍不是合法 JSON 对象。",
+                "retryable": True,
+                "stage": progress_stage,
+            },
+        ) from exc
+    return result.data
+
+
 _WORLD_BIBLE_SLOT_GROUPS: List[Dict[str, Any]] = [
     {
         "label": "历史与世界格局",
@@ -806,16 +1268,44 @@ def _outline_stage_has_depth(item: Dict[str, Any]) -> bool:
 
 def _is_chapter_outline_batch_complete(chapters: List[Dict[str, Any]], start_chapter: int, end_chapter: int) -> bool:
     expected = list(range(start_chapter, end_chapter + 1))
-    actual = [
-        int(item.get("chapter_number") or 0)
-        for item in chapters
-        if isinstance(item, dict) and start_chapter <= int(item.get("chapter_number") or 0) <= end_chapter
-    ]
+    actual: List[int] = []
+    for item in chapters:
+        if not isinstance(item, dict):
+            continue
+        try:
+            chapter_number = int(item.get("chapter_number") or 0)
+        except (TypeError, ValueError):
+            continue
+        if start_chapter <= chapter_number <= end_chapter:
+            actual.append(chapter_number)
+    actual.sort()
     return actual == expected
 
 
-def _has_complete_chapter_outline(chapters: List[Dict[str, Any]]) -> bool:
-    return _is_chapter_outline_batch_complete(chapters, 1, 12)
+def _has_complete_chapter_outline(chapters: List[Dict[str, Any]], expected_count: Optional[int] = None) -> bool:
+    valid_numbers: List[int] = []
+    for item in chapters:
+        if not isinstance(item, dict):
+            continue
+        try:
+            chapter_number = int(item.get("chapter_number") or 0)
+        except (TypeError, ValueError):
+            continue
+        if chapter_number > 0:
+            valid_numbers.append(chapter_number)
+    valid_numbers = sorted(set(valid_numbers))
+    if not valid_numbers:
+        return False
+    if expected_count is not None:
+        try:
+            target = max(1, int(expected_count))
+        except (TypeError, ValueError):
+            target = len(valid_numbers)
+        if len(valid_numbers) < target:
+            return False
+    else:
+        target = len(valid_numbers)
+    return _is_chapter_outline_batch_complete(chapters, 1, target)
 
 
 def _build_blueprint_checkpoint_patch(blueprint_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -872,10 +1362,11 @@ def _parse_expected_chapter_range(value: Any) -> tuple[int, int] | None:
     return start, end
 
 
-def _validate_novel_outline_coherence(outline: List[Dict[str, Any]]) -> None:
-    if len(outline) < 4:
+def _validate_novel_outline_coherence(outline: List[Dict[str, Any]], *, min_stage_count: int = 4) -> None:
+    min_stage_count = max(1, int(min_stage_count or 4))
+    if len(outline) < min_stage_count:
         raise HTTPException(status_code=500, detail=f"小说总大纲生成失败，有效阶段数不足：{len(outline)}")
-    if len(outline) > 12:
+    if len(outline) > 40:
         raise HTTPException(status_code=500, detail=f"小说总大纲生成失败，阶段数超出上限：{len(outline)}")
 
     previous_stage = 0
@@ -1022,7 +1513,7 @@ async def _generate_novel_world_bible(
 
     for index, slot_group in enumerate(_WORLD_BIBLE_SLOT_GROUPS, start=1):
         if progress_callback is not None:
-            await progress_callback("polishing", f"{slot_group['message']}（{index}/{len(_WORLD_BIBLE_SLOT_GROUPS)}）")
+            await progress_callback("blueprint_setting_lock", f"{slot_group['message']}（{index}/{len(_WORLD_BIBLE_SLOT_GROUPS)}）")
 
         existing_segment = _select_world_system_payload(merged_world_setting, slot_group["fields"])
         segment_gap_report = {
@@ -1064,7 +1555,7 @@ async def _generate_novel_world_bible(
   }}
 }}
 """
-        raw = await _call_llm_with_stage_retries(
+        payload = await _call_llm_json_with_stage_retries(
             llm_service=llm_service,
             system_prompt="你是长篇小说世界圣经构建器。你只负责补全当前给定的一组世界、文明、力量、生存、生活与文化体系字段。只输出 JSON。",
             conversation_history=[{"role": "user", "content": prompt}],
@@ -1075,10 +1566,9 @@ async def _generate_novel_world_bible(
             max_tokens=2600,
             stage_label=slot_group["label"],
             progress_callback=progress_callback,
-            progress_stage="polishing",
+            progress_stage="blueprint_setting_lock",
             retry_attempts=3,
         )
-        payload = json.loads(sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(raw))))
         world_bible = payload.get("world_bible") if isinstance(payload, dict) else None
         if not isinstance(world_bible, dict):
             raise HTTPException(status_code=500, detail=f"世界体系补全失败，{slot_group['label']} 未返回合法的 world_bible 结构")
@@ -1091,7 +1581,7 @@ async def _generate_novel_world_bible(
         if checkpoint_callback is not None:
             await checkpoint_callback(
                 blueprint_data,
-                "polishing",
+                "blueprint_setting_lock",
                 f"已保存世界骨架阶段结果（{index}/{len(_WORLD_BIBLE_SLOT_GROUPS)}）",
             )
 
@@ -1120,6 +1610,8 @@ async def _enrich_novel_outline_in_chunks(
     world_systems = _compact_system_payload(
         blueprint_data.get("world_setting") if isinstance(blueprint_data.get("world_setting"), dict) else {}
     )
+    length_contract = _resolve_blueprint_length_contract(blueprint_data)
+    length_contract_instruction = _format_length_contract_instruction(length_contract)
 
     for chunk_index, start in enumerate(range(0, len(normalized_outline), chunk_size), start=1):
         chunk = normalized_outline[start:start + chunk_size]
@@ -1128,14 +1620,25 @@ async def _enrich_novel_outline_in_chunks(
         if existing_chunk and all(item is not None and _outline_stage_has_depth(item) for item in existing_chunk):
             enriched_outline.extend([dict(item) for item in existing_chunk if item is not None])
             if progress_callback is not None:
-                await progress_callback("polishing", f"检测到已保存的总纲细化结果，跳过第 {chunk_index}/{total_chunks} 段")
+                await progress_callback("blueprint_plot_threads", f"检测到已保存的总纲细化结果，跳过第 {chunk_index}/{total_chunks} 段")
             continue
         if progress_callback is not None:
-            await progress_callback("polishing", f"正在细化小说总大纲（第 {chunk_index}/{total_chunks} 段）")
+            await progress_callback("blueprint_plot_threads", f"正在细化小说总大纲（第 {chunk_index}/{total_chunks} 段）")
+        chapter_range_example = next(
+            (
+                str(item.get("expected_chapter_range")).strip()
+                for item in chunk
+                if isinstance(item, dict) and str(item.get("expected_chapter_range") or "").strip()
+            ),
+            "沿用输入阶段范围",
+        )
         prompt = f"""
 [任务目标]
-你将收到一部超长篇小说的世界骨架和一小段阶段总纲骨架。
-请只细化当前这几段阶段，把它们扩写到足够支撑百万到千万字长篇的密度。
+你将收到一部小说的世界骨架和一小段阶段总纲骨架。
+请只细化当前这几段阶段，把它们扩写到足够支撑对应篇幅的叙事密度；篇幅可以是短中篇，也可以是长篇，不要机械套用百万字模板。
+
+[篇幅契约]
+{length_contract_instruction}
 
 [全局蓝图摘要]
 {json.dumps(outline_context, ensure_ascii=False, indent=2)}
@@ -1153,7 +1656,8 @@ async def _enrich_novel_outline_in_chunks(
 4. 如果某字段在当前作品中不是字面意义，就写出它在当前作品中的实际承担内容，但字段名保持不变，方便系统后续处理。
 5. key_events 至少 6 条，且要能支撑后续拆章节。
 6. 每段要像“整卷策划案”，不是几句总结。
-7. 只输出当前这些阶段的 JSON，不要输出别的阶段。
+7. 保留输入中的 expected_chapter_range，不得在细化时把章节范围扩出篇幅契约。
+8. 只输出当前这些阶段的 JSON，不要输出别的阶段。
 
 [输出格式]
 {{
@@ -1180,12 +1684,12 @@ async def _enrich_novel_outline_in_chunks(
       "foreshadowing_and_payoff": "",
       "story_function": "",
       "ending_hook": "",
-      "expected_chapter_range": "1-60章"
+      "expected_chapter_range": "{chapter_range_example}"
     }}
   ]
 }}
 """
-        raw = await _call_llm_with_stage_retries(
+        payload = await _call_llm_json_with_stage_retries(
             llm_service=llm_service,
             system_prompt="你是超长篇小说分卷策划师。你只细化当前给定的阶段片段，并补足世界、生存、生活、文明和资源层面的推进。只输出 JSON。",
             conversation_history=[{"role": "user", "content": prompt}],
@@ -1196,10 +1700,9 @@ async def _enrich_novel_outline_in_chunks(
             max_tokens=5200,
             stage_label=f"小说总大纲细化第 {chunk_index}/{total_chunks} 段",
             progress_callback=progress_callback,
-            progress_stage="polishing",
+            progress_stage="blueprint_plot_threads",
             retry_attempts=3,
         )
-        payload = json.loads(sanitize_json_like_text(unwrap_markdown_json(remove_think_tags(raw))))
         items = payload.get("novel_outline") if isinstance(payload, dict) else None
         if not isinstance(items, list):
             raise HTTPException(status_code=500, detail=f"小说总大纲细化失败，第 {chunk_index} 段未返回合法阶段列表")
@@ -1209,6 +1712,15 @@ async def _enrich_novel_outline_in_chunks(
                 continue
             normalized = _normalize_novel_outline_stage(item, local_index)
             if normalized is not None:
+                original_stage = int(normalized.get("stage") or local_index)
+                original_item = existing_by_stage.get(original_stage)
+                original_range = (
+                    str(original_item.get("expected_chapter_range") or "").strip()
+                    if isinstance(original_item, dict)
+                    else ""
+                )
+                if original_range:
+                    normalized["expected_chapter_range"] = original_range
                 chunk_result.append(normalized)
         if len(chunk_result) != len(chunk):
             raise HTTPException(status_code=500, detail=f"小说总大纲细化失败，第 {chunk_index} 段返回阶段数不完整")
@@ -1217,11 +1729,14 @@ async def _enrich_novel_outline_in_chunks(
         if checkpoint_callback is not None:
             await checkpoint_callback(
                 blueprint_data,
-                "polishing",
+                "blueprint_plot_threads",
                 f"已保存总纲细化结果（第 {chunk_index}/{total_chunks} 段）",
             )
     enriched_outline.sort(key=lambda item: int(item.get("stage") or 0))
-    _validate_novel_outline_coherence(enriched_outline)
+    _validate_novel_outline_coherence(
+        enriched_outline,
+        min_stage_count=_resolve_novel_outline_min_stage_count(blueprint_data),
+    )
     _validate_novel_outline_depth(enriched_outline)
     return enriched_outline
 
@@ -1238,7 +1753,7 @@ async def _repair_blueprint_character_names(
         return blueprint_data
 
     if progress_callback is not None:
-        await progress_callback("polishing", "正在补全主角与核心角色命名")
+        await progress_callback("blueprint_cast_plan", "正在补全主角与核心角色命名")
 
     naming_profile = _build_character_naming_profile(blueprint_data, project_title)
 
@@ -1273,18 +1788,24 @@ async def _repair_blueprint_character_names(
 {json.dumps(blueprint_data, ensure_ascii=False, indent=2)}
 """.strip()
 
-    repaired_raw = await llm_service.get_llm_response(
+    repaired_result = await call_generation_json(
+        llm_service=llm_service,
         system_prompt="你是小说蓝图修复器。你只负责修复角色命名与相关引用一致性，不重写故事方向。输出必须是合法 JSON 对象。",
         conversation_history=[{"role": "user", "content": repair_prompt}],
         temperature=0.2,
         user_id=user_id,
         timeout=180.0,
-        response_format="json_object",
-        max_tokens=5000,
+        policy=GenerationCallPolicy(
+            stage_label="蓝图角色命名修复",
+            progress_stage="blueprint_cast_plan",
+            retry_attempts=3,
+            response_format="json_object",
+            max_tokens=5000,
+            allow_truncated_response=True,
+            json_repair_attempts=1,
+        ),
     )
-    repaired_normalized = unwrap_markdown_json(remove_think_tags(repaired_raw))
-    repaired_sanitized = sanitize_json_like_text(repaired_normalized)
-    repaired_data = json.loads(repaired_sanitized)
+    repaired_data = repaired_result.data
     if not isinstance(repaired_data, dict):
         raise HTTPException(status_code=500, detail="蓝图角色命名修复失败，系统未返回有效结构")
     if not _blueprint_has_valid_character_names(repaired_data):
@@ -1300,11 +1821,20 @@ async def _generate_novel_outline(
     progress_callback: Callable[[str, str], Awaitable[None]] | None = None,
     checkpoint_callback: Callable[[Dict[str, Any], str, str], Awaitable[None]] | None = None,
 ) -> Dict[str, Any]:
+    length_contract = _resolve_blueprint_length_contract(blueprint_data)
+    length_contract_instruction = _format_length_contract_instruction(length_contract)
     existing_outline = blueprint_data.get("novel_outline")
     if isinstance(existing_outline, list) and len(existing_outline) >= 4:
         try:
-            _validate_novel_outline_coherence([item for item in existing_outline if isinstance(item, dict)])
-            _validate_novel_outline_depth([item for item in existing_outline if isinstance(item, dict)])
+            existing_items = [item for item in existing_outline if isinstance(item, dict)]
+            if length_contract and _outline_exceeds_length_contract(existing_items, length_contract):
+                existing_items = _remap_outline_ranges_to_length_contract(existing_items, length_contract)
+                blueprint_data["novel_outline"] = existing_items
+            _validate_novel_outline_coherence(
+                existing_items,
+                min_stage_count=_resolve_novel_outline_min_stage_count(blueprint_data),
+            )
+            _validate_novel_outline_depth(existing_items)
             return blueprint_data
         except HTTPException:
             pass
@@ -1324,7 +1854,47 @@ async def _generate_novel_outline(
 
     outline_source_context = _build_outline_source_context(blueprint_data)
     structure_gap_report = _scan_longform_structure_gaps(blueprint_data)
+    length_contract = _resolve_blueprint_length_contract(blueprint_data)
+    length_contract_instruction = _format_length_contract_instruction(length_contract)
     title = str(outline_source_context.get("title") or "未命名作品").strip() or "未命名作品"
+    if length_contract:
+        stage_min = int(length_contract.get("stage_count_min") or 4)
+        stage_max = int(length_contract.get("stage_count_max") or 12)
+        target_chapters = int(length_contract.get("target_chapter_count") or 0)
+        outline_stage_requirement = f"输出 {stage_min}-{stage_max} 个阶段节点"
+        chapter_range_example = f"1-{max(1, math.ceil(target_chapters / max(stage_min, 1)))}章"
+    else:
+        outline_stage_requirement = "输出 8-12 个阶段节点"
+        chapter_range_example = "1-60章"
+
+
+    # 长篇检测：如果目标超过30章或20万字，切换到长篇大纲生成器
+    total_chapters = int(blueprint_data.get("total_chapters") or 0)
+    total_word_count = int(blueprint_data.get("total_word_count") or int(length_contract.get("target_total_words") or 0))
+    if total_chapters > 30 or total_word_count > 200000:
+        logger.info("检测到长篇项目（%s章/%s字），尝试使用 LongNovelOutlineGenerator", total_chapters, total_word_count)
+        generator = LongNovelOutlineGenerator(llm_service)
+        volume_count = max(2, total_chapters // 15) if total_chapters > 0 else 6
+        chapters_per_volume = max(8, total_chapters // max(volume_count, 1)) if total_chapters > 0 else 15
+        try:
+            blueprint_data = await generator.generate_outline(
+                blueprint_data=blueprint_data,
+                llm_service=llm_service,
+                user_id=user_id,
+                volume_count=volume_count,
+                chapters_per_volume=chapters_per_volume,
+                progress_callback=progress_callback,
+            )
+            if blueprint_data and blueprint_data.get("novel_outline"):
+                _validate_novel_outline_coherence(
+                    blueprint_data["novel_outline"],
+                    min_stage_count=_resolve_novel_outline_min_stage_count(blueprint_data),
+                )
+                _validate_novel_outline_depth(blueprint_data["novel_outline"])
+                return blueprint_data
+        except Exception as e:
+            logger.warning("LongNovelOutlineGenerator 失败，回退到标准流程: %s", str(e))
+
 
     outline_system_prompt = (
         "你是资深长篇网文总策划，擅长把小说蓝图整理成完整的全书大纲与分卷路线。"
@@ -1344,8 +1914,12 @@ async def _generate_novel_outline(
 以下是系统根据当前蓝图识别出的长篇结构缺口。你的职责不是停在现有信息上，而是在不违背现有设定的前提下，把这些对长篇成立至关重要但尚未充分展开的骨架补齐：
 {json.dumps(structure_gap_report, ensure_ascii=False, indent=2)}
 
+[篇幅契约]
+{length_contract_instruction}
+执行优先级：篇幅契约高于通用长篇模板；所有篇幅都启用连续性、角色池和伏笔回收，但不得无视明确章节数。
+
 [硬性要求]
-1. 输出 8-12 个阶段节点，每个节点代表一个大阶段、一卷或一大段剧情推进。
+1. {outline_stage_requirement}，每个节点代表一个大阶段、一卷或一大段剧情推进；如果用户明确要求短中篇，不要套用超长篇阶段数量。
 2. 每个阶段都必须写得足够详细，能够独立回答：这一阶段的背景是什么、主角在做什么、主要矛盾怎么升级、世界发生了什么变化、这一段结束后故事被推进到了哪里。
 3. 必须严格根据蓝图材料本身来归纳这本书的主推进线、副推进线、世界扩张线、人物成长线与长期矛盾，不能套固定题材模板，也不要额外强调、压制或改写某一种题材倾向。
 4. 如果蓝图同时包含多条推进轴，必须把它们编织进同一部长篇主线，形成统一的长期结构。
@@ -1369,7 +1943,7 @@ async def _generate_novel_outline(
 - stage_climax: 本阶段高潮事件
 - foreshadowing_and_payoff: 本阶段埋下或回收的伏笔
 - ending_hook: 阶段结尾如何把读者推进到下一阶段
-- expected_chapter_range: 预估章节范围，如“1-60章”
+- expected_chapter_range: 预估章节范围，如“{chapter_range_example}”
 
 [输出约束]
 1. key_events 不少于 5 条。
@@ -1396,16 +1970,17 @@ async def _generate_novel_outline(
       "stage_climax": "阶段高潮",
       "foreshadowing_and_payoff": "伏笔埋设与回收",
       "ending_hook": "阶段收尾钩子",
-      "expected_chapter_range": "1-60章"
+      "expected_chapter_range": "{chapter_range_example}"
     }}
   ]
 }}
 """
 
     if progress_callback is not None:
-        await progress_callback("generating", "正在生成小说总大纲（阶段骨架首轮）")
+        await progress_callback("blueprint_setting_lock", "正在锁定设定与长篇目标（世界规则 / 角色规模 / 伏笔回收）")
+        await progress_callback("blueprint_plot_threads", "正在生成小说总大纲（阶段骨架首轮）")
 
-    outline_raw = await _call_llm_with_stage_retries(
+    outline_data = await _call_llm_json_with_stage_retries(
         llm_service=llm_service,
         system_prompt=outline_system_prompt,
         conversation_history=[{"role": "user", "content": outline_user_prompt}],
@@ -1416,15 +1991,11 @@ async def _generate_novel_outline(
         max_tokens=7000,
         stage_label="小说总大纲骨架生成",
         progress_callback=progress_callback,
-        progress_stage="generating",
+        progress_stage="blueprint_plot_threads",
         retry_attempts=3,
     )
     if progress_callback is not None:
-        await progress_callback("generating", "正在解析小说总大纲骨架")
-    outline_cleaned = remove_think_tags(outline_raw)
-    outline_normalized = unwrap_markdown_json(outline_cleaned)
-    outline_sanitized = sanitize_json_like_text(outline_normalized)
-    outline_data = json.loads(outline_sanitized)
+        await progress_callback("blueprint_plot_threads", "正在解析小说总大纲骨架")
 
     raw_items = outline_data.get("novel_outline") if isinstance(outline_data, dict) else None
     if not isinstance(raw_items, list):
@@ -1439,14 +2010,21 @@ async def _generate_novel_outline(
             normalized_outline.append(normalized)
 
     normalized_outline.sort(key=lambda item: int(item.get("stage") or 0))
+    if length_contract and _outline_exceeds_length_contract(normalized_outline, length_contract):
+        normalized_outline = _remap_outline_ranges_to_length_contract(normalized_outline, length_contract)
     if progress_callback is not None:
-        await progress_callback("generating", "正在校验小说总大纲骨架连续性")
-    _validate_novel_outline_coherence(normalized_outline)
+        await progress_callback("blueprint_foreshadowing", "正在校验小说总大纲骨架连续性")
+    _validate_novel_outline_coherence(
+        normalized_outline,
+        min_stage_count=_resolve_novel_outline_min_stage_count(blueprint_data),
+    )
 
     blueprint_data["novel_outline"] = normalized_outline
     if checkpoint_callback is not None:
-        await checkpoint_callback(blueprint_data, "generating", "已保存小说总大纲骨架")
+        await checkpoint_callback(blueprint_data, "blueprint_foreshadowing", "已保存小说总大纲骨架")
     if not world_bible_prepared:
+        if progress_callback is not None:
+            await progress_callback("blueprint_setting_lock", "正在补全设定锁定包（世界运行 / 势力 / 生存生活逻辑）")
         blueprint_data = await _generate_novel_world_bible(
             llm_service=llm_service,
             blueprint_data=blueprint_data,
@@ -1454,6 +2032,8 @@ async def _generate_novel_outline(
             progress_callback=progress_callback,
             checkpoint_callback=checkpoint_callback,
         )
+    if progress_callback is not None:
+        await progress_callback("blueprint_foreshadowing", "正在细化角色生命周期、伏笔回收窗口和阶段任务")
     blueprint_data["novel_outline"] = await _enrich_novel_outline_in_chunks(
         llm_service=llm_service,
         blueprint_data=blueprint_data,
@@ -1461,6 +2041,13 @@ async def _generate_novel_outline(
         progress_callback=progress_callback,
         checkpoint_callback=checkpoint_callback,
     )
+    if length_contract and _outline_exceeds_length_contract(blueprint_data["novel_outline"], length_contract):
+        blueprint_data["novel_outline"] = _remap_outline_ranges_to_length_contract(
+            blueprint_data["novel_outline"],
+            length_contract,
+        )
+        if checkpoint_callback is not None:
+            await checkpoint_callback(blueprint_data, "blueprint_plot_threads", "已按篇幅契约校正小说总纲章节范围")
     return blueprint_data
 
 
@@ -1473,7 +2060,8 @@ async def _generate_executable_chapter_outline(
     checkpoint_callback: Callable[[Dict[str, Any], str, str], Awaitable[None]] | None = None,
 ) -> Dict[str, Any]:
     existing_outline = blueprint_data.get("chapter_outline")
-    if isinstance(existing_outline, list) and len(existing_outline) >= 12:
+    target_chapter_outline_count = _resolve_blueprint_chapter_outline_count(blueprint_data)
+    if isinstance(existing_outline, list) and len(existing_outline) >= target_chapter_outline_count:
         return blueprint_data
 
     outline_source_context = _build_chapter_outline_source_context(blueprint_data)
@@ -1485,7 +2073,7 @@ async def _generate_executable_chapter_outline(
     )
 
     normalized_outline: List[Dict[str, Any]] = [item for item in existing_outline if isinstance(item, dict)] if isinstance(existing_outline, list) else []
-    chapter_batches = [(1, 4), (5, 8), (9, 12)]
+    chapter_batches = _build_chapter_batches(target_chapter_outline_count, batch_size=4)
     for batch_index, (start_chapter, end_chapter) in enumerate(chapter_batches, start=1):
         existing_batch = [
             chapter for chapter in normalized_outline
@@ -1493,7 +2081,7 @@ async def _generate_executable_chapter_outline(
         ]
         if _is_chapter_outline_batch_complete(existing_batch, start_chapter, end_chapter):
             if progress_callback is not None:
-                await progress_callback("generating", f"检测到已保存的章节批次，跳过第 {batch_index}/{len(chapter_batches)} 批（{start_chapter}-{end_chapter} 章）")
+                await progress_callback("blueprint_chapter_plan", f"检测到已保存的章节批次，跳过第 {batch_index}/{len(chapter_batches)} 批（{start_chapter}-{end_chapter} 章）")
             continue
         outline_user_prompt = f"""
 [任务目标]
@@ -1509,11 +2097,13 @@ async def _generate_executable_chapter_outline(
 
 [输出要求]
 1. 本次只输出第 {start_chapter} 到第 {end_chapter} 章，chapter_number 必须连续递增。
-2. 每章只输出三个字段：chapter_number、title、summary。
-3. summary 控制在 90-180 字，必须写清本章推进点、使用了总纲中的哪一层背景/冲突/人物关系/世界规则、以及章末钩子。
-4. 首卷节奏必须严格服从当前项目的总纲与世界骨架，自行判断这几章优先承担哪些职责，例如：建立故事入口、挂载核心关系、显影关键规则、引爆首轮矛盾、埋设长线钩子。不要套任何固定题材模板。
-5. 必须严格服从小说总大纲中的阶段背景、外部格局变化、人物推进与体系升级，不能脱离总纲另起炉灶。
-6. 标题和摘要必须具体，不要模板腔，不要空泛口号。
+2. 每章必须输出：chapter_number、title、summary、character_focus、cast_delta、continuity_notes、foreshadowing_tasks、payoff_window。
+3. summary 控制在 120-220 字，必须写清本章推进点、使用了总纲中的哪一层背景/冲突/人物关系/世界规则、以及章末钩子。
+4. cast_delta 要说明本章新增/回归/退出的角色位，必须落入角色池、势力或功能性路人规则；不能凭空出现又消失。
+5. foreshadowing_tasks 要区分 plant / reinforce / payoff / avoid_forgetting，不能只写“埋伏笔”。
+6. 首卷节奏必须严格服从当前项目的总纲与世界骨架，自行判断这几章优先承担哪些职责，例如：建立故事入口、挂载核心关系、显影关键规则、引爆首轮矛盾、埋设长线钩子。不要套任何固定题材模板。
+7. 必须严格服从小说总大纲中的阶段背景、外部格局变化、人物推进与体系升级，不能脱离总纲另起炉灶。
+8. 标题和摘要必须具体，不要模板腔，不要空泛口号。
 
 [输出格式]
 只输出 JSON：
@@ -1522,16 +2112,21 @@ async def _generate_executable_chapter_outline(
     {{
       "chapter_number": {start_chapter},
       "title": "标题",
-      "summary": "摘要"
+      "summary": "摘要",
+      "character_focus": ["本章角色焦点"],
+      "cast_delta": {{"new": [], "returning": [], "exit_or_absent": [], "faction_roles": []}},
+      "continuity_notes": ["承接点", "递给后文的压力"],
+      "foreshadowing_tasks": {{"plant": [], "reinforce": [], "payoff": [], "avoid_forgetting": []}},
+      "payoff_window": "计划回收窗口，如第8-12章"
     }}
   ]
 }}
 """
 
         if progress_callback is not None:
-            await progress_callback("generating", f"正在生成可执行章节大纲（第 {batch_index}/{len(chapter_batches)} 批，第 {start_chapter}-{end_chapter} 章）")
+            await progress_callback("blueprint_chapter_plan", f"正在生成可执行章节大纲（第 {batch_index}/{len(chapter_batches)} 批，第 {start_chapter}-{end_chapter} 章）")
 
-        outline_raw = await _call_llm_with_stage_retries(
+        outline_data = await _call_llm_json_with_stage_retries(
             llm_service=llm_service,
             system_prompt=outline_system_prompt,
             conversation_history=[{"role": "user", "content": outline_user_prompt}],
@@ -1542,15 +2137,11 @@ async def _generate_executable_chapter_outline(
             max_tokens=1800,
             stage_label=f"章节大纲第 {start_chapter}-{end_chapter} 章生成",
             progress_callback=progress_callback,
-            progress_stage="generating",
+            progress_stage="blueprint_chapter_plan",
             retry_attempts=3,
         )
         if progress_callback is not None:
-            await progress_callback("generating", f"正在解析章节大纲批次（第 {start_chapter}-{end_chapter} 章）")
-        outline_cleaned = remove_think_tags(outline_raw)
-        outline_normalized = unwrap_markdown_json(outline_cleaned)
-        outline_sanitized = sanitize_json_like_text(outline_normalized)
-        outline_data = json.loads(outline_sanitized)
+            await progress_callback("blueprint_chapter_plan", f"正在解析章节大纲批次（第 {start_chapter}-{end_chapter} 章）")
 
         raw_items = outline_data.get("chapter_outline") if isinstance(outline_data, dict) else None
         if not isinstance(raw_items, list):
@@ -1575,6 +2166,11 @@ async def _generate_executable_chapter_outline(
                     "chapter_number": chapter_number,
                     "title": title_value,
                     "summary": summary_value,
+                    "character_focus": item.get("character_focus") if isinstance(item.get("character_focus"), list) else [],
+                    "cast_delta": item.get("cast_delta") if isinstance(item.get("cast_delta"), dict) else {},
+                    "continuity_notes": item.get("continuity_notes") if isinstance(item.get("continuity_notes"), list) else [],
+                    "foreshadowing_tasks": item.get("foreshadowing_tasks") if isinstance(item.get("foreshadowing_tasks"), dict) else {},
+                    "payoff_window": str(item.get("payoff_window") or "").strip(),
                 }
             )
 
@@ -1593,17 +2189,17 @@ async def _generate_executable_chapter_outline(
         if checkpoint_callback is not None:
             await checkpoint_callback(
                 blueprint_data,
-                "generating",
+                "blueprint_chapter_plan",
                 f"已保存章节批次结果（第 {batch_index}/{len(chapter_batches)} 批，第 {start_chapter}-{end_chapter} 章）",
             )
 
     normalized_outline.sort(key=lambda chapter: chapter["chapter_number"])
     chapter_numbers = [chapter["chapter_number"] for chapter in normalized_outline]
-    if len(normalized_outline) < 12:
+    if len(normalized_outline) < target_chapter_outline_count:
         raise HTTPException(status_code=500, detail=f"章节大纲生成失败，返回的有效章节数不足：{len(normalized_outline)}")
-    if chapter_numbers[:12] != list(range(1, 13)):
-        raise HTTPException(status_code=500, detail="章节大纲生成失败，前 12 章的章节号不连续或存在缺失")
-    blueprint_data["chapter_outline"] = normalized_outline[:12]
+    if chapter_numbers[:target_chapter_outline_count] != list(range(1, target_chapter_outline_count + 1)):
+        raise HTTPException(status_code=500, detail=f"章节大纲生成失败，前 {target_chapter_outline_count} 章的章节号不连续或存在缺失")
+    blueprint_data["chapter_outline"] = normalized_outline[:target_chapter_outline_count]
     return blueprint_data
 
 
@@ -1622,6 +2218,21 @@ async def _polish_chapter_outline_quality(
     normalized_chapter_outline = [item for item in chapter_outline if isinstance(item, dict)]
     if not normalized_chapter_outline:
         return blueprint_data
+    resolved_outline_target = _resolve_blueprint_chapter_outline_count(blueprint_data)
+    existing_numbers: List[int] = []
+    for item in normalized_chapter_outline:
+        try:
+            chapter_number = int(item.get("chapter_number") or 0)
+        except (TypeError, ValueError):
+            continue
+        if chapter_number > 0:
+            existing_numbers.append(chapter_number)
+    target_chapter_outline_count = min(
+        resolved_outline_target,
+        max(existing_numbers) if existing_numbers else len(normalized_chapter_outline),
+    )
+    if target_chapter_outline_count <= 0:
+        return blueprint_data
 
     one_sentence_summary = str(blueprint_data.get("one_sentence_summary") or "").strip()
     full_synopsis = str(blueprint_data.get("full_synopsis") or "").strip()
@@ -1639,7 +2250,7 @@ async def _polish_chapter_outline_quality(
     )
 
     polished_map: Dict[int, Dict[str, Any]] = {}
-    chapter_batches = [(1, 4), (5, 8), (9, 12)]
+    chapter_batches = _build_chapter_batches(target_chapter_outline_count, batch_size=4)
     for batch_index, (start_chapter, end_chapter) in enumerate(chapter_batches, start=1):
         batch_items = [
             item for item in normalized_chapter_outline
@@ -1690,8 +2301,9 @@ async def _polish_chapter_outline_quality(
 2. 每章 summary 必须有明确冲突、人物目标/阻碍、关键转折、章末钩子。
 3. summary 长度控制在 180-360 字，避免空泛描述。
 4. 补全每章承担的长线职责，保证前承后接，不允许只写“发生了什么”，还要写“推进了什么”。
-5. 强制输出以下字段：narrative_phase、chapter_role、suspense_hook、emotional_progression、character_focus、conflict_escalation、continuity_notes、foreshadowing。
-6. 语言要具体、可直接落地写作，避免模板腔。
+5. 强制输出以下字段：narrative_phase、chapter_role、suspense_hook、emotional_progression、character_focus、cast_delta、conflict_escalation、continuity_notes、foreshadowing、foreshadowing_tasks、payoff_window。
+6. cast_delta 必须说明新增/回归/退出角色与势力位置；foreshadowing_tasks 必须说明本章回收、强化、禁忘和可新增伏笔。
+7. 语言要具体、可直接落地写作，避免模板腔。
 
 [输出格式]
 只输出 JSON：
@@ -1706,12 +2318,15 @@ async def _polish_chapter_outline_quality(
       "suspense_hook": "章末钩子",
       "emotional_progression": "情绪如何变化",
       "character_focus": ["角色A", "角色B"],
+      "cast_delta": {{"new": [], "returning": [], "exit_or_absent": [], "faction_roles": []}},
       "conflict_escalation": ["升级点1", "升级点2"],
       "continuity_notes": ["承接上一章的点", "为下一章预埋的点"],
       "foreshadowing": {{
         "plant": ["埋下的伏笔"],
         "payoff": ["本章回收的伏笔"]
-      }}
+      }},
+      "foreshadowing_tasks": {{"plant": [], "reinforce": [], "payoff": [], "avoid_forgetting": []}},
+      "payoff_window": "计划回收窗口"
     }}
   ]
 }}
@@ -1719,8 +2334,8 @@ async def _polish_chapter_outline_quality(
 
         try:
             if progress_callback is not None:
-                await progress_callback("polishing", f"正在润色章节大纲（第 {batch_index}/{len(chapter_batches)} 批，第 {start_chapter}-{end_chapter} 章）")
-            polished_raw = await _call_llm_with_stage_retries(
+                await progress_callback("blueprint_chapter_plan", f"正在润色章节大纲（第 {batch_index}/{len(chapter_batches)} 批，第 {start_chapter}-{end_chapter} 章）")
+            polished_data = await _call_llm_json_with_stage_retries(
                 llm_service=llm_service,
                 system_prompt=polish_system_prompt,
                 conversation_history=[{"role": "user", "content": polish_user_prompt}],
@@ -1731,15 +2346,11 @@ async def _polish_chapter_outline_quality(
                 allow_truncated_response=True,
                 stage_label=f"章节大纲第 {start_chapter}-{end_chapter} 章润色",
                 progress_callback=progress_callback,
-                progress_stage="polishing",
+                progress_stage="blueprint_chapter_plan",
                 retry_attempts=3,
             )
             if progress_callback is not None:
-                await progress_callback("polishing", f"正在解析润色结果（第 {start_chapter}-{end_chapter} 章）")
-            polished_cleaned = remove_think_tags(polished_raw)
-            polished_normalized = unwrap_markdown_json(polished_cleaned)
-            polished_sanitized = sanitize_json_like_text(polished_normalized)
-            polished_data = json.loads(polished_sanitized)
+                await progress_callback("blueprint_chapter_plan", f"正在解析润色结果（第 {start_chapter}-{end_chapter} 章）")
         except Exception as exc:
             logger.warning("蓝图章节大纲润色失败，保留原始结果: %s", exc)
             continue
@@ -1794,7 +2405,7 @@ async def _polish_chapter_outline_quality(
             if checkpoint_callback is not None:
                 await checkpoint_callback(
                     blueprint_data,
-                    "polishing",
+                    "blueprint_chapter_plan",
                     f"已保存章节润色结果（第 {batch_index}/{len(chapter_batches)} 批，第 {start_chapter}-{end_chapter} 章）",
                 )
 
@@ -2012,13 +2623,23 @@ async def converse_with_concept(
     system_prompt = f"{system_prompt}\n{JSON_RESPONSE_INSTRUCTION}"
 
     with LLMService.daily_limit_scope(f"concept:{project_id}:{user_id}"):
-        llm_response = await llm_service.get_llm_response(
+        llm_result = await call_generation_text(
+            llm_service=llm_service,
             system_prompt=system_prompt,
             conversation_history=conversation_history,
             temperature=0.8,
             user_id=user_id,
             timeout=240.0,
+            policy=GenerationCallPolicy(
+                stage_label="概念蓝图对话",
+                progress_stage="blueprint_concept",
+                retry_attempts=2,
+                response_format="json_object",
+                max_tokens=5000,
+                retry_same_model_once=True,
+            ),
         )
+        llm_response = llm_result.text
     llm_response = remove_think_tags(llm_response)
 
     try:
@@ -2364,7 +2985,7 @@ async def _run_blueprint_generation_job(
     await _set_blueprint_job_state(
         run_id,
         status="generating",
-        progress_stage="generating",
+        progress_stage="blueprint_concept",
         progress_message="正在生成小说蓝图",
     )
 
@@ -2672,7 +3293,8 @@ async def _generate_blueprint_impl(
         logger.warning("Failed to load existing blueprint before generation: project=%s error=%s", project_id, exc)
 
     history_records = await novel_service.list_conversations(project_id)
-    if not history_records and existing_blueprint is None:
+    initial_prompt_text = str(project.initial_prompt or "").strip()
+    if not history_records and existing_blueprint is None and not initial_prompt_text:
         logger.warning("项目 %s 缺少对话历史，无法生成蓝图", project_id)
         raise HTTPException(status_code=400, detail="缺少对话历史，请先完成概念对话后再生成蓝图")
 
@@ -2710,6 +3332,14 @@ async def _generate_blueprint_impl(
         except (json.JSONDecodeError, AttributeError):
             continue
 
+    if not formatted_history and initial_prompt_text:
+        formatted_history.append({"role": "user", "content": initial_prompt_text})
+        structured_dialogue.append({
+            "role": "user",
+            "value": initial_prompt_text,
+            "raw": {"source": "initial_prompt", "value": initial_prompt_text},
+        })
+
     if not formatted_history and existing_blueprint is None:
         logger.warning("项目 %s 对话历史格式异常，无法提取有效内容", project_id)
         raise HTTPException(
@@ -2736,8 +3366,14 @@ async def _generate_blueprint_impl(
         )
 
     if progress_callback is not None:
-        await progress_callback("generating", "正在整理灵感访谈并生成蓝图结构")
+        await progress_callback("blueprint_concept", "正在整理灵感访谈并生成蓝图结构")
 
+    length_contract = _build_length_contract(
+        formatted_history,
+        structured_dialogue,
+        project_title=project.title,
+        existing_blueprint=existing_blueprint,
+    )
     existing_novel_outline = list(existing_blueprint.novel_outline or []) if existing_blueprint else []
     existing_chapter_outline = list(existing_blueprint.chapter_outline or []) if existing_blueprint else []
     force_stage = (force_stage or "").strip().lower() or None
@@ -2746,12 +3382,18 @@ async def _generate_blueprint_impl(
         existing_chapter_outline = []
     elif force_stage == "chapter_outline":
         existing_chapter_outline = []
-    elif existing_chapter_outline and not _has_complete_chapter_outline(existing_chapter_outline):
-        existing_chapter_outline = []
+    elif existing_chapter_outline:
+        existing_blueprint_data = existing_blueprint.model_dump(exclude_none=True) if existing_blueprint else {}
+        expected_outline_count = _resolve_blueprint_chapter_outline_count(
+            _attach_length_contract_to_blueprint(existing_blueprint_data, length_contract)
+        )
+        if not _has_complete_chapter_outline(existing_chapter_outline, expected_outline_count):
+            existing_chapter_outline = []
     generated_stage = "chapter_outline"
 
     if existing_blueprint:
         blueprint_data = existing_blueprint.model_dump(exclude_none=True)
+        blueprint_data = _attach_length_contract_to_blueprint(blueprint_data, length_contract)
     else:
         system_prompt = _ensure_prompt(await prompt_service.get_prompt("screenwriting"), "screenwriting")
         story_constraint_profile = _build_story_constraint_profile(
@@ -2775,13 +3417,21 @@ async def _generate_blueprint_impl(
                 "must_not_reduce_output_to_summary_rewrite": True,
             },
             "requirements": {
-                "must_build_longform_architecture": True,
+                "must_build_length_aware_architecture": True,
+                "length_contract": length_contract or {},
+                "must_preserve_explicit_length_constraints": True,
                 "must_output_volume_plan": True,
                 "must_include_multi_arc_progression": True,
                 "must_not_skip_novel_outline_stage": True,
                 "must_not_output_chapter_outline_yet": True,
                 "must_assign_concrete_protagonist_name": True,
                 "must_assign_concrete_core_character_names": True,
+                "must_output_longform_cast_plan": True,
+                "must_write_cast_plan_into_world_setting": "world_setting.cast_plan",
+                "must_plan_cast_tiers": ["主角", "核心角色", "重要配角", "阶段配角", "势力成员", "功能性路人"],
+                "must_plan_character_lifecycle": "每个重要角色都要有首次登场、退出/回归、所属势力、目标、秘密、知识边界和状态变化职责。",
+                "must_plan_foreshadowing_payoff_windows": True,
+                "must_not_keep_cast_tiny_for_longform": "长篇不能只有少数角色反复承担所有剧情功能。",
                 "must_match_name_with_genre_style_tone": True,
                 "must_keep_same_culture_name_system_within_same_faction": True,
                 "must_avoid_overly_modern_or_out_of_setting_names": True,
@@ -2792,7 +3442,7 @@ async def _generate_blueprint_impl(
                 ),
             },
         }
-        blueprint_raw = await _call_llm_with_stage_retries(
+        blueprint_data = await _call_llm_json_with_stage_retries(
             llm_service=llm_service,
             system_prompt=system_prompt,
             conversation_history=[
@@ -2816,38 +3466,20 @@ async def _generate_blueprint_impl(
             max_tokens=6500,
             stage_label="蓝图主结构生成",
             progress_callback=progress_callback,
-            progress_stage="generating",
+            progress_stage="blueprint_concept",
             retry_attempts=2,
         )
-        blueprint_raw = remove_think_tags(blueprint_raw)
-
-        blueprint_normalized = unwrap_markdown_json(blueprint_raw)
-        blueprint_sanitized = sanitize_json_like_text(blueprint_normalized)
-        try:
-            blueprint_data = json.loads(blueprint_sanitized)
-        except json.JSONDecodeError as exc:
-            logger.error(
-                "项目 %s 蓝图生成 JSON 解析失败: %s\n原始响应: %s\n标准化后: %s\n清洗后: %s",
-                project_id,
-                exc,
-                blueprint_raw[:500],
-                blueprint_normalized[:500],
-                blueprint_sanitized[:500],
-            )
-            raise HTTPException(
-                status_code=500,
-                detail=f"蓝图生成失败，AI 返回的内容格式不正确。请重试或联系管理员。错误详情: {str(exc)}"
-            ) from exc
 
     if not isinstance(blueprint_data, dict):
         raise HTTPException(status_code=500, detail="蓝图生成失败，系统未得到可用的蓝图结构")
 
+    blueprint_data = _attach_length_contract_to_blueprint(blueprint_data, length_contract)
     if "novel_outline" not in blueprint_data or blueprint_data["novel_outline"] is None:
         blueprint_data["novel_outline"] = existing_novel_outline
     if "chapter_outline" not in blueprint_data or blueprint_data["chapter_outline"] is None:
         blueprint_data["chapter_outline"] = existing_chapter_outline
 
-    await checkpoint_callback(blueprint_data, "generating", "已保存蓝图基础结构")
+    await checkpoint_callback(blueprint_data, "blueprint_concept", "已保存蓝图基础结构")
 
     if not existing_novel_outline:
         if not existing_chapter_outline:
@@ -2896,10 +3528,10 @@ async def _generate_blueprint_impl(
             exc,
         )
         if progress_callback is not None:
-            await progress_callback("polishing", "角色命名附加修复失败，已保留现有有效角色名")
+            await progress_callback("blueprint_cast_plan", "角色命名附加修复失败，已保留现有有效角色名")
 
     if progress_callback is not None:
-        await progress_callback("generating", "正在保存蓝图与项目状态")
+        await progress_callback("blueprint_chapter_plan", "正在保存蓝图与项目状态")
 
     blueprint = Blueprint(**blueprint_data)
     await novel_service.replace_blueprint(project_id, blueprint)

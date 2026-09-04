@@ -34,6 +34,7 @@ from ..services.admin_setting_service import AdminSettingService
 from ..services.prompt_service import PromptService
 from ..services.usage_service import UsageService
 from ..utils.llm_tool import ChatMessage, LLMClient
+from .config_sync_manager import get_config_sync_manager
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +232,15 @@ class LLMService:
         )
 
     @staticmethod
+    def _should_retry_without_prompt_cache_key(detail: str) -> bool:
+        lowered = (detail or "").lower()
+        return (
+            "prompt_cache_key" in lowered
+            or "prompt cache key" in lowered
+            or ("cache" in lowered and "unsupported" in lowered)
+        )
+
+    @staticmethod
     def _get_llm_env_value(key: str) -> Optional[str]:
         alias_map = {
             "llm.api_key": ("OPENAI_API_KEY",),
@@ -260,10 +270,11 @@ class LLMService:
         *,
         temperature: float = 0.7,
         user_id: Optional[int] = None,
-        timeout: float = 180.0,  # 默认3分钟超时
-        response_format: Optional[str] = "json_object",
+        timeout: float = 100.0,  # 默认100秒超时（比Cloudflare 120s短以快速fallback）
+        response_format: Optional[Any] = "json_object",
         max_tokens: Optional[int] = None,
         top_p: Optional[float] = None,
+        prompt_cache_key: Optional[str] = None,
         allow_truncated_response: bool = False,
         retry_same_model_once: bool = True,
     ) -> str:
@@ -279,6 +290,7 @@ class LLMService:
                     response_format=response_format,
                     max_tokens=max_tokens,
                     top_p=top_p,
+                    prompt_cache_key=prompt_cache_key,
                     allow_truncated_response=allow_truncated_response,
                     retry_same_model_once=retry_same_model_once,
                 ),
@@ -309,10 +321,11 @@ class LLMService:
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
         user_id: Optional[int] = None,
-        timeout: float = 300.0,
+        timeout: float = 180.0,  # 非流式超时180秒
         max_tokens: Optional[int] = None,
-        response_format: Optional[str] = None,
+        response_format: Optional[Any] = None,
         top_p: Optional[float] = None,
+        prompt_cache_key: Optional[str] = None,
         allow_truncated_response: bool = False,
     ) -> str:
         """兼容旧版接口的文本生成入口，统一走 get_llm_response。"""
@@ -325,6 +338,7 @@ class LLMService:
             response_format=response_format,
             max_tokens=max_tokens,
             top_p=top_p,
+            prompt_cache_key=prompt_cache_key,
             allow_truncated_response=allow_truncated_response,
         )
 
@@ -429,9 +443,10 @@ class LLMService:
         temperature: float,
         user_id: Optional[int],
         timeout: float,
-        response_format: Optional[str] = None,
+        response_format: Optional[Any] = None,
         max_tokens: Optional[int] = None,
         top_p: Optional[float] = None,
+        prompt_cache_key: Optional[str] = None,
         allow_truncated_response: bool = False,
         retry_same_model_once: bool = True,
     ) -> str:
@@ -475,6 +490,7 @@ class LLMService:
                     response_format=response_format,
                     max_tokens=max_tokens,
                     top_p=top_p,
+                    prompt_cache_key=prompt_cache_key,
                     retry_same_model_once=retry_same_model_once,
                 )
         except HTTPException as exc:
@@ -541,17 +557,19 @@ class LLMService:
         temperature: float,
         user_id: Optional[int],
         timeout: float,
-        response_format: Optional[str] = None,
+        response_format: Optional[Any] = None,
         max_tokens: Optional[int] = None,
         top_p: Optional[float] = None,
+        prompt_cache_key: Optional[str] = None,
         retry_same_model_once: bool = True,
     ) -> tuple[str, Optional[str]]:
         stream_response_format = response_format
+        stream_prompt_cache_key = prompt_cache_key
         full_response = ""
         finish_reason = None
         network_retry_used = False
 
-        max_attempts = 2 if retry_same_model_once else 1
+        max_attempts = (2 if retry_same_model_once else 1) + int(bool(response_format)) + int(bool(prompt_cache_key))
         for attempt_index in range(max_attempts):
             full_response = ""
             finish_reason = None
@@ -565,11 +583,41 @@ class LLMService:
                     response_format=stream_response_format,
                     max_tokens=max_tokens,
                     top_p=top_p,
+                    prompt_cache_key=stream_prompt_cache_key,
                 ):
                     if part.get("content"):
                         full_response += part["content"]
                     if part.get("finish_reason"):
                         finish_reason = part["finish_reason"]
+                # [PATCH] Empty response fallback for glm-5.2 intermittent empty streaming
+                if not full_response:
+                    logger.warning(
+                        "LLM stream returned empty response (model=%s), attempting non-stream fallback",
+                        model_name,
+                    )
+                    try:
+                        non_stream_resp = await client.chat(
+                            messages=chat_messages,
+                            model=model_name,
+                            temperature=temperature,
+                            timeout=int(timeout),
+                            response_format=stream_response_format,
+                            max_tokens=max_tokens,
+                            top_p=top_p,
+                        )
+                        if non_stream_resp.get("content"):
+                            logger.debug(
+                                "Non-stream fallback succeeded: model=%s len=%d",
+                                model_name,
+                                len(non_stream_resp["content"]),
+                            )
+                            return non_stream_resp["content"], non_stream_resp.get("finish_reason")
+                    except Exception as fallback_exc:
+                        logger.warning(
+                            "Non-stream fallback exception: model=%s error=%s",
+                            model_name,
+                            fallback_exc,
+                        )
                 return full_response, finish_reason
             except RateLimitError as exc:
                 detail = self._extract_provider_error_detail(exc, "AI 服务当前限流，请稍后重试或切换模型")
@@ -609,6 +657,15 @@ class LLMService:
                         detail,
                     )
                     stream_response_format = None
+                    continue
+                if stream_prompt_cache_key and self._should_retry_without_prompt_cache_key(detail):
+                    logger.warning(
+                        "LLM provider rejected prompt_cache_key, retrying without it: model=%s user_id=%s detail=%s",
+                        model_name,
+                        user_id,
+                        detail,
+                    )
+                    stream_prompt_cache_key = None
                     continue
                 logger.warning(
                     "LLM stream rejected: model=%s user_id=%s status=400 detail=%s",
@@ -679,6 +736,7 @@ class LLMService:
                     response_format=stream_response_format,
                     max_tokens=max_tokens,
                     top_p=top_p,
+                    prompt_cache_key=stream_prompt_cache_key,
                     user_id=user_id,
                     trigger=detail,
                 )
@@ -725,6 +783,7 @@ class LLMService:
                         response_format=stream_response_format,
                         max_tokens=max_tokens,
                         top_p=top_p,
+                        prompt_cache_key=stream_prompt_cache_key,
                         user_id=user_id,
                         trigger=detail,
                     )
@@ -810,6 +869,7 @@ class LLMService:
                     response_format=stream_response_format,
                     max_tokens=max_tokens,
                     top_p=top_p,
+                    prompt_cache_key=stream_prompt_cache_key,
                     user_id=user_id,
                     trigger=detail,
                 )
@@ -852,6 +912,7 @@ class LLMService:
                     response_format=stream_response_format,
                     max_tokens=max_tokens,
                     top_p=top_p,
+                    prompt_cache_key=stream_prompt_cache_key,
                     user_id=user_id,
                     trigger=detail,
                 )
@@ -877,9 +938,10 @@ class LLMService:
         model_name: str,
         temperature: float,
         timeout: float,
-        response_format: Optional[str],
+        response_format: Optional[Any],
         max_tokens: Optional[int],
         top_p: Optional[float],
+        prompt_cache_key: Optional[str],
         user_id: Optional[int],
         trigger: str,
     ) -> Optional[tuple[str, Optional[str]]]:
@@ -898,6 +960,7 @@ class LLMService:
                 response_format=response_format,
                 max_tokens=max_tokens,
                 top_p=top_p,
+                prompt_cache_key=prompt_cache_key,
             )
             content = (result.get("content") or "").strip()
             if not content:

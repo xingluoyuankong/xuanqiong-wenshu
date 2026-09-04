@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
@@ -124,6 +125,84 @@ _SUPPLEMENTAL_CHARACTER_NAMES: tuple[str, ...] = (
     "信息中介",
     "失联亲属",
 )
+_SUPPLEMENTAL_CHARACTER_NAME_POOL: tuple[str, ...] = (
+    "许岑",
+    "陆青珩",
+    "闻笙",
+    "周砚",
+    "顾小满",
+    "程砚秋",
+    "白砚宁",
+    "秦照",
+    "柳听澜",
+    "贺微",
+    "唐照夜",
+    "苏问渠",
+    "姜照雪",
+    "林既白",
+    "韩青芜",
+    "谢停云",
+    "方知返",
+    "沈雁回",
+    "宋临川",
+    "叶无咎",
+    "虞见微",
+    "裴照影",
+    "岑归舟",
+    "温不器",
+    "洛闻潮",
+    "穆寒灯",
+    "楚照山",
+    "纪听雨",
+    "宁折枝",
+    "卫长缨",
+    "萧渡",
+    "钟离珩",
+)
+_SUPPLEMENTAL_CHARACTER_ARCHETYPES: tuple[dict[str, str], ...] = (
+    {
+        "identity": "关键线索持有者",
+        "personality": "谨慎、多疑，习惯用半句真话试探来人。",
+        "goals": "保住自己掌握的证据，同时判断主角是否值得托付。",
+        "abilities": "掌握旧案碎片、地方传闻或被忽略的证物。",
+        "relationship_to_protagonist": "先试探主角，后成为阶段性信息来源。",
+    },
+    {
+        "identity": "旧日盟友",
+        "personality": "念旧但不盲从，愿意帮忙却会要求代价。",
+        "goals": "偿还旧债或守住旧约，同时避免被卷入更大清算。",
+        "abilities": "熟悉旧路、人脉、账册或禁区规矩。",
+        "relationship_to_protagonist": "与主角家族或核心盟友有旧，关系从观望转向协作。",
+    },
+    {
+        "identity": "对立势力代理人",
+        "personality": "克制、强势，做事讲秩序但不轻易交底。",
+        "goals": "替所属势力确认主角价值、弱点或可利用之处。",
+        "abilities": "拥有组织资源、追踪手段和谈判筹码。",
+        "relationship_to_protagonist": "既压迫主角，也在关键时刻提供反向线索。",
+    },
+    {
+        "identity": "边缘证人",
+        "personality": "胆小、敏感，却记得别人忽略的细节。",
+        "goals": "活下来，并把自己看见的异常换成保护。",
+        "abilities": "目击关键场景、认得特殊声音/标记/路线。",
+        "relationship_to_protagonist": "被主角保护或说服后，成为局部真相的拼图。",
+    },
+    {
+        "identity": "信息中介",
+        "personality": "圆滑、嘴紧，信奉消息必须等价交换。",
+        "goals": "在多方势力之间维持生意和安全边界。",
+        "abilities": "打听消息、转交物件、安排会面或伪装身份。",
+        "relationship_to_protagonist": "与主角形成交易关系，逐步从买卖走向风险共担。",
+    },
+    {
+        "identity": "失联亲属或旧案牵连者",
+        "personality": "沉默、警惕，背负未公开的旧案压力。",
+        "goals": "弄清亲人或旧案当事人的下落，同时躲避追索。",
+        "abilities": "持有家族口述、旧物、血缘线索或隐秘路线。",
+        "relationship_to_protagonist": "与主角形成情感牵引和旧案互证。",
+    },
+)
 logger = logging.getLogger(__name__)
 
 
@@ -209,7 +288,11 @@ def _normalize_chapter_status(status: Any) -> str:
     normalized = str(status).strip().lower()
     if not normalized:
         return ChapterGenerationStatus.NOT_GENERATED.value
-    return _LEGACY_CHAPTER_STATUS_MAP.get(normalized, normalized)
+    mapped = _LEGACY_CHAPTER_STATUS_MAP.get(normalized)
+    if mapped:
+        return mapped
+    known = {e.value for e in ChapterGenerationStatus}
+    return normalized if normalized in known else ChapterGenerationStatus.NOT_GENERATED.value
 
 
 def _blocks_sequential_generation(status: Any) -> bool:
@@ -293,13 +376,44 @@ def _merge_character_extra(data: Dict[str, Any]) -> Dict[str, Any]:
     return extra
 
 
+def _character_is_supplemental(data: Dict[str, Any]) -> bool:
+    extra = data.get("extra")
+    nested_flag = extra.get("is_supplemental") if isinstance(extra, dict) else None
+    return bool(data.get("is_supplemental") or nested_flag)
+
+
+def _is_legacy_supplemental_character(data: Dict[str, Any]) -> bool:
+    name = _safe_str(data.get("name")).strip()
+    identity = _safe_str(data.get("identity") or data.get("role")).strip()
+    extra = data.get("extra")
+    if isinstance(extra, dict):
+        identity = identity or _safe_str(extra.get("role") or extra.get("identity")).strip()
+    if identity.startswith("补强角色位"):
+        return True
+    return any(name.startswith(prefix) and any(ch.isdigit() for ch in name) for prefix in _SUPPLEMENTAL_CHARACTER_NAMES)
+
+
+def _relationship_mentions_current_cast(relation: Dict[str, Any], character_names: set[str]) -> bool:
+    from_name = _safe_str(relation.get("character_from")).strip()
+    to_name = _safe_str(relation.get("character_to")).strip()
+    if not from_name and not to_name:
+        return True
+    if not from_name or not to_name:
+        return False
+    return from_name in character_names and to_name in character_names
+
+
 def _character_importance_label(index: int, total_target: int) -> str:
     if index == 0:
         return "protagonist"
     if index < min(4, max(2, total_target)):
         return "core"
-    if index < max(6, total_target):
+    if index < min(10, max(6, total_target)):
         return "secondary"
+    if index < min(18, max(10, total_target)):
+        return "stage_support"
+    if index < min(30, max(18, total_target)):
+        return "faction_member"
     return "support"
 
 
@@ -312,25 +426,156 @@ def _estimate_highlight_chapter(index: int, total_chapters: int) -> int:
 
 
 def _target_character_count(total_chapters: int) -> int:
+    if total_chapters >= 200:
+        return 42
+    if total_chapters >= 120:
+        return 32
+    if total_chapters >= 80:
+        return 26
+    if total_chapters >= 50:
+        return 20
     if total_chapters >= 36:
-        return 10
+        return 16
     if total_chapters >= 24:
-        return 8
+        return 12
     if total_chapters >= 12:
-        return 6
-    return 4
+        return 8
+    return 5
 
 
 def _target_relationship_count(character_count: int, total_chapters: int) -> int:
-    if total_chapters >= 36:
-        base_target = 20
+    if total_chapters >= 200:
+        base_target = 90
+    elif total_chapters >= 120:
+        base_target = 70
+    elif total_chapters >= 80:
+        base_target = 56
+    elif total_chapters >= 50:
+        base_target = 44
+    elif total_chapters >= 36:
+        base_target = 32
     elif total_chapters >= 24:
-        base_target = 16
+        base_target = 24
     elif total_chapters >= 12:
-        base_target = 12
+        base_target = 16
     else:
-        base_target = 4
+        base_target = 8
     return max(character_count * 2, base_target)
+
+
+def _item_get(item: Any, key: str, default: Any = None) -> Any:
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
+def _parse_chapter_range_end(value: Any) -> Optional[int]:
+    text = _safe_str(value).strip()
+    if not text:
+        return None
+    numbers = [int(match) for match in re.findall(r"\d+", text)]
+    if not numbers:
+        return None
+    return max(numbers)
+
+
+def _extract_length_contract_target(value: Any) -> Optional[int]:
+    payload = _to_plain_data(value)
+    if not isinstance(payload, dict):
+        return None
+    candidates = []
+    length_contract = payload.get("length_contract")
+    if isinstance(length_contract, dict):
+        candidates.append(length_contract)
+    system_blueprint = payload.get("system_blueprint")
+    if isinstance(system_blueprint, dict) and isinstance(system_blueprint.get("length_contract"), dict):
+        candidates.append(system_blueprint["length_contract"])
+    for candidate in candidates:
+        try:
+            target = int(candidate.get("target_chapter_count") or 0)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= target <= 1000:
+            return target
+    return None
+
+
+def _infer_total_chapters_for_cast(
+    *,
+    chapter_outline: Any = None,
+    novel_outline: Any = None,
+    volume_plan: Any = None,
+    world_setting: Any = None,
+    fallback: int = 0,
+) -> int:
+    length_contract_target = _extract_length_contract_target(world_setting)
+    if length_contract_target:
+        return length_contract_target
+
+    total = max(0, int(fallback or 0))
+    chapter_items = _to_plain_data(chapter_outline or [])
+    if isinstance(chapter_items, list):
+        total = max(total, len(chapter_items))
+        for item in chapter_items:
+            chapter_number = _item_get(item, "chapter_number")
+            try:
+                total = max(total, int(chapter_number))
+            except (TypeError, ValueError):
+                continue
+
+    outline_items = _to_plain_data(novel_outline or [])
+    if isinstance(outline_items, list):
+        for item in outline_items:
+            for key in ("expected_chapter_range", "chapter_range", "chapters", "range"):
+                end = _parse_chapter_range_end(_item_get(item, key))
+                if end:
+                    total = max(total, end)
+
+    volume_items = _to_plain_data(volume_plan or [])
+    if isinstance(volume_items, list):
+        for item in volume_items:
+            for key in ("expected_chapter_range", "chapter_range", "chapters", "range"):
+                end = _parse_chapter_range_end(_item_get(item, key))
+                if end:
+                    total = max(total, end)
+    return total
+
+
+def _build_supplemental_character_seed(
+    *,
+    index: int,
+    total_chapters: int,
+    blueprint_title: str,
+    genre: str,
+) -> Dict[str, Any]:
+    archetype = _SUPPLEMENTAL_CHARACTER_ARCHETYPES[index % len(_SUPPLEMENTAL_CHARACTER_ARCHETYPES)]
+    name = _SUPPLEMENTAL_CHARACTER_NAME_POOL[index % len(_SUPPLEMENTAL_CHARACTER_NAME_POOL)]
+    if index >= len(_SUPPLEMENTAL_CHARACTER_NAME_POOL):
+        name = f"{name}{index + 1}"
+    first_chapter = _estimate_highlight_chapter(index, max(1, total_chapters))
+    identity = archetype["identity"]
+    return {
+        "name": name,
+        "identity": identity,
+        "personality": archetype["personality"],
+        "goals": archetype["goals"],
+        "abilities": archetype["abilities"],
+        "relationship_to_protagonist": archetype["relationship_to_protagonist"],
+        "core_motivation": archetype["goals"],
+        "fear_or_wound": "害怕自己掌握的信息害死身边人，因此不会一次说尽。",
+        "external_goal": f"在第 {first_chapter} 章附近把{identity}的作用落到具体事件中。",
+        "hidden_secret": f"与{blueprint_title or genre or '主线旧案'}存在尚未公开的牵连。",
+        "relationship_hook": archetype["relationship_to_protagonist"],
+        "extra": {
+            "is_supplemental": True,
+            "supplemental_reason": "角色数量不足时自动补强，但必须带具体姓名、职责、登场窗口和后续去向。",
+            "first_appearance_chapter": first_chapter,
+            "first_highlight_chapter": first_chapter,
+            "exit_or_return_plan": "完成阶段职责后留下清晰去向，并在对应伏笔、证据或势力线需要时回归。",
+            "knowledge_boundary": "只知道自身经历、所属势力和登场前合理可知的信息，不得提前知道核心谜底。",
+            "dynamic_role_policy": "可作为阶段配角、势力成员或功能性路人登场；登场后必须进入角色池/关系/知识边界账本。",
+        },
+    }
 
 
 def _default_relationship_hooks(name: str, identity: str, goals: str, genre: str) -> List[str]:
@@ -355,9 +600,12 @@ def _normalize_character_record(
     name = _safe_str(data.get("name")).strip()
     if not name:
         if supplemental:
-            name = _SUPPLEMENTAL_CHARACTER_NAMES[index % len(_SUPPLEMENTAL_CHARACTER_NAMES)]
-            if index >= len(_SUPPLEMENTAL_CHARACTER_NAMES):
-                name = f"{name}{index + 1}"
+            name = _build_supplemental_character_seed(
+                index=index,
+                total_chapters=total_chapters,
+                blueprint_title=blueprint_title,
+                genre=genre,
+            )["name"]
         else:
             name = f"角色{index + 1}"
     identity = _safe_str(data.get("identity")).strip()
@@ -367,10 +615,31 @@ def _normalize_character_record(
     relationship_to_protagonist = _safe_str(data.get("relationship_to_protagonist")).strip()
     extra = _merge_character_extra(data)
 
-    total_target = max(total_chapters, len(data))
-    extra.setdefault("importance", _character_importance_label(index, total_target))
-    extra.setdefault("role_rank", "protagonist" if index == 0 else ("core" if index < 4 else "support"))
+    total_target = max(_target_character_count(total_chapters), 1)
+    importance_label = _character_importance_label(index, total_target)
+    extra.setdefault("importance", importance_label)
+    extra.setdefault("role_rank", "protagonist" if index == 0 else ("core" if index < 4 else importance_label))
+    extra.setdefault("cast_tier", importance_label)
     extra.setdefault("first_highlight_chapter", _estimate_highlight_chapter(index, max(1, total_chapters)))
+    extra.setdefault("first_appearance_chapter", extra.get("first_highlight_chapter"))
+    extra.setdefault(
+        "exit_or_return_plan",
+        "主角/核心角色持续推进；阶段配角在完成阶段职责后要么退出、牺牲、转阵营，要么在后续伏笔回收时回归。"
+        if index < 10
+        else "服务当前阶段或势力线，离场前必须留下可追踪去向或影响。",
+    )
+    extra.setdefault(
+        "faction_role",
+        _safe_str(extra.get("faction_role") or extra.get("affiliation") or "").strip(),
+    )
+    extra.setdefault(
+        "knowledge_boundary",
+        _safe_str(extra.get("knowledge_boundary") or "只知道其身份、经历和登场章节合理可知的信息，不得提前知道核心秘密。").strip(),
+    )
+    extra.setdefault(
+        "dynamic_role_policy",
+        "可随剧情新增同层级角色，但必须绑定目标、所属势力/关系、首次登场章节和后续去向。",
+    )
     extra.setdefault(
         "relationship_hooks",
         _default_relationship_hooks(name, identity, goals, genre or blueprint_title),
@@ -591,10 +860,13 @@ def _augment_character_profile(
 
     total_target = max(_target_character_count(total_chapters), 1)
     role_rank = extra.get("role_rank") or ("protagonist" if index == 0 else ("core" if index < 4 else "support"))
+    importance_label = _character_importance_label(index, total_target)
 
-    extra.setdefault("importance", _character_importance_label(index, total_target))
+    extra.setdefault("importance", importance_label)
     extra.setdefault("role_rank", role_rank)
+    extra.setdefault("cast_tier", extra.get("importance") or importance_label)
     extra.setdefault("first_highlight_chapter", _estimate_highlight_chapter(index, max(1, total_chapters)))
+    extra.setdefault("first_appearance_chapter", extra.get("first_highlight_chapter"))
     extra.setdefault("relationship_hooks", hooks)
     extra.setdefault("role", role or role_rank)
     extra.setdefault("core_motivation", core_motivation or f"{normalized.get('name', '角色')}围绕主线目标展开行动")
@@ -612,6 +884,27 @@ def _augment_character_profile(
     )
     extra.setdefault("is_supplemental", supplemental)
     extra.setdefault("hidden_info", _safe_str(extra.get("hidden_info")).strip())
+    extra.setdefault(
+        "exit_or_return_plan",
+        _safe_str(extra.get("exit_or_return_plan")).strip()
+        or (
+            "完成阶段职责后要留下清晰去向，并在对应伏笔/势力线需要时回归。"
+            if index >= 4
+            else "随主线长期推进，关键状态变化必须进入记忆层。"
+        ),
+    )
+    extra.setdefault(
+        "faction_role",
+        _safe_str(extra.get("faction_role") or extra.get("affiliation") or "").strip(),
+    )
+    extra.setdefault(
+        "knowledge_boundary",
+        _safe_str(extra.get("knowledge_boundary") or "只能掌握其经历与登场位置合理可知的信息，不能提前知道未揭示秘密。").strip(),
+    )
+    extra.setdefault(
+        "dynamic_role_policy",
+        _safe_str(extra.get("dynamic_role_policy") or "新增角色必须绑定角色池、势力/关系、首次登场章节和后续去向。").strip(),
+    )
 
     normalized.update(
         {
@@ -622,8 +915,13 @@ def _augment_character_profile(
             "hidden_secret": extra["hidden_secret"],
             "growth_arc": extra["growth_arc"],
             "first_highlight_chapter": extra["first_highlight_chapter"],
+            "first_appearance_chapter": extra["first_appearance_chapter"],
             "relationship_hook": extra["relationship_hook"],
             "importance": extra["importance"],
+            "cast_tier": extra["cast_tier"],
+            "exit_or_return_plan": extra["exit_or_return_plan"],
+            "faction_role": extra["faction_role"],
+            "knowledge_boundary": extra["knowledge_boundary"],
             "extra": extra,
         }
     )
@@ -743,13 +1041,23 @@ def _normalize_blueprint_characters_for_storage(
                 if not key.startswith("_")
             }
 
+        supplemental = _character_is_supplemental(character_data)
+        if supplemental and _is_legacy_supplemental_character(character_data):
+            character_data = _build_supplemental_character_seed(
+                index=index,
+                total_chapters=total_chapters,
+                blueprint_title=blueprint_title,
+                genre=genre,
+            )
+            supplemental = True
+
         base_record = _normalize_character_record(
             character_data,
             index=index,
             total_chapters=total_chapters,
             blueprint_title=blueprint_title,
             genre=genre,
-            supplemental=bool(character_data.get("is_supplemental")),
+            supplemental=supplemental,
         )
         record = _augment_character_profile(
             base_record,
@@ -757,7 +1065,7 @@ def _normalize_blueprint_characters_for_storage(
             total_chapters=total_chapters,
             blueprint_title=blueprint_title,
             genre=genre,
-            supplemental=bool(character_data.get("is_supplemental")),
+            supplemental=supplemental,
         )
 
         key = record["name"].strip().lower()
@@ -818,29 +1126,28 @@ def _normalize_blueprint_characters_for_storage(
         return normalized
 
     target_count = _target_character_count(total_chapters)
+    if len(normalized) > target_count:
+        anchored = [
+            item for item in normalized
+            if not bool((item.get("extra") or {}).get("is_supplemental"))
+        ]
+        supplemental = [
+            item for item in normalized
+            if bool((item.get("extra") or {}).get("is_supplemental"))
+        ]
+        if len(anchored) < len(normalized):
+            normalized = anchored + supplemental[:max(0, target_count - len(anchored))]
+
     while len(normalized) < target_count:
         index = len(normalized)
-        supplemental_name = _SUPPLEMENTAL_CHARACTER_NAMES[index % len(_SUPPLEMENTAL_CHARACTER_NAMES)]
-        if index >= len(_SUPPLEMENTAL_CHARACTER_NAMES):
-            supplemental_name = f"{supplemental_name}{index + 1}"
+        supplemental_seed = _build_supplemental_character_seed(
+            index=index,
+            total_chapters=total_chapters,
+            blueprint_title=blueprint_title,
+            genre=genre,
+        )
         supplemental_record = _augment_character_profile(
-            {
-                "name": supplemental_name,
-                "identity": f"补强角色位{index + 1}",
-                "personality": "立场鲜明，承担支线张力与信息补位。",
-                "goals": "围绕主线目标提供新冲突或新支持。",
-                "abilities": "提供关键线索、资源或叙事视角。",
-                "relationship_to_protagonist": "补强主线关系网。",
-                "core_motivation": "围绕主线目标形成稳定支撑。",
-                "fear_or_wound": "担心自己只是工具人。",
-                "external_goal": "推动当前章节的关键行动。",
-                "hidden_secret": "与主线事件存在未公开关联。",
-                "relationship_hook": "与主角形成持续互动与张力。",
-                "extra": {
-                    "is_supplemental": True,
-                    "supplemental_reason": "角色数量不足时自动补强。",
-                },
-            },
+            supplemental_seed,
             index=index,
             total_chapters=total_chapters,
             blueprint_title=blueprint_title,
@@ -861,6 +1168,11 @@ def _normalize_blueprint_relationships_for_storage(
     expand: bool = True,
 ) -> List[Dict[str, Any]]:
     protagonist_name = characters[0]["name"] if characters else blueprint_title or "主角"
+    character_names = {
+        str(character.get("name") or "").strip()
+        for character in characters
+        if str(character.get("name") or "").strip()
+    }
     normalized: List[Dict[str, Any]] = []
     seen_pairs: Dict[tuple[str, str], int] = {}
 
@@ -875,6 +1187,9 @@ def _normalize_blueprint_relationships_for_storage(
                 for key, value in getattr(raw_relationship, "__dict__", {}).items()
                 if not key.startswith("_")
             }
+
+        if character_names and not _relationship_mentions_current_cast(relation_data, character_names):
+            continue
 
         base_record = _normalize_relationship_record(
             relation_data,
@@ -1027,6 +1342,15 @@ def _prepare_blueprint_characters(
             character_data = dict(raw_character)
         else:
             character_data = dict(getattr(raw_character, "__dict__", {}))
+        supplemental = _character_is_supplemental(character_data)
+        if supplemental and _is_legacy_supplemental_character(character_data):
+            character_data = _build_supplemental_character_seed(
+                index=index,
+                total_chapters=total_chapters,
+                blueprint_title=blueprint_title,
+                genre=genre,
+            )
+            supplemental = True
         normalized.append(
             _normalize_character_record(
                 character_data,
@@ -1034,29 +1358,33 @@ def _prepare_blueprint_characters(
                 total_chapters=total_chapters,
                 blueprint_title=blueprint_title,
                 genre=genre,
+                supplemental=supplemental,
             )
         )
 
     target_count = _target_character_count(total_chapters)
+    if len(normalized) > target_count:
+        anchored = [
+            item for item in normalized
+            if not bool((item.get("extra") or {}).get("is_supplemental"))
+        ]
+        supplemental = [
+            item for item in normalized
+            if bool((item.get("extra") or {}).get("is_supplemental"))
+        ]
+        if len(anchored) < len(normalized):
+            normalized = anchored + supplemental[:max(0, target_count - len(anchored))]
+
     while len(normalized) < target_count:
         index = len(normalized)
-        supplemental_name = _SUPPLEMENTAL_CHARACTER_NAMES[index % len(_SUPPLEMENTAL_CHARACTER_NAMES)]
-        if index >= len(_SUPPLEMENTAL_CHARACTER_NAMES):
-            supplemental_name = f"{supplemental_name}{index + 1}"
         normalized.append(
             _normalize_character_record(
-                {
-                    "name": supplemental_name,
-                    "identity": f"补强角色位{index + 1}",
-                    "personality": "立场鲜明，承担支线张力与信息补位。",
-                    "goals": "围绕主线目标提供新冲突或新支持。",
-                    "abilities": "提供关键线索、资源或叙事视角。",
-                    "relationship_to_protagonist": "补强主线关系网。",
-                    "extra": {
-                        "is_supplemental": True,
-                        "supplemental_reason": "角色数量不足时自动补强",
-                    },
-                },
+                _build_supplemental_character_seed(
+                    index=index,
+                    total_chapters=total_chapters,
+                    blueprint_title=blueprint_title,
+                    genre=genre,
+                ),
                 index=index,
                 total_chapters=total_chapters,
                 blueprint_title=blueprint_title,
@@ -1076,6 +1404,11 @@ def _prepare_blueprint_relationships(
     blueprint_title: str,
 ) -> List[Dict[str, Any]]:
     protagonist_name = characters[0]["name"] if characters else blueprint_title or "主角"
+    character_names = {
+        str(character.get("name") or "").strip()
+        for character in characters
+        if str(character.get("name") or "").strip()
+    }
     normalized: List[Dict[str, Any]] = []
     for index, raw_relationship in enumerate(relationships):
         if hasattr(raw_relationship, "model_dump"):
@@ -1084,6 +1417,8 @@ def _prepare_blueprint_relationships(
             relation_data = dict(raw_relationship)
         else:
             relation_data = dict(getattr(raw_relationship, "__dict__", {}))
+        if character_names and not _relationship_mentions_current_cast(relation_data, character_names):
+            continue
         normalized.append(
             _normalize_relationship_record(
                 relation_data,
@@ -1581,7 +1916,13 @@ class NovelService:
             "foreshadowing_system": _to_plain_data(blueprint.foreshadowing_system or []),
         }
 
-        total_chapters = len(blueprint.chapter_outline or [])
+        total_chapters = _infer_total_chapters_for_cast(
+            chapter_outline=blueprint.chapter_outline or [],
+            novel_outline=blueprint.novel_outline or [],
+            volume_plan=blueprint.volume_plan or [],
+            world_setting=blueprint.world_setting,
+            fallback=len(blueprint.chapter_outline or []),
+        )
         normalized_characters = _normalize_blueprint_characters_for_storage(
             blueprint.characters or [],
             total_chapters=total_chapters,
@@ -1675,7 +2016,13 @@ class NovelService:
             foreshadowing_system=[],
             chapter_outline=[],
         )
-        total_chapters = len(current_blueprint.chapter_outline or [])
+        total_chapters = _infer_total_chapters_for_cast(
+            chapter_outline=current_blueprint.chapter_outline or [],
+            novel_outline=current_blueprint.novel_outline or [],
+            volume_plan=current_blueprint.volume_plan or [],
+            world_setting=current_blueprint.world_setting,
+            fallback=len(current_blueprint.chapter_outline or []),
+        )
 
         if "one_sentence_summary" in patch:
             blueprint.one_sentence_summary = patch["one_sentence_summary"]
@@ -2006,6 +2353,7 @@ class NovelService:
             raise HTTPException(status_code=400, detail="选中的版本内容为空，无法确认为最终版")
         
         chapter.selected_version_id = selected.id
+        chapter.selected_version = selected
         chapter.status = ChapterGenerationStatus.SUCCESSFUL.value
         chapter.word_count = len(selected.content or "")
         await self._touch_project(chapter.project_id, auto_commit=False)
@@ -2249,9 +2597,12 @@ class NovelService:
                         suspense_hook=(getattr(outline, "metadata", None) or {}).get("suspense_hook"),
                         emotional_progression=(getattr(outline, "metadata", None) or {}).get("emotional_progression"),
                         character_focus=list((getattr(outline, "metadata", None) or {}).get("character_focus") or []),
+                        cast_delta=dict((getattr(outline, "metadata", None) or {}).get("cast_delta") or {}),
                         conflict_escalation=list((getattr(outline, "metadata", None) or {}).get("conflict_escalation") or []),
                         continuity_notes=list((getattr(outline, "metadata", None) or {}).get("continuity_notes") or []),
                         foreshadowing=dict((getattr(outline, "metadata", None) or {}).get("foreshadowing") or {}),
+                        foreshadowing_tasks=dict((getattr(outline, "metadata", None) or {}).get("foreshadowing_tasks") or {}),
+                        payoff_window=(getattr(outline, "metadata", None) or {}).get("payoff_window"),
                         metadata=dict(getattr(outline, "metadata", None) or {}),
                     )
                     for outline in sorted(project.outlines, key=lambda o: o.chapter_number)
@@ -2658,10 +3009,12 @@ class NovelService:
 
         title = outline.title if outline else f"第{chapter_number}章"
         summary = outline.summary if outline else ""
+        outline_metadata = dict(getattr(outline, "metadata", None) or {}) if outline else {}
         raw_real_summary = _get_loaded_scalar_value(chapter, "real_summary") if chapter else None
         runtime_payload = _extract_generation_runtime_payload(chapter)
         real_summary = None if runtime_payload else raw_real_summary
         content = None
+        selected_version_id = None
         versions: Optional[List[str]] = None
         evaluation_text: Optional[str] = None
         status_value = ChapterGenerationStatus.NOT_GENERATED.value
@@ -2690,6 +3043,7 @@ class NovelService:
                     ChapterGenerationStatus.SELECTING.value,
                 }:
                     word_count = runtime_actual_word_count
+            selected_version_id = _get_loaded_scalar_value(chapter, "selected_version_id")
             selected_version = _get_loaded_relation_value(chapter, "selected_version")
             chapter_versions = sorted(
                 _get_loaded_relation_items(chapter, "versions"),
@@ -2701,6 +3055,16 @@ class NovelService:
             )
 
             # 只有在 include_content=True 时才包含完整内容
+            if selected_version_id is not None:
+                selected_version = next(
+                    (
+                        version
+                        for version in chapter_versions
+                        if str(getattr(version, "id", "")) == str(selected_version_id)
+                    ),
+                    selected_version,
+                )
+
             if include_content:
                 if selected_version and isinstance(selected_version.content, str) and selected_version.content.strip():
                     content = selected_version.content
@@ -2774,8 +3138,21 @@ class NovelService:
             chapter_number=chapter_number,
             title=title,
             summary=summary,
+            narrative_phase=outline_metadata.get("narrative_phase"),
+            chapter_role=outline_metadata.get("chapter_role"),
+            suspense_hook=outline_metadata.get("suspense_hook"),
+            emotional_progression=outline_metadata.get("emotional_progression"),
+            character_focus=list(outline_metadata.get("character_focus") or []),
+            cast_delta=dict(outline_metadata.get("cast_delta") or {}),
+            conflict_escalation=list(outline_metadata.get("conflict_escalation") or []),
+            continuity_notes=list(outline_metadata.get("continuity_notes") or []),
+            foreshadowing=dict(outline_metadata.get("foreshadowing") or {}),
+            foreshadowing_tasks=dict(outline_metadata.get("foreshadowing_tasks") or {}),
+            payoff_window=outline_metadata.get("payoff_window"),
+            metadata=outline_metadata,
             real_summary=real_summary,
             content=content,
+            selected_version_id=selected_version_id,
             versions=versions,
             evaluation=evaluation_text,
             generation_status=ChapterGenerationStatus(status_value),

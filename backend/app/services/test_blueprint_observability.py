@@ -4,7 +4,7 @@ import json
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -15,8 +15,10 @@ from app.api.routers.novels import (
     _build_character_naming_profile,
     _build_chapter_outline_source_context,
     _build_compact_blueprint_context,
+    _build_length_contract,
     _build_outline_source_context,
     _build_story_constraint_profile,
+    _format_length_contract_instruction,
     _call_llm_with_stage_retries,
     _db_blueprint_job_to_payload,
     _fail_orphaned_blueprint_job,
@@ -31,6 +33,9 @@ from app.api.routers.novels import (
     _recover_stale_blueprint_job,
     _is_recoverable_blueprint_schema,
     _repair_blueprint_character_names,
+    _remap_outline_ranges_to_length_contract,
+    _resolve_blueprint_chapter_outline_count,
+    _resolve_novel_outline_min_stage_count,
     _resolve_novel_outline_timeout_seconds,
     _resolve_outline_chunk_timeout_seconds,
     _resolve_world_bible_timeout_seconds,
@@ -43,16 +48,22 @@ from app.api.routers.novels import (
 )
 from app.db.base import Base
 from app.models import BlueprintGenerationJob, NovelProject, User
-from app.models.novel import ChapterOutline, NovelBlueprint
+from app.models.novel import BlueprintCharacter, ChapterOutline, NovelBlueprint
 from app.schemas.novel import Blueprint
 from app.services import llm_service as llm_service_module
+from app.services import consistency_service as consistency_service_module
 from app.services import novel_service as novel_service_module
 from app.services.consistency_service import ConsistencyService, ConsistencyViolation, ViolationSeverity
 from app.services.llm_service import LLMService
 from app.services.novel_service import NovelService, _extract_generation_runtime_payload
 from app.services.pipeline_orchestrator import PipelineOrchestrator
 from app.services.self_critique_service import CritiqueDimension, SelfCritiqueService
-from app.api.routers.writer import _build_failed_generation_runtime_state, _run_finalize_pipeline
+from app.api.routers.writer import (
+    _append_generation_runtime_event,
+    _build_failed_generation_runtime_state,
+    _build_memory_layer_runtime_summary,
+    _run_finalize_pipeline,
+)
 
 
 @pytest.fixture
@@ -196,9 +207,110 @@ async def test_run_finalize_pipeline_uses_explicit_chapter_number_without_touchi
     assert result == {"finalize": {"success": True, "chapter_number": 7}}
 
 
+@pytest.mark.anyio
+async def test_run_finalize_pipeline_snapshots_selected_version_before_service_rollback(monkeypatch):
+    from app.api.routers import writer as writer_router
+
+    class ExpiringSelectedVersion:
+        def __init__(self):
+            self.expired = False
+            self._content = "定稿正文"
+            self._id = 12
+            self._chapter_id = 34
+
+        @property
+        def content(self):
+            if self.expired:
+                raise AssertionError("selected_version.content was touched after finalize rollback")
+            return self._content
+
+        @property
+        def id(self):
+            if self.expired:
+                raise AssertionError("selected_version.id was touched after finalize rollback")
+            return self._id
+
+        @property
+        def chapter_id(self):
+            if self.expired:
+                raise AssertionError("selected_version.chapter_id was touched after finalize rollback")
+            return self._chapter_id
+
+    selected_version = ExpiringSelectedVersion()
+
+    async def fake_finalize(self, project_id, chapter_number, chapter_text, user_id, skip_vector_update=False):
+        selected_version.expired = True
+        return {"success": True, "chapter_number": chapter_number}
+
+    monkeypatch.setattr(writer_router.FinalizeService, "finalize_chapter", fake_finalize)
+    chapter = DummyChapter(
+        chapter_number=7,
+        real_summary=json.dumps({"generation_runtime": {"run_id": "run-1", "events": []}}, ensure_ascii=False),
+    )
+
+    result = await _run_finalize_pipeline(
+        session=DummyAsyncSession(),
+        project_id="project-1",
+        chapter_number=7,
+        selected_version=selected_version,
+        user_id=42,
+        skip_vector_update=True,
+        refresh_memory_layer=False,
+        chapter=chapter,
+    )
+
+    assert result == {"finalize": {"success": True, "chapter_number": 7}}
+    runtime = json.loads(chapter.real_summary)["generation_runtime"]
+    assert runtime["progress_stage"] == "finalize"
+    assert runtime["events"][-1]["content_preview"] == "定稿正文"
+
+
 def test_blueprint_character_name_validator_rejects_placeholder_protagonist():
     assert _blueprint_has_valid_character_names({"characters": [{"name": "主角", "role": "主角"}]}) is False
     assert _blueprint_has_valid_character_names({"characters": [{"name": "林渡", "role": "主角"}]}) is True
+
+
+def test_append_generation_runtime_event_records_finalize_ledger_preview():
+    chapter = DummyChapter(
+        chapter_number=3,
+        real_summary=json.dumps({"generation_runtime": {"run_id": "run-1", "events": []}}, ensure_ascii=False),
+    )
+
+    _append_generation_runtime_event(
+        chapter,
+        stage="ledger_foreshadowing",
+        message="伏笔闭环完成",
+        title="伏笔闭环完成",
+        summary="回收 1 条，强化 2 条。",
+        content_preview="正文片段" * 140,
+        metrics={"resolved": 1, "reinforced": 2},
+        artifact_refs={"resolution_ids": [10]},
+    )
+
+    runtime = json.loads(chapter.real_summary)["generation_runtime"]
+    event = runtime["events"][-1]
+    assert runtime["progress_stage"] == "ledger_foreshadowing"
+    assert event["kind"] == "ledger"
+    assert event["content_preview"].endswith("...")
+    assert event["metrics"]["resolved"] == 1
+    assert event["artifact_refs"]["resolution_ids"] == [10]
+
+
+def test_memory_layer_runtime_summary_reports_dynamic_characters():
+    summary = _build_memory_layer_runtime_summary(
+        {
+            "character_states_updated": 2,
+            "timeline_events_added": 1,
+            "causal_chains_added": 1,
+            "dynamic_characters_created": 1,
+            "dynamic_character_names": ["林渡"],
+        }
+    )
+
+    assert "角色状态 2 条" in summary
+    assert "时间线事件 1 条" in summary
+    assert "因果链 1 条" in summary
+    assert "动态角色入池：林渡" in summary
 
 
 def test_build_character_naming_profile_includes_style_constraints():
@@ -238,14 +350,14 @@ def test_self_critique_structure_rewrite_collapses_to_contiguous_span_for_residu
     issues = [
         {
             "dimension": "continuity",
-            "severity": "major",
+            "severity": "critical",
             "location": "黑皮账册只有自己看得见",
             "problem": "前文已经确认账册异常性质，后文却重新第一次发现。",
             "suggestion": "合并为单一事件链，删除第一次发现的重复版本。",
         },
         {
             "dimension": "logic",
-            "severity": "major",
+            "severity": "critical",
             "location": "港北四巷十七号当成新的发现",
             "problem": "同一线索被多次首次发现，形成明显时间线回卷与双版本拼接。",
             "suggestion": "保留一个正式发现节点，删掉重复发现残留。",
@@ -472,7 +584,7 @@ def test_self_critique_deduplicates_cross_dimension_duplicate_major_issues():
     issues = [
         {
             "dimension": "logic",
-            "severity": "major",
+            "severity": "critical",
             "location": "中段周尧盘问",
             "problem": "同一轮盘问被重复确认，形成双版本推进。",
             "suggestion": "压缩为单一正式问答链。",
@@ -769,7 +881,31 @@ async def test_run_self_critique_preserves_rejected_candidate_diagnostics(monkey
             "final_critique": candidate_critique,
             "status": "optimized",
             "improvement": 1.8,
-            "optimization_logs": [{"strategy": "delivery_polish", "accepted": True}],
+            "optimization_logs": [
+                {
+                    "stage": "structural",
+                    "strategy_logs": [
+                        {
+                            "strategy": "structure_guardrail",
+                            "attempts": [
+                                {
+                                    "mode": "stagewide",
+                                    "manual_confirmation_required": True,
+                                    "patch_suggestions": [
+                                        {
+                                            "dimension": "logic",
+                                            "severity": "major",
+                                            "location": "章末",
+                                            "problem": "承接仍有断裂",
+                                            "suggestion": "补一条可观察因果链",
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
         }
 
     monkeypatch.setattr(SelfCritiqueService, "critique_and_revise_loop", fake_loop)
@@ -788,6 +924,10 @@ async def test_run_self_critique_preserves_rejected_candidate_diagnostics(monkey
     assert summary["acceptance_reason"] == "critical_issues_increased"
     assert summary["final_critique"]["critical_count"] == 0
     assert summary["rejected_candidate_critique"] == candidate_critique
+    assert summary["manual_stagewide_confirmation_required"] is True
+    assert summary["stagewide_deferred_count"] == 1
+    assert summary["manual_patch_suggestions"][0]["stage"] == "structural"
+    assert summary["manual_patch_suggestions"][0]["strategy"] == "structure_guardrail"
     assert summary["rejected_candidate_content_fingerprint"] == orchestrator._content_fingerprint(candidate_content)
     assert summary["before_revision_stats"] == {
         "score": 78.0,
@@ -1411,7 +1551,64 @@ async def test_critique_and_revise_loop_runs_multiple_iterations_when_issues_rem
 
 
 @pytest.mark.anyio
-async def test_revise_chapter_uses_stagewide_fallback_when_localized_fix_does_not_change_text(monkeypatch):
+async def test_revise_chapter_defers_stagewide_fallback_without_manual_confirmation(monkeypatch):
+    service = SelfCritiqueService(DummyAsyncSession(), FakeLLMService(""), DummyPromptService())
+    issues = [
+        {
+            "dimension": "logic",
+            "severity": "major",
+            "location": "中段盘问",
+            "problem": "同一轮盘问出现双版本推进。",
+            "suggestion": "合并为一次正式盘问。",
+            "example": "周尧先否认再改口出现两次。",
+        }
+    ]
+
+    async def fake_local(content, issues, context=None, user_id=0, strategy_key="delivery_polish"):
+        return content
+
+    async def fake_stagewide(*args, **kwargs):
+        raise AssertionError("stagewide rewrite requires explicit manual confirmation")
+
+    async def fake_snapshot(content, *, strategy_key, context=None, user_id=0, focus_issues=None):
+        if content.endswith("\n\n修正后的正式版本。"):
+            return {"critical": 0, "major": 0, "minor": 0, "total": 0, "weighted": 0}
+        return {"critical": 0, "major": 1, "minor": 0, "total": 1, "weighted": 10}
+
+    async def fake_report(content, *, strategy_key, context=None, user_id=0, focus_issues=None):
+        if content.endswith("\n\n修正后的正式版本。"):
+            return {"issues": []}
+        return {
+            "issues": [
+                {"dimension": "logic", "severity": "major", "location": "中段对话", "problem": "同一轮问答出现双版本推进。", "suggestion": "合并为一个正式问答链。", "example": "韩峤先确认，再改口处理。"}
+            ]
+        }
+
+    monkeypatch.setattr(service, "_revise_chapter_locally", fake_local)
+    monkeypatch.setattr(service, "_revise_chapter_stagewide", fake_stagewide)
+    monkeypatch.setattr(service, "_critique_strategy_snapshot", fake_snapshot)
+    monkeypatch.setattr(service, "_critique_strategy_report", fake_report)
+
+    revised, logs = await service.revise_chapter(
+        "原始正文",
+        issues,
+        return_diagnostics=True,
+        allow_stagewide=True,
+    )
+
+    assert revised == "原始正文"
+    assert logs[0]["accepted"] is False
+    assert logs[0]["stagewide_allowed"] is False
+    assert logs[0]["stagewide_requested"] is True
+    assert logs[0]["manual_stagewide_confirmation_required"] is True
+    deferred = next(item for item in logs[0]["attempts"] if item["mode"] == "stagewide")
+    assert deferred["reason"] == "stagewide_deferred"
+    assert deferred["manual_confirmation_required"] is True
+    assert deferred["patch_suggestions"]
+
+
+@pytest.mark.anyio
+async def test_revise_chapter_uses_stagewide_fallback_only_with_manual_confirmation(monkeypatch):
     service = SelfCritiqueService(DummyAsyncSession(), FakeLLMService(""), DummyPromptService())
     issues = [
         {
@@ -1449,10 +1646,17 @@ async def test_revise_chapter_uses_stagewide_fallback_when_localized_fix_does_no
     monkeypatch.setattr(service, "_critique_strategy_snapshot", fake_snapshot)
     monkeypatch.setattr(service, "_critique_strategy_report", fake_report)
 
-    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True)
+    revised, logs = await service.revise_chapter(
+        "原始正文",
+        issues,
+        context={"manual_stagewide_rewrite": {"confirmed": True}},
+        return_diagnostics=True,
+        allow_stagewide=True,
+    )
 
     assert revised.endswith("修正后的正式版本。")
     assert logs[0]["accepted"] is True
+    assert logs[0]["stagewide_allowed"] is True
     assert any(item["mode"] == "stagewide" and item["accepted"] is True for item in logs[0]["attempts"])
 
 
@@ -1483,7 +1687,13 @@ async def test_revise_chapter_rejects_stagewide_candidate_when_targeted_major_is
     monkeypatch.setattr(service, "_revise_chapter_stagewide", fake_stagewide)
     monkeypatch.setattr(service, "_critique_strategy_snapshot", fake_snapshot)
 
-    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True)
+    revised, logs = await service.revise_chapter(
+        "原始正文",
+        issues,
+        context={"manual_stagewide_rewrite": {"confirmed": True}},
+        return_diagnostics=True,
+        allow_stagewide=True,
+    )
 
     assert revised == "原始正文"
     assert logs[0]["accepted"] is False
@@ -1496,7 +1706,7 @@ async def test_revise_chapter_rejects_stagewide_candidate_when_safety_snapshot_r
     issues = [
         {
             "dimension": "character",
-            "severity": "major",
+            "severity": "critical",
             "location": "中后段对手戏",
             "problem": "人物动机仍偏功能性。",
             "suggestion": "补个人代价与旧伤回声。",
@@ -1535,7 +1745,13 @@ async def test_revise_chapter_rejects_stagewide_candidate_when_safety_snapshot_r
     monkeypatch.setattr(service, "_critique_strategy_report", fake_report)
     monkeypatch.setattr(service, "_critique_stagewide_safety_snapshot", fake_stagewide_safety)
 
-    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True)
+    revised, logs = await service.revise_chapter(
+        "原始正文",
+        issues,
+        context={"manual_stagewide_rewrite": {"confirmed": True}},
+        return_diagnostics=True,
+        allow_stagewide=True,
+    )
 
     assert revised == "原始正文"
     assert logs[0]["accepted"] is False
@@ -1581,7 +1797,7 @@ async def test_revise_chapter_rejects_candidate_when_aggregate_strategy_snapshot
     monkeypatch.setattr(service, "_critique_strategy_snapshot", fake_snapshot)
     monkeypatch.setattr(service, "_critique_strategy_report", fake_report)
 
-    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True, allow_stagewide=False)
+    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True)
 
     assert revised == "原始正文"
     assert logs[0]["accepted"] is False
@@ -1598,7 +1814,7 @@ async def test_revise_chapter_retries_stagewide_with_aggregate_feedback(monkeypa
     issues = [
         {
             "dimension": "character",
-            "severity": "major",
+            "severity": "critical",
             "location": "对手戏中段",
             "problem": "人物反应仍然偏功能性。",
             "suggestion": "补人物伤口与关系代价。",
@@ -1650,7 +1866,13 @@ async def test_revise_chapter_retries_stagewide_with_aggregate_feedback(monkeypa
     monkeypatch.setattr(service, "_critique_strategy_report", fake_report)
     monkeypatch.setattr(service, "_critique_stagewide_safety_snapshot", fake_stagewide_safety)
 
-    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True)
+    revised, logs = await service.revise_chapter(
+        "原始正文",
+        issues,
+        context={"manual_stagewide_rewrite": {"confirmed": True}},
+        return_diagnostics=True,
+        allow_stagewide=True,
+    )
 
     assert revised.endswith("第二次候选。")
     assert logs[0]["accepted"] is True
@@ -1669,7 +1891,7 @@ async def test_revise_chapter_marks_stagewide_as_deferred_when_iteration_budget_
     issues = [
         {
             "dimension": "character",
-            "severity": "major",
+            "severity": "critical",
             "location": "对手戏中段",
             "problem": "人物反应仍然偏功能性，需要更大范围重写才能补足。",
             "suggestion": "补人物伤口与关系代价。",
@@ -1686,7 +1908,7 @@ async def test_revise_chapter_marks_stagewide_as_deferred_when_iteration_budget_
     monkeypatch.setattr(service, "_revise_chapter_locally", fake_local)
     monkeypatch.setattr(service, "_revise_chapter_stagewide", fail_if_called)
 
-    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True, allow_stagewide=False)
+    revised, logs = await service.revise_chapter("原始正文", issues, return_diagnostics=True)
 
     assert revised == "原始正文"
     assert logs[0]["stagewide_allowed"] is False
@@ -1729,7 +1951,8 @@ async def test_revise_chapter_skips_stagewide_for_long_form_delivery_polish_with
     revised, logs = await service.revise_chapter(long_content, issues, return_diagnostics=True, allow_stagewide=True)
 
     assert revised == long_content
-    assert logs[0]["stagewide_allowed"] is True
+    assert logs[0]["stagewide_allowed"] is False
+    assert logs[0]["stagewide_requested"] is True
     assert logs[0]["stagewide_attempted"] is False
     assert logs[0]["stagewide_accepted"] is False
 
@@ -1816,13 +2039,13 @@ async def test_critique_and_revise_loop_frontloads_deferred_stage_on_next_iterat
 
     result = await service.critique_and_revise_loop("原始正文", max_iterations=2)
 
-    assert call_sequence[:4] == [
-        ("logic", True),
-        ("character", False),
-        ("character", True),
+    assert call_sequence == [
         ("logic", False),
+        ("character", False),
     ]
-    assert result["final_score"] == 83.0
+    assert len(result["iterations"]) == 1
+    assert result["final_score"] == 72.0
+    assert all(log["stagewide_deferred"] is True for log in result["optimization_logs"])
 
 
 @pytest.mark.anyio
@@ -1920,16 +2143,13 @@ async def test_critique_and_revise_loop_adds_one_extra_iteration_to_drain_deferr
 
     result = await service.critique_and_revise_loop("原始正文", max_iterations=2)
 
-    assert len(result["iterations"]) == 3
-    assert call_sequence[:5] == [
-        ("logic", True),
-        ("character", False),
-        ("character", True),
+    assert len(result["iterations"]) == 1
+    assert call_sequence == [
         ("logic", False),
-        ("logic", True),
+        ("character", False),
     ]
-    assert result["iterations"][1]["deferred_stage_replay_extension"]["granted"] is True
-    assert result["final_score"] == 84.0
+    assert "deferred_stage_replay_extension" not in result["iterations"][0]
+    assert result["final_score"] == 72.0
 
 
 def test_failed_generation_runtime_state_preserves_debug_payload_for_quality_gate_failures():
@@ -2135,6 +2355,124 @@ def test_should_reject_self_critique_revision_when_score_improves_but_critical_i
     assert after_stats["critical"] == 3
 
 
+def test_consistency_fallback_fix_guard_rejects_partial_or_collapsed_repair():
+    service = ConsistencyService(db=None, llm_service=None)
+    original = "\n\n".join(
+        [
+            "第一段保留前锚点，主角带着旧卷宗进入听潮祠。"*2,
+            "第二段说明上一章留下的缉印令压力仍在。"*2,
+            "第三段对话推进冲突，对手要求他交出证据。"*2,
+            "第四段主角发现账页编号和旧案编号重合。"*2,
+            "第五段他决定暂时隐瞒发现，把风险压给下一步行动。"*2,
+            "第六段保留后锚点，门外水路封锁的锣声逼近。"*2,
+        ]
+    )
+    partial = "只修复中段冲突，但丢掉章首章尾和多数原有段落。"*80
+
+    assert service._fix_continuity_guard_failure(original, partial).startswith(
+        "fixed_content_collapsed_paragraphs"
+    )
+
+
+def test_consistency_fallback_fix_guard_accepts_anchored_full_chapter_repair():
+    service = ConsistencyService(db=None, llm_service=None)
+    original_parts = [
+        "第一段保留前锚点，主角带着旧卷宗进入听潮祠。",
+        "第二段说明上一章留下的缉印令压力仍在。",
+        "第三段对话推进冲突，对手要求他交出证据。",
+        "第四段主角发现账页编号和旧案编号重合。",
+        "第五段他决定暂时隐瞒发现，把风险压给下一步行动。",
+        "第六段保留后锚点，门外水路封锁的锣声逼近。",
+    ]
+    fixed_parts = list(original_parts)
+    fixed_parts[2] = "第三段对话推进冲突，对手先要求交证据，主角再用编号反制，冲突链只保留一个正式版本。"
+
+    assert service._fix_continuity_guard_failure(
+        "\n\n".join(original_parts),
+        "\n\n".join(fixed_parts),
+    ) is None
+
+
+@pytest.mark.anyio
+async def test_consistency_auto_fix_skips_full_chapter_fallback_without_confirmation(monkeypatch):
+    service = ConsistencyService(db=None, llm_service=FakeLLMService(""))
+
+    async def fake_context(*args, **kwargs):
+        return {"novel_setting": "设定", "character_state": "角色状态", "global_summary": "前文"}
+
+    async def fake_local(*args, **kwargs):
+        return None
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("full-chapter consistency fallback should require explicit confirmation")
+
+    monkeypatch.setattr(service, "_get_check_context", fake_context)
+    monkeypatch.setattr(service, "_auto_fix_locally", fake_local)
+    monkeypatch.setattr(consistency_service_module, "call_generation_text", fail_if_called)
+
+    result = await service.auto_fix(
+        project_id="project-1",
+        chapter_text="第一段保留前锚点。\n\n第二段存在冲突。\n\n第三段保留后锚点。",
+        violations=[
+            ConsistencyViolation(
+                severity=ViolationSeverity.MAJOR,
+                category="plot",
+                description="来源存在双版本残留。",
+                location="第2段",
+                suggested_fix="统一来源，只保留一个正式版本。",
+            )
+        ],
+        user_id=1,
+    )
+
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_consistency_auto_fix_allows_full_chapter_fallback_when_confirmed(monkeypatch):
+    service = ConsistencyService(db=None, llm_service=FakeLLMService(""))
+    original = "\n\n".join(
+        [
+            "第一段保留前锚点，主角带着旧卷宗进入听潮祠。",
+            "第二段说明上一章留下的缉印令压力仍在。",
+            "第三段对话存在两个来源版本，需要统一。",
+            "第四段保留后锚点，门外水路封锁的锣声逼近。",
+        ]
+    )
+    fixed = original.replace("第三段对话存在两个来源版本，需要统一。", "第三段对话只保留借阅单这一条正式来源，并让主角用编号反制。")
+
+    async def fake_context(*args, **kwargs):
+        return {"novel_setting": "设定", "character_state": "角色状态", "global_summary": "前文"}
+
+    async def fake_local(*args, **kwargs):
+        return None
+
+    async def fake_call_generation_text(*args, **kwargs):
+        return type("Result", (), {"text": fixed})()
+
+    monkeypatch.setattr(service, "_get_check_context", fake_context)
+    monkeypatch.setattr(service, "_auto_fix_locally", fake_local)
+    monkeypatch.setattr(consistency_service_module, "call_generation_text", fake_call_generation_text)
+
+    result = await service.auto_fix(
+        project_id="project-1",
+        chapter_text=original,
+        violations=[
+            ConsistencyViolation(
+                severity=ViolationSeverity.CRITICAL,
+                category="plot",
+                description="来源存在双版本残留。",
+                location="第3段",
+                suggested_fix="统一来源，只保留一个正式版本。",
+            )
+        ],
+        user_id=1,
+        allow_full_chapter_fallback=True,
+    )
+
+    assert result == fixed
+
+
 
 def test_should_accept_consistency_improvement_when_unresolved_severity_drops():
     before_report = {
@@ -2276,6 +2614,59 @@ async def test_run_consistency_check_retries_with_post_fix_feedback(monkeypatch)
     assert report["repair_attempts"][0]["accepted"] is False
     assert report["repair_attempts"][1]["accepted"] is True
     assert report["repair_attempts"][1]["retry_source"] == "post_fix_feedback"
+
+
+@pytest.mark.anyio
+async def test_run_consistency_check_reports_deferred_full_chapter_fallback(monkeypatch):
+    orchestrator = PipelineOrchestrator(DummyAsyncSession())
+    orchestrator.llm_service = FakeLLMService("")
+    violation = ConsistencyViolation(
+        severity=ViolationSeverity.MAJOR,
+        category="plot",
+        description="来源仍像两条并行事件链。",
+        location="第2段",
+        suggested_fix="统一来源，只保留一个正式版本。",
+    )
+
+    async def fake_check_consistency(self, project_id, chapter_text, user_id, include_foreshadowing=True):
+        return type(
+            "CheckResult",
+            (),
+            {
+                "is_consistent": False,
+                "violations": [violation],
+                "summary": "发现一致性问题。",
+                "check_time_ms": 12,
+                "status": "warning",
+            },
+        )()
+
+    async def fake_auto_fix(self, project_id, chapter_text, violations, user_id):
+        return None
+
+    monkeypatch.setattr(ConsistencyService, "check_consistency", fake_check_consistency)
+    monkeypatch.setattr(ConsistencyService, "auto_fix", fake_auto_fix)
+
+    fixed, report = await orchestrator._run_consistency_check(
+        project_id="project-1",
+        chapter_text="原稿",
+        user_id=1,
+    )
+
+    assert fixed == "原稿"
+    assert report["auto_fix_applied"] is False
+    assert report["auto_fix_accepted"] is False
+    assert report["repair_attempts"] == [
+        {
+            "attempt": 1,
+            "mode": "local_patch",
+            "accepted": False,
+            "acceptance_reason": "local_repair_failed_full_chapter_deferred",
+            "content_changed": False,
+            "full_chapter_fallback_deferred": True,
+            "manual_confirmation_required": True,
+        }
+    ]
 
 
 @pytest.mark.anyio
@@ -2699,6 +3090,19 @@ def test_build_chapter_schema_uses_runtime_actual_word_count_and_exposes_version
         },
     )
 
+    version_one = DummyChapter(id=11, content="甲" * 120, version_label="v1", metadata={}, created_at=datetime.now(timezone.utc))
+    version_two = DummyChapter(
+        id=12,
+        content="乙" * 80,
+        version_label="v2",
+        metadata={
+            "quality_metrics": {
+                "scene_fulfillment_rate": 0.75,
+                "dialogue_changes_state": True,
+            }
+        },
+        created_at=datetime.now(timezone.utc),
+    )
     chapter = DummyChapter(
         chapter_number=1,
         status="waiting_for_confirm",
@@ -2713,22 +3117,9 @@ def test_build_chapter_schema_uses_runtime_actual_word_count_and_exposes_version
             },
             ensure_ascii=False,
         ),
-        selected_version=None,
-        versions=[
-            DummyChapter(id=11, content="甲" * 120, version_label="v1", metadata={}, created_at=datetime.now(timezone.utc)),
-            DummyChapter(
-                id=12,
-                content="乙" * 80,
-                version_label="v2",
-                metadata={
-                    "quality_metrics": {
-                        "scene_fulfillment_rate": 0.75,
-                        "dialogue_changes_state": True,
-                    }
-                },
-                created_at=datetime.now(timezone.utc),
-            ),
-        ],
+        selected_version_id=12,
+        selected_version=version_one,
+        versions=[version_one, version_two],
         evaluations=[],
         updated_at=datetime.now(timezone.utc),
         created_at=datetime.now(timezone.utc),
@@ -2740,6 +3131,8 @@ def test_build_chapter_schema_uses_runtime_actual_word_count_and_exposes_version
     result = service._build_chapter_schema(project, 1, include_content=True)
 
     assert result.word_count == 5072
+    assert result.selected_version_id == 12
+    assert result.content == "乙" * 80
     assert result.versions is not None
     assert result.versions[0].word_count == 120
     assert result.versions[1].word_count == 80
@@ -2872,6 +3265,230 @@ def test_build_story_constraint_profile_and_gap_scan_capture_missing_longform_sl
     assert "era_background" in gaps["world_slots_missing"]
     assert "full_synopsis" in gaps["story_slots_missing"]
     assert gaps["coverage_summary"]["world_slots_missing_count"] >= 10
+
+
+def test_length_contract_keeps_short_projects_from_becoming_forced_longform():
+    contract = _build_length_contract(
+        formatted_history=[
+            {"role": "user", "content": "写一部12章左右的东方玄幻冒险小说，章节要连续推进。"},
+        ],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=None,
+    )
+
+    assert contract["target_chapter_count"] == 12
+    assert contract["stage_count_min"] == 4
+    assert contract["stage_count_max"] <= 6
+    assert contract["chapter_outline_seed_count"] == 12
+    assert "约 12 章" in _format_length_contract_instruction(contract)
+
+    oversized_outline = [
+        {"stage": 1, "title": "起", "core_theme": "起", "expected_chapter_range": "1-35章"},
+        {"stage": 2, "title": "承", "core_theme": "承", "expected_chapter_range": "36-70章"},
+        {"stage": 3, "title": "转", "core_theme": "转", "expected_chapter_range": "71-105章"},
+        {"stage": 4, "title": "合", "core_theme": "合", "expected_chapter_range": "106-140章"},
+    ]
+    remapped = _remap_outline_ranges_to_length_contract(oversized_outline, contract)
+
+    assert [item["expected_chapter_range"] for item in remapped] == ["1-3章", "4-6章", "7-9章", "10-12章"]
+    assert _resolve_blueprint_chapter_outline_count(
+        {"world_setting": {"system_blueprint": {"length_contract": contract}}}
+    ) == 12
+
+
+def test_length_contract_allows_three_act_outline_for_very_short_projects():
+    contract = _build_length_contract(
+        formatted_history=[
+            {"role": "user", "content": "写一部8章左右的东方玄幻短篇，章节要连续推进。"},
+        ],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=None,
+    )
+
+    assert contract["target_chapter_count"] == 8
+    assert contract["stage_count_min"] == 3
+    assert contract["stage_count_max"] <= 5
+    assert _resolve_novel_outline_min_stage_count(
+        {"world_setting": {"system_blueprint": {"length_contract": contract}}}
+    ) == 3
+    _validate_novel_outline_coherence(
+        [
+            {"stage": 1, "core_theme": "开端", "expected_chapter_range": "1-2章"},
+            {"stage": 2, "core_theme": "对抗", "expected_chapter_range": "3-5章"},
+            {"stage": 3, "core_theme": "收束", "expected_chapter_range": "6-8章"},
+        ],
+        min_stage_count=contract["stage_count_min"],
+    )
+
+
+def test_length_contract_does_not_compress_long_projects_to_twelve_chapters():
+    contract_120 = _build_length_contract(
+        formatted_history=[
+            {"role": "user", "content": "写一部120章左右的东方玄幻长篇，章节之间要连续推进。"},
+        ],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=None,
+    )
+    contract_300 = _build_length_contract(
+        formatted_history=[
+            {"role": "user", "content": "写一部300章左右的群像长篇，不要压缩成短纲。"},
+        ],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=None,
+    )
+
+    assert contract_120["target_chapter_count"] == 120
+    assert contract_120["chapter_outline_seed_count"] == 60
+    assert contract_120["stage_count_max"] >= 12
+    assert _resolve_blueprint_chapter_outline_count(
+        {"world_setting": {"system_blueprint": {"length_contract": contract_120}}}
+    ) == 60
+    assert "不会被压缩成 12 章骨架" in _format_length_contract_instruction(contract_120)
+
+    assert contract_300["target_chapter_count"] == 300
+    assert contract_300["chapter_outline_seed_count"] == 80
+    assert contract_300["stage_count_max"] >= 16
+    assert _resolve_blueprint_chapter_outline_count(
+        {"world_setting": {"system_blueprint": {"length_contract": contract_300}}}
+    ) == 80
+
+
+def test_length_contract_prefers_user_request_over_existing_outline_ranges():
+    existing_blueprint = Blueprint(
+        title="旧蓝图",
+        one_sentence_summary="旧版已经被错误扩成长篇。",
+        world_setting={
+            "system_blueprint": {
+                "length_contract": {
+                    "target_chapter_count": 390,
+                    "stage_count_min": 8,
+                    "stage_count_max": 12,
+                    "chapter_outline_seed_count": 12,
+                }
+            }
+        },
+        novel_outline=[
+            {
+                "stage": 1,
+                "title": "旧阶段",
+                "core_theme": "旧扩容",
+                "expected_chapter_range": "346-390章",
+            }
+        ],
+    )
+
+    contract = _build_length_contract(
+        formatted_history=[
+            {"role": "user", "content": "写一部12章左右的东方玄幻冒险小说，章节要连续推进。"},
+        ],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=existing_blueprint,
+    )
+
+    assert contract["target_chapter_count"] == 12
+    assert contract["source"] == "explicit_user_or_project_length"
+
+
+def test_length_contract_understands_hyphenated_english_chapter_count():
+    existing_blueprint = Blueprint(
+        title="旧蓝图",
+        one_sentence_summary="旧版已经被错误扩成长篇。",
+        world_setting={
+            "system_blueprint": {
+                "length_contract": {
+                    "target_chapter_count": 390,
+                    "chapter_outline_seed_count": 12,
+                }
+            }
+        },
+    )
+
+    contract = _build_length_contract(
+        formatted_history=[
+            {
+                "role": "user",
+                "content": '{"value": "A 12-chapter eastern fantasy adventure with continuous chapter progression."}',
+            },
+        ],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=existing_blueprint,
+    )
+
+    assert contract["target_chapter_count"] == 12
+    assert contract["source"] == "explicit_user_or_project_length"
+
+
+def test_length_contract_does_not_infer_from_existing_generated_ranges():
+    existing_blueprint = Blueprint(
+        title="旧蓝图",
+        one_sentence_summary="旧版总纲残留。",
+        novel_outline=[
+            {
+                "stage": 1,
+                "title": "旧阶段",
+                "core_theme": "旧扩容",
+                "expected_chapter_range": "346-390章",
+            }
+        ],
+    )
+
+    contract = _build_length_contract(
+        formatted_history=[],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=existing_blueprint,
+    )
+
+    assert contract["target_chapter_count"] == 60
+    assert contract["source"] == "inferred_project_scale"
+    assert contract["target_chapter_count"] != 390
+
+
+def test_length_contract_infers_longform_from_total_word_count():
+    contract = _build_length_contract(
+        formatted_history=[
+            {"role": "user", "content": "写一部百万字左右的玄幻长篇，跨章节伏笔和角色状态要持续。"},
+        ],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=None,
+    )
+
+    assert contract["source"] == "inferred_project_scale"
+    assert contract["target_chapter_count"] >= 180
+    assert contract["chapter_outline_seed_count"] >= 80
+
+
+def test_length_contract_reuses_stored_contract_when_user_does_not_restates_length():
+    existing_blueprint = Blueprint(
+        title="旧蓝图",
+        one_sentence_summary="已保存明确篇幅。",
+        world_setting={
+            "system_blueprint": {
+                "length_contract": {
+                    "target_chapter_count": 20,
+                    "chapter_outline_seed_count": 20,
+                }
+            }
+        },
+    )
+
+    contract = _build_length_contract(
+        formatted_history=[{"role": "user", "content": "继续完善这个故事。"}],
+        structured_dialogue=[],
+        project_title="潮印迷城",
+        existing_blueprint=existing_blueprint,
+    )
+
+    assert contract["target_chapter_count"] == 20
+    assert contract["chapter_outline_seed_count"] == 20
+    assert contract["source"] == "stored_blueprint_length_contract"
 
 
 def test_gap_scan_treats_whitespace_world_slots_as_missing_and_scales_world_timeout():
@@ -3177,14 +3794,16 @@ async def test_generate_novel_outline_builds_total_outline_when_missing():
     )
 
     assert stages == [
-        ("polishing", "正在补全世界体系（历史背景 / 世界结构 / 地理秩序）（1/3）"),
-        ("polishing", "正在补全世界体系（力量体系 / 生存生活逻辑）（2/3）"),
-        ("polishing", "正在补全世界体系（文化文明 / 经济社会 / 信仰秩序）（3/3）"),
-        ("generating", "正在生成小说总大纲（阶段骨架首轮）"),
-        ("generating", "正在解析小说总大纲骨架"),
-        ("generating", "正在校验小说总大纲骨架连续性"),
-        ("polishing", "正在细化小说总大纲（第 1/2 段）"),
-        ("polishing", "正在细化小说总大纲（第 2/2 段）"),
+        ("blueprint_setting_lock", "正在补全世界体系（历史背景 / 世界结构 / 地理秩序）（1/3）"),
+        ("blueprint_setting_lock", "正在补全世界体系（力量体系 / 生存生活逻辑）（2/3）"),
+        ("blueprint_setting_lock", "正在补全世界体系（文化文明 / 经济社会 / 信仰秩序）（3/3）"),
+        ("blueprint_setting_lock", "正在锁定设定与长篇目标（世界规则 / 角色规模 / 伏笔回收）"),
+        ("blueprint_plot_threads", "正在生成小说总大纲（阶段骨架首轮）"),
+        ("blueprint_plot_threads", "正在解析小说总大纲骨架"),
+        ("blueprint_foreshadowing", "正在校验小说总大纲骨架连续性"),
+        ("blueprint_foreshadowing", "正在细化角色生命周期、伏笔回收窗口和阶段任务"),
+        ("blueprint_plot_threads", "正在细化小说总大纲（第 1/2 段）"),
+        ("blueprint_plot_threads", "正在细化小说总大纲（第 2/2 段）"),
     ]
     assert len(result["novel_outline"]) == 4
     assert result["novel_outline"][0]["title"] == "孤岛立足"
@@ -3212,14 +3831,15 @@ async def test_generate_novel_outline_builds_total_outline_when_missing():
     assert "世界系统总表" in llm.calls[4]["conversation_history"][0]["content"]
 
 
-def test_has_complete_chapter_outline_requires_contiguous_twelve_chapters():
+def test_has_complete_chapter_outline_uses_expected_count_when_available():
     complete = [{"chapter_number": index, "title": f"第{index}章", "summary": "摘要"} for index in range(1, 13)]
     partial = complete[:4]
     broken = complete[:11] + [{"chapter_number": 13, "title": "第13章", "summary": "摘要"}]
 
-    assert _has_complete_chapter_outline(complete) is True
-    assert _has_complete_chapter_outline(partial) is False
-    assert _has_complete_chapter_outline(broken) is False
+    assert _has_complete_chapter_outline(complete, expected_count=12) is True
+    assert _has_complete_chapter_outline(partial, expected_count=12) is False
+    assert _has_complete_chapter_outline(broken, expected_count=12) is False
+    assert _has_complete_chapter_outline(partial, expected_count=4) is True
 
 
 @pytest.mark.anyio
@@ -3259,7 +3879,17 @@ async def test_generate_executable_chapter_outline_builds_outline_when_missing()
             "title": "异海开拓史",
             "one_sentence_summary": "从孤岛生存开始的异海长篇",
             "full_synopsis": "长篇慢热海洋文明故事",
-            "world_setting": {"core": "海洋文明 + 修炼反馈生态"},
+            "world_setting": {
+                "core": "海洋文明 + 修炼反馈生态",
+                "system_blueprint": {
+                    "length_contract": {
+                        "target_chapter_count": 12,
+                        "stage_count_min": 4,
+                        "stage_count_max": 6,
+                        "chapter_outline_seed_count": 12,
+                    }
+                },
+            },
             "characters": [{"name": "主角"}],
             "relationships": [],
             "story_arcs": [],
@@ -3272,12 +3902,12 @@ async def test_generate_executable_chapter_outline_builds_outline_when_missing()
     )
 
     assert stages == [
-        ("generating", "正在生成可执行章节大纲（第 1/3 批，第 1-4 章）"),
-        ("generating", "正在解析章节大纲批次（第 1-4 章）"),
-        ("generating", "正在生成可执行章节大纲（第 2/3 批，第 5-8 章）"),
-        ("generating", "正在解析章节大纲批次（第 5-8 章）"),
-        ("generating", "正在生成可执行章节大纲（第 3/3 批，第 9-12 章）"),
-        ("generating", "正在解析章节大纲批次（第 9-12 章）"),
+        ("blueprint_chapter_plan", "正在生成可执行章节大纲（第 1/3 批，第 1-4 章）"),
+        ("blueprint_chapter_plan", "正在解析章节大纲批次（第 1-4 章）"),
+        ("blueprint_chapter_plan", "正在生成可执行章节大纲（第 2/3 批，第 5-8 章）"),
+        ("blueprint_chapter_plan", "正在解析章节大纲批次（第 5-8 章）"),
+        ("blueprint_chapter_plan", "正在生成可执行章节大纲（第 3/3 批，第 9-12 章）"),
+        ("blueprint_chapter_plan", "正在解析章节大纲批次（第 9-12 章）"),
     ]
     assert len(result["chapter_outline"]) == 12
     assert result["chapter_outline"][0]["title"] == "第1章标题"
@@ -3328,12 +3958,12 @@ async def test_polish_outline_reports_polishing_progress_and_sanitizes_json():
     )
 
     assert stages == [
-        ("polishing", "正在润色章节大纲（第 1/3 批，第 1-4 章）"),
-        ("polishing", "正在解析润色结果（第 1-4 章）"),
-        ("polishing", "正在润色章节大纲（第 2/3 批，第 5-8 章）"),
-        ("polishing", "正在解析润色结果（第 5-8 章）"),
-        ("polishing", "正在润色章节大纲（第 3/3 批，第 9-12 章）"),
-        ("polishing", "正在解析润色结果（第 9-12 章）"),
+        ("blueprint_chapter_plan", "正在润色章节大纲（第 1/3 批，第 1-4 章）"),
+        ("blueprint_chapter_plan", "正在解析润色结果（第 1-4 章）"),
+        ("blueprint_chapter_plan", "正在润色章节大纲（第 2/3 批，第 5-8 章）"),
+        ("blueprint_chapter_plan", "正在解析润色结果（第 5-8 章）"),
+        ("blueprint_chapter_plan", "正在润色章节大纲（第 3/3 批，第 9-12 章）"),
+        ("blueprint_chapter_plan", "正在解析润色结果（第 9-12 章）"),
     ]
     assert result["chapter_outline"][0]["title"] == "新标题"
     assert result["chapter_outline"][0]["summary"] == long_summary
@@ -3462,9 +4092,18 @@ async def test_replace_blueprint_serializes_nested_pydantic_models(tmp_path):
                 "key_locations": [{"name": "旧档案馆地库"}],
             },
             story_arcs=[{"title": "黑潮账册线", "conflict": "证据不断消失"}],
-            novel_outline=[{"title": "第一阶段", "main_conflict": "抢在记忆抹除前留下证据"}],
+            novel_outline=[{"title": "第一阶段", "main_conflict": "抢在记忆抹除前留下证据", "expected_chapter_range": "1-260章"}],
             foreshadowing_system=[{"plant": "盐渍编号", "payoff": "渡雾码头旧仓库"}],
-            chapter_outline=[{"chapter_number": 1, "title": "雾夜来客", "summary": "林七第一次摸到被篡改的残页。"}],
+            chapter_outline=[
+                {
+                    "chapter_number": 1,
+                    "title": "雾夜来客",
+                    "summary": "林七第一次摸到被篡改的残页。",
+                    "cast_delta": {"new": ["林七"], "returning": [], "exit_or_absent": [], "faction_roles": []},
+                    "foreshadowing_tasks": {"plant": ["盐渍编号"], "reinforce": [], "payoff": [], "avoid_forgetting": []},
+                    "payoff_window": "第8-12章",
+                }
+            ],
         )
 
         async with session_factory() as session:
@@ -3488,6 +4127,20 @@ async def test_replace_blueprint_serializes_nested_pydantic_models(tmp_path):
             outline = outline_result.scalars().first()
             assert outline is not None
             assert outline.title == "雾夜来客"
+            assert outline.metadata["cast_delta"]["new"] == ["林七"]
+            assert outline.metadata["foreshadowing_tasks"]["plant"] == ["盐渍编号"]
+            assert outline.metadata["payoff_window"] == "第8-12章"
+
+            character_count = await session.scalar(
+                select(func.count(BlueprintCharacter.id)).where(BlueprintCharacter.project_id == "project-blueprint-1")
+            )
+            assert character_count >= 40
+
+            schema = await NovelService(session).get_project_schema("project-blueprint-1", 1)
+            chapter_schema = next(item for item in schema.chapters if item.chapter_number == 1)
+            assert chapter_schema.cast_delta["new"] == ["林七"]
+            assert chapter_schema.foreshadowing_tasks["plant"] == ["盐渍编号"]
+            assert chapter_schema.payoff_window == "第8-12章"
     finally:
         await engine.dispose()
 

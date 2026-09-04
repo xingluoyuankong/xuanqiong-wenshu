@@ -1,6 +1,6 @@
 <template>
   <div class="wd-workspace-root">
-    <div class="wd-workspace-card md-card md-card-elevated" style="border-radius: var(--md-radius-xl);">
+    <div class="wd-workspace-card">
       <header v-if="selectedChapterNumber" class="wd-workspace-head">
         <div class="wd-workspace-head__main">
           <div class="wd-workspace-head__eyebrow">
@@ -33,6 +33,7 @@
           <div class="wd-workspace-head__actions">
             <span class="wd-workspace-tool-label">内容工具</span>
             <button type="button" class="md-btn md-btn-text md-ripple m3-action-btn m3-action-btn--quiet" @click="$emit('fetchChapterStatus')">
+              <RefreshCw class="wd-btn-icon" aria-hidden="true" />
               刷新状态
             </button>
             <button
@@ -41,6 +42,7 @@
               class="md-btn md-btn-text md-ripple m3-action-btn m3-action-btn--quiet"
               @click="openPrimaryReader"
             >
+              <BookOpen class="wd-btn-icon" aria-hidden="true" />
               全文阅读
             </button>
             <button
@@ -49,6 +51,7 @@
               class="md-btn md-btn-tonal md-ripple m3-action-btn m3-action-btn--strong"
               @click="openEditModal"
             >
+              <Pencil class="wd-btn-icon" aria-hidden="true" />
               正文编辑
             </button>
             <button
@@ -57,6 +60,7 @@
               class="md-btn md-btn-outlined md-ripple m3-action-btn"
               @click="openPatchDiffModal"
             >
+              <Wrench class="wd-btn-icon" aria-hidden="true" />
               精细编辑
             </button>
           </div>
@@ -65,11 +69,16 @@
 
       <section v-if="project" class="wd-health-panel" aria-label="项目健康检查">
         <div class="wd-health-panel__lead">
-          <p class="wd-strip-kicker">项目健康检查</p>
-          <h3>{{ projectHealthTitle }}</h3>
-          <p>{{ projectHealthHint }}</p>
+          <div>
+            <p class="wd-strip-kicker">项目体检</p>
+            <h3>{{ projectHealthTitle }}</h3>
+            <p v-if="healthPanelOpen">{{ projectHealthHint }}</p>
+          </div>
+          <button type="button" class="wd-health-toggle" @click="healthPanelOpen = !healthPanelOpen">
+            {{ healthPanelOpen ? '收起' : '展开' }}
+          </button>
         </div>
-        <div class="wd-health-grid">
+        <div v-if="healthPanelOpen" class="wd-health-grid">
           <div
             v-for="item in projectHealthItems"
             :key="item.label"
@@ -148,13 +157,7 @@
         <div class="flex items-center justify-between border-b p-6" style="border-bottom-color: var(--md-outline-variant);">
           <h3 class="md-title-large font-semibold">编辑第 {{ selectedChapterNumber }} 章正文</h3>
           <button type="button" class="md-icon-btn md-ripple" @click="closeEditModal">
-            <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 20 20">
-              <path
-                fill-rule="evenodd"
-                d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                clip-rule="evenodd"
-              />
-            </svg>
+            <X class="h-6 w-6" aria-hidden="true" />
           </button>
         </div>
 
@@ -184,13 +187,7 @@
             :disabled="isSaving || !editingContent.trim()"
             @click="saveEditedContent"
           >
-            <svg v-if="isSaving" class="h-4 w-4 animate-spin" fill="currentColor" viewBox="0 0 20 20">
-              <path
-                fill-rule="evenodd"
-                d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
-                clip-rule="evenodd"
-              />
-            </svg>
+            <Loader2 v-if="isSaving" class="h-4 w-4 animate-spin" aria-hidden="true" />
             {{ isSaving ? '保存中...' : '保存' }}
           </button>
         </div>
@@ -202,6 +199,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { BookOpen, Loader2, Pencil, RefreshCw, Wrench, X } from 'lucide-vue-next'
 import { globalAlert } from '@/composables/useAlert'
 import type { Chapter, ChapterGenerationResponse, ChapterVersion, NovelProject } from '@/api/novel'
 import { normalizeChapterContent } from '@/utils/chapterContent'
@@ -285,6 +283,7 @@ const editingContent = ref('')
 const isSaving = ref(false)
 const workspaceBodyRef = ref<HTMLElement | null>(null)
 const showWorkspaceScrollTop = ref(false)
+const healthPanelOpen = ref(false)
 const forceVersionSelector = ref(false)
 const versionSelectorDismissed = ref(false)
 const workspaceScrollRafId = ref<number | null>(null)
@@ -560,10 +559,10 @@ const openPatchDiffModal = () => {
 const handleOpenReader = (payload: ReaderPayload) => {
   const readerKey = `xqws-reader-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const chips: string[] = []
-  if (payload.chapterNumber !== undefined) chips.push(`? ${payload.chapterNumber} ?`)
-  if (payload.source === 'chapter-content') chips.push('???')
-  if (payload.source === 'candidate-version') chips.push('???')
-  if (typeof payload.versionIndex === 'number') chips.push(`?? ${payload.versionIndex + 1}`)
+  if (payload.chapterNumber !== undefined) chips.push(`第 ${payload.chapterNumber} 章`)
+  if (payload.source === 'chapter-content') chips.push('当前正文')
+  if (payload.source === 'candidate-version') chips.push('候选版本')
+  if (typeof payload.versionIndex === 'number') chips.push(`第 ${payload.versionIndex + 1} 版`)
 
   sessionStorage.setItem(readerKey, JSON.stringify({
     title: payload.title,
@@ -824,6 +823,7 @@ defineExpose({
   border: 1px solid rgba(148, 175, 220, 0.15);
   box-shadow: 0 8px 24px rgba(107, 155, 235, 0.08);
   overflow: hidden;
+  border-radius: 8px;
 }
 
 .wd-workspace-head {
@@ -939,6 +939,12 @@ defineExpose({
   align-items: center;
 }
 
+.wd-btn-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
 .wd-workspace-tool-label {
   display: inline-flex;
   align-items: center;
@@ -953,9 +959,13 @@ defineExpose({
 }
 
 .m3-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   min-height: 40px;
   padding: 0 16px;
-  border-radius: 14px;
+  border-radius: 8px;
   font-size: 0.86rem;
   font-weight: 850;
 }
@@ -979,19 +989,21 @@ defineExpose({
 
 .wd-health-panel {
   display: grid;
-  grid-template-columns: minmax(180px, 0.9fr) minmax(0, 2fr);
+  grid-template-columns: 1fr;
   gap: 10px;
   padding: 8px;
   border-bottom: 1px solid rgba(161, 186, 220, 0.16);
-  background:
-    radial-gradient(circle at 8% 20%, rgba(107, 155, 235, 0.16), transparent 28%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(240, 247, 255, 0.9));
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(240, 247, 255, 0.9));
 }
 
 .wd-health-panel__lead {
   min-width: 0;
-  padding: 10px 12px;
-  border-radius: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.7);
   border: 1px solid rgba(148, 163, 184, 0.18);
 }
@@ -1010,6 +1022,20 @@ defineExpose({
   line-height: 1.5;
 }
 
+.wd-health-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: #fff;
+  color: #334155;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .wd-health-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(72px, 1fr));
@@ -1021,7 +1047,7 @@ defineExpose({
   gap: 2px;
   min-height: 74px;
   padding: 10px;
-  border-radius: 18px;
+  border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(255, 255, 255, 0.8);
   box-shadow: 0 10px 24px rgba(107, 155, 235, 0.08);
@@ -1131,7 +1157,7 @@ defineExpose({
   min-height: 68px;
   padding: 10px 12px;
   text-align: left;
-  border-radius: 18px;
+  border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.24);
   background: #fff;
   cursor: pointer;
@@ -1182,7 +1208,7 @@ defineExpose({
   min-height: 42px;
   padding: 0 14px;
   border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 999px;
+  border-radius: 8px;
   background: rgba(53, 94, 147, 0.94);
   color: #fff;
   font-size: 0.82rem;

@@ -28,28 +28,9 @@
 
       <div class="cg-badge">
         <div :class="['cg-badge__icon', `cg-badge__icon--${stageTone}`]">
-          <svg v-if="stageTone === 'active'" class="h-6 w-6 animate-spin" viewBox="0 0 24 24" fill="none">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-            <path
-              class="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-            />
-          </svg>
-          <svg v-else-if="stageTone === 'danger'" class="h-6 w-6" fill="currentColor" viewBox="0 0 20 20">
-            <path
-              fill-rule="evenodd"
-              d="M18 10A8 8 0 112 10a8 8 0 0116 0zm-7-3a1 1 0 10-2 0v4a1 1 0 102 0V7zm-1 8a1.25 1.25 0 100-2.5A1.25 1.25 0 0010 15z"
-              clip-rule="evenodd"
-            />
-          </svg>
-          <svg v-else class="h-6 w-6" fill="currentColor" viewBox="0 0 20 20">
-            <path
-              fill-rule="evenodd"
-              d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-              clip-rule="evenodd"
-            />
-          </svg>
+          <Loader2 v-if="stageTone === 'active'" class="h-6 w-6 animate-spin" aria-hidden="true" />
+          <AlertCircle v-else-if="stageTone === 'danger'" class="h-6 w-6" aria-hidden="true" />
+          <CheckCircle2 v-else class="h-6 w-6" aria-hidden="true" />
         </div>
 
         <div>
@@ -76,7 +57,10 @@
         </div>
 
         <div class="cg-actions">
-          <button type="button" class="cg-action-btn" @click="$emit('fetchStatusNow')">立即刷新</button>
+          <button type="button" class="cg-action-btn" @click="$emit('fetchStatusNow')">
+            <RefreshCw class="cg-action-icon" aria-hidden="true" />
+            立即刷新
+          </button>
           <button
             v-if="canTerminate"
             type="button"
@@ -84,6 +68,7 @@
             :disabled="isTerminating"
             @click="$emit('terminateChapter', chapterNumber)"
           >
+            <Square class="cg-action-icon" aria-hidden="true" />
             {{ isTerminating ? '终止中...' : '终止处理' }}
           </button>
           <button
@@ -92,6 +77,7 @@
             class="cg-action-btn cg-action-btn--strong"
             @click="$emit('regenerateChapter', chapterNumber)"
           >
+            <RotateCcw class="cg-action-icon" aria-hidden="true" />
             重新生成
           </button>
         </div>
@@ -134,9 +120,18 @@
         </ul>
       </article>
 
-      <article v-if="runtimeEvents.length" class="cg-card">
+      <article v-if="latestContentPreview" class="cg-card cg-card--preview">
+        <p class="cg-card__title">最新草稿片段</p>
+        <p class="cg-card__subtitle">这里直接显示后台正在产出的正文内容，不再只看程序日志。</p>
+        <pre class="cg-live-preview">{{ latestContentPreview }}</pre>
+      </article>
+
+      <article v-if="allRuntimeEvents.length" class="cg-card cg-card--logs">
         <div class="cg-card__head">
-          <p class="cg-card__title">后台详细日志</p>
+          <div>
+            <p class="cg-card__title">生成状态日志</p>
+            <p class="cg-card__subtitle">显示正文片段、评审、修复和连续性检查；原始程序字段收在开发者详情里。</p>
+          </div>
           <button
             v-if="hiddenRuntimeEventCount > 0 || showAllRuntimeEvents"
             type="button"
@@ -146,23 +141,62 @@
             {{ showAllRuntimeEvents ? '收起日志' : `展开全部（+${hiddenRuntimeEventCount}）` }}
           </button>
         </div>
+        <div class="cg-log-tabs" role="tablist" aria-label="generation-log-tabs">
+          <button
+            v-for="tab in runtimeLogTabs"
+            :key="tab.key"
+            type="button"
+            :class="['cg-log-tab', { 'is-active': selectedRuntimeLogTab === tab.key }]"
+            @click="selectedRuntimeLogTab = tab.key"
+          >
+            <span>{{ tab.icon }}</span>
+            {{ tab.label }}
+          </button>
+        </div>
         <ul class="cg-log-list">
           <li v-for="(event, index) in runtimeEvents" :key="`${event.at || 'event'}-${index}`" class="cg-log-item">
             <div class="cg-log-item__head">
+              <span class="cg-log-item__kind">{{ formatEventKindIcon(event) }}</span>
               <span class="cg-log-item__time">{{ formatEventTime(event.at) }}</span>
               <span :class="['cg-log-item__level', `cg-log-item__level--${event.level || 'info'}`]">{{ formatEventLevel(event.level) }}</span>
+              <span v-if="event.kind" class="cg-log-item__stage">{{ formatEventKindLabel(event.kind) }}</span>
               <span v-if="event.stage" class="cg-log-item__stage">{{ event.stage }}</span>
             </div>
+            <p v-if="eventTitle(event)" class="cg-log-item__title">{{ eventTitle(event) }}</p>
             <p class="cg-log-item__message">
-              {{ event.message || '后台已记录状态更新' }}
+              {{ eventSummary(event) }}
               <span v-if="eventDurationLabel(event)" class="cg-log-item__duration">（{{ eventDurationLabel(event) }}）</span>
             </p>
+            <div v-if="eventContinuityNotice(event)" class="cg-log-item__notice">
+              {{ eventContinuityNotice(event) }}
+            </div>
+            <pre v-if="event.content_preview" class="cg-log-item__preview">{{ event.content_preview }}</pre>
+            <div v-if="eventPatchSuggestions(event).length" class="cg-log-item__patches">
+              <p class="cg-log-item__patch-title">局部补丁建议</p>
+              <ul>
+                <li v-for="(patch, patchIndex) in eventPatchSuggestions(event)" :key="`${patch.problem}-${patchIndex}`">
+                  <span v-if="patch.scope" class="cg-log-item__patch-scope">{{ patch.scope }}</span>
+                  <strong>{{ patch.problem }}</strong>
+                  <span v-if="patch.suggestion">{{ patch.suggestion }}</span>
+                  <small v-if="patch.requirement">执行要求：{{ patch.requirement }}</small>
+                </li>
+              </ul>
+            </div>
+            <details v-if="event.metrics && Object.keys(event.metrics).length" class="cg-log-item__meta">
+              <summary>生成指标</summary>
+              <pre>{{ formatEventMetadata(event.metrics) }}</pre>
+            </details>
+            <details v-if="event.artifact_refs && formatEventMetadata(event.artifact_refs)" class="cg-log-item__meta">
+              <summary>产物引用</summary>
+              <pre>{{ formatEventMetadata(event.artifact_refs) }}</pre>
+            </details>
             <details v-if="event.metadata && Object.keys(event.metadata).length" class="cg-log-item__meta">
-              <summary>查看附加信息</summary>
+              <summary>开发者详情</summary>
               <pre>{{ formatEventMetadata(event.metadata) }}</pre>
             </details>
           </li>
         </ul>
+        <p v-if="!runtimeEvents.length" class="cg-log-empty">这个分组暂时没有日志，切到“简略日志”可以看全部阶段。</p>
       </article>
     </section>
   </div>
@@ -170,6 +204,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { AlertCircle, CheckCircle2, Loader2, RefreshCw, RotateCcw, Square } from 'lucide-vue-next'
 import { buildChapterTaskUiModel, canCancelGeneration, normalizeRuntimeStage } from '@/utils/chapterGeneration'
 import { stripThinkTags } from '@/utils/safeMarkdown'
 
@@ -201,13 +236,41 @@ let timer: number | null = null
 const runtime = computed(() => props.generationRuntime || {})
 const runtimeQueued = computed(() => Boolean(runtime.value.queued))
 const showAllRuntimeEvents = ref(false)
+type RuntimeLogTabKey = 'summary' | 'progress' | 'content' | 'review' | 'ledger' | 'diagnostics'
+const selectedRuntimeLogTab = ref<RuntimeLogTabKey>('summary')
+const runtimeLogTabs: Array<{ key: RuntimeLogTabKey; label: string; icon: string }> = [
+  { key: 'summary', label: '简略日志', icon: '✨' },
+  { key: 'progress', label: '生成进展', icon: '⏳' },
+  { key: 'content', label: '草稿预览', icon: '✍' },
+  { key: 'review', label: '评审/修复', icon: '✓' },
+  { key: 'ledger', label: '账本闭环', icon: '☘' },
+  { key: 'diagnostics', label: '诊断详情', icon: '⚙' },
+]
 const allRuntimeEvents = computed(() => {
   const events = Array.isArray(runtime.value.events) ? runtime.value.events : []
   return [...events].reverse()
 })
-const runtimeEventLimit = computed(() => (showAllRuntimeEvents.value ? allRuntimeEvents.value.length : 8))
-const runtimeEvents = computed(() => allRuntimeEvents.value.slice(0, runtimeEventLimit.value))
-const hiddenRuntimeEventCount = computed(() => Math.max(0, allRuntimeEvents.value.length - runtimeEvents.value.length))
+const latestContentPreview = computed(() => {
+  const event = allRuntimeEvents.value.find((item) => typeof item?.content_preview === 'string' && item.content_preview.trim())
+  return event ? stripThinkTags(String(event.content_preview)).trim() : ''
+})
+const filteredRuntimeEvents = computed(() => {
+  const tab = selectedRuntimeLogTab.value
+  if (tab === 'summary') return allRuntimeEvents.value
+  return allRuntimeEvents.value.filter((event) => {
+    const kind = String(event?.kind || '').toLowerCase()
+    const stageKey = String(event?.stage || '').toLowerCase()
+    if (tab === 'progress') return !kind || kind === 'status' || ['prepare_context', 'cast_plan', 'foreshadowing_plan', 'longform_context', 'generate_mission', 'generate_variants', 'persist_versions'].includes(stageKey)
+    if (tab === 'content') return kind === 'content' || kind === 'save' || Boolean(event?.content_preview)
+    if (tab === 'review') return ['review', 'continuity', 'error'].includes(kind) || stageKey.includes('review') || stageKey.includes('optimize') || stageKey.includes('diagnose') || stageKey.includes('continuity')
+    if (tab === 'ledger') return kind === 'ledger' || stageKey.includes('ledger') || ['finalize', 'finalized'].includes(stageKey)
+    if (tab === 'diagnostics') return Boolean(event?.metadata || event?.metrics || event?.artifact_refs)
+    return true
+  })
+})
+const runtimeEventLimit = computed(() => (showAllRuntimeEvents.value ? filteredRuntimeEvents.value.length : 8))
+const runtimeEvents = computed(() => filteredRuntimeEvents.value.slice(0, runtimeEventLimit.value))
+const hiddenRuntimeEventCount = computed(() => Math.max(0, filteredRuntimeEvents.value.length - runtimeEvents.value.length))
 
 const title = computed(() => {
   if (props.chapterTitle) return props.chapterTitle
@@ -224,6 +287,10 @@ const stage = computed(() =>
 const stageDescriptionMap: Record<string, string> = {
   queued: '任务已经进入后台队列，正在等待分配执行槽位。',
   prepare_context: '系统正在整理蓝图、历史章节、角色约束和上下文材料。',
+  audit_context: '系统正在审计长期记忆、章节快照、时间线和知识图谱。',
+  cast_plan: '系统正在装配角色规模、登场层级、势力归属和动态角色规则。',
+  foreshadowing_plan: '系统正在规划本章伏笔回收、强化、禁忘和可新增线索。',
+  longform_context: '系统正在把长篇上下文压成写前约束包。',
   generate_mission: '系统正在构建本章写作任务、约束和生成计划。',
   generate_variants: '系统正在正式生成正文草稿，这通常是最耗时的阶段。',
   review: '正文草稿已产出，系统正在做首轮评审、筛选和增强准备。',
@@ -238,9 +305,15 @@ const stageDescriptionMap: Record<string, string> = {
   optimize_character: '正在处理人物层问题：角色、关系、情绪、对话。',
   optimize_delivery: '正在处理表现层问题：节奏、场景、悬念、文风。',
   consistency: '系统正在校验剧情设定、前后文和伏笔一致性。',
+  continuity_gate: '系统正在检查跨章节、伏笔、角色状态和知识边界。',
   optimizer: '系统正在做定向优化，强化最重要的问题维度。',
   enrichment: '系统正在补字数、强化细节和做最终质量增强。',
   persist_versions: '系统正在写入候选版本并整理确认结果。',
+  finalize: '系统正在确认定稿，写入章节摘要和快照。',
+  ledger_memory: '系统正在把正文更新进角色状态、时间线和因果账本。',
+  ledger_foreshadowing: '系统正在判断本章伏笔回收、强化和新埋设情况。',
+  ledger_graph: '系统正在同步线索和知识图谱。',
+  finalized: '定稿闭环已完成，正文和故事账本都已处理。',
   generating: '系统正在写正文草稿，完成后会自动进入评估或确认阶段。',
   evaluating: '正文已生成，系统正在评估候选版本可用性。',
   selecting: '候选版本已就绪，即将切换到版本确认界面。',
@@ -409,6 +482,126 @@ const formatEventLevel = (level: unknown) => {
   return '信息'
 }
 
+const formatEventKindIcon = (event: Record<string, any>) => {
+  const kind = String(event?.kind || '').toLowerCase()
+  if (event?.level === 'error' || kind === 'error') return '⚠'
+  if (kind === 'content') return '✍'
+  if (kind === 'review') return '✓'
+  if (kind === 'continuity') return '⌁'
+  if (kind === 'save') return '▣'
+  if (kind === 'ledger') return '☘'
+  return '✨'
+}
+
+const formatEventKindLabel = (kind: unknown) => {
+  const key = String(kind || '').toLowerCase()
+  const labels: Record<string, string> = {
+    status: '状态',
+    content: '正文',
+    review: '评审',
+    continuity: '连续性',
+    save: '保存',
+    ledger: '账本',
+    error: '异常',
+  }
+  return labels[key] || String(kind || '状态')
+}
+
+const eventTitle = (event: Record<string, any>) => {
+  const title = String(event?.title || '').trim()
+  if (title) return title
+  if (event?.stage) return STAGE_LABEL_FALLBACK[String(event.stage)] || ''
+  return ''
+}
+
+const eventSummary = (event: Record<string, any>) => {
+  const summary = String(event?.summary || event?.message || '').trim()
+  if (summary) return summary
+  if (event?.content_preview) return '已记录一段生成内容预览'
+  return '已记录状态更新'
+}
+
+const eventContinuityNotice = (event: Record<string, any>) => {
+  const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata as Record<string, any> : {}
+  if (metadata.manual_stagewide_confirmation_required) {
+    return '整章候选没有自动套用：当前流程优先保留原文顺序和前后锚点，只给出局部补丁；确需整章候选时必须人工确认。'
+  }
+  if (metadata.stagewide_deferred || metadata.stagewide_deferred_count) {
+    return '已延后整章候选，继续按局部窗口修补，避免破坏章节连续性。'
+  }
+  return ''
+}
+
+type PatchSuggestionView = {
+  scope: string
+  problem: string
+  suggestion: string
+  requirement: string
+}
+
+const stringifyPatchField = (value: unknown): string => {
+  if (value === null || typeof value === 'undefined') return ''
+  if (Array.isArray(value)) return value.map((item: unknown) => stringifyPatchField(item)).filter(Boolean).join('、')
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value).trim()
+}
+
+const normalizePatchSuggestion = (item: unknown): PatchSuggestionView | null => {
+  if (!item || typeof item !== 'object') {
+    const text = stringifyPatchField(item)
+    return text ? { scope: '', problem: text, suggestion: '', requirement: '' } : null
+  }
+  const record = item as Record<string, unknown>
+  const scopeParts = [
+    stringifyPatchField(record.stage),
+    stringifyPatchField(record.strategy),
+    stringifyPatchField(record.dimension),
+    stringifyPatchField(record.location),
+  ].filter(Boolean)
+  const problem = stringifyPatchField(record.problem || record.description || record.issue || record.reason)
+  const suggestion = stringifyPatchField(record.suggestion || record.suggested_fix || record.patch || record.action)
+  const requirement = stringifyPatchField(record.execution_requirement || record.requirement)
+  if (!problem && !suggestion && !requirement) return null
+  return {
+    scope: scopeParts.join(' · '),
+    problem: problem || suggestion || requirement,
+    suggestion: problem ? suggestion : '',
+    requirement,
+  }
+}
+
+const eventPatchSuggestions = (event: Record<string, any>) => {
+  const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata as Record<string, unknown> : {}
+  const candidates = [
+    event?.manual_patch_suggestions,
+    event?.patch_suggestions,
+    metadata.manual_patch_suggestions,
+    metadata.patch_suggestions,
+  ]
+  return candidates
+    .flatMap((value) => Array.isArray(value) ? value : value ? [value] : [])
+    .map((item) => normalizePatchSuggestion(item))
+    .filter((item): item is PatchSuggestionView => Boolean(item))
+    .slice(0, 5)
+}
+
+const STAGE_LABEL_FALLBACK: Record<string, string> = {
+  prepare_context: '上下文准备',
+  cast_plan: '角色规划',
+  foreshadowing_plan: '伏笔规划',
+  longform_context: '长期上下文包',
+  generate_mission: '章节任务生成',
+  generate_variants: '正文候选生成',
+  review: 'AI 评审',
+  continuity_gate: '连续性检查',
+  persist_versions: '保存候选版本',
+  finalize: '定稿快照',
+  ledger_memory: '记忆层更新',
+  ledger_foreshadowing: '伏笔闭环',
+  ledger_graph: '线索/图谱同步',
+  finalized: '定稿完成',
+}
+
 const formatDurationMs = (value: unknown) => {
   const parsed = Number(value)
   if (!Number.isFinite(parsed) || parsed <= 0) return ''
@@ -451,7 +644,42 @@ const metadataLabelMap: Record<string, string> = {
   optimization_stage: '优化阶段键',
   optimization_stage_label: '优化阶段',
   optimization_issue_count: '优化问题数',
-  optimization_dimensions: '当前维度'
+  optimization_dimensions: '当前维度',
+  optimization_strategy: '优化策略',
+  optimization_strategy_phase: '策略阶段',
+  optimization_aggregate_issue_count: '聚合问题数',
+  optimization_retry_reason: '重试原因',
+  repair_attempt_count: '局部修复尝试数',
+  unresolved_consistency_issues: '未解决一致性问题数',
+  auto_fix_accepted: '自动局部修复已采纳',
+  repair_attempts: '修复尝试记录',
+  full_chapter_fallback_deferred: '整章兜底已延后',
+  stagewide_requested: '请求整章候选',
+  stagewide_allowed: '允许整章候选',
+  stagewide_deferred_count: '延后整章候选数',
+  manual_stagewide_confirmation_required: '整章候选需人工确认',
+  manual_patch_suggestions: '局部补丁建议',
+  patch_suggestions: '局部补丁建议',
+  execution_requirement: '执行要求',
+  event_density_passed: '事件密度达标',
+  long_chapter_density_passed: '长章密度达标',
+  state_change_interval_passed: '状态变化间隔达标',
+  progression_unit_count: '推进单元数',
+  event_density_per_1000: '每千字推进密度',
+  scene_structure_rate: '场景结构兑现率',
+  structure_passed_scene_count: '结构通过场景数',
+  resolved: '回收伏笔数',
+  reinforced: '强化伏笔数',
+  unresolved_due_ids: '逾期未回收伏笔',
+  character_states_updated: '更新角色状态数',
+  timeline_events_added: '新增时间线事件数',
+  causal_chains_added: '新增因果链数',
+  dynamic_characters_created: '动态角色入池数',
+  dynamic_character_names: '动态入池角色',
+  selected_version_id: '确认版本ID',
+  memory_success: '记忆层成功',
+  foreshadowing_success: '伏笔闭环成功',
+  ledger_sync_success: '账本同步成功'
 }
 
 const formatEventMetadata = (metadata: unknown) => {
@@ -463,8 +691,10 @@ const formatEventMetadata = (metadata: unknown) => {
       const renderedValue = typeof value === 'boolean'
         ? (value ? '是' : '否')
         : Array.isArray(value)
-          ? value.join('、')
-          : String(value)
+          ? value.map((item) => typeof item === 'object' ? JSON.stringify(item) : String(item)).join('、')
+          : typeof value === 'object'
+            ? JSON.stringify(value)
+            : String(value)
       return `- ${label}：${renderedValue}`
     })
   return entries.join('\n')
@@ -518,7 +748,7 @@ onUnmounted(() => {
 }
 
 .cg-log-item {
-  border-radius: 16px;
+  border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(248, 250, 252, 0.9);
   padding: 12px 14px;
@@ -571,6 +801,62 @@ onUnmounted(() => {
   line-height: 1.6;
 }
 
+.cg-log-item__notice {
+  margin-top: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(14, 165, 233, 0.18);
+  background: rgba(240, 249, 255, 0.9);
+  color: #075985;
+  font-size: 0.86rem;
+  line-height: 1.6;
+  padding: 8px 10px;
+}
+
+.cg-log-item__patches {
+  margin-top: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: #ffffff;
+  padding: 10px 12px;
+}
+
+.cg-log-item__patch-title {
+  margin: 0 0 8px;
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.cg-log-item__patches ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cg-log-item__patches li {
+  display: grid;
+  gap: 3px;
+  color: #0f172a;
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.cg-log-item__patches strong {
+  font-weight: 800;
+}
+
+.cg-log-item__patches small {
+  color: #475569;
+}
+
+.cg-log-item__patch-scope {
+  color: #2563eb;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
 .cg-log-item__meta {
   margin-top: 8px;
 }
@@ -585,7 +871,7 @@ onUnmounted(() => {
 .cg-log-item__meta pre {
   margin: 8px 0 0;
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: 8px;
   background: rgba(15, 23, 42, 0.04);
   color: #334155;
   font-size: 0.78rem;
@@ -596,7 +882,7 @@ onUnmounted(() => {
 
 .cg-hero,
 .cg-card {
-  border-radius: 24px;
+  border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 12px 40px -28px rgba(15, 23, 42, 0.24);
@@ -720,7 +1006,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
-  border-radius: 20px;
+  border-radius: 8px;
   background: rgba(248, 250, 252, 0.92);
 }
 
@@ -730,7 +1016,7 @@ onUnmounted(() => {
   justify-content: center;
   width: 46px;
   height: 46px;
-  border-radius: 16px;
+  border-radius: 8px;
 }
 
 .cg-badge__icon--active {
@@ -776,6 +1062,101 @@ onUnmounted(() => {
   color: #0f172a;
 }
 
+.cg-card__subtitle {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.cg-card--logs {
+  grid-column: 1 / -1;
+}
+
+.cg-card--preview {
+  grid-column: 1 / -1;
+}
+
+.cg-live-preview {
+  margin: 12px 0 0;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 8px;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  background: #f8fafc;
+  color: #0f172a;
+  padding: 14px;
+  font-size: 0.92rem;
+  line-height: 1.78;
+}
+
+.cg-log-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 14px;
+}
+
+.cg-log-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(248, 250, 252, 0.92);
+  color: #475569;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.cg-log-tab.is-active {
+  border-color: rgba(37, 99, 235, 0.28);
+  background: rgba(219, 234, 254, 0.9);
+  color: #1d4ed8;
+}
+
+.cg-log-item__kind {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.cg-log-item__title {
+  margin: 0 0 4px;
+  color: #0f172a;
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.cg-log-item__preview {
+  margin: 10px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 8px;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  background: rgba(239, 246, 255, 0.82);
+  color: #1e293b;
+  padding: 12px;
+  font-size: 0.88rem;
+  line-height: 1.7;
+}
+
+.cg-log-empty {
+  margin: 10px 0 0;
+  color: #64748b;
+  font-size: 0.86rem;
+}
+
 .cg-message {
   margin-top: 12px;
   display: grid;
@@ -786,7 +1167,7 @@ onUnmounted(() => {
 
 .cg-error {
   padding: 12px 14px;
-  border-radius: 16px;
+  border-radius: 8px;
   background: rgba(254, 226, 226, 0.82);
   color: #991b1b;
 }
@@ -794,7 +1175,7 @@ onUnmounted(() => {
 .cg-diagnostics {
   margin-top: 10px;
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: 8px;
   background: rgba(248, 250, 252, 0.96);
   border: 1px solid rgba(148, 163, 184, 0.24);
 }
@@ -816,7 +1197,7 @@ onUnmounted(() => {
 
 .cg-stuck {
   padding: 12px 14px;
-  border-radius: 16px;
+  border-radius: 8px;
   background: rgba(255, 245, 157, 0.46);
   border: 1px solid rgba(14, 165, 233, 0.25);
   color: #1d4ed8;
@@ -833,7 +1214,7 @@ onUnmounted(() => {
 .cg-critique-panel {
   margin-top: 12px;
   padding: 12px 14px;
-  border-radius: 16px;
+  border-radius: 8px;
   background: rgba(237, 246, 255, 0.95);
   border: 1px solid rgba(96, 165, 250, 0.2);
 }
@@ -889,10 +1270,11 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   min-height: 40px;
   padding: 0 14px;
   border: 1px solid rgba(37, 99, 235, 0.2);
-  border-radius: 999px;
+  border-radius: 8px;
   background: rgba(37, 99, 235, 0.08);
   color: #1d4ed8;
   font-size: 0.86rem;
@@ -929,6 +1311,12 @@ onUnmounted(() => {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;
+}
+
+.cg-action-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
 }
 
 @media (max-width: 900px) {

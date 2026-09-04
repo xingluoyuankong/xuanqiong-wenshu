@@ -512,6 +512,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+const readPositiveInt = (value: unknown): number | null => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null
+}
+
 const optionalText = (value: unknown): string => {
   if (typeof value === 'string') {
     return value.trim()
@@ -691,11 +696,47 @@ const chapterOutline = computed<ChapterItem[]>(() => {
   }))
 })
 
+const chapterOutlineExpectedCount = computed(() => {
+  if (!props.blueprint) return 0
+  const root = props.blueprint as Record<string, unknown>
+  const world = isRecord(props.blueprint.world_setting) ? props.blueprint.world_setting : {}
+  const systemBlueprint = isRecord(world.system_blueprint) ? world.system_blueprint : {}
+  const candidates = [
+    isRecord(root.length_contract) ? root.length_contract : null,
+    isRecord(world.length_contract) ? world.length_contract : null,
+    isRecord(systemBlueprint.length_contract) ? systemBlueprint.length_contract : null,
+  ].filter(isRecord)
+
+  for (const candidate of candidates) {
+    const seedCount = readPositiveInt(candidate.chapter_outline_seed_count)
+    const targetCount = readPositiveInt(candidate.target_chapter_count)
+    if (seedCount && targetCount) return Math.min(seedCount, targetCount)
+    if (seedCount) return seedCount
+    if (targetCount && targetCount <= 60) return targetCount
+  }
+
+  const inferredTotal = novelOutline.value.reduce((maxChapter, stage) => {
+    const numbers = Array.from(stage.expectedChapterRange.matchAll(/\d+/g)).map((match) => Number(match[0]))
+    const stageMax = numbers.length ? Math.max(...numbers.filter((item) => Number.isFinite(item))) : 0
+    return Math.max(maxChapter, stageMax)
+  }, 0)
+  if (inferredTotal > 0) {
+    if (inferredTotal <= 60) return inferredTotal
+    if (inferredTotal <= 120) return 60
+    if (inferredTotal <= 300) return 80
+    if (inferredTotal <= 600) return 100
+    return 120
+  }
+
+  return chapterOutline.value.length
+})
+
 const hasNovelOutline = computed(() => novelOutline.value.length > 0)
 const hasCompleteChapterOutline = computed(() => {
-  if (chapterOutline.value.length < 12) return false
+  const expectedCount = chapterOutlineExpectedCount.value
+  if (expectedCount <= 0 || chapterOutline.value.length < expectedCount) return false
   const sortedNumbers = chapterOutline.value.map((chapter) => chapter.number).sort((left, right) => left - right)
-  return sortedNumbers.slice(0, 12).every((chapterNumber, index) => chapterNumber === index + 1)
+  return sortedNumbers.slice(0, expectedCount).every((chapterNumber, index) => chapterNumber === index + 1)
 })
 const hasChapterOutline = computed(() => chapterOutline.value.length > 0)
 const primaryActionLabel = computed(() => {
@@ -822,7 +863,9 @@ const overviewStats = computed(() => [
   {
     label: hasChapterOutline.value ? '章节数' : '总纲段数',
     value: String(hasChapterOutline.value ? chapterOutline.value.length : novelOutline.value.length),
-    hint: hasChapterOutline.value ? '后续会按这个结构开写' : '下一步将基于这些阶段拆成章节',
+    hint: hasChapterOutline.value && chapterOutlineExpectedCount.value
+      ? `首批目标 ${chapterOutlineExpectedCount.value} 章，后续可继续批量扩展`
+      : '下一步将基于这些阶段拆成章节',
   },
   {
     label: '角色数',

@@ -95,7 +95,7 @@ describe('BlueprintDisplay', () => {
     expect(wrapper.emitted('regenerate')).toBeTruthy()
   })
 
-  it('章节大纲未满十二章时仍提示继续生成章节大纲', () => {
+  it('章节大纲未达到总纲推断批次时仍提示继续生成章节大纲', () => {
     const wrapper = mount(BlueprintDisplay, {
       props: {
         blueprint: buildBlueprint({
@@ -106,6 +106,33 @@ describe('BlueprintDisplay', () => {
 
     expect(wrapper.text()).toContain('基于小说总大纲生成章节大纲')
     expect(wrapper.text()).not.toContain('确认蓝图并进入开写')
+  })
+
+  it('按蓝图长度契约判断章节大纲首批完成，不再固定十二章', () => {
+    const outline = Array.from({ length: 24 }, (_, index) => ({
+      chapter_number: index + 1,
+      title: `第${index + 1}章`,
+      summary: '摘要',
+    }))
+    const wrapper = mount(BlueprintDisplay, {
+      props: {
+        blueprint: buildBlueprint({
+          world_setting: {
+            core_rules: '海潮会周期性改写航路规则。',
+            system_blueprint: {
+              length_contract: {
+                target_chapter_count: 80,
+                chapter_outline_seed_count: 24,
+              },
+            },
+          },
+          chapter_outline: outline,
+        }),
+      },
+    })
+
+    expect(wrapper.text()).toContain('确认蓝图并进入开写')
+    expect(wrapper.text()).toContain('首批目标 24 章')
   })
 
   it('展示世界系统卡片与阶段扩展字段', () => {

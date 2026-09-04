@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from .llm_service import LLMService
+from .generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text
 from ..models.project_memory import ProjectMemory
 from ..models.user_style_library import UserStyleLibrary
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
@@ -291,19 +292,25 @@ class StyleRAGService:
             )
 
             try:
-                response = await self.llm_service.generate(
-                    prompt=prompt,
+                result = await call_generation_json(
+                    llm_service=self.llm_service,
+                    system_prompt="你是小说文风分析助手，请忽略情节事实，只输出 JSON 风格特征。",
+                    conversation_history=[{"role": "user", "content": prompt}],
                     user_id=user_id,
-                    max_tokens=2000,
-                    temperature=0.3
+                    timeout=90.0,
+                    temperature=0.3,
+                    policy=GenerationCallPolicy(
+                        stage_label="文风RAG-章节文风提取",
+                        progress_stage="style_extract_chapters",
+                        retry_attempts=2,
+                        max_tokens=2000,
+                        json_repair_attempts=1,
+                    ),
                 )
 
-                if response:
-                    style_data = self._parse_json_response(response)
-                    if style_data:
-                        style_feature = StyleFeature(style_data)
-                        await self._save_style_feature(project_id, style_feature)
-                        return style_feature
+                style_feature = StyleFeature(result.data)
+                await self._save_style_feature(project_id, style_feature)
+                return style_feature
 
             except Exception as e:
                 logger.error(f"风格提取失败: {e}")
@@ -348,14 +355,23 @@ class StyleRAGService:
             )
 
             try:
-                response = await self.llm_service.generate(
-                    prompt=prompt,
+                result = await call_generation_text(
+                    llm_service=self.llm_service,
+                    system_prompt="你是文风控制续写助手。保持既有事实与连续性，只输出续写正文。",
+                    conversation_history=[{"role": "user", "content": prompt}],
                     user_id=user_id,
-                    max_tokens=max_tokens,
-                    temperature=0.7
+                    timeout=120.0,
+                    temperature=0.7,
+                    policy=GenerationCallPolicy(
+                        stage_label="文风RAG-风格续写",
+                        progress_stage="style_generate",
+                        retry_attempts=2,
+                        response_format=None,
+                        max_tokens=max_tokens,
+                    ),
                 )
 
-                cleaned = remove_think_tags(response) if response else ""
+                cleaned = remove_think_tags(result.text) if result.text else ""
                 return cleaned.strip() if cleaned else ""
 
             except Exception as e:
@@ -650,13 +666,22 @@ class StyleRAGService:
                 raise ValueError("参考文本内容不足，无法提取文风")
 
             prompt = STYLE_EXTRACTION_PROMPT.format(text_content=combined_text[:12000])
-            response = await self.llm_service.generate(
-                prompt=prompt,
+            result = await call_generation_json(
+                llm_service=self.llm_service,
+                system_prompt="你是小说文风分析助手，请忽略情节事实，只输出 JSON 风格特征。",
+                conversation_history=[{"role": "user", "content": prompt}],
                 user_id=user_id,
-                max_tokens=2000,
+                timeout=120.0,
                 temperature=0.3,
+                policy=GenerationCallPolicy(
+                    stage_label="文风RAG-外部文风画像",
+                    progress_stage="style_profile_extract",
+                    retry_attempts=2,
+                    max_tokens=2000,
+                    json_repair_attempts=1,
+                ),
             )
-            style_data = self._parse_json_response(response or "")
+            style_data = result.data
             if not style_data:
                 raise ValueError("外部参考文风提取失败")
 

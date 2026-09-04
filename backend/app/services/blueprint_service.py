@@ -24,8 +24,8 @@ from ..models.chapter_blueprint import (
     ChapterFunction
 )
 from ..models.novel import ChapterOutline, NovelProject
+from .generation_call_service import GenerationCallPolicy, GenerationJSONDecodeError, call_generation_json, call_generation_text, parse_llm_json_value
 from .llm_service import LLMService
-from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
 
 logger = logging.getLogger(__name__)
 
@@ -272,22 +272,32 @@ class BlueprintService:
             )
 
             try:
-                response = await self.llm_service.generate(
-                    prompt=prompt,
+                json_result = await call_generation_json(
+                    llm_service=self.llm_service,
+                    system_prompt="你是一位章节蓝图编辑。请只输出一个合法 JSON 对象。",
+                    conversation_history=[{"role": "user", "content": prompt}],
+                    temperature=0.5,
                     user_id=user_id,
-                    max_tokens=1000,
-                    temperature=0.5
+                    timeout=90.0,
+                    policy=GenerationCallPolicy(
+                        stage_label="单章蓝图生成",
+                        progress_stage="blueprint_chapter_plan",
+                        retry_attempts=2,
+                        response_format="json_object",
+                        max_tokens=1200,
+                        retry_same_model_once=True,
+                        json_repair_attempts=1,
+                    ),
                 )
 
-                if response:
-                    data = self._parse_json_response(response)
-                    if data:
-                        # 创建或更新蓝图
-                        blueprint = self.get_blueprint(project_id, chapter_number)
-                        if blueprint:
-                            return self.update_blueprint(blueprint, **data)
-                        else:
-                            return self.create_blueprint(project_id, chapter_number, **data)
+                data = json_result.data
+                if data:
+                    # 创建或更新蓝图
+                    blueprint = self.get_blueprint(project_id, chapter_number)
+                    if blueprint:
+                        return self.update_blueprint(blueprint, **data)
+                    else:
+                        return self.create_blueprint(project_id, chapter_number, **data)
 
             except Exception as e:
                 logger.error(f"生成章节蓝图失败: {e}")
@@ -335,15 +345,25 @@ class BlueprintService:
             )
 
             try:
-                response = await self.llm_service.generate(
-                    prompt=prompt,
+                text_result = await call_generation_text(
+                    llm_service=self.llm_service,
+                    system_prompt="你是一位长篇小说蓝图编辑。请只输出 JSON 数组，不要解释。",
+                    conversation_history=[{"role": "user", "content": prompt}],
+                    temperature=0.5,
                     user_id=user_id,
-                    max_tokens=8000,
-                    temperature=0.5
+                    timeout=240.0,
+                    policy=GenerationCallPolicy(
+                        stage_label="批量章节蓝图生成",
+                        progress_stage="blueprint_chapter_plan",
+                        retry_attempts=2,
+                        response_format=None,
+                        max_tokens=8000,
+                        retry_same_model_once=True,
+                    ),
                 )
 
-                if response:
-                    data_list = self._parse_json_response(response)
+                if text_result.text:
+                    data_list = self._parse_json_response(text_result.text)
                     if isinstance(data_list, list):
                         blueprints = []
                         for data in data_list:
@@ -507,15 +527,9 @@ class BlueprintService:
     def _parse_json_response(self, response: str) -> Any:
         """解析JSON响应"""
         try:
-            content = sanitize_json_like_text(
-                unwrap_markdown_json(remove_think_tags(response or ""))
-            )
-            json_start = content.find("{")
-            json_end = content.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                return json.loads(content[json_start:json_end])
-            return json.loads(content)
-        except json.JSONDecodeError as e:
+            data, _ = parse_llm_json_value(response or "")
+            return data
+        except (GenerationJSONDecodeError, json.JSONDecodeError) as e:
             logger.error(f"JSON解析失败: {e}")
             return None
     

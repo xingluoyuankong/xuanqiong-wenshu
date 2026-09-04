@@ -12,7 +12,7 @@ from ...schemas.user import UserInDB
 from ...services.novel_service import NovelService
 from ...services.writing_skills_service import WritingSkillsService
 
-router = APIRouter(tags=["writing-skills"])
+router = APIRouter(prefix="/api/writing-skills", tags=["writing-skills"])
 
 
 class SkillItemResponse(BaseModel):
