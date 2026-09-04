@@ -3,7 +3,7 @@
 import logging
 import re
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -587,7 +587,7 @@ class ForeshadowingService:
             raise ValueError(f"提醒不存在: {reminder_id}")
         
         reminder.status = "dismissed"
-        reminder.dismissed_at = datetime.utcnow()
+        reminder.dismissed_at = datetime.now(timezone.utc)
         reminder.dismissed_reason = reason
         
         await self.session.flush()
@@ -674,7 +674,7 @@ class ForeshadowingService:
         analysis.pattern_analysis = type_distribution
         analysis.overall_quality_score = overall_quality_score
         analysis.recommendations = recommendations
-        analysis.analyzed_at = datetime.utcnow()
+        analysis.analyzed_at = datetime.now(timezone.utc)
         
         await self.session.flush()
         logger.info(f"分析伏笔: project={project_id}, total={total}, resolved={resolved_count}")

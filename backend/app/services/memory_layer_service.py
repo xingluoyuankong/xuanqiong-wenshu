@@ -6,7 +6,7 @@
 from typing import Optional, List, Dict, Any
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc, func
@@ -967,7 +967,7 @@ class MemoryLayerService:
         3. 自动递增版本号
         4. 创建快照以支持回溯
         """
-        from datetime import datetime
+        from datetime import datetime, timezone
         from ..models.project_memory import ProjectMemory, ChapterSnapshot
 
         # 1. 获取当前记忆
@@ -992,7 +992,7 @@ class MemoryLayerService:
             global_summary_snapshot=memory.global_summary,
             plot_arcs_snapshot=memory.plot_arcs,
             chapter_summary=new_global_summary,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         self.db.add(snapshot)
 
@@ -1057,7 +1057,7 @@ class MemoryLayerService:
         # 7. 更新元数据
         memory.last_updated_chapter = chapter_number
         memory.version = new_version
-        memory.updated_at = datetime.utcnow()
+        memory.updated_at = datetime.now(timezone.utc)
 
         await self.db.commit()
         await self.db.refresh(memory)
@@ -1222,14 +1222,14 @@ class MemoryLayerService:
         )
         memory = mem_result.scalar_one_or_none()
 
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         if memory:
             memory.global_summary = target_snapshot.global_summary_snapshot
             memory.plot_arcs = target_snapshot.plot_arcs_snapshot
             memory.last_updated_chapter = target_snapshot.chapter_number
             memory.version = target_version
-            memory.updated_at = datetime.utcnow()
+            memory.updated_at = datetime.now(timezone.utc)
 
             await self.db.commit()
             await self.db.refresh(memory)

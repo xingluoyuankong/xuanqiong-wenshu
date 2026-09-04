@@ -1,7 +1,7 @@
 # Token 预算管理服务层
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy import select, func
@@ -288,7 +288,7 @@ class TokenBudgetService:
 
         if alert:
             alert.is_resolved = True
-            alert.resolved_at = datetime.utcnow()
+            alert.resolved_at = datetime.now(timezone.utc)
             await self.db.commit()
             return True
         return False

@@ -1,5 +1,5 @@
 # AIMETA P=安全模块_JWT令牌和密码处理|R=JWT生成验证_密码哈希|NR=不含用户管理|E=create_token_verify_password|X=internal|A=安全函数|D=jose,passlib|S=none|RD=./README.ai
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, status
@@ -32,7 +32,7 @@ def create_access_token(
     if expires_delta is None:
         expires_delta = timedelta(minutes=settings.access_token_expire_minutes)
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     expire = now + expires_delta
 
     to_encode: Dict[str, Any] = {"sub": subject, "iat": now, "exp": expire}

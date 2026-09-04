@@ -401,9 +401,9 @@ class OutlineEvolutionService:
         hours: int = 24,
     ) -> int:
         """清理过期的演进选项"""
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
-        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
         result = await self.db.execute(
             update(OutlineAlternative)
