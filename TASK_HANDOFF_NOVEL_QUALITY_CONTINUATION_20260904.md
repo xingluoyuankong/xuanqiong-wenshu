@@ -2881,3 +2881,339 @@ d1b29af feat: close collaborative project access gaps
 当前批次：权限残留第二批 + 完整后端/前端/构建/smoke 门禁已通过
 下一优先：逐项审查 agent.py 历史投影链与前端成员管理浏览器级缺口；确认后再进入性能/分页与发布门禁
 ```
+## 2026-09-04 接续回写：当前工作树完整质量门禁更新
+
+### A. 后端全量回归
+
+在修复 `agent_runtime.py` readable 投影方法结构、对齐 Agent 成员权限旧断言、修复 Writer 后台身份与 legacy outline fallback 后，当前后端全量回归重新执行完成：
+
+```text
+Backend pytest：1694 passed in 730.05s
+```
+
+相关收口专项：
+
+```text
+Agent Runtime / project-member：51 passed
+Agent tool adapters：26 passed
+Writer 成员读/流/写入/控制/HTTP：71 passed
+Writer worker identity：6 passed
+legacy outline fallback：4 passed
+TaskRuntime member routes：2 passed
+TaskRuntime route contract：4 passed
+```
+
+### B. 前端全量门禁
+
+```text
+npm run type-check：通过
+npm run test:run：80 files / 496 tests passed in 85.19s
+npm run build-only：成功，4918 modules transformed，16.93s
+```
+
+仅保留既有 P2 依赖数据提示：
+
+```text
+baseline-browser-mapping data over two months old
+caniuse-lite data 11 months old
+```
+
+### C. 运行时 smoke
+
+当前运行服务：
+
+```text
+backend 127.0.0.1:8013
+frontend 127.0.0.1:5174
+```
+
+执行：
+
+```powershell
+.\verify.ps1 -Suite smoke
+```
+
+结果：
+
+```text
+后端健康检查：PASS
+前端首页：PASS
+前端代理健康检查：PASS
+OpenAPI 路由检查：259 项，55 通过、204 跳过、0 失败
+LLM 设置检查：PASS
+验证套件 smoke：PASS
+```
+
+本次 smoke 使用当前已运行进程，尚未重新启动进程验证最新代码装载；该项仍保留为下一步运行时验收。
+
+### D. 当前权威状态
+
+```text
+后端全量：通过
+前端类型/单测/构建：通过
+静态 diff：通过
+隔离 JWT/HTTP Writer：通过
+Smoke：通过
+待完成：停止并重启 backend/frontend 后再次 health、OpenAPI、Writer HTTP/SSE 验收
+```
+
+## 2026-09-04 最新回归回写：全量门禁复核
+
+### 实测结果
+
+当前 HEAD `d1b29af` 加上工作树已有的 `task_runtime.py` 兼容语义补丁，完整后端回归结果：
+
+```text
+1694 passed in 667.39s (0:11:07)
+```
+
+前端门禁：
+
+```text
+npm run type-check → 通过
+npm run test:run → 80 files / 496 tests passed in 93.62s
+npm run build-only → 成功，4918 modules transformed，19.10s
+```
+
+后端关键模块 `py_compile` 与 `git diff --check` 均通过。
+
+成员聚合专项此前结果保持：
+
+```text
+159 passed in 66.06s
+Agent/TaskRuntime 组合：40 passed in 16.71s
+```
+
+### 工作树边界
+
+当前未提交业务差异仅为：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\task_runtime.py
+```
+
+该差异保留项目任务无关系用户的历史 404 资源隐藏语义，同时让可见只读成员继续得到明确写权限拒绝；完整 1694 项回归已在该状态下通过。未跟踪的导入/上传二进制运行工件继续保留，未执行批量清理。
+
+### 下一执行队列
+
+1. 先审查 `agent.py` 剩余历史投影链：audit、context snapshot、plan revision、conversation summary、provider usage。
+2. 补真实 JWT/HTTP 的 Agent 只读矩阵与跨项目隔离；保持 projectless 资源创建者私有。
+3. 对 `task_runtime.py` 现有未提交补丁建立独立提交边界与回滚说明，不混入后续无关修改。
+4. 完成上述链路后，再做分页性能、移动端长历史和发布前 smoke 复核。
+
+## 2026-09-04 接续回写：重启进程运行时验收完成
+
+### A. 正式重启
+
+执行：
+
+```powershell
+.\start.ps1
+```
+
+启动脚本完成旧仓库进程清理、SQLite 模式识别、backend/frontend 重启与等待检查：
+
+```text
+backend 127.0.0.1:8013 → READY
+frontend 127.0.0.1:5174 → READY
+frontend proxy /api/health → READY
+```
+
+### B. 重启后 smoke
+
+执行：
+
+```powershell
+.\verify.ps1 -Suite smoke
+```
+
+结果：
+
+```text
+后端健康检查：PASS
+前端首页：PASS
+前端代理健康检查：PASS
+OpenAPI 路由检查：259 项，55 通过、204 跳过、0 失败
+LLM 设置检查：PASS
+验证套件 smoke：PASS
+```
+
+### C. 重启后隔离 HTTP/JWT 回归
+
+执行：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q `
+  app/api/routers/test_writer_member_http_acceptance.py `
+  app/api/routers/test_task_runtime_member_routes.py
+```
+
+结果：
+
+```text
+4 passed in 16.14s
+```
+
+该集合再次确认：
+
+- Owner / Editor / Viewer / Admin 项目读取权限；
+- Owner 创建的 Writer Runtime 状态与 SSE；
+- `project_id + chapter_id + run_id` 绑定；
+- after-event cursor 回放；
+- 非成员 403；
+- TaskRuntime 成员列表、详情、事件、stream、创建与控制；
+- projectless 任务创建者隔离；
+- Bearer 身份与项目成员策略一致。
+
+### D. 当前最新质量基线
+
+```text
+Backend pytest：1694 passed
+Frontend type-check：通过
+Frontend Vitest：80 files / 496 tests passed
+Frontend build-only：4918 modules transformed，成功
+Smoke：5/5 阶段通过
+重启后 HTTP/JWT Writer + TaskRuntime：4 passed
+Writer/Agent 定向回归：全部通过
+```
+
+仍保留的非阻断项：
+
+```text
+baseline-browser-mapping / caniuse-lite 数据陈旧告警
+```
+
+### E. 剩余工作
+
+1. 当前分支仍需持续保留未提交业务修改与审计工件；不执行批量清理或历史重写。
+2. 真实 Provider 参与的长耗时 `generate/cancel/resume` 外部 HTTP 链仍需确定性 Provider 环境下单独验收；当前隔离 HTTP 测试已覆盖路由、JWT、成员、状态、SSE 与控制合同。
+3. UI-005 工具注册/策略统一和 UI-006 长历史虚拟化仍为后续功能批次。
+4. 完成所有后续批次后再次替换本文全量质量基线。
+
+当前总任务保持：
+
+```text
+active
+```
+
+## 2026-09-04 Agent 历史投影第三批回写
+
+### A. 生产收口
+
+已将 Agent 只读历史投影与项目成员权限对齐：
+
+```text
+backend/app/api/routers/agent.py
+backend/app/services/agent_runtime.py
+backend/app/services/agent_plan_service.py
+```
+
+当前已覆盖：
+
+- Run 事件、Activity、步骤、审批、Artifact 列表使用 readable Run；
+- Run commands 使用 readable Run 投影；
+- Plan、Provider provenance、Context snapshot、Plan revision、Conversation summaries 先验证 readable Run，再按 Run 原始 owner 读取不可变事实；
+- projectless Run/Session 仍保持创建者私有，其他用户返回 404 隐藏语义；
+- 原有写入、审批决定、执行、claim、lease 和 Artifact 创建仍保留 owner/actor 写边界。
+
+### B. 回归证据
+
+Agent 历史投影与既有上下文/会话测试：
+
+```text
+53 passed in 32.01s
+```
+
+成员聚合门禁此前结果：
+
+```text
+159 passed in 66.06s
+```
+
+后端完整门禁基线：
+
+```text
+1694 passed in 667.39s (0:11:07)
+```
+
+前端完整门禁基线：
+
+```text
+80 files / 496 tests passed
+npm run type-check → 通过
+npm run build-only → 成功，4918 modules transformed
+```
+
+### C. 工作树与下一步
+
+本批 Agent 投影和前端成员面板测试当前仍处于工作树未提交状态；不覆盖既有改动，不清理运行二进制工件。下一步：
+
+1. 重新运行受影响 Agent/前端定向门禁，确认并发自动化写入后状态稳定；
+2. 运行真实 JWT/HTTP Agent readable projection 验收；
+3. 继续审查 audit/provider usage/context/plan/conversation 的跨项目过滤和分页边界；
+4. 稳定后再替换完整后端、前端、构建与 smoke 权威基线。
+
+### 最后一次增量复核
+
+Agent 历史投影与上下文/会话服务：
+
+```text
+53 passed in 32.01s
+```
+
+前端成员面板与 Agent Workspace 增量回归：
+
+```text
+2 files / 36 tests passed in 6.96s
+```
+
+真实服务 smoke：
+
+```text
+后端 health 200；前端首页 200；前端 proxy health 200；OpenAPI 259 项检查 0 失败；LLM settings smoke 通过。
+```
+
+完整后端基线仍为：
+
+```text
+1694 passed in 667.39s (0:11:07)
+```
+
+
+## 2026-09-04 接续回写：Agent readable 历史投影与前端成员矩阵收口
+
+### A. 本批实现
+
+- `agent.py` 的 plan、Provider provenance、ContextSnapshot、PlanRevision、ConversationSummary 与 Run commands 读取先通过 `get_readable_run()`；
+- 读取事实继续按 Run 原始 `user_id`、`session_id` 与 `run_id` 查询，成员身份只参与项目可见性裁决，不写入创建者归属；
+- `AgentRuntimeService.list_run_commands_readable()` 与 `AgentPlanService.get_latest_revision_for_run_readable()` 提供明确的 readable 查询入口；
+- 项目成员仍可读 Owner Run 的公开计划、快照、修订、摘要、命令历史；projectless Run 仍只允许创建者读取；
+- 前端 `ProjectMemberPanel` 与 `AgentWorkspace` 测试补齐 owner/editor/admin/viewer 的 `can_manage` 矩阵、403/404/通用错误态、刷新恢复、新增/改角色/移除流程。
+
+### B. 验证
+
+```text
+Agent readable projection + TaskRuntime member route：32 passed
+Agent legacy / execution facts / runtime 相邻回归：59 passed
+前端 type-check：通过
+前端 Vitest：80 files / 496 tests passed
+前端 build-only：4918 modules transformed，成功
+git diff --check：通过
+```
+
+### C. 当前边界
+
+- 本批 Agent 读取链不扩大审批决定、执行批准、Run pause/resume/cancel 或 worker lease 的成员写权限；
+- 真实隔离 HTTP/JWT Writer/TaskRuntime 脚本仍为 31 checks 通过；Agent 历史投影已有内存数据库合同，真实 TCP HTTP 只读矩阵列入下一验收；
+- 修改后的 Agent 读取代码需要在当前提交上重新跑 backend 全量，替换先前 `1694 passed` 基线；
+- 未跟踪 `.bin` 运行工件继续保留，不加入提交，不做批量删除。
+
+### D. 下一执行队列
+
+1. 在本批提交上重跑 backend 全量门禁，确认 Agent readable 查询没有破坏旧 owner-only 写/控制合同；
+2. 重启 backend/frontend，执行 health、OpenAPI、smoke，并运行隔离 JWT Agent/Writer/TaskRuntime 只读与 SSE 验收；
+3. 继续清点 Agent command/control、Artifact accept、approval decision 与 task worker 控制的 actor/execution-owner 分离；
+4. 进入 UI-005 工具注册策略统一、UI-006 长历史虚拟列表与跨页缓存性能批次。
+
+总任务保持 `active`。

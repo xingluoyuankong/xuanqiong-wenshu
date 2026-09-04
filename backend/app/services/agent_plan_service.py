@@ -126,6 +126,21 @@ class AgentPlanService:
         )
         return (await self.session.execute(statement)).scalar_one_or_none()
 
+    async def get_latest_revision_for_run_readable(
+        self, *, run_id: str, session_id: str
+    ) -> PlanRevision | None:
+        """Return the newest immutable plan fact after Run visibility is authorized."""
+        statement = (
+            select(PlanRevision)
+            .where(
+                PlanRevision.run_id == run_id,
+                PlanRevision.session_id == session_id,
+            )
+            .order_by(PlanRevision.revision_number.desc(), PlanRevision.created_at.desc(), PlanRevision.id.desc())
+            .limit(1)
+        )
+        return (await self.session.execute(statement)).scalar_one_or_none()
+
     async def get_latest_revision(self, *, run_id: str) -> PlanRevision | None:
         """Return the newest immutable revision for Run recovery and replan parentage."""
         return (await self.session.execute(

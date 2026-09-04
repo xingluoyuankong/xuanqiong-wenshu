@@ -653,7 +653,7 @@ async def list_agent_run_commands(
     current_user: UserInDB = Depends(get_current_user),
 ) -> list[AgentRunCommandRead]:
     try:
-        commands = await AgentRuntimeService(session).list_run_commands(
+        commands = await AgentRuntimeService(session).list_run_commands_readable(
             run_id=run_id,
             user_id=current_user.id,
             limit=limit,
@@ -728,12 +728,11 @@ async def get_agent_run_plan(
 ) -> AgentPlan:
     """Read the public structured PlanDraft persisted by agent_execution."""
     try:
-        run = await AgentRuntimeService(session).get_run(run_id, current_user.id)
+        run = await AgentRuntimeService(session).get_readable_run(run_id, current_user.id)
         context = dict(run.context_json or {})
-        revision = await AgentPlanService(session).get_latest_revision_for_run(
+        revision = await AgentPlanService(session).get_latest_revision_for_run_readable(
             run_id=run.id,
             session_id=run.session_id,
-            user_id=current_user.id,
         )
         revision_payload = dict(revision.plan_json or {}) if revision is not None else {}
         if revision is not None:
@@ -806,7 +805,7 @@ async def get_agent_run_provider_provenance(
 ) -> AgentProviderProvenanceRead:
     """Return user-scoped stage provenance without asking clients to infer it from events."""
     try:
-        run = await AgentRuntimeService(session).get_run(run_id, current_user.id)
+        run = await AgentRuntimeService(session).get_readable_run(run_id, current_user.id)
         context = dict(run.context_json or {})
         return AgentProviderProvenanceRead(
             planner_provider_called=(bool(context["planner_provider_called"]) if context.get("planner_provider_called") is not None else None),
@@ -830,9 +829,9 @@ async def get_agent_run_context_snapshot(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> AgentContextSnapshotRead | None:
-    """Return the latest persisted ContextSnapshot for a user-owned Run, or null before P1-A wiring exists."""
+    """Return the latest persisted ContextSnapshot for a readable Run, or null before P1-A wiring exists."""
     try:
-        run = await AgentRuntimeService(session).get_run(run_id, current_user.id)
+        run = await AgentRuntimeService(session).get_readable_run(run_id, current_user.id)
         context = dict(run.context_json or {})
         snapshot_key = str(context.get("relational_context_snapshot_key") or "").strip()
         context_service = AgentContextService(session)
@@ -840,10 +839,10 @@ async def get_agent_run_context_snapshot(
             await context_service.get_run_snapshot(run_id=run.id, snapshot_id=snapshot_key)
             if snapshot_key
             else await context_service.get_latest_snapshot_for_run(
-                run_id=run.id, session_id=run.session_id, user_id=current_user.id
+                run_id=run.id, session_id=run.session_id, user_id=run.user_id
             )
         )
-        if snapshot is not None and (snapshot.session_id != run.session_id or snapshot.user_id != current_user.id):
+        if snapshot is not None and (snapshot.session_id != run.session_id or snapshot.user_id != run.user_id):
             snapshot = None
         return AgentContextSnapshotRead.model_validate(snapshot) if snapshot is not None else None
     except (AgentRuntimeError, SQLAlchemyError) as exc:
@@ -856,11 +855,11 @@ async def get_agent_run_latest_plan_revision(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> AgentPlanRevisionRead | None:
-    """Return the newest persisted PlanRevision for a user-owned Run, or null for legacy/unwired Runs."""
+    """Return the newest persisted PlanRevision for a readable Run, or null for legacy/unwired Runs."""
     try:
-        run = await AgentRuntimeService(session).get_run(run_id, current_user.id)
+        run = await AgentRuntimeService(session).get_readable_run(run_id, current_user.id)
         revision = await AgentPlanService(session).get_latest_revision_for_run(
-            run_id=run.id, session_id=run.session_id, user_id=current_user.id
+            run_id=run.id, session_id=run.session_id, user_id=run.user_id
         )
         return AgentPlanRevisionRead.model_validate(revision) if revision is not None else None
     except (AgentRuntimeError, SQLAlchemyError) as exc:
@@ -874,11 +873,11 @@ async def list_agent_run_conversation_summaries(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> list[AgentConversationSummaryRead]:
-    """List immutable summaries explicitly attributed to a user-owned Run; legacy Runs return an empty list."""
+    """List immutable summaries explicitly attributed to a readable Run; legacy Runs return an empty list."""
     try:
-        run = await AgentRuntimeService(session).get_run(run_id, current_user.id)
+        run = await AgentRuntimeService(session).get_readable_run(run_id, current_user.id)
         summaries = await AgentConversationService(session).list_summaries_for_run(
-            run_id=run.id, session_id=run.session_id, user_id=current_user.id, limit=limit
+            run_id=run.id, session_id=run.session_id, user_id=run.user_id, limit=limit
         )
         return [AgentConversationSummaryRead.model_validate(item) for item in summaries]
     except (AgentRuntimeError, SQLAlchemyError) as exc:

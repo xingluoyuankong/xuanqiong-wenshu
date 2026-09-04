@@ -30,6 +30,9 @@ const {
   getSectionMock,
   getChapterMock,
   listProjectMembersMock,
+  addProjectMemberMock,
+  updateProjectMemberRoleMock,
+  removeProjectMemberMock,
   store,
 } = vi.hoisted(() => ({
   pushMock: vi.fn(),
@@ -58,6 +61,9 @@ const {
   getSectionMock: vi.fn(),
   getChapterMock: vi.fn(),
   listProjectMembersMock: vi.fn(),
+  addProjectMemberMock: vi.fn(),
+  updateProjectMemberRoleMock: vi.fn(),
+  removeProjectMemberMock: vi.fn(),
   store: {
     projects: [{ id: 'p1', title: '星河旧梦', completed_chapters: 2, total_chapters: 8 }],
     loadProjects: vi.fn(),
@@ -74,9 +80,9 @@ vi.mock('@/api/novel', () => ({
 vi.mock('@/api/projectMembers', () => ({
   ProjectMembersAPI: {
     list: listProjectMembersMock,
-    add: vi.fn(),
-    updateRole: vi.fn(),
-    remove: vi.fn(),
+    add: addProjectMemberMock,
+    updateRole: updateProjectMemberRoleMock,
+    remove: removeProjectMemberMock,
   },
 }))
 vi.mock('@/api/agent', () => ({
@@ -164,6 +170,9 @@ describe('AgentWorkspace', () => {
     getSectionMock.mockReset()
     getChapterMock.mockReset()
     listProjectMembersMock.mockReset()
+    addProjectMemberMock.mockReset()
+    updateProjectMemberRoleMock.mockReset()
+    removeProjectMemberMock.mockReset()
     listProjectMembersMock.mockResolvedValue({
       members: [{ id: 'owner-p1', project_id: 'p1', user_id: 1, role: 'owner', created_at: 'now', updated_at: 'now', deleted_at: null }],
       count: 1,
@@ -260,6 +269,98 @@ describe('AgentWorkspace', () => {
     expect(wrapper.find('[data-testid="agent-project-members-section"]').exists()).toBe(true)
     expect(listProjectMembersMock).toHaveBeenCalledWith('p1')
     expect(wrapper.find('[data-testid="project-members-role-1"]').exists()).toBe(true)
+  })
+
+  it.each([
+    ['owner', true],
+    ['editor', true],
+    ['admin', true],
+    ['viewer', false],
+  ] as const)('工作区真实挂载成员面板并呈现 %s 的 can_manage/read-only 矩阵', async (accessRole, canManage) => {
+    Object.assign(routeQuery, { project_id: 'p1' })
+    listSessionsMock.mockResolvedValue([])
+    listProjectMembersMock.mockResolvedValue({
+      members: [
+        { id: 'owner-p1', project_id: 'p1', user_id: 1, role: 'owner', created_at: 'now', updated_at: 'now', deleted_at: null },
+        { id: 'editor-p1', project_id: 'p1', user_id: 2, role: 'editor', created_at: 'now', updated_at: 'now', deleted_at: null },
+      ],
+      count: 2,
+      access_role: accessRole,
+      can_manage: canManage,
+    })
+
+    const wrapper = mount(AgentWorkspace)
+    await flushPromises()
+
+    const panel = wrapper.get('[data-testid="project-member-panel"]')
+    expect(panel.find('[data-testid="project-members-readonly"]').exists()).toBe(!canManage)
+    expect((panel.get('[data-testid="project-members-user-id"]').element as HTMLInputElement).disabled).toBe(!canManage)
+    expect((panel.get('[data-testid="project-members-new-role"]').element as HTMLSelectElement).disabled).toBe(!canManage)
+    await panel.get('[data-testid="project-members-user-id"]').setValue('99')
+    expect((panel.get('[data-testid="project-members-add"]').element as HTMLButtonElement).disabled).toBe(!canManage)
+    expect((panel.get('[data-testid="project-members-role-2"]').element as HTMLSelectElement).disabled).toBe(!canManage)
+    expect((panel.get('[data-testid="project-members-remove-2"]').element as HTMLButtonElement).disabled).toBe(!canManage)
+  })
+
+  it('工作区成员面板支持新增、角色更新、移除，并在服务错误后显示错误态', async () => {
+    Object.assign(routeQuery, { project_id: 'p1' })
+    listSessionsMock.mockResolvedValue([])
+    const owner = { id: 'owner-p1', project_id: 'p1', user_id: 1, role: 'owner' as const, created_at: 'now', updated_at: 'now', deleted_at: null }
+    const editor = { id: 'editor-p1', project_id: 'p1', user_id: 2, role: 'editor' as const, created_at: 'now', updated_at: 'now', deleted_at: null }
+    const viewer = { id: 'viewer-p1', project_id: 'p1', user_id: 3, role: 'viewer' as const, created_at: 'now', updated_at: 'now', deleted_at: null }
+    listProjectMembersMock.mockResolvedValue({ members: [owner, editor], count: 2, access_role: 'owner', can_manage: true })
+    addProjectMemberMock.mockResolvedValue(viewer)
+    updateProjectMemberRoleMock.mockResolvedValue({ ...editor, role: 'viewer' })
+    removeProjectMemberMock.mockResolvedValue(editor)
+
+    const wrapper = mount(AgentWorkspace)
+    await flushPromises()
+    const panel = wrapper.get('[data-testid="project-member-panel"]')
+
+    await panel.get('[data-testid="project-members-user-id"]').setValue('3')
+    await panel.get('[data-testid="project-members-new-role"]').setValue('viewer')
+    await panel.get('[data-testid="project-members-add-form"]').trigger('submit')
+    await flushPromises()
+    expect(panel.find('[data-member-user-id="3"]').exists()).toBe(true)
+
+    await panel.get('[data-testid="project-members-role-2"]').setValue('viewer')
+    await flushPromises()
+    expect(updateProjectMemberRoleMock).toHaveBeenCalledWith('p1', 2, { role: 'viewer' })
+
+    await panel.get('[data-testid="project-members-remove-3"]').trigger('click')
+    await flushPromises()
+    expect(removeProjectMemberMock).toHaveBeenCalledWith('p1', 3)
+    expect(panel.find('[data-member-user-id="3"]').exists()).toBe(false)
+
+    listProjectMembersMock.mockRejectedValueOnce(new Error('成员服务错误（HTTP 404）'))
+    await panel.get('[data-testid="project-members-refresh"]').trigger('click')
+    await flushPromises()
+    expect(panel.get('[data-testid="project-members-error"]').text()).toContain('成员服务错误')
+  })
+
+  it.each([
+    ['403', '成员访问已拒绝（HTTP 403）'],
+    ['404', '项目不存在（HTTP 404）'],
+    ['error', '成员服务暂时不可用'],
+  ] as const)('工作区显示成员加载 %s 状态并可刷新恢复', async (_label, message) => {
+    Object.assign(routeQuery, { project_id: 'p1' })
+    listSessionsMock.mockResolvedValue([])
+    listProjectMembersMock.mockRejectedValueOnce(new Error(message)).mockResolvedValueOnce({
+      members: [{ id: 'owner-p1', project_id: 'p1', user_id: 1, role: 'owner', created_at: 'now', updated_at: 'now', deleted_at: null }],
+      count: 1,
+      access_role: 'owner',
+      can_manage: true,
+    })
+
+    const wrapper = mount(AgentWorkspace)
+    await flushPromises()
+    const panel = wrapper.get('[data-testid="project-member-panel"]')
+    expect(panel.get('[data-testid="project-members-error"]').text()).toContain(message)
+
+    await panel.get('[data-testid="project-members-refresh"]').trigger('click')
+    await flushPromises()
+    expect(panel.find('[data-testid="project-members-error"]').exists()).toBe(false)
+    expect(panel.find('[data-member-user-id="1"]').exists()).toBe(true)
   })
 
   it('按当前 Run 请求 Provider 统计并把失败留在数据面板', async () => {

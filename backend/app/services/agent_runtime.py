@@ -1941,6 +1941,17 @@ class AgentRuntimeService:
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def list_run_commands_readable(self, *, run_id: str, user_id: int, limit: int = 100) -> list[AgentRunCommand]:
+        """List commands for a readable project Run without changing attribution."""
+        run = await self.get_readable_run(run_id, user_id)
+        stmt = (
+            select(AgentRunCommand)
+            .where(AgentRunCommand.run_id == run.id)
+            .order_by(AgentRunCommand.requested_at.asc(), AgentRunCommand.id.asc())
+            .limit(min(max(int(limit), 1), 200))
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
     async def request_run_command(
         self,
         *,
