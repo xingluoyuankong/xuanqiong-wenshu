@@ -1825,6 +1825,18 @@ class NovelService:
         project = await self.ensure_project_owner(project_id, user_id)
         return self._build_chapter_schema(project, chapter_number)
 
+    async def get_chapter_schema_for_member(
+        self,
+        project_id: str,
+        user_id: int,
+        chapter_number: int,
+    ) -> ChapterSchema:
+        """Serialize a chapter after project-member read authorization.
+
+        This explicit member-facing helper avoids the legacy admin-named
+        serializer on collaborative writer routes.
+        """
+        return await self.get_chapter_status_schema(project_id, user_id, chapter_number)
     async def get_chapter_status_schema(
         self,
         project_id: str,

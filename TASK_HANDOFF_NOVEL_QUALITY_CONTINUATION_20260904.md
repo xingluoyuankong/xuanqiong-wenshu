@@ -2201,3 +2201,76 @@ git diff --check：通过
    - 所有 Run 的恢复、取消、读取和 SSE 持续保持 `project_id + chapter_id/chapter_number + run_id + task_type` 精确绑定。
 
 只有在上述真实服务重启与真实 HTTP `generate` / `cancel` / `resume` 执行链验收也形成独立证据后，当前 Writer H-2 才能确认完整端到端执行基线。
+
+## 2026-09-04 当前会话接续复审：历史会话恢复与下一批执行基线
+
+### A. 历史会话定位
+
+已从 Codex 会话记录确认目标历史任务：
+
+```text
+标题：全面优化重构玄穹文枢
+历史会话 ID：01a02410-94af-7002-9585-3532293aa587
+工作区：D:\小说写作\xuanqiong-wenshu
+状态：历史会话未加载/卡住
+```
+
+当前任务不回到历史会话执行；本文件作为当前任务的唯一接续入口，所有后续代码、测试、审查和计划回写均在当前工作区完成。
+
+### B. 当前工作树与已有证据复核
+
+```text
+分支：codex/bohrium-integration-20260831
+最近质量提交：af9b5eb docs: refresh final quality gate baseline
+已有 Writer 成员专项：78 passed
+```
+
+本次重新执行的定向回归集合为：
+
+```text
+app/api/routers/test_writer_member_read_access.py
+app/api/routers/test_writer_member_stream_access.py
+app/api/routers/test_writer_member_write_access.py
+app/api/routers/test_writer_member_generation_control_access.py
+app/api/routers/test_writer_member_finalize_access.py
+app/api/routers/test_writer_member_outline_control_access.py
+app/agent/test_write_executor_member_access.py
+app/services/test_generation_run_rebind.py
+```
+
+实际结果：
+
+```text
+78 passed in 39.67s
+```
+
+`git diff --check` 当前通过。工作区中仍有导入/风格上传产生的未跟踪 `.bin` 运行工件；这些工件保留原状，不加入提交，不做批量清理。
+
+### C. 本次全面审查的确认项
+
+1. Writer 读写入口已普遍使用 `ProjectAccessService`；生成 Pipeline 已移除后台恢复路径上的旧 Owner-only 项目过滤。
+2. H-1 SSE 已覆盖成员读取、持久化终态、`after_event_id`、`Last-Event-ID`、项目/章节/Run/task type 绑定和非成员 403。
+3. H-2 已覆盖成员写入、generation cancel/resume、outline/rewrite-outline 控制、finalize 选择版本并发保护以及旧 outline task type 隔离。
+4. Agent Artifact、候选接受、成员管理 API/前端面板已有专项回归与组件/API 测试。
+5. 当前尚需用真实进程和隔离文件 SQLite 补齐可重复的多用户 HTTP/JWT Writer 执行链；静态检查和本地路由单测不替代该证据。
+6. 仍需收口后台身份字段：`actor_user_id` 表示当前 HTTP 操作者，`execution_owner_id` 表示 Run/lease/retry/终态事件原始执行归属；后台重建用户对象必须保留 `is_admin`。
+7. `edit-fast` 返回路径仍需使用语义明确的项目成员 serializer；legacy outline DB fallback 仍需明确 active/terminal/idle，避免历史记录被误投影为 active。
+
+### D. 当前执行计划（按优先级）
+
+| 优先级 | 批次 | 交付 | 验证 |
+|---|---|---|---|
+| P0 | 真实执行链 | 隔离 SQLite + 真实 JWT/HTTP + 确定性 provider 的 Owner/Editor/Viewer/Admin/Outsider 验收脚本与回归 | 登录、成员权限、generate/cancel/resume/finalize、outline、SSE cursor/replay、终态和跨项目隔离 |
+| P1 | 后台身份 | 修正 outline/generation worker 的身份重建与 execution owner 传递 | 管理员身份、Owner Run 被成员控制、lease/terminal owner 不漂移 |
+| P1 | 状态语义 | 收口 legacy outline fallback 与 active 状态筛选 | active/terminal/idle 反向测试 |
+| P2 | 成员 serializer | 使用 `get_chapter_schema_for_member` 等明确命名路径替换 admin-named helper | Editor 可读、Viewer 只读、非成员 403 |
+| P2 | 完整门禁 | 所有代码批次合并后重跑后端/前端/构建/重启 smoke | 全量结果写回本文 |
+
+### E. 本批状态
+
+```text
+总任务：active
+当前批次：复审已完成，P0/P1 子任务并行执行中
+已启动子智能体：3 个（HTTP 验收、后台身份、权限全面扫描）
+当前接续原则：不创建新 Codex task；子智能体只在当前代码任务的分工范围内工作；任何阻塞由主任务重新分派并继续推进。
+```
