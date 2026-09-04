@@ -14,6 +14,14 @@ class _FakeNovelService:
         return object()
 
 
+class _FakeProjectAccessService:
+    def __init__(self, session):
+        self.session = session
+
+    async def require_project_read(self, project_id, user_id):
+        return object()
+
+
 @pytest.fixture(autouse=True)
 def clear_outline_jobs():
     writer._OUTLINE_JOBS.clear()
@@ -26,6 +34,7 @@ def clear_outline_jobs():
 @pytest.mark.asyncio
 async def test_outline_generation_job_has_start_status_and_cancel(monkeypatch):
     monkeypatch.setattr(writer, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(writer, "ProjectAccessService", _FakeProjectAccessService)
     current_user = UserInDB(id=7, username="tester", email=None, hashed_password="x")
     request = GenerateOutlineRequest(start_chapter=2, num_chapters=4, target_total_chapters=80)
     background_tasks = BackgroundTasks()
@@ -66,6 +75,7 @@ async def test_outline_generation_job_has_start_status_and_cancel(monkeypatch):
 @pytest.mark.asyncio
 async def test_outline_rewrite_job_has_start_status_and_cancel(monkeypatch):
     monkeypatch.setattr(writer, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(writer, "ProjectAccessService", _FakeProjectAccessService)
     current_user = UserInDB(id=7, username="tester", email=None, hashed_password="x")
     request = RewriteChapterOutlineRequest(chapter_number=3, title="旧标题", summary="旧摘要", direction="加强冲突")
     background_tasks = BackgroundTasks()

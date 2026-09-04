@@ -62,6 +62,7 @@ from ...services.chapter_ingest_service import ChapterIngestionService
 from ...services.llm_service import LLMService
 from ...services.novel_service import NovelService, build_chapter_progress_snapshot
 from ...services.prompt_service import PromptService
+from ...services.project_access_service import ProjectAccessService
 from ...services.vector_store_service import VectorStoreService
 from ...services.writer_context_builder import WriterContextBuilder
 from ...services.chapter_guardrails import ChapterGuardrails
@@ -1667,14 +1668,13 @@ async def _persist_outline_job_state(job: Dict[str, Any]) -> None:
     except Exception:
         logger.exception("保存章节大纲任务状态失败：project=%s run_id=%s", job.get("project_id"), job.get("run_id"))
 
-async def _load_active_outline_job_from_db(project_id: str, user_id: int) -> Dict[str, Any] | None:
+async def _load_active_outline_job_from_db(project_id: str) -> Dict[str, Any] | None:
+    """Load legacy outline state by project after the route checked read access."""
     async with AsyncSessionLocal() as session:
         records = await NovelService(session).list_conversations(project_id)
     for record in reversed(records):
         metadata = getattr(record, "metadata", None) or {}
         if not isinstance(metadata, dict) or metadata.get("type") != "outline_generation_job":
-            continue
-        if metadata.get("user_id") not in (None, user_id, str(user_id)):
             continue
         try:
             payload = json.loads(record.content)
@@ -1771,21 +1771,23 @@ async def _load_active_outline_job_from_runtime(
     session: Any,
     *,
     project_id: str,
-    user_id: int,
     task_types: tuple[str, ...],
+    owner_user_id: int | None = None,
 ) -> Dict[str, Any] | None:
-    """查找该项目下仍未完成的持久化大纲任务，避免重启后重复入队。"""
+    """Load a project outline task; writes may retain creator-scoped dedup."""
     if not hasattr(session, "execute"):
         return None
     try:
+        conditions = [
+            TaskRuntime.project_id == project_id,
+            TaskRuntime.task_type.in_(list(task_types)),
+            TaskRuntime.status.in_(list(_OUTLINE_RUNTIME_ACTIVE_STATUSES)),
+        ]
+        if owner_user_id is not None:
+            conditions.append(TaskRuntime.owner_user_id == int(owner_user_id))
         result = await session.execute(
             select(TaskRuntime)
-            .where(
-                TaskRuntime.owner_user_id == int(user_id),
-                TaskRuntime.project_id == project_id,
-                TaskRuntime.task_type.in_(list(task_types)),
-                TaskRuntime.status.in_(list(_OUTLINE_RUNTIME_ACTIVE_STATUSES)),
-            )
+            .where(*conditions)
             .order_by(TaskRuntime.updated_at.desc(), TaskRuntime.created_at.desc())
             .limit(1)
         )
@@ -1797,7 +1799,7 @@ async def _load_active_outline_job_from_runtime(
         return None
     try:
         events = await TaskRuntimeService(session).list_events(
-            task.task_id, limit=500, owner_user_id=int(user_id)
+            task.task_id, limit=500, owner_user_id=owner_user_id
         )
     except Exception:
         events = []
@@ -4856,8 +4858,8 @@ async def start_chapter_outline_rewrite(
         restored = await _load_active_outline_job_from_runtime(
             session,
             project_id=project_id,
-            user_id=int(current_user.id),
             task_types=("chapter_outline_generation", "chapter_outline_rewrite"),
+            owner_user_id=int(current_user.id),
         )
         if restored:
             _OUTLINE_JOBS[str(restored["run_id"])] = dict(restored)
@@ -4958,8 +4960,8 @@ async def start_chapters_outline_generation(
         restored = await _load_active_outline_job_from_runtime(
             session,
             project_id=project_id,
-            user_id=int(current_user.id),
             task_types=("chapter_outline_generation", "chapter_outline_rewrite"),
+            owner_user_id=int(current_user.id),
         )
         if restored:
             _OUTLINE_JOBS[str(restored["run_id"])] = dict(restored)
@@ -5010,8 +5012,7 @@ async def get_chapters_outline_generation_status(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> OutlineGenerationJobResponse:
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_read(project_id, current_user.id)
 
     async with _OUTLINE_JOB_LOCK:
         run_id = _OUTLINE_PROJECT_RUNS.get(project_id)
@@ -5025,18 +5026,20 @@ async def get_chapters_outline_generation_status(
     # 按同一个 run_id 从持久化任务中心重建对外响应。
     if run_id and hasattr(session, "execute"):
         try:
-            runtime_task = await TaskRuntimeService(session).get_task(
-                str(run_id), int(current_user.id)
-            )
+            runtime_task = await TaskRuntimeService(session).get_task(str(run_id))
         except TaskRuntimeNotFound:
             runtime_task = None
-        if runtime_task is not None and str(getattr(runtime_task, "task_type", "")) in {
-            "chapter_outline_generation",
-            "chapter_outline_rewrite",
-        }:
+        if (
+            runtime_task is not None
+            and runtime_task.project_id == project_id
+            and str(getattr(runtime_task, "task_type", "")) in {
+                "chapter_outline_generation",
+                "chapter_outline_rewrite",
+            }
+        ):
             try:
                 runtime_events = await TaskRuntimeService(session).list_events(
-                    str(run_id), limit=500, owner_user_id=int(current_user.id)
+                    str(run_id), limit=500
                 )
             except Exception:
                 runtime_events = []
@@ -5051,7 +5054,7 @@ async def get_chapters_outline_generation_status(
                 await _schedule_outline_recovery(
                     str(from_runtime["run_id"]),
                     project_id,
-                    int(current_user.id),
+                    int(runtime_task.owner_user_id),
                     dict(from_runtime.get("request") or {}),
                     background_tasks,
                     rewrite=str(from_runtime.get("task_type") or "") == "chapter_outline_rewrite",
@@ -5065,7 +5068,6 @@ async def get_chapters_outline_generation_status(
     from_runtime = await _load_active_outline_job_from_runtime(
         session,
         project_id=project_id,
-        user_id=int(current_user.id),
         task_types=("chapter_outline_generation", "chapter_outline_rewrite"),
     )
     if from_runtime:
@@ -5079,14 +5081,14 @@ async def get_chapters_outline_generation_status(
             await _schedule_outline_recovery(
                 str(from_runtime["run_id"]),
                 project_id,
-                int(current_user.id),
+                int(from_runtime["user_id"]),
                 dict(from_runtime.get("request") or {}),
                 background_tasks,
                 rewrite=str(from_runtime.get("task_type") or "") == "chapter_outline_rewrite",
             )
         return _serialize_outline_job(from_runtime)
 
-    persisted = await _load_active_outline_job_from_db(project_id, int(current_user.id))
+    persisted = await _load_active_outline_job_from_db(project_id)
     if persisted:
         return _serialize_outline_job(persisted)
 
@@ -5116,8 +5118,8 @@ async def cancel_chapters_outline_generation(
         restored = await _load_active_outline_job_from_runtime(
             session,
             project_id=project_id,
-            user_id=int(current_user.id),
             task_types=("chapter_outline_generation", "chapter_outline_rewrite"),
+            owner_user_id=int(current_user.id),
         )
         if restored:
             async with _OUTLINE_JOB_LOCK:
@@ -5730,17 +5732,14 @@ async def _find_chapter_runtime_task(
     project_id: str,
     chapter_number: int,
     chapter_id: Optional[int],
-    owner_user_id: int,
+    owner_user_id: Optional[int],
     run_id: Optional[str],
 ) -> Optional[TaskRuntime]:
     """Find the persisted chapter task while accepting old/new linkage shapes."""
     candidates: List[TaskRuntime] = []
     if run_id:
         result = await session.execute(
-            select(TaskRuntime).where(
-                TaskRuntime.task_id == run_id,
-                TaskRuntime.owner_user_id == owner_user_id,
-            )
+            select(TaskRuntime).where(TaskRuntime.task_id == run_id)
         )
         candidate = result.scalar_one_or_none()
         if candidate is not None:
@@ -5748,10 +5747,7 @@ async def _find_chapter_runtime_task(
 
     result = await session.execute(
         select(TaskRuntime)
-        .where(
-            TaskRuntime.owner_user_id == owner_user_id,
-            TaskRuntime.project_id == project_id,
-        )
+        .where(TaskRuntime.project_id == project_id)
         .order_by(TaskRuntime.updated_at.desc(), TaskRuntime.created_at.desc())
         .limit(100)
     )
@@ -5770,8 +5766,11 @@ async def _find_chapter_runtime_task(
         linked_project_id = task.project_id or task_payload.get("project_id")
         linked_chapter_id = task.chapter_id or task_payload.get("chapter_id")
         run_matches = not run_id or task.task_id == run_id or linked_run_id == run_id
-        project_matches = linked_project_id in (None, project_id)
-        chapter_matches = linked_chapter_id is None or str(linked_chapter_id) in expected_chapter_refs
+        project_matches = linked_project_id == project_id
+        # A durable task must name this exact chapter. Ambiguous project-only
+        # runtime tasks fall back to the legacy chapter status stream instead of
+        # leaking events across chapters.
+        chapter_matches = linked_chapter_id is not None and str(linked_chapter_id) in expected_chapter_refs
         if run_matches and project_matches and chapter_matches:
             return task
     return None
@@ -5793,8 +5792,7 @@ async def stream_chapter_progress(
     old chapters continue to receive the previous ``real_summary`` polling
     stream instead of failing or fabricating durable events.
     """
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_read(project_id, current_user.id)
     chapter_result = await session.execute(
         select(Chapter).where(
             Chapter.project_id == project_id,
@@ -5812,7 +5810,7 @@ async def stream_chapter_progress(
         project_id=project_id,
         chapter_number=chapter_number,
         chapter_id=chapter.id,
-        owner_user_id=int(current_user.id),
+        owner_user_id=None,
         run_id=str(initial_run_id) if initial_run_id else None,
     )
     initial_task_id = initial_task.task_id if initial_task else None
@@ -5848,7 +5846,7 @@ async def stream_chapter_progress(
                         project_id=project_id,
                         chapter_number=chapter_number,
                         chapter_id=current_chapter.id,
-                        owner_user_id=int(current_user.id),
+                        owner_user_id=None,
                         run_id=str(current_run_id) if current_run_id else None,
                     )
 
@@ -5860,7 +5858,6 @@ async def stream_chapter_progress(
                             task.task_id,
                             after_event_id=cursor,
                             limit=500,
-                            owner_user_id=int(current_user.id),
                         )
                         terminal_event_seen = False
                         for event in events:

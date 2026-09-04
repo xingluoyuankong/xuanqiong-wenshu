@@ -31,6 +31,7 @@ from ..models import (
 from ..models.memory_layer import CharacterState, TimelineEvent
 from ..services.vector_store_service import VectorStoreService
 from ..repositories.novel_repository import NovelRepository
+from .project_access_service import ProjectAccessService
 from ..schemas.admin import AdminNovelSummary
 from ..schemas.novel import (
     Blueprint,
@@ -1827,7 +1828,14 @@ class NovelService:
         user_id: int,
         chapter_number: int,
     ) -> ChapterSchema:
-        project = await self.ensure_project_owner(project_id, user_id)
+        # Generation state is shared project read metadata; mutations retain the
+        # owner/editor gates on their dedicated write routes.
+        await ProjectAccessService(self.session).require_project_read(project_id, user_id)
+        # Keep the existing eager-load contract required by _build_chapter_schema;
+        # the access service object intentionally is a minimal authorization projection.
+        project = await self.repo.get_by_id(project_id)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在")
         # 状态轮询不仅要看进度，还要在 waiting_for_confirm / selecting / successful 等阶段
         # 回填正文与候选版本，否则前端会在轮询后把已生成内容替换成空壳章节。
         return self._build_chapter_schema(project, chapter_number, include_content=True)
