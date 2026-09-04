@@ -55,19 +55,14 @@ if settings.is_sqlite_backend:
 
     @event.listens_for(engine.sync_engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):
+        """Apply SQLite WAL and lock-wait settings exactly once per new connection."""
         cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA synchronous=NORMAL")
-        cursor.execute("PRAGMA busy_timeout=300000")
-        cursor.close()
-
-    @event.listens_for(engine.sync_engine, "connect")
-    def set_sqlite_pragma(dbapi_connection, connection_record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA synchronous=NORMAL")
-        cursor.execute("PRAGMA busy_timeout=300000")  # 5分钟超时（适应长生成）
-        cursor.close()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=300000")  # 5 分钟，适配长生成写锁。
+        finally:
+            cursor.close()
 
 # 统一的 Session 工厂，禁用 expire_on_commit 方便返回模型对象
 AsyncSessionLocal = async_sessionmaker(bind=engine, expire_on_commit=False)
