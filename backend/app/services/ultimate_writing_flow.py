@@ -10,7 +10,7 @@
 - 章节回顾机制
 """
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import logging
 
@@ -125,7 +125,7 @@ class UltimateWritingFlow:
             "versions": [],
             "best_version_index": 0,
             "metadata": {
-                "generation_time": datetime.utcnow().isoformat(),
+                "generation_time": datetime.now(timezone.utc).isoformat(),
                 "flow_stages": [],
                 "emotion_curve": None,
                 "memory_context": None,
