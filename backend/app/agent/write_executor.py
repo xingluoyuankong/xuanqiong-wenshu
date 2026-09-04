@@ -17,13 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.config import settings
 from ..models.agent import AgentArtifactRef, AgentApproval
 from ..models.agent_lineage import ArtifactLineage
-from ..models.novel import Chapter, ChapterVersion, NovelProject
+from ..models.novel import Chapter, ChapterVersion
 from ..services.agent_execution_service import AgentCapabilityExecutionConflict, AgentExecutionService
 from ..services.agent_quality_service import AgentQualityGateBlocked, AgentQualityService, QualityEvaluation
 from ..services.agent_runtime import AgentConflict, AgentNotFound, AgentRuntimeError, AgentRuntimeService, AgentScopeViolation
 from ..services.llm_service import LLMService
 from ..services.novel_service import NovelService
 from ..services.pipeline_orchestrator import PipelineOrchestrator
+from ..services.project_access_service import ProjectAccessService
 from .provider_attempt import ProviderAttemptLedger
 
 _ARTIFACT_ROOT = Path(__file__).resolve().parents[2] / "output" / "agent-artifacts"
@@ -48,19 +49,42 @@ def _candidate_prompt(tool_name: str, arguments: dict[str, Any]) -> str:
     return f"工具：{tool_name}\n章节号：{chapter}\n用户要求：{instruction}{source_block}\n请只输出候选正文，不要输出解释、思考或 markdown 围栏。"
 
 
-async def _resolve_rewrite_source(*, session: AsyncSession, user_id: int, project_id: str, chapter_number: int, arguments: dict[str, Any]) -> ChapterVersion:
-    """Resolve rewrite input from an owned ChapterVersion, never user-supplied text alone."""
+async def _resolve_rewrite_source(
+    *,
+    session: AsyncSession,
+    project_id: str,
+    chapter_number: int,
+    arguments: dict[str, Any],
+) -> ChapterVersion:
+    """Resolve a rewrite input after the caller has verified project write access."""
     requested_id = arguments.get("source_version_id")
     if requested_id is None:
-        chapter = (await session.execute(select(Chapter).join(NovelProject, NovelProject.id == Chapter.project_id).where(Chapter.project_id == project_id, Chapter.chapter_number == chapter_number, NovelProject.user_id == user_id))).scalar_one_or_none()
+        chapter = (
+            await session.execute(
+                select(Chapter).where(
+                    Chapter.project_id == project_id,
+                    Chapter.chapter_number == chapter_number,
+                )
+            )
+        ).scalar_one_or_none()
         if chapter is None or chapter.selected_version_id is None:
-            raise AgentConflict("chapter.rewrite requires an owned selected source version")
+            raise AgentConflict("chapter.rewrite requires a selected source version")
         requested_id = chapter.selected_version_id
     try:
         source_version_id = int(requested_id)
     except (TypeError, ValueError) as exc:
         raise AgentConflict("source_version_id must be an integer") from exc
-    version = (await session.execute(select(ChapterVersion).join(Chapter, Chapter.id == ChapterVersion.chapter_id).join(NovelProject, NovelProject.id == Chapter.project_id).where(ChapterVersion.id == source_version_id, Chapter.project_id == project_id, Chapter.chapter_number == chapter_number, NovelProject.user_id == user_id))).scalar_one_or_none()
+    version = (
+        await session.execute(
+            select(ChapterVersion)
+            .join(Chapter, Chapter.id == ChapterVersion.chapter_id)
+            .where(
+                ChapterVersion.id == source_version_id,
+                Chapter.project_id == project_id,
+                Chapter.chapter_number == chapter_number,
+            )
+        )
+    ).scalar_one_or_none()
     if version is None:
         raise AgentScopeViolation("source version does not belong to the requested project/chapter")
     if not str(version.content or "").strip():
@@ -70,34 +94,71 @@ async def _resolve_rewrite_source(*, session: AsyncSession, user_id: int, projec
     return version
 
 
+async def _readable_artifact(
+    *, artifact_id: str, user_id: int, session: AsyncSession
+) -> AgentArtifactRef:
+    """Resolve an Artifact through project membership, preserving private scope."""
+    artifact = (
+        await session.execute(
+            select(AgentArtifactRef).where(AgentArtifactRef.id == artifact_id)
+        )
+    ).scalar_one_or_none()
+    if artifact is None:
+        raise AgentNotFound("artifact not found")
+    if artifact.project_id:
+        await ProjectAccessService(session).require_project_read(artifact.project_id, user_id)
+        return artifact
+    if artifact.user_id != user_id:
+        raise AgentNotFound("artifact not found")
+    return artifact
+
+
+async def _writable_project_artifact(
+    *, artifact_id: str, user_id: int, session: AsyncSession
+) -> tuple[AgentArtifactRef, int]:
+    """Resolve a shared project Artifact and its immutable execution owner."""
+    artifact = await _readable_artifact(artifact_id=artifact_id, user_id=user_id, session=session)
+    if not artifact.project_id:
+        raise AgentScopeViolation("candidate artifact has no project scope")
+    await ProjectAccessService(session).require_project_write(artifact.project_id, user_id)
+    return artifact, artifact.user_id
+
 async def execute_approved_write(*, approval_id: str, user_id: int, session: AsyncSession) -> AgentArtifactRef:
+    """Execute with actor authorization and the approval creator as runtime owner."""
     runtime = AgentRuntimeService(session)
-    approval = await runtime.get_approval(approval_id=approval_id, user_id=user_id)
+    approval = (
+        await session.execute(select(AgentApproval).where(AgentApproval.id == approval_id))
+    ).scalar_one_or_none()
+    if approval is None:
+        raise AgentNotFound("approval not found")
     if approval.status != "approved":
         raise AgentConflict("approval must be approved before execution")
     if approval.tool_name not in {"chapter.generate", "chapter.rewrite"}:
         raise AgentConflict(f"no write executor registered for {approval.tool_name}")
     if not approval.project_id:
         raise AgentScopeViolation("write tool requires project scope")
+    await ProjectAccessService(session).require_project_write(approval.project_id, user_id)
+    actor_user_id = user_id
+    execution_owner_id = approval.user_id
 
     arguments = dict(approval.request_json or {})
     chapter_number = _chapter_number(arguments)
     source_version: ChapterVersion | None = None
     if approval.tool_name == "chapter.rewrite":
-        source_version = await _resolve_rewrite_source(session=session, user_id=user_id, project_id=approval.project_id, chapter_number=chapter_number, arguments=arguments)
-    approval = await runtime.claim_approval_execution(approval_id=approval_id, user_id=user_id)
+        source_version = await _resolve_rewrite_source(session=session, project_id=approval.project_id, chapter_number=chapter_number, arguments=arguments)
+    approval = await runtime.claim_approval_execution(approval_id=approval_id, user_id=execution_owner_id)
     step_owner = f"write:{socket.gethostname()}:{os.getpid()}:{approval.id}"[:128]
     claimed_step = None
     if approval.step_id:
-        claimed_step = await runtime.claim_step(step_id=approval.step_id, user_id=user_id, lease_owner=step_owner, lease_seconds=300)
+        claimed_step = await runtime.claim_step(step_id=approval.step_id, user_id=execution_owner_id, lease_owner=step_owner, lease_seconds=300)
         if claimed_step.run_id != approval.run_id or claimed_step.tool_name != approval.tool_name:
             raise AgentScopeViolation("approval step does not match approval run or tool")
-    await runtime.update_run(run_id=approval.run_id, user_id=user_id, status="running", phase="write_candidate", progress=70)
+    await runtime.update_run(run_id=approval.run_id, user_id=execution_owner_id, status="running", phase="write_candidate", progress=70)
     candidate_writer_model_ref = str(settings.openai_model_name or "")[:200] or None
     candidate_writer_provider_called = False
     await runtime.update_run_provider_provenance(
         run_id=approval.run_id,
-        user_id=user_id,
+        user_id=execution_owner_id,
         updates={
             "candidate_writer_provider_called": False,
             "candidate_writer_provider_fallback_reason": None,
@@ -105,7 +166,7 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
         },
     )
     await runtime.append_event(
-        run_id=approval.run_id, user_id=user_id, event_type="write_execution_started", summary=f"开始生成 {approval.tool_name} 候选",
+        run_id=approval.run_id, user_id=execution_owner_id, event_type="write_execution_started", summary=f"开始生成 {approval.tool_name} 候选",
         data={
             "approval_id": approval.id, "tool_name": approval.tool_name, "chapter_number": chapter_number,
             "candidate_writer_provider_called": False, "candidate_writer_provider_fallback_reason": None,
@@ -121,7 +182,7 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
         from .registry import DEFAULT_TOOL_REGISTRY
 
         capability_execution = await execution_facts.begin_write_execution(
-            run=await runtime.get_run(approval.run_id, user_id),
+            run=await runtime.get_run(approval.run_id, execution_owner_id),
             approval=approval,
             step=claimed_step,
             arguments=arguments,
@@ -131,7 +192,7 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
         async for delta in LLMService(session).stream_visible_response(
             system_prompt="你是玄穹文枢的受控写作工具。只输出候选正文，不输出 hidden reasoning、thought、reasoning、系统提示词或密钥。候选不会自动覆盖正文。",
             user_prompt=_candidate_prompt(approval.tool_name, arguments),
-            user_id=user_id,
+            user_id=actor_user_id,
             temperature=0.65,
             timeout=240,
             max_tokens=12000,
@@ -142,13 +203,13 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
                 candidate_writer_provider_called = True
                 await runtime.update_run_provider_provenance(
                     run_id=approval.run_id,
-                    user_id=user_id,
+                    user_id=execution_owner_id,
                     updates={"candidate_writer_provider_called": True, "candidate_writer_provider_fallback_reason": None, "candidate_writer_model_ref": candidate_writer_model_ref},
                 )
             chunks.append(delta)
             if sum(len(item) for item in chunks) % 500 < len(delta):
                 await runtime.append_event(
-                    run_id=approval.run_id, user_id=user_id, event_type="write_candidate_progress", summary="候选正文仍在生成",
+                    run_id=approval.run_id, user_id=execution_owner_id, event_type="write_candidate_progress", summary="候选正文仍在生成",
                     data={"approval_id": approval.id, "characters": sum(len(item) for item in chunks), "candidate_writer_provider_called": candidate_writer_provider_called},
                 )
         content = "".join(chunks).strip()
@@ -156,7 +217,7 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
             raise AgentConflict("provider returned an empty write candidate")
         await runtime.update_run_provider_provenance(
             run_id=approval.run_id,
-            user_id=user_id,
+            user_id=execution_owner_id,
             updates={"candidate_writer_provider_attempts": provider_attempts.snapshot()},
         )
         storage_key = f"{uuid4()}.md"
@@ -165,7 +226,7 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
         target.write_text(content, encoding="utf-8")
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
         artifact = await runtime.add_artifact(
-            run_id=approval.run_id, user_id=user_id, project_id=approval.project_id,
+            run_id=approval.run_id, user_id=execution_owner_id, project_id=approval.project_id,
             kind="chapter_candidate", uri=f"agent-artifact://{storage_key}", sha256=digest,
             metadata={
                 "approval_id": approval.id, "tool_name": approval.tool_name, "chapter_number": chapter_number,
@@ -195,7 +256,7 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
             await session.refresh(artifact)
             await runtime.append_event(
                 run_id=approval.run_id,
-                user_id=user_id,
+                user_id=execution_owner_id,
                 event_type="quality_check_completed" if quality_evaluation.passed else "quality_check_blocked",
                 summary="候选已通过结构质量门" if quality_evaluation.passed else "候选已生成，但结构质量门已阻断接受",
                 data={
@@ -213,7 +274,7 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
                 await session.commit()
                 await runtime.append_event(
                     run_id=approval.run_id,
-                    user_id=user_id,
+                    user_id=execution_owner_id,
                     event_type="quality_check_failed",
                     summary="候选质量检查不可用，候选保留但不可接受",
                     data={"artifact_id": artifact.id, "error_type": type(quality_error).__name__},
@@ -224,7 +285,7 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
         if claimed_step is not None:
             await runtime.complete_step(
                 step_id=claimed_step.id,
-                user_id=user_id,
+                user_id=execution_owner_id,
                 lease_generation=int(claimed_step.lease_generation or 0),
                 lease_owner=step_owner,
                 output={"artifact_id": artifact.id, "kind": artifact.kind},
@@ -235,12 +296,12 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
                 lease_generation=int(claimed_step.lease_generation or 0) if claimed_step is not None else 0,
                 output={"artifact_id": artifact.id, "kind": artifact.kind, "sha256": artifact.sha256},
             )
-        await runtime.mark_approval_executed(approval_id=approval.id, user_id=user_id, status="executed")
+        await runtime.mark_approval_executed(approval_id=approval.id, user_id=execution_owner_id, status="executed")
         candidate_phase = "candidate_ready" if quality_evaluation.passed else "quality_blocked"
         candidate_summary = "写入候选 artifact 已生成，等待用户接受" if quality_evaluation.passed else "写入候选 artifact 已生成，但质量门阻断接受"
-        await runtime.update_run(run_id=approval.run_id, user_id=user_id, status="paused", phase=candidate_phase, progress=90)
+        await runtime.update_run(run_id=approval.run_id, user_id=execution_owner_id, status="paused", phase=candidate_phase, progress=90)
         await runtime.append_event(
-            run_id=approval.run_id, user_id=user_id, event_type="artifact_created", summary=candidate_summary,
+            run_id=approval.run_id, user_id=execution_owner_id, event_type="artifact_created", summary=candidate_summary,
             data={
                 "artifact_id": artifact.id, "kind": artifact.kind, "chapter_number": chapter_number,
                 "candidate_writer_provider_called": candidate_writer_provider_called,
@@ -252,7 +313,7 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
     except asyncio.CancelledError:
         await runtime.update_run_provider_provenance(
             run_id=approval.run_id,
-            user_id=user_id,
+            user_id=execution_owner_id,
             updates={"candidate_writer_provider_attempts": provider_attempts.snapshot()},
         )
         raise
@@ -268,13 +329,13 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
                 pass
         if claimed_step is not None:
             try:
-                await runtime.fail_step(step_id=claimed_step.id, user_id=user_id, lease_owner=step_owner, lease_generation=int(claimed_step.lease_generation or 0), error_type=type(exc).__name__)
+                await runtime.fail_step(step_id=claimed_step.id, user_id=execution_owner_id, lease_owner=step_owner, lease_generation=int(claimed_step.lease_generation or 0), error_type=type(exc).__name__)
             except AgentRuntimeError:
                 pass
         fallback_reason = "empty_response" if isinstance(exc, AgentConflict) and "empty write candidate" in str(exc) else type(exc).__name__
         await runtime.update_run_provider_provenance(
             run_id=approval.run_id,
-            user_id=user_id,
+            user_id=execution_owner_id,
             updates={
                 "candidate_writer_provider_called": candidate_writer_provider_called,
                 "candidate_writer_provider_fallback_reason": fallback_reason,
@@ -282,10 +343,10 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
                 "candidate_writer_provider_attempts": provider_attempts.snapshot(),
             },
         )
-        await runtime.mark_approval_executed(approval_id=approval.id, user_id=user_id, status="execution_failed")
-        await runtime.update_run(run_id=approval.run_id, user_id=user_id, status="failed", phase="write_candidate_error")
+        await runtime.mark_approval_executed(approval_id=approval.id, user_id=execution_owner_id, status="execution_failed")
+        await runtime.update_run(run_id=approval.run_id, user_id=execution_owner_id, status="failed", phase="write_candidate_error")
         await runtime.append_event(
-            run_id=approval.run_id, user_id=user_id, event_type="write_execution_failed", summary="写入候选生成失败",
+            run_id=approval.run_id, user_id=execution_owner_id, event_type="write_execution_failed", summary="写入候选生成失败",
             data={
                 "approval_id": approval.id, "error_type": type(exc).__name__,
                 "candidate_writer_provider_called": candidate_writer_provider_called,
@@ -328,27 +389,26 @@ def _quality_observation(content: str, metadata: dict[str, Any]) -> tuple[dict[s
 async def _source_quality_retest(
     *,
     session: AsyncSession,
-    user_id: int,
     project_id: str,
     chapter_number: int,
     source_version_id: int | None,
     candidate_content: str,
     metadata: dict[str, Any],
 ) -> dict[str, Any] | None:
-    """Compare rewrite source and candidate with the same structural gate."""
+    """Compare rewrite source and candidate after project access was checked."""
     if source_version_id is None:
         return None
-    source = (await session.execute(
-        select(ChapterVersion)
-        .join(Chapter, Chapter.id == ChapterVersion.chapter_id)
-        .join(NovelProject, NovelProject.id == Chapter.project_id)
-        .where(
-            ChapterVersion.id == int(source_version_id),
-            Chapter.project_id == project_id,
-            Chapter.chapter_number == chapter_number,
-            NovelProject.user_id == user_id,
+    source = (
+        await session.execute(
+            select(ChapterVersion)
+            .join(Chapter, Chapter.id == ChapterVersion.chapter_id)
+            .where(
+                ChapterVersion.id == int(source_version_id),
+                Chapter.project_id == project_id,
+                Chapter.chapter_number == chapter_number,
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if source is None or not str(source.content or '').strip():
         raise AgentScopeViolation('rewrite source version is unavailable for quality retest')
     source_summaries, source_gate = _quality_observation(str(source.content), metadata)
@@ -382,7 +442,6 @@ async def _source_quality_retest(
         },
     }
 
-
 async def accept_candidate_artifact(*, artifact_id: str, user_id: int, note: str | None, session: AsyncSession, acceptance_approval_id: str | None = None) -> AgentArtifactRef:
     """Accept a candidate only after the persisted P1-B Gate allows it.
 
@@ -392,9 +451,9 @@ async def accept_candidate_artifact(*, artifact_id: str, user_id: int, note: str
     acceptance.
     """
     runtime = AgentRuntimeService(session)
-    artifact = (await session.execute(select(AgentArtifactRef).where(AgentArtifactRef.id == artifact_id, AgentArtifactRef.user_id == user_id))).scalar_one_or_none()
-    if artifact is None:
-        raise AgentNotFound("artifact not found")
+    artifact, execution_owner_id = await _writable_project_artifact(
+        artifact_id=artifact_id, user_id=user_id, session=session
+    )
     metadata = dict(artifact.metadata_json or {})
     if artifact.kind != "chapter_candidate":
         raise AgentConflict("artifact is not a chapter candidate")
@@ -417,7 +476,7 @@ async def accept_candidate_artifact(*, artifact_id: str, user_id: int, note: str
         raise AgentConflict("candidate artifact integrity check failed")
     quality_service = AgentQualityService(session)
     quality_evaluation = await quality_service.get_artifact_evaluation(
-        artifact_id=artifact.id, user_id=user_id
+        artifact_id=artifact.id, user_id=execution_owner_id
     )
     quality_summaries: dict[str, Any] = {}
     if quality_evaluation is None:
@@ -436,7 +495,7 @@ async def accept_candidate_artifact(*, artifact_id: str, user_id: int, note: str
             metadata.update({"quality_status": "unavailable", "quality_error_type": type(exc).__name__})
             artifact.metadata_json = metadata
             await session.commit()
-            await runtime.append_event(run_id=artifact.run_id, user_id=user_id, event_type="quality_check_failed", summary="候选质量检查不可用，未保存版本", data={"artifact_id": artifact.id, "error_type": type(exc).__name__})
+            await runtime.append_event(run_id=artifact.run_id, user_id=execution_owner_id, event_type="quality_check_failed", summary="候选质量检查不可用，未保存版本", data={"artifact_id": artifact.id, "error_type": type(exc).__name__})
             raise AgentConflict("candidate quality check unavailable") from exc
     assert quality_evaluation is not None
 
@@ -446,7 +505,6 @@ async def accept_candidate_artifact(*, artifact_id: str, user_id: int, note: str
     try:
         metadata["quality_retest"] = await _source_quality_retest(
             session=session,
-            user_id=user_id,
             project_id=artifact.project_id,
             chapter_number=chapter_number,
             source_version_id=int(metadata["source_version_id"]) if metadata.get("source_version_id") is not None else None,
@@ -463,13 +521,13 @@ async def accept_candidate_artifact(*, artifact_id: str, user_id: int, note: str
 
     try:
         await quality_service.assert_acceptance_allowed(
-            artifact_id=artifact.id, user_id=user_id, require_evaluation=True
+            artifact_id=artifact.id, user_id=execution_owner_id, require_evaluation=True
         )
     except AgentQualityGateBlocked as exc:
-        await runtime.update_run(run_id=artifact.run_id, user_id=user_id, status="paused", phase="quality_blocked", progress=92)
+        await runtime.update_run(run_id=artifact.run_id, user_id=execution_owner_id, status="paused", phase="quality_blocked", progress=92)
         await runtime.append_event(
             run_id=artifact.run_id,
-            user_id=user_id,
+            user_id=execution_owner_id,
             event_type="quality_check_blocked",
             summary="候选未通过持久化质量门，未保存章节版本",
             data={
@@ -480,18 +538,32 @@ async def accept_candidate_artifact(*, artifact_id: str, user_id: int, note: str
         )
         raise AgentConflict("candidate did not pass persisted quality gate") from exc
 
-    await runtime.append_event(run_id=artifact.run_id, user_id=user_id, event_type="quality_check_completed", summary="候选已通过持久化结构质量门", data={"artifact_id": artifact.id, "quality_status": "passed"})
+    await runtime.append_event(run_id=artifact.run_id, user_id=execution_owner_id, event_type="quality_check_completed", summary="候选已通过持久化结构质量门", data={"artifact_id": artifact.id, "quality_status": "passed"})
     novel = NovelService(session)
-    await novel.ensure_project_owner(artifact.project_id, user_id)
+    # Project write access was verified by _writable_project_artifact above.
     chapter = await novel.get_or_create_chapter(artifact.project_id, chapter_number)
-    versions = await novel.append_chapter_versions(chapter, [content], metadata=[{"source": "agent_approved_candidate", "artifact_id": artifact.id, "approval_id": metadata.get("approval_id"), "acceptance_approval_id": acceptance_approval_id, "source_version_id": metadata.get("source_version_id"), "quality_gate_id": quality_evaluation.gate.id, "quality_result_id": quality_evaluation.result.id, "note": (note or "")[:2000]}])
-    accepted_version = max(versions, key=lambda item: int(item.id)) if versions else None
+    chapter_id = int(chapter.id)
+    versions = await novel.append_chapter_versions(chapter, [content], metadata=[{"source": "agent_approved_candidate", "artifact_id": artifact.id, "approval_id": metadata.get("approval_id"), "acceptance_approval_id": acceptance_approval_id, "source_version_id": metadata.get("source_version_id"), "quality_gate_id": quality_evaluation.gate.id, "quality_result_id": quality_evaluation.result.id, "note": (note or "")[:2000], "accepted_by_user_id": user_id}])
+    accepted_version = None
+    if versions:
+        # append_chapter_versions commits internally; reload avoids implicit async
+        # attribute refreshes when a rewrite source has already been loaded.
+        accepted_version = (
+            await session.execute(
+                select(ChapterVersion)
+                .where(ChapterVersion.chapter_id == chapter_id)
+                .order_by(ChapterVersion.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    accepted_version_id = int(accepted_version.id) if accepted_version is not None else None
+    accepted_version_content = str(accepted_version.content or "") if accepted_version is not None else ""
     if accepted_version is not None and metadata.get("source_version_id") is not None:
         accepted_version.parent_version_id = int(metadata["source_version_id"])
         await session.commit()
 
     accepted_artifact = None
-    if accepted_version is not None:
+    if accepted_version_id is not None:
         accepted_artifact = AgentArtifactRef(
             id=str(uuid4()),
             run_id=artifact.run_id,
@@ -500,13 +572,13 @@ async def accept_candidate_artifact(*, artifact_id: str, user_id: int, note: str
             user_id=artifact.user_id,
             project_id=artifact.project_id,
             kind="chapter_version",
-            uri=f"chapter-version://{accepted_version.id}",
-            sha256=hashlib.sha256(str(accepted_version.content or "").encode("utf-8")).hexdigest(),
+            uri=f"chapter-version://{accepted_version_id}",
+            sha256=hashlib.sha256(accepted_version_content.encode("utf-8")).hexdigest(),
             metadata_json={
                 "status": "accepted_version",
                 "chapter_number": chapter_number,
-                "chapter_id": int(chapter.id),
-                "version_id": int(accepted_version.id),
+                "chapter_id": chapter_id,
+                "version_id": accepted_version_id,
                 "source_artifact_id": artifact.id,
                 "quality_gate_id": quality_evaluation.gate.id,
                 "quality_result_id": quality_evaluation.result.id,
@@ -536,16 +608,17 @@ async def accept_candidate_artifact(*, artifact_id: str, user_id: int, note: str
 
     metadata.update({
         "status": "accepted",
-        "accepted_version_id": accepted_version.id if accepted_version else None,
+        "accepted_version_id": accepted_version_id,
         "accepted_artifact_ref_id": accepted_artifact.id if accepted_artifact is not None else None,
+        "accepted_by_user_id": user_id,
         **({"acceptance_approval_id": acceptance_approval_id} if acceptance_approval_id else {}),
     })
     artifact.metadata_json = metadata
     await session.commit()
     await session.refresh(artifact)
-    await runtime.append_event(run_id=artifact.run_id, user_id=user_id, event_type="artifact_accepted", summary="用户已接受候选并保存为新章节版本", data={"artifact_id": artifact.id, "chapter_number": chapter_number, "version_id": accepted_version.id if accepted_version else None, **({"acceptance_approval_id": acceptance_approval_id} if acceptance_approval_id else {})})
-    await runtime.update_run(run_id=artifact.run_id, user_id=user_id, status="completed", phase="accepted", progress=100)
-    await runtime.append_event(run_id=artifact.run_id, user_id=user_id, event_type="run_completed", summary="候选已接受，Agent 写入流程完成", data={"artifact_id": artifact.id, "version_id": accepted_version.id if accepted_version else None})
+    await runtime.append_event(run_id=artifact.run_id, user_id=execution_owner_id, event_type="artifact_accepted", summary="用户已接受候选并保存为新章节版本", data={"artifact_id": artifact.id, "chapter_number": chapter_number, "version_id": accepted_version_id, **({"acceptance_approval_id": acceptance_approval_id} if acceptance_approval_id else {})})
+    await runtime.update_run(run_id=artifact.run_id, user_id=execution_owner_id, status="completed", phase="accepted", progress=100)
+    await runtime.append_event(run_id=artifact.run_id, user_id=execution_owner_id, event_type="run_completed", summary="候选已接受，Agent 写入流程完成", data={"artifact_id": artifact.id, "version_id": accepted_version_id})
     return artifact
 
 
@@ -591,12 +664,10 @@ async def diff_artifact_with_chapter_version(*, artifact_id: str, project_id: st
     version = (await session.execute(
         select(ChapterVersion)
         .join(Chapter, Chapter.id == ChapterVersion.chapter_id)
-        .join(NovelProject, NovelProject.id == Chapter.project_id)
         .where(
             ChapterVersion.id == version_id,
             Chapter.project_id == project_id,
             Chapter.chapter_number == chapter_number,
-            NovelProject.user_id == user_id,
         )
     )).scalar_one_or_none()
     if version is None:
@@ -642,7 +713,7 @@ async def list_artifact_quality_blockers(*, artifact_id: str, user_id: int, sess
     metadata = dict(artifact.metadata_json or {})
     evaluation = await AgentQualityService(session).get_artifact_evaluation(
         artifact_id=artifact_id,
-        user_id=user_id,
+        user_id=artifact.user_id,
     )
     if evaluation is not None:
         raw_blockers: list[dict[str, Any]] = []
@@ -769,9 +840,7 @@ def build_rewrite_instructions(blockers: list[dict[str, Any]], *, artifact_id: s
 
 async def list_artifact_rewrite_instructions(*, artifact_id: str, user_id: int, session: AsyncSession) -> list[dict[str, Any]]:
     blockers = await list_artifact_quality_blockers(artifact_id=artifact_id, user_id=user_id, session=session)
-    artifact = (await session.execute(select(AgentArtifactRef).where(AgentArtifactRef.id == artifact_id, AgentArtifactRef.user_id == user_id))).scalar_one_or_none()
-    if artifact is None:
-        raise AgentNotFound("artifact not found")
+    artifact = await _readable_artifact(artifact_id=artifact_id, user_id=user_id, session=session)
     metadata = dict(artifact.metadata_json or {})
     chapter_number = None
     try:
@@ -787,9 +856,7 @@ async def list_artifact_rewrite_instructions(*, artifact_id: str, user_id: int, 
 
 
 async def read_artifact_content(*, artifact_id: str, user_id: int, session: AsyncSession) -> tuple[AgentArtifactRef, str]:
-    artifact = (await session.execute(select(AgentArtifactRef).where(AgentArtifactRef.id == artifact_id, AgentArtifactRef.user_id == user_id))).scalar_one_or_none()
-    if artifact is None:
-        raise AgentNotFound("artifact not found")
+    artifact = await _readable_artifact(artifact_id=artifact_id, user_id=user_id, session=session)
     metadata = dict(artifact.metadata_json or {})
     storage_key = str(metadata.get("storage_key") or "")
     target = (_ARTIFACT_ROOT / storage_key).resolve()
