@@ -774,3 +774,36 @@ ab3c1d3 test: align access and database failure contracts
 4. 启动真实后端，执行 health、成员管理、Agent reasoning、SSE 断线恢复 smoke；
 5. 追加 UI-004 状态和证据后，再进入 UI-005/UI-006。
 ```
+
+## 2026-09-04 最终回写：当前分支完整静态/单元门禁已收口
+
+在修正 Agent 数据库异常测试注入边界、对齐项目成员拒绝语义、并把 `AdminView` 动态导入测试超时从 20 秒提升到 30 秒后，重新执行完整门禁：
+
+```text
+后端：backend\.venv\Scripts\python.exe -m pytest -q
+结果：1476 passed in 644.36s
+
+前端：npm run type-check
+结果：通过
+
+前端：npm run test:run
+结果：78 files passed, 490 tests passed, 113.65s
+
+前端：npm run build-only
+结果：通过，4914 modules transformed，1m51s
+
+git diff --check
+结果：通过
+```
+
+前端构建仍提示 `baseline-browser-mapping` 和 `caniuse-lite` 兼容性数据较旧，未阻断本轮测试/构建；保留为 P2 依赖数据刷新任务。
+
+本分支当前已包含本批提交：
+
+```text
+1f2e265 feat: close project member management access loop
+ab3c1d3 test: align access and database failure contracts
+d5972aa test: stabilize admin view import regression
+```
+
+本批结论：UI-004 成员管理 HTTP 与 Agent 读取权限基线的单元/静态门禁已经收口；真实服务启动、多用户 HTTP/SSE、全业务路由成员策略贯穿、成员管理 UI、UI-005、UI-006 和 main 质量主线逐批对齐仍是后续工作，任务总状态保持 `active`。
