@@ -2636,7 +2636,14 @@ async def _finalize_chapter_async(
             if not selected_version or not selected_version.content:
                 return
 
-            chapter.selected_version_id = selected_version.id
+            await _assert_finalize_selection_current(
+                session,
+                project_id=project_id,
+                chapter_number=chapter_number,
+                selected_version_id=selected_version.id,
+            )
+            # Do not write selected_version_id here. A newer collaborator choice
+            # must remain authoritative while stale finalize jobs exit cleanly.
             chapter.status = ChapterGenerationStatus.SUCCESSFUL.value
             chapter.word_count = len(selected_version.content or "")
             await session.commit()
@@ -4334,7 +4341,10 @@ async def evaluate_chapter(
     prompt_service = PromptService(session)
     llm_service = LLMService(session)
 
-    project = await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user.id)
+    project = await novel_service.repo.get_by_id(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
 
     # 获取该章节及其所有版本
     stmt_versions = (
@@ -5194,7 +5204,13 @@ async def cancel_chapters_outline_generation(
             existing_runtime_task = await TaskRuntimeService(session).get_task(
                 str(snapshot["run_id"])
             )
-            if existing_runtime_task.project_id != project_id:
+            if (
+                existing_runtime_task.project_id != project_id
+                or existing_runtime_task.task_type not in {
+                    "chapter_outline_generation",
+                    "chapter_outline_rewrite",
+                }
+            ):
                 raise TaskRuntimeNotFound("outline task does not belong to project")
             execution_owner_id = int(existing_runtime_task.owner_user_id)
             runtime_task = await TaskRuntimeService(session).request_cancel(

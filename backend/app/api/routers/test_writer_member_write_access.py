@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 from app.api.routers import writer
 from app.models import (
     Chapter,
+    ChapterEvaluation,
     ChapterOutline,
     ChapterVersion,
     NovelProject,
@@ -24,7 +25,7 @@ from app.models import (
 )
 from app.models.project_member import ProjectMemberRole
 from app.models.task_runtime import TaskRuntime
-from app.schemas.novel import EditChapterRequest, SelectVersionRequest, UpdateChapterOutlineRequest
+from app.schemas.novel import EditChapterRequest, EvaluateChapterRequest, SelectVersionRequest, UpdateChapterOutlineRequest
 from app.schemas.user import UserInDB
 
 PROJECT_ID = "writer-member-write-project"
@@ -263,3 +264,53 @@ async def test_viewer_and_nonmember_get_403_without_mutating_shared_writer_resou
         fixture.task.lease_owner,
         fixture.task.lease_generation,
     ) == original["execution_identity"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("actor_kind", ["owner", "editor", "admin"])
+async def test_project_writers_can_evaluate_shared_candidate_without_legacy_owner_filter(
+    task_session, actor_kind: str
+):
+    fixture = await _seed(task_session)
+    actor = getattr(fixture, actor_kind)
+
+    response = await writer.evaluate_chapter(
+        project_id=fixture.project.id,
+        request=EvaluateChapterRequest(
+            chapter_number=fixture.chapter.chapter_number,
+            version_id=fixture.candidate_version.id,
+        ),
+        session=task_session,
+        current_user=_principal(actor),
+    )
+
+    assert response.id == fixture.project.id
+    evaluation = await task_session.scalar(
+        select(ChapterEvaluation)
+        .where(
+            ChapterEvaluation.chapter_id == fixture.chapter.id,
+            ChapterEvaluation.version_id == fixture.candidate_version.id,
+        )
+        .order_by(ChapterEvaluation.id.desc())
+    )
+    assert evaluation is not None
+    assert evaluation.decision == "skipped"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("actor_kind", ["viewer", "outsider"])
+async def test_viewer_and_nonmember_cannot_evaluate_shared_candidate(task_session, actor_kind: str):
+    fixture = await _seed(task_session)
+
+    with pytest.raises(HTTPException) as denied:
+        await writer.evaluate_chapter(
+            project_id=fixture.project.id,
+            request=EvaluateChapterRequest(
+                chapter_number=fixture.chapter.chapter_number,
+                version_id=fixture.candidate_version.id,
+            ),
+            session=task_session,
+            current_user=_principal(getattr(fixture, actor_kind)),
+        )
+
+    assert denied.value.status_code == 403

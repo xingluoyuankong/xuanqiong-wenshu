@@ -168,3 +168,52 @@ async def test_viewer_and_nonmember_receive_403_from_finalize_entry(task_session
 
     assert denied.value.status_code == 403
 
+
+
+@pytest.mark.asyncio
+async def test_stale_async_finalize_does_not_restore_a_superseded_selection(task_session, monkeypatch):
+    fixture = await _seed(task_session)
+    newer = ChapterVersion(
+        chapter_id=fixture.chapter.id,
+        version_label="newer-selection",
+        provider="fixture",
+        content="更新后的协作选择。",
+        content_hash="writer-member-finalize-newer",
+        status="selected",
+    )
+    task_session.add(newer)
+    await task_session.flush()
+    newer_id = int(newer.id)
+    fixture.chapter.selected_version_id = newer_id
+    await task_session.commit()
+    called = {"pipeline": False}
+
+    class _SessionContext:
+        async def __aenter__(self):
+            return task_session
+
+        async def __aexit__(self, *_args):
+            return False
+
+    async def no_pipeline(**_kwargs):
+        called["pipeline"] = True
+        return {"finalize": {"success": True}}
+
+    async def no_background_failure(**_kwargs):
+        return None
+
+    monkeypatch.setattr(writer, "AsyncSessionLocal", lambda: _SessionContext())
+    monkeypatch.setattr(writer, "_run_finalize_pipeline", no_pipeline)
+    monkeypatch.setattr(writer, "_record_background_finalize_failure", no_background_failure)
+
+    await writer._finalize_chapter_async(
+        fixture.project.id,
+        CHAPTER_NUMBER,
+        fixture.selected_version.id,
+        fixture.owner.id,
+        skip_vector_update=True,
+    )
+
+    await task_session.refresh(fixture.chapter)
+    assert fixture.chapter.selected_version_id == newer_id
+    assert called["pipeline"] is False
