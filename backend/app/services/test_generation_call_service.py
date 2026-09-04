@@ -414,3 +414,36 @@ def test_continuity_contract_includes_neighboring_outlines_and_hard_rules():
     assert contract["required_motif_groups"] == []
     assert any("局部改动" in rule for rule in contract["hard_rules"])
     assert any("完整章节正文" in rule for rule in contract["hard_rules"])
+
+@pytest.mark.anyio
+async def test_call_generation_text_drains_provider_task_when_caller_cancels():
+    provider_started = asyncio.Event()
+    provider_finished = asyncio.Event()
+
+    class CancellableLLMService(_FakeLLMService):
+        async def get_llm_response(self, **kwargs):
+            self.calls.append(kwargs)
+            provider_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                provider_finished.set()
+
+    pending = asyncio.create_task(
+        call_generation_text(
+            llm_service=CancellableLLMService([]),
+            system_prompt="system",
+            conversation_history=[{"role": "user", "content": "chapter"}],
+            temperature=0.3,
+            user_id=1,
+            timeout=30.0,
+            policy=GenerationCallPolicy(stage_label="章节正文", response_format=None),
+        )
+    )
+    await provider_started.wait()
+    pending.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+
+    assert provider_finished.is_set()

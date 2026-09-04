@@ -3,7 +3,6 @@ import asyncio
 import json
 import logging
 import random
-from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -322,6 +321,19 @@ def validate_json_schema_subset(data: Dict[str, Any], schema: Optional[Dict[str,
     return errors
 
 
+async def _cancel_and_drain_provider_task(provider_task: asyncio.Task[Any]) -> None:
+    """Cancel a provider task and consume its terminal result before returning.
+
+    Generation runs may be cancelled by a caller, a soft timeout, or a hard
+    timeout. Draining the task prevents it from surviving after its parent
+    request has exited and prevents late task exceptions from being detached
+    from the generation lifecycle.
+    """
+    if not provider_task.done():
+        provider_task.cancel()
+    await asyncio.gather(provider_task, return_exceptions=True)
+
+
 async def _await_provider_text_with_heartbeat(
     *,
     llm_service: LLMService,
@@ -380,9 +392,7 @@ async def _await_provider_text_with_heartbeat(
 
             now = loop.time()
             if soft_deadline is not None and now >= soft_deadline:
-                provider_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await provider_task
+                await _cancel_and_drain_provider_task(provider_task)
                 raise HTTPException(
                     status_code=504,
                     detail={
@@ -394,9 +404,7 @@ async def _await_provider_text_with_heartbeat(
                     },
                 )
             if now >= hard_deadline:
-                provider_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await provider_task
+                await _cancel_and_drain_provider_task(provider_task)
                 raise HTTPException(
                     status_code=504,
                     detail={
@@ -416,8 +424,7 @@ async def _await_provider_text_with_heartbeat(
                 next_heartbeat = now + max(0.01, float(heartbeat_interval))
                 continue
     except BaseException:
-        if not provider_task.done():
-            provider_task.cancel()
+        await _cancel_and_drain_provider_task(provider_task)
         raise
 
 
