@@ -3571,6 +3571,14 @@ class PipelineOrchestrator:
         return stable
 
     @staticmethod
+    def _append_style_hint(prompt: str, style_hint: Optional[str]) -> str:
+        """Append a normalized per-candidate style instruction exactly once."""
+        normalized_hint = str(style_hint or "").strip()
+        if not normalized_hint:
+            return prompt
+        return f"{prompt}\n\n[版本风格提示]\n{normalized_hint}"
+
+    @staticmethod
     def _partition_generation_results(results: List[Any]) -> Tuple[List[Dict[str, Any]], List[Exception]]:
         """Separate completed candidate payloads from recoverable candidate failures.
 
@@ -4769,8 +4777,7 @@ class PipelineOrchestrator:
                     final_prompt_input += f"\n\n[首稿回炉要求]\n{additional_feedback}"
                 if prior_excerpt:
                     final_prompt_input += f"\n\n[上一版片段（只用于识别缺陷，不要照抄）]\n{prior_excerpt}"
-                if style_hint:
-                    final_prompt_input += f"\n\n[鐗堟湰椋庢牸鎻愮ず]\n{style_hint}"
+                final_prompt_input = self._append_style_hint(final_prompt_input, style_hint)
 
                 generation_started_at = time.perf_counter()
                 try:
@@ -4887,8 +4894,7 @@ class PipelineOrchestrator:
                     f"- {self._format_chapter_draft_contract_for_prompt(config.target_word_count, config.min_word_count)}\n"
                     f"- 目标字数约 {config.target_word_count}；最低字数：{config.min_word_count}。在保证质量的前提下，必须尽量逼近目标字数，不能写到刚过底线就提前收束。"
                 )
-                if style_hint:
-                    final_prompt_input += f"\n\n[版本风格提示]\n{style_hint}"
+                final_prompt_input = self._append_style_hint(final_prompt_input, style_hint)
 
                 generation_started_at = time.perf_counter()
                 try:

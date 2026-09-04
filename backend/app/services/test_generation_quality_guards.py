@@ -1576,3 +1576,11 @@ def test_partition_generation_results_preserves_payloads_and_sanitizes_failure_f
 def test_partition_generation_results_propagates_cancelled_candidate():
     with pytest.raises(asyncio.CancelledError):
         PipelineOrchestrator._partition_generation_results([asyncio.CancelledError()])
+
+
+def test_append_style_hint_uses_one_readable_label_and_ignores_blank_values():
+    assert PipelineOrchestrator._append_style_hint("基础提示", None) == "基础提示"
+    assert PipelineOrchestrator._append_style_hint("基础提示", "   ") == "基础提示"
+    assert PipelineOrchestrator._append_style_hint("基础提示", "冷峻克制") == (
+        "基础提示\n\n[版本风格提示]\n冷峻克制"
+    )
