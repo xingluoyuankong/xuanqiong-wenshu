@@ -2028,3 +2028,149 @@ logs/run-20260905-044317
 ### C. 尚未完成的真实验收
 
 当前仍未完成的唯一验收项，是使用真实且彼此不同的 Owner、Editor、Viewer、Admin、非成员会话执行 Writer HTTP/SSE 端到端矩阵。该矩阵必须覆盖项目写入、generation/cancel/resume/finalize、outline/rewrite-outline 控制、状态读取、SSE cursor/replay、断线续传、终态围栏和跨项目隔离，并保留真实请求链证据；现有单用户 smoke、OpenAPI smoke 与本地回归均不替代该验收。
+
+
+## 2026-09-04 接续回写：真实网络 HTTP/SSE 验收与 Writer H-2 末尾缺口修复
+
+### A. 真实 JWT + 文件 SQLite 多用户验收
+
+本轮已使用真实监听服务、真实 JWT 认证和文件 SQLite fixture 完成独立网络验收：
+
+```text
+fixture：live-http-1788555354
+认证：POST /api/auth/login → Bearer JWT
+存储：文件 SQLite
+服务：http://127.0.0.1:8013
+会话：Owner / Editor / Viewer / Admin / 非成员，共 5 个独立登录身份
+```
+
+验收覆盖的真实请求链包括：
+
+```text
+GET /api/projects/{project_id}/members
+GET /api/writer/novels/{project_id}/chapters/{chapter_number}/status
+GET /api/writer/novels/{project_id}/chapters/outline/status
+GET /api/writer/novels/{project_id}/chapters/rewrite-outline/status
+GET /api/writer/novels/{project_id}/chapters/{chapter_number}/stream
+```
+
+成员读取与管理矩阵在真实 JWT 链路中符合项目访问模型：
+
+```text
+Owner：成员管理、项目读取、Writer 状态与 SSE 可用
+Editor：项目读取、Writer 状态与 SSE 可用；成员管理不可用
+Viewer：项目读取、Writer 状态与 SSE 可用；写入与成员管理不可用
+Admin：项目读取、成员管理、Writer 状态与 SSE 可用
+非成员：项目成员、状态、outline/rewrite status 与 SSE 均为 403
+```
+
+Writer 状态、outline status 和 rewrite-outline status 已分别以 Owner、Editor、Viewer、Admin 验证可读；非成员路径均在资源投影或流创建前被拦截。该结果确认项目成员 read 边界已通过真实 JWT 解析、文件数据库查询、`ProjectAccessService` 与实际网络路由链，而不只依赖内存 SQLite 或依赖覆盖。
+
+### B. 真实章节 SSE cursor / replay 验收
+
+真实 SSE fixture 包含持久化章节 Runtime、`content_delta` 和终态事件。使用真实 `text/event-stream` 请求完成以下验证：
+
+```text
+首次请求：after_event_id=0，回放 content_delta 与 task_completed
+断线续传：Last-Event-ID / after_event_id 取最大 cursor，仅返回 cursor 之后事件
+终态围栏：收到 task_completed 后连接结束
+成员读取：Owner / Editor / Viewer / Admin 可回放同项目事件
+隔离：非成员、错误 project_id、错误 chapter_number 均不泄漏事件
+```
+
+因此 Writer 章节流已在真实网络条件下确认：项目 read gate、项目/章节/Run 精确绑定、durable event replay、cursor 续传与终态闭合同时成立。
+
+### C. 本轮末尾缺口修复
+
+#### 1. 静态 outline status 路由注册顺序
+
+提交：
+
+```text
+59032aa
+```
+
+已修复静态 outline status 路由与动态 `{chapter_number}/status` 的注册顺序，避免 FastAPI 将 `outline` 或 `rewrite-outline` 误解析为章节编号。真实 HTTP 验收已覆盖：
+
+```text
+/chapters/outline/status
+/chapters/rewrite-outline/status
+```
+
+并确认两条静态路由按预期命中。
+
+#### 2. 后台 generation Pipeline 的 legacy Owner-only 截断
+
+提交：
+
+```text
+df55473
+```
+
+已移除章节生成后台 Pipeline 在项目实体读取阶段对 legacy `NovelProject.user_id` 的二次 Owner-only 截断。现在的边界明确为：
+
+```text
+HTTP 写权限：actor_user_id 的 project write
+TaskRuntime / claim / lease / worker / 终态事件：execution_owner_id
+Pipeline 项目实体读取：project_id 绑定读取，不以旧项目创建者字段否决协作成员 Run
+```
+
+这闭合了 Editor 或 Admin 已通过 Writer 写入口、已创建 Runtime 后，却在 `PipelineOrchestrator.generate_chapter()` 内部被旧 Owner 校验中止的执行链缺口。
+
+专项验证：
+
+```text
+Pipeline 相关回归：211 passed
+```
+
+该组覆盖项目协作生成进入后台 Pipeline 的路径，避免仅验证路由入队而遗漏 worker 内部项目读取截断。
+
+#### 3. evaluate、async finalize stale selection 与 outline task type
+
+提交：
+
+```text
+5e7fdc1
+```
+
+本批完成三项 H-2 收口修复：
+
+```text
+章节 evaluate：入口改用 project write；Owner / Editor / Admin 可评审，Viewer / 非成员为 403
+async finalize stale selection：旧 finalize worker 在写回 selected_version 前先验证当前选择；较新的版本选择不会被旧任务覆盖
+outline cancel task type：持久化 Run 恢复和取消同时校验 project_id + run_id + outline task_type；错绑定的非 outline Runtime 返回未找到，且不写入取消事件
+```
+
+Writer 成员写入、finalize 与 outline 组合专项结果：
+
+```text
+40 passed
+```
+
+该组合验证覆盖 Writer 项目 write 矩阵、finalize 选择版本并发不变量，以及 outline/rewrite-outline 运行类型隔离；未通过删除断言、跳过 worker 语义或放宽跨项目绑定获得通过。
+
+### D. 当前验证边界
+
+本次真实 HTTP/SSE 验收与最新专项修复均已具备独立证据；但此前的完整后端基线发生在本节所列末尾修复之前。因此以下完整质量门禁必须按最新工作树重新执行后，才可作为当前权威基线：
+
+```text
+cd backend; .\.venv\Scripts\python.exe -m pytest -q
+cd frontend; npm run type-check
+cd frontend; npm run test:run
+cd frontend; npm run build-only
+git diff --check
+```
+
+### E. 后续执行计划
+
+1. 按最新修复后的工作树完整重跑后端、前端和静态差异质量门禁，并把实际命令结果回写本文档。
+2. 重启 backend / frontend 真实服务，复验 health、前端代理、OpenAPI 与当前代码已加载，排除旧进程承载旧路由或旧 worker 的可能。
+3. 继续以 `live-http-1788555354` 或等价隔离文件 SQLite fixture 运行真实 HTTP 写执行链：Editor / Admin 的 `generate`、对既有 Run 的 `cancel`、`resume`、状态转移、worker claim、终态事件、SSE cursor 与跨项目隔离；Provider 调用使用确定性测试替身，避免将权限与外部模型稳定性混淆。
+4. 继续审查和收口 P1/P2 不变量：
+   - `actor_user_id` 与 `execution_owner_id` 在所有后台入口、retry、lease、计量、审计和终态事件中的命名与传递一致性；
+   - outline/rewrite-outline 后台 Admin 身份完整恢复，不因重建用户对象遗失 `is_admin`；
+   - `edit-fast` 不再经语义含混的 admin-only serializer 返回项目成员数据；
+   - legacy outline DB fallback 明确区分 active、terminal 与 idle，不把任意历史记录投影为 active；
+   - 所有 Run 恢复、取消、读取和 SSE 均持续保持 `project_id + chapter_id/chapter_number + run_id + task_type` 的精确绑定。
+
+只有完成最新完整质量门禁、真实服务重启验收和真实 generation/cancel/resume 执行链验证后，Writer H-2 才能从“路由与读取/控制链闭合”升级为“当前分支端到端执行基线已确认”。
