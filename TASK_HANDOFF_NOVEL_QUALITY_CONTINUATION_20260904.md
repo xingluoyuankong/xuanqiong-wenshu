@@ -1253,3 +1253,78 @@ backend/app/agent/test_context_refs.py
 ```
 
 下一 Agent P0：`tool_adapters.py`，将 `project.context`、章节/大纲/质量/统计/知识图谱/文风/研究/伏笔等只读工具改为项目成员可读；之后处理 `write_executor.py` 与单 Run execution facts。
+
+## 2026-09-04 追加：UI-004 Agent 只读工具 P0 与全量回归合同对齐
+
+### A. 十个项目只读工具成员化
+
+`backend/app/agent/tool_adapters.py` 新增统一项目读取门和兼容序列化适配，以下工具现在支持 Owner / Editor / Viewer / Admin 的项目成员读取：
+
+```text
+project.context
+chapter.inspect
+chapter.version.list
+chapter.version.diff
+outline.inspect
+statistics.project
+knowledge.inspect
+style.inspect
+research.inspect
+foreshadowing.inspect
+```
+
+非成员统一返回 403。项目无关资源继续维持私有隔离。
+
+### B. 专项与反向验证
+
+新增：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\test_tool_adapters_member_access.py
+```
+
+专项：
+
+```text
+22 passed
+```
+
+反向移除统一成员读取门后：
+
+```text
+12 failed
+```
+
+恢复实现后专项重新通过。
+
+### C. 既有回归合同修正
+
+旧 adapter 测试把非成员项目读取表述为“空结果”或 `ValueError`。UI-004 统一合同为非成员 `403`，故更新：
+
+```text
+backend/app/agent/test_tool_adapters.py
+```
+
+并同步更新 clue / knowledge graph 路由既有测试的权限 mock：
+
+```text
+backend/app/api/routers/test_clue_tracker_route.py
+backend/app/api/routers/test_knowledge_graph_route.py
+```
+
+定向复测：
+
+```text
+Agent tool adapters：48 passed in 14.30s
+Clue / KnowledgeGraph 路由：2 passed in 3.35s
+```
+
+全量后端首轮发现的 6 个旧合同失败均已定位并修复；下一步重新执行完整后端门禁取得最终结果。
+
+### D. 后续 P0
+
+```text
+write_executor.py：Editor 创建/接收候选，Viewer Artifact 可读
+execution_facts.py：单 Run facts / provider summary 成员可读
+writer.py H-1：状态、SSE、运行态项目成员读取
+```

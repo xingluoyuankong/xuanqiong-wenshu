@@ -13,11 +13,14 @@ def anyio_backend():
     return "asyncio"
 
 
-class _OwnerService:
+class _AccessService:
     def __init__(self, _session):
         pass
 
-    async def ensure_project_owner(self, _project_id, _user_id):
+    async def require_project_read(self, _project_id, _user):
+        return object()
+
+    async def require_project_write(self, _project_id, _user):
         return object()
 
 
@@ -82,7 +85,7 @@ async def test_clue_overview_syncs_once_and_returns_list_plus_analysis(monkeypat
         instances.append(service)
         return service
 
-    monkeypatch.setattr(clue_tracker, "NovelService", _OwnerService)
+    monkeypatch.setattr(clue_tracker, "ProjectAccessService", _AccessService)
     monkeypatch.setattr(clue_tracker, "ClueTrackerService", factory)
     monkeypatch.setattr(clue_tracker, "project_ledger_lease", _fake_project_ledger_lease)
     user = UserInDB(id=7, username="owner", email=None, hashed_password="x")

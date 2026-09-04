@@ -21,6 +21,7 @@ from ..models.project_memory import ProjectMemory
 from ..services.foreshadowing_service import ForeshadowingService
 from ..services.knowledge_graph_service import KnowledgeGraphService
 from ..services.novel_service import NovelService
+from ..services.project_access_service import ProjectAccessService
 from ..services.style_rag_service import StyleRAGService
 
 
@@ -38,15 +39,35 @@ def _plain(value: Any) -> Any:
     return str(value)
 
 
+async def _require_project_read(session, project_id: str | None, user_id: int):
+    """Resolve member visibility once before reading project-scoped agent data.
+
+    Legacy ``NovelService`` serializers remain owner-scoped during the model
+    migration, so callers that still use them must pass the verified project's
+    canonical owner ID rather than the collaborating reader ID.
+    """
+    if not project_id:
+        raise ValueError("project-scoped tool requires project_id")
+    return await ProjectAccessService(session).require_project_read(project_id, user_id)
+
+
+async def _readable_project_schema(*, session, project_id: str | None, user_id: int) -> Any:
+    access = await _require_project_read(session, project_id, user_id)
+    return await NovelService(session).get_project_schema(access.project.id, access.project.user_id)
+
+
+async def _readable_project_section(*, session, project_id: str | None, user_id: int, section: NovelSectionType) -> Any:
+    access = await _require_project_read(session, project_id, user_id)
+    return await NovelService(session).get_section_data(access.project.id, access.project.user_id, section)
+
+
 async def execute_project_list(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     novel = NovelService(session)
     return {"tool_name": "project.list", "projects": _plain(await novel.list_projects_for_user(user_id))}
 
 
 async def execute_project_context(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
-    if not project_id:
-        raise ValueError("project-scoped tool requires project_id")
-    return {"tool_name": "project.context", "project": _plain(await NovelService(session).get_project_schema(project_id, user_id))}
+    return {"tool_name": "project.context", "project": _plain(await _readable_project_schema(session=session, project_id=project_id, user_id=user_id))}
 
 
 async def execute_entity_inspect(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -143,10 +164,8 @@ async def execute_quality_finding_inspect(*, session, user_id: int, project_id: 
 
 
 async def execute_chapter_inspect(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
-    if not project_id:
-        raise ValueError("project-scoped tool requires project_id")
     arguments = arguments or {}
-    data = _plain(await NovelService(session).get_section_data(project_id, user_id, NovelSectionType.CHAPTERS))
+    data = _plain(await _readable_project_section(session=session, project_id=project_id, user_id=user_id, section=NovelSectionType.CHAPTERS))
     chapter_number = arguments.get("chapter_number")
     if chapter_number is not None and isinstance(data.get("data"), dict):
         chapters = data["data"].get("chapters")
@@ -157,8 +176,7 @@ async def execute_chapter_inspect(*, session, user_id: int, project_id: str | No
 
 async def execute_chapter_version_list(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     """List safe version metadata without exposing chapter正文 to the planner/UI."""
-    if not project_id:
-        raise ValueError("project-scoped tool requires project_id")
+    await _require_project_read(session, project_id, user_id)
     arguments = arguments or {}
     try:
         limit = min(100, max(1, int(arguments.get("limit", 50))))
@@ -172,8 +190,7 @@ async def execute_chapter_version_list(*, session, user_id: int, project_id: str
     stmt = (
         select(Chapter, ChapterVersion)
         .join(ChapterVersion, ChapterVersion.chapter_id == Chapter.id)
-        .join(NovelProject, NovelProject.id == Chapter.project_id)
-        .where(Chapter.project_id == project_id, NovelProject.user_id == user_id)
+        .where(Chapter.project_id == project_id)
     )
     if chapter_number is not None:
         stmt = stmt.where(Chapter.chapter_number == chapter_number)
@@ -200,8 +217,7 @@ async def execute_chapter_version_list(*, session, user_id: int, project_id: str
 
 async def execute_chapter_version_diff(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     """Compare two same-chapter versions with bounded, project-scoped diff output."""
-    if not project_id:
-        raise ValueError("project-scoped tool requires project_id")
+    await _require_project_read(session, project_id, user_id)
     arguments = arguments or {}
     try:
         chapter_number = int(arguments.get("chapter_number"))
@@ -216,11 +232,9 @@ async def execute_chapter_version_diff(*, session, user_id: int, project_id: str
     stmt = (
         select(Chapter, ChapterVersion)
         .join(ChapterVersion, ChapterVersion.chapter_id == Chapter.id)
-        .join(NovelProject, NovelProject.id == Chapter.project_id)
         .where(
             Chapter.project_id == project_id,
             Chapter.chapter_number == chapter_number,
-            NovelProject.user_id == user_id,
             ChapterVersion.id.in_([from_version_id, to_version_id]),
         )
     )
@@ -273,9 +287,7 @@ async def execute_chapter_version_diff(*, session, user_id: int, project_id: str
 
 
 async def execute_outline_inspect(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
-    if not project_id:
-        raise ValueError("project-scoped tool requires project_id")
-    return {"tool_name": "outline.inspect", "result": _plain(await NovelService(session).get_section_data(project_id, user_id, NovelSectionType.CHAPTER_OUTLINE))}
+    return {"tool_name": "outline.inspect", "result": _plain(await _readable_project_section(session=session, project_id=project_id, user_id=user_id, section=NovelSectionType.CHAPTER_OUTLINE))}
 
 
 async def execute_quality_inspect(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -428,13 +440,8 @@ async def execute_quality_rewrite_instructions(*, session, user_id: int, project
 
 async def execute_statistics_project(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return compact project/quality counters without loading chapter prose or mutating runtime."""
-    if not project_id:
-        raise ValueError("project-scoped tool requires project_id")
-    project = (await session.execute(
-        select(NovelProject).where(NovelProject.id == project_id, NovelProject.user_id == user_id)
-    )).scalar_one_or_none()
-    if project is None:
-        raise ValueError("project is not accessible")
+    access = await _require_project_read(session, project_id, user_id)
+    project = access.project
     chapters = list((await session.execute(
         select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.chapter_number.asc())
     )).scalars().all())
@@ -495,10 +502,8 @@ async def execute_statistics_project(*, session, user_id: int, project_id: str |
 
 
 async def execute_knowledge_inspect(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
-    if not project_id:
-        raise ValueError("project-scoped tool requires project_id")
-    await NovelService(session).ensure_project_owner(project_id, user_id)
-    return {"tool_name": "knowledge.inspect", "result": _plain(await KnowledgeGraphService(session).get_project_graph(project_id))}
+    access = await _require_project_read(session, project_id, user_id)
+    return {"tool_name": "knowledge.inspect", "result": _plain(await KnowledgeGraphService(session).get_project_graph(access.project.id))}
 
 
 def _safe_style_value(value: Any, *, depth: int = 0) -> Any:
@@ -518,9 +523,8 @@ def _safe_style_value(value: Any, *, depth: int = 0) -> Any:
 
 async def execute_style_inspect(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     """Read style metadata without extraction, generation, source prose, or prompt context."""
-    if not project_id:
-        raise ValueError("project-scoped tool requires project_id")
-    await NovelService(session).ensure_project_owner(project_id, user_id)
+    access = await _require_project_read(session, project_id, user_id)
+    project_id = access.project.id
     style_service = StyleRAGService(session, llm_service=None)
     profiles = await style_service.list_style_profiles(user_id)
     memory_extra = (await session.execute(select(ProjectMemory.extra).where(ProjectMemory.project_id == project_id))).scalar_one_or_none()
@@ -555,8 +559,7 @@ async def execute_style_inspect(*, session, user_id: int, project_id: str | None
 
 async def execute_research_inspect(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     """Read safe persisted research summaries; never starts a network research job."""
-    if not project_id:
-        raise ValueError("project-scoped tool requires project_id")
+    await _require_project_read(session, project_id, user_id)
     arguments = arguments or {}
     scope = arguments.get("scope")
     if scope is not None:
@@ -572,15 +575,7 @@ async def execute_research_inspect(*, session, user_id: int, project_id: str | N
         limit = min(20, max(1, int(arguments.get("limit", 5))))
     except (TypeError, ValueError):
         limit = 5
-    stmt = (
-        select(ResearchArtifact)
-        .join(NovelProject, NovelProject.id == ResearchArtifact.project_id)
-        .where(
-            ResearchArtifact.project_id == project_id,
-            ResearchArtifact.user_id == user_id,
-            NovelProject.user_id == user_id,
-        )
-    )
+    stmt = select(ResearchArtifact).where(ResearchArtifact.project_id == project_id)
     if scope:
         stmt = stmt.where(ResearchArtifact.scope == scope)
     if chapter_number is not None:
@@ -612,11 +607,9 @@ async def execute_research_inspect(*, session, user_id: int, project_id: str | N
 
 
 async def execute_foreshadowing_inspect(*, session, user_id: int, project_id: str | None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
-    if not project_id:
-        raise ValueError("project-scoped tool requires project_id")
-    await NovelService(session).ensure_project_owner(project_id, user_id)
+    access = await _require_project_read(session, project_id, user_id)
     arguments = arguments or {}
-    items, total = await ForeshadowingService(session).get_foreshadowings(project_id, limit=min(int(arguments.get("limit", 100)), 100))
+    items, total = await ForeshadowingService(session).get_foreshadowings(access.project.id, limit=min(int(arguments.get("limit", 100)), 100))
     return {"tool_name": "foreshadowing.inspect", "result": {"total": total, "items": _plain(items)}}
 
 

@@ -177,8 +177,9 @@ async def test_chapter_version_list_returns_safe_metadata_and_respects_owner_sco
     assert all("content" not in item for item in result["versions"])
     assert all(item["word_count"] > 0 for item in result["versions"])
 
-    foreign = await execute_read_tool(tool_name="chapter.version.list", session=task_session, user_id=other.id, project_id=project.id, arguments={})
-    assert foreign["count"] == 0
+    with pytest.raises(HTTPException) as denied:
+        await execute_read_tool(tool_name="chapter.version.list", session=task_session, user_id=other.id, project_id=project.id, arguments={})
+    assert denied.value.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -212,11 +213,12 @@ async def test_chapter_version_diff_is_bounded_and_project_scoped(task_session):
             tool_name="chapter.version.diff", session=task_session, user_id=owner.id,
             project_id=project.id, arguments={"chapter_number": 2, "from_version_id": first.id, "to_version_id": first.id},
         )
-    with pytest.raises(ValueError):
+    with pytest.raises(HTTPException) as denied:
         await execute_read_tool(
             tool_name="chapter.version.diff", session=task_session, user_id=other.id,
             project_id=project.id, arguments={"chapter_number": 2, "from_version_id": first.id, "to_version_id": second.id},
         )
+    assert denied.value.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -441,11 +443,12 @@ async def test_research_inspect_reads_safe_summaries_without_starting_research(t
     assert "api_key" not in str(result)
     assert "sensitive detail" not in str(result)
 
-    foreign = await execute_read_tool(
-        tool_name="research.inspect", session=task_session, user_id=other.id,
-        project_id=project.id, arguments={},
-    )
-    assert foreign["count"] == 0
+    with pytest.raises(HTTPException) as denied:
+        await execute_read_tool(
+            tool_name="research.inspect", session=task_session, user_id=other.id,
+            project_id=project.id, arguments={},
+        )
+    assert denied.value.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -519,8 +522,9 @@ async def test_statistics_project_aggregates_selected_versions_without_exposing_
     assert result["quality"]["top_blocker_counts"] == {"event_density_weak": 2}
     assert "SECRET_CHAPTER_PROSE" not in str(result)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(HTTPException) as denied:
         await execute_read_tool(tool_name="statistics.project", session=task_session, user_id=other.id, project_id=project.id)
+    assert denied.value.status_code == 403
 
 
 def test_default_registry_has_handlers_for_all_read_tools():

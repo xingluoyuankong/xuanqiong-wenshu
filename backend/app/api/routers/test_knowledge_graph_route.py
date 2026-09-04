@@ -13,11 +13,14 @@ def anyio_backend():
     return "asyncio"
 
 
-class _OwnerService:
+class _AccessService:
     def __init__(self, _session):
         pass
 
-    async def ensure_project_owner(self, _project_id, _user_id):
+    async def require_project_read(self, _project_id, _user):
+        return object()
+
+    async def require_project_write(self, _project_id, _user):
         return object()
 
 
@@ -130,7 +133,7 @@ async def test_knowledge_graph_overview_syncs_once_and_returns_graph_plus_thread
     _KnowledgeGraphService.last_thread_calls = 0
     _fake_project_ledger_lease.calls = 0
 
-    monkeypatch.setattr(knowledge_graph, "NovelService", _OwnerService)
+    monkeypatch.setattr(knowledge_graph, "ProjectAccessService", _AccessService)
     monkeypatch.setattr(knowledge_graph, "KnowledgeGraphService", _KnowledgeGraphService)
     monkeypatch.setattr(knowledge_graph, "project_ledger_lease", _fake_project_ledger_lease)
     user = UserInDB(id=7, username="owner", email=None, hashed_password="x")
