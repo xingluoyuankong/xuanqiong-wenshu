@@ -1,4 +1,7 @@
+import asyncio
+
 import pytest
+from fastapi import HTTPException
 
 from app.api.routers.optimizer import _continuity_guard_failure as optimizer_continuity_guard_failure
 from app.services.ai_review_service import AIReviewService, ReviewResult
@@ -1551,3 +1554,25 @@ def test_quality_issue_summary_exposes_frontend_ready_labels():
     assert "static_description_risk" in summary["codes"]
     assert "静态描写过多" in summary["labels"]
     assert "对白未改变局势" in summary["labels"]
+
+
+def test_partition_generation_results_preserves_payloads_and_sanitizes_failure_facts():
+    versions, errors = PipelineOrchestrator._partition_generation_results(
+        [
+            {"index": 0, "content": "候选正文"},
+            HTTPException(status_code=429, detail={"retryable": True, "message": "provider detail must not persist"}),
+            RuntimeError("unexpected transport detail"),
+        ]
+    )
+
+    assert versions == [{"index": 0, "content": "候选正文"}]
+    assert len(errors) == 2
+    assert PipelineOrchestrator._summarize_generation_errors(errors) == [
+        {"category": "rate_limit", "status_code": 429, "retryable": True},
+        {"category": "candidate_error", "error_type": "RuntimeError", "retryable": False},
+    ]
+
+
+def test_partition_generation_results_propagates_cancelled_candidate():
+    with pytest.raises(asyncio.CancelledError):
+        PipelineOrchestrator._partition_generation_results([asyncio.CancelledError()])

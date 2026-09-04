@@ -2216,20 +2216,16 @@ class PipelineOrchestrator:
                 generation_run_id=generation_run_id,
                 stage=f"generation_attempt_{attempt_idx + 1}",
             )
-            attempt_versions: List[Dict[str, Any]] = []
-            attempt_errors: List[Exception] = []
-            for result in generation_results:
-                if isinstance(result, Exception):
-                    attempt_errors.append(result)
-                    logger.warning(
-                        "Single version generation candidate failed: project=%s chapter=%s mode=%s error=%s",
-                        project_id,
-                        chapter_number,
-                        attempt_config.preset,
-                        result,
-                    )
-                else:
-                    attempt_versions.append(result)
+            attempt_versions, attempt_errors = self._partition_generation_results(generation_results)
+            for error in attempt_errors:
+                logger.warning(
+                    "Single version generation candidate failed: project=%s chapter=%s mode=%s error=%s",
+                    project_id,
+                    chapter_number,
+                    attempt_config.preset,
+                    error,
+                )
+            failure_summary = self._summarize_generation_errors(attempt_errors)
 
             success_count = len(attempt_versions)
             generated_version_timings = [
@@ -2248,6 +2244,7 @@ class PipelineOrchestrator:
                     "requested_version_count": version_count,
                     "successful_versions": success_count,
                     "failed_versions": len(attempt_errors),
+                    "failure_summary": failure_summary,
                     "meets_success_threshold": success_count >= required_success_count,
                     "duration_ms": generation_attempt_duration_ms,
                     "generation_phase_total_ms": generation_phase_total_ms,
@@ -2265,6 +2262,7 @@ class PipelineOrchestrator:
                     "requested_version_count": version_count,
                     "successful_versions": success_count,
                     "failed_versions": len(attempt_errors),
+                    "failure_summary": failure_summary,
                     "required_success_count": required_success_count,
                 }
                 if attempt_idx > 0:
@@ -2286,6 +2284,7 @@ class PipelineOrchestrator:
                     metrics={
                         "generated_version_count": len(attempt_versions),
                         "failed_versions": len(attempt_errors),
+                        "failure_summary": failure_summary,
                         "target_word_count": config.target_word_count,
                     },
                     extra={
@@ -3570,6 +3569,64 @@ class PipelineOrchestrator:
         stable.enable_six_dimension = False
         stable.allow_truncated_response = config.allow_truncated_response
         return stable
+
+    @staticmethod
+    def _partition_generation_results(results: List[Any]) -> Tuple[List[Dict[str, Any]], List[Exception]]:
+        """Separate completed candidate payloads from recoverable candidate failures.
+
+        ``asyncio.gather(..., return_exceptions=True)`` returns ``CancelledError``
+        as a ``BaseException`` on supported Python versions. A cancelled child is
+        control flow, not a malformed candidate: propagate it so the enclosing
+        generation request stops instead of attempting ``.get(...)`` on it.
+        """
+        versions: List[Dict[str, Any]] = []
+        errors: List[Exception] = []
+        for result in results:
+            if isinstance(result, asyncio.CancelledError):
+                raise result
+            if isinstance(result, Exception):
+                errors.append(result)
+                continue
+            if isinstance(result, BaseException):
+                raise result
+            if not isinstance(result, dict):
+                errors.append(TypeError(f"Unexpected candidate generation result: {type(result).__name__}"))
+                continue
+            versions.append(result)
+        return versions, errors
+
+    @staticmethod
+    def _summarize_generation_errors(errors: List[Exception]) -> List[Dict[str, Any]]:
+        """Expose bounded, non-sensitive candidate failure facts in run metadata."""
+        summary: List[Dict[str, Any]] = []
+        for error in errors[:8]:
+            if isinstance(error, HTTPException):
+                detail = error.detail if isinstance(error.detail, dict) else {}
+                status_code = int(error.status_code)
+                if status_code == 429:
+                    category = "rate_limit"
+                elif status_code in {408, 504}:
+                    category = "timeout"
+                elif status_code in {500, 502, 503}:
+                    category = "provider_unavailable"
+                else:
+                    category = "http_error"
+                summary.append(
+                    {
+                        "category": category,
+                        "status_code": status_code,
+                        "retryable": bool(detail.get("retryable") or status_code in {408, 409, 425, 429, 500, 502, 503, 504}),
+                    }
+                )
+            else:
+                summary.append(
+                    {
+                        "category": "candidate_error",
+                        "error_type": type(error).__name__,
+                        "retryable": False,
+                    }
+                )
+        return summary
 
     @staticmethod
     def _should_retry_with_stable_config(errors: List[Exception]) -> bool:
