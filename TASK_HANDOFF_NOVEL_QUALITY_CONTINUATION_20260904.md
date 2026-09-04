@@ -1920,3 +1920,45 @@ Writer H-2 outline/rewrite-outline 控制专项：14 passed
 1. 迁移 deprecated outline generation path，统一 project write gate、TaskRuntime execution owner、共享项目 active-run 去重与项目/任务/run 绑定，清理遗留 Owner-only 二次过滤。
 2. 完成真实多用户 HTTP 验收，覆盖 Owner、Editor、Viewer、Admin、非成员的 generation、cancel、resume、finalize、outline/rewrite-outline start/cancel、状态读取、SSE cursor/replay 与跨项目隔离。
 3. deprecated path 与真实 HTTP 验收收口后，重新执行完整后端、前端、启动冒烟和跨项目隔离质量门禁，并回写权威实测基线。
+
+
+## 2026-09-04 接续回写：UI-004 Writer H-2 deprecated outline / rewrite-outline 同步入口迁移
+
+### A. 同步入口项目成员写入合同
+
+deprecated `outline` 与 `rewrite-outline` 同步入口已完成项目成员写权限迁移：
+
+```text
+入口权限：project write
+可发起身份：Owner / Editor / Admin
+Viewer / 非成员：403
+```
+
+同步 LLM 调用继续以当前实际发起成员作为本次执行的 `execution owner`，使额度计量、审计和同步写入归属与 actor 一致。
+
+### B. 项目实体恢复与 Owner-only 截断清理
+
+两个同步入口中的项目实体恢复已改为通过 repository 按项目绑定读取，不再以 `NovelProject.user_id` 作为恢复查询条件。Editor 或 Admin 在通过项目 write 后可完整取得同项目实体，旧项目创建者过滤不再在同步生成/改写链路中造成二次截断。
+
+```text
+project entity restore：repository project-bound lookup
+legacy NovelProject.user_id filter：已移出同步入口恢复路径
+sync execution owner：current actor
+```
+
+### C. 验证
+
+现有 outline/member 组合验证：
+
+```text
+40 passed
+```
+
+该组合覆盖 deprecated outline / rewrite-outline 同步入口的 project write 合同、项目实体恢复不受 Owner-only 过滤影响、当前 actor 的同步 execution owner 归属，以及 Viewer / 非成员拒绝路径。
+
+### D. 剩余阶段
+
+Writer H-2 的代码迁移范围已收口；下一阶段仅保留：
+
+1. 真实多用户 HTTP/SSE 验收：覆盖 Owner、Editor、Viewer、Admin、非成员的 Writer 写入、运行控制、状态读取、SSE cursor/replay、断线续传、终态围栏与跨项目隔离。
+2. 当前分支完整质量门禁：重新执行后端全量测试、前端 type-check、Vitest、build-only、服务启动/冒烟与跨项目隔离验证，并将权威实测基线回写本接续文档。

@@ -4706,7 +4706,10 @@ async def rewrite_chapter_outline(
     novel_service = NovelService(session)
     prompt_service = PromptService(session)
     llm_service = LLMService(session)
-    project = await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user.id)
+    project = await novel_service.repo.get_by_id(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
 
     outline = await novel_service.get_outline(project_id, request.chapter_number)
     if not outline:
@@ -5233,7 +5236,10 @@ async def generate_chapters_outline(
     prompt_service = PromptService(session)
     llm_service = LLMService(session)
 
-    project = await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user.id)
+    project = await novel_service.repo.get_by_id(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="项目不存在")
 
     if request.start_chapter < 1:
         raise HTTPException(status_code=400, detail="start_chapter 必须大于等于 1")
