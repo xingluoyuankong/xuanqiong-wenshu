@@ -121,7 +121,15 @@ async def test_outline_start_job_includes_default_metrics(monkeypatch):
         async def ensure_project_owner(self, project_id, user_id):
             return object()
 
+    class _FakeProjectAccess:
+        def __init__(self, session):
+            self.session = session
+
+        async def require_project_write(self, project_id, user_id):
+            return object()
+
     monkeypatch.setattr(writer_router, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(writer_router, "ProjectAccessService", _FakeProjectAccess)
 
     async def fake_load_active(*_args, **_kwargs):
         return None

@@ -199,6 +199,13 @@ async def test_finalize_chapter_defaults_to_background_ledger_sync(monkeypatch):
         async def ensure_project_owner(self, project_id, user_id):
             return DummyChapter(id=project_id, user_id=user_id)
 
+    class FakeProjectAccess:
+        def __init__(self, session):
+            self.session = session
+
+        async def require_project_write(self, project_id, user_id):
+            return DummyChapter(id=project_id, user_id=user_id)
+
     async def fail_if_sync_pipeline_runs(**_kwargs):
         raise AssertionError("finalize route should queue ledger sync by default")
 
@@ -216,6 +223,7 @@ async def test_finalize_chapter_defaults_to_background_ledger_sync(monkeypatch):
     background_tasks = BackgroundTasks()
 
     monkeypatch.setattr(writer_router, "NovelService", FakeNovelService)
+    monkeypatch.setattr(writer_router, "ProjectAccessService", FakeProjectAccess)
     monkeypatch.setattr(writer_router, "_run_finalize_pipeline", fail_if_sync_pipeline_runs)
 
     response = await writer_router.finalize_chapter(
@@ -248,6 +256,13 @@ async def test_finalize_chapter_can_still_run_sync_when_requested(monkeypatch):
         async def ensure_project_owner(self, project_id, user_id):
             return DummyChapter(id=project_id, user_id=user_id)
 
+    class FakeProjectAccess:
+        def __init__(self, session):
+            self.session = session
+
+        async def require_project_write(self, project_id, user_id):
+            return DummyChapter(id=project_id, user_id=user_id)
+
     async def fake_pipeline(**kwargs):
         assert kwargs["project_id"] == "project-1"
         assert kwargs["chapter_number"] == 7
@@ -268,6 +283,7 @@ async def test_finalize_chapter_can_still_run_sync_when_requested(monkeypatch):
     background_tasks = BackgroundTasks()
 
     monkeypatch.setattr(writer_router, "NovelService", FakeNovelService)
+    monkeypatch.setattr(writer_router, "ProjectAccessService", FakeProjectAccess)
     monkeypatch.setattr(writer_router, "_run_finalize_pipeline", fake_pipeline)
 
     response = await writer_router.finalize_chapter(
