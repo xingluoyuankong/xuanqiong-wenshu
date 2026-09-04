@@ -1799,7 +1799,10 @@ class NovelService:
         return project
 
     async def get_project_schema(self, project_id: str, user_id: int) -> NovelProjectSchema:
-        project = await self.ensure_project_owner(project_id, user_id)
+        await ProjectAccessService(self.session).require_project_read(project_id, user_id)
+        project = await self.repo.get_by_id(project_id)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在")
         return await self._serialize_project(project)
 
     async def get_section_data(

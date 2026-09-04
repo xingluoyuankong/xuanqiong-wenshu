@@ -4200,7 +4200,7 @@ async def select_chapter_version(
     current_user: UserInDB = Depends(get_current_user),
 ) -> NovelProjectSchema:
     novel_service = NovelService(session)
-    project = await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user.id)
     chapter = await novel_service.get_or_create_chapter(project_id, request.chapter_number)
 
     selected_version = await _resolve_chapter_version(
@@ -4250,7 +4250,7 @@ async def delete_chapter_version(
 ) -> NovelProjectSchema:
     """删除章节的某个候选版本"""
     novel_service = NovelService(session)
-    project = await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user.id)
     chapter = await novel_service.get_or_create_chapter(project_id, request.chapter_number)
 
     versions = sorted(list(chapter.versions or []), key=lambda item: (item.created_at, item.id))
@@ -4680,7 +4680,7 @@ async def update_chapter_outline(
     current_user: UserInDB = Depends(get_current_user),
 ) -> NovelProjectSchema:
     novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user.id)
 
     outline = await novel_service.get_outline(project_id, request.chapter_number)
     if not outline:
@@ -4931,7 +4931,7 @@ async def delete_chapters(
     current_user: UserInDB = Depends(get_current_user),
 ) -> NovelProjectSchema:
     novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user.id)
 
     for ch_num in request.chapter_numbers:
         await novel_service.delete_chapter(project_id, ch_num)
@@ -5508,7 +5508,7 @@ async def edit_chapter_content(
 ) -> NovelProjectSchema:
     novel_service = NovelService(session)
 
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user.id)
     await novel_service.get_or_create_chapter(project_id, request.chapter_number)
     chapter_stmt = (
         select(Chapter)
@@ -5578,7 +5578,7 @@ async def edit_chapter_content_fast(
 ) -> ChapterSchema:
     novel_service = NovelService(session)
 
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user.id)
     await novel_service.get_or_create_chapter(project_id, request.chapter_number)
     chapter_stmt = (
         select(Chapter)
