@@ -746,7 +746,9 @@ class StoryQualityScoringMixin:
     def _evaluate_dialogue_changes_state(cls, text: str, *, expected_dialogue: bool, dialogue_markers: int) -> Dict[str, Any]:
         marker_count = cls._count_dialogue_state_change_markers(text)
         if not expected_dialogue:
-            passed = True
+            # None means the chapter is outside the dialogue quality dimension;
+            # callers must distinguish that from an applicable failed check.
+            passed = None
         elif dialogue_markers >= 2 and marker_count >= 2:
             # classic: quotes + explicit pressure/state verbs
             passed = True
@@ -1160,10 +1162,20 @@ class StoryQualityScoringMixin:
         content: str,
         violations: List[Dict[str, Any]],
         chapter_mission: Optional[dict],
+        target_word_count: Optional[int] = None,
+        min_word_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         text = str(content or "")
         condensed = "".join(text.split())
         word_count = len(condensed)
+        target_floor = max(0, int(target_word_count or 0))
+        minimum_floor = max(0, int(min_word_count or 0))
+        if target_floor and minimum_floor > target_floor:
+            minimum_floor = target_floor
+        preferred_floor = max(minimum_floor, int(target_floor * 0.92)) if target_floor else minimum_floor
+        word_count_below_min = bool(minimum_floor and word_count < minimum_floor)
+        word_count_far_below_target = bool(preferred_floor and word_count < preferred_floor)
+        word_count_far_above_target = bool(target_floor and word_count > int(target_floor * 1.25))
         paragraphs = [segment for segment in text.splitlines() if segment.strip()]
         paragraph_count = len(paragraphs)
         dialogue_markers = sum(text.count(marker) for marker in ("“", "”", "「", "」", "『", "』", '"'))
@@ -1181,12 +1193,22 @@ class StoryQualityScoringMixin:
         score += min(dialogue_markers, 10) * 12
         score += 80 if ending_hook else 0
         score += min(word_count, 2400) // 50
+        score -= 620 if word_count_below_min else 0
+        score -= 180 if word_count_far_below_target and not word_count_below_min else 0
+        score -= 520 if word_count_far_above_target else 0
         score -= len(violations) * 500
         score -= 160 if static_description_risk else 0
 
         return {
             "score": score,
             "word_count": word_count,
+            "target_word_count": target_floor,
+            "min_word_count": minimum_floor,
+            "preferred_floor": preferred_floor,
+            "preferred_word_floor": preferred_floor,
+            "word_count_below_min": word_count_below_min,
+            "word_count_far_below_target": word_count_far_below_target,
+            "word_count_far_above_target": word_count_far_above_target,
             "paragraph_count": paragraph_count,
             "dialogue_marker_count": dialogue_markers,
             "guardrail_violation_count": len(violations),
@@ -1364,7 +1386,11 @@ class StoryQualityScoringMixin:
         score += min(dialogue_markers, 10) * 12
         score += int(scene_rate * 280) if scene_count else 80
         score += int(scene_structure_rate * 140) if scene_count else 40
-        score += 140 if dialogue_state.get("dialogue_changes_state") else -140
+        dialogue_state_passed = dialogue_state.get("dialogue_changes_state")
+        if dialogue_state_passed is True:
+            score += 140
+        elif dialogue_state_passed is False:
+            score -= 140
         score += 140 if ending_hook else -120
         score += min(int(event_density.get("progression_unit_count") or 0), 18) * 16
         score += 80 if event_density.get("event_density_passed") else -180
@@ -1385,6 +1411,7 @@ class StoryQualityScoringMixin:
             "target_word_count": target_floor,
             "min_word_count": minimum_floor,
             "preferred_word_floor": preferred_floor,
+            "preferred_floor": preferred_floor,
             "upper_word_ceiling": upper_target,
             "word_count_below_min": word_count_below_min,
             "word_count_far_above_target": word_count_far_above_target,
@@ -1402,7 +1429,7 @@ class StoryQualityScoringMixin:
             "scene_count": scene_count,
             "scene_structure_rate": scene_structure_rate,
             "structure_passed_scene_count": scene_fulfillment.get("structure_passed_scene_count", 0),
-            "dialogue_changes_state": bool(dialogue_state.get("dialogue_changes_state")),
+            "dialogue_changes_state": dialogue_state.get("dialogue_changes_state"),
             "dialogue_state_change_markers": dialogue_state.get("state_change_marker_count", 0),
             "ending_pressure_passed": ending_hook,
             "static_description_risk": static_description_risk,
@@ -1431,6 +1458,7 @@ class StoryQualityScoringMixin:
             "target_word_count": target_floor,
             "min_word_count": minimum_floor,
             "preferred_word_floor": preferred_floor,
+            "preferred_floor": preferred_floor,
             "upper_word_ceiling": upper_target,
             "word_count_below_min": word_count_below_min,
             "word_count_far_above_target": word_count_far_above_target,
@@ -1480,6 +1508,9 @@ class StoryQualityScoringMixin:
         cls,
         versions: List[Dict[str, Any]],
         chapter_mission: Optional[dict] = None,
+        *,
+        target_word_count: Optional[int] = None,
+        min_word_count: Optional[int] = None,
     ) -> Tuple[int, Dict[str, Any]]:
         scored: List[Tuple[int, int, Dict[str, Any]]] = []
         for idx, variant in enumerate(versions):
@@ -1491,6 +1522,8 @@ class StoryQualityScoringMixin:
                 content=content,
                 violations=violations,
                 chapter_mission=chapter_mission,
+                target_word_count=target_word_count,
+                min_word_count=min_word_count,
             )
             candidate_summary.update(
                 {
@@ -1520,6 +1553,5 @@ class StoryQualityScoringMixin:
 
     @staticmethod
     def _count_words(text: str) -> int:
-        return len("".join((text or "").split()))
         return len("".join((text or "").split()))
 

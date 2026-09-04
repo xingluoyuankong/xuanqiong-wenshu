@@ -1716,3 +1716,31 @@ def test_story_quality_metrics_track_active_word_count_target():
     assert guard["word_count_below_min"] is True
     assert guard["word_count_far_below_target"] is True
     assert "word_count_far_below_target" in guard["quality_issue_codes"]
+
+def test_fallback_selector_propagates_active_word_target_to_every_candidate():
+    best_index, summary = PipelineOrchestrator._fallback_select_best_version(
+        [
+            {"content": "短稿：门外传来脚步声。", "metadata": {"guardrail": {"passed": True}}},
+            {"content": "长稿：" + "林七推门而入，局势突然变化。\n" * 200, "metadata": {"guardrail": {"passed": True}}},
+        ],
+        chapter_mission={"chapter_purpose": "确认门外来人"},
+        target_word_count=2000,
+        min_word_count=1500,
+    )
+
+    assert best_index in {0, 1}
+    assert all(item["target_word_count"] == 2000 for item in summary["candidates"])
+    assert all(item["min_word_count"] == 1500 for item in summary["candidates"])
+
+
+def test_canonical_story_quality_scorer_keeps_dialogue_check_not_applicable_for_non_dialogue_chapters():
+    guard = PipelineOrchestrator._score_story_quality_candidate(
+        content="风雪压住山道，林七拖着伤继续赶路。",
+        violations=[],
+        chapter_mission={"chapter_purpose": "穿过山道"},
+        target_word_count=500,
+        min_word_count=300,
+    )
+
+    assert guard["expected_dialogue"] is False
+    assert guard["dialogue_changes_state"] is None

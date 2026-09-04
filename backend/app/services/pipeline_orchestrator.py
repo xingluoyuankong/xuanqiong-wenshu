@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import os
 import re
 import asyncio
@@ -48,6 +47,7 @@ from ..services.prompt_service import PromptService
 from ..services.reader_simulator_service import ReaderSimulatorService, ReaderType
 from ..services.style_rag_service import StyleRAGService
 from ..services.self_critique_service import CritiqueDimension, SelfCritiqueService
+from ..services.story_quality_scoring import StoryQualityScoringMixin
 from ..services.vector_store_service import VectorStoreService
 from ..services.writer_context_builder import WriterContextBuilder
 from ..utils.json_utils import remove_think_tags, unwrap_markdown_json
@@ -106,7 +106,7 @@ class PipelineConfig:
     multi_round_min_increment: int = 400  # 每轮最低增量字数
 
 
-class PipelineOrchestrator:
+class PipelineOrchestrator(StoryQualityScoringMixin):
     """统一写作流水线编排器。"""
 
     _RUNTIME_MAX_EVENTS = 60
@@ -434,6 +434,12 @@ class PipelineOrchestrator:
         "major_consistency_unresolved": "连续性冲突未处理",
         "dialogue_pressure_weak": "对白攻防不足",
         "mission_progression_weak": "本章目标命中不足",
+        "mission_anchor_missing": "本章任务锚点缺失",
+        "focus_character_missing": "焦点角色缺席",
+        "repetition_risk": "重复段落过多",
+        "chapter_artifact_markers": "章节含提纲/标记残留",
+        "word_count_below_min": "低于最低字数",
+        "word_count_far_above_target": "字数远超目标",
         "word_count_far_below_target": "字数离目标过远",
         "event_density_weak": "事件密度不足",
         "state_change_interval_weak": "状态变化间隔过长",
@@ -450,6 +456,12 @@ class PipelineOrchestrator:
         "ending_pressure_missing": "结尾必须交出危险、证据、期限、误会或代价，避免总结式平收。",
         "critical_consistency_unresolved": "优先修复前后文事实冲突，再继续润色。",
         "major_consistency_unresolved": "补齐承接关系和未闭环钩子，避免章节断裂。",
+        "mission_anchor_missing": "至少落地本章任务中的核心人物、地点、证据、冲突或转折。",
+        "focus_character_missing": "让本章焦点角色实际出场、说话、行动或被明确处理。",
+        "repetition_risk": "删除重复段落，用新的行动回合、信息增量或关系变化替换。",
+        "chapter_artifact_markers": "清除场景标签、提纲说明或生成指令残留，只保留正文。",
+        "word_count_below_min": "先补足最低字数，新增内容必须服务行动、对话、后果和短余波。",
+        "word_count_far_above_target": "压缩重复回合与无效铺陈，避免正文远超当前目标。",
         "word_count_far_below_target": "扩写只能补行动、对话、后果和短余波，不能用空泛描写凑字。",
         "event_density_weak": "把篇幅写到事件链里：行动、阻碍、反击、发现、代价和关系变化必须持续出现。",
         "state_change_interval_weak": "每个长段落窗口都要有可见变化，不能连续停在解释、回忆或氛围里。",
@@ -498,6 +510,18 @@ class PipelineOrchestrator:
             )
             if guard.get("static_description_risk"):
                 add("static_description_risk")
+            if guard.get("chapter_artifact_markers"):
+                add("chapter_artifact_markers")
+            if guard.get("repetition_risk"):
+                add("repetition_risk")
+            if guard.get("focus_character_missing"):
+                add("focus_character_missing")
+            if guard.get("word_count_below_min"):
+                add("word_count_below_min")
+            elif guard.get("word_count_far_above_target"):
+                add("word_count_far_above_target")
+            elif guard.get("word_count_far_below_target"):
+                add("word_count_far_below_target")
             if guard.get("expected_dialogue") and int(guard.get("dialogue_marker_count") or 0) < 4 and int(guard.get("word_count") or 0) >= 1500:
                 add("insufficient_dialogue_pressure")
             if (
@@ -2494,6 +2518,8 @@ class PipelineOrchestrator:
             versions=versions,
             chapter_mission=review_chapter_mission,
             user_id=user_id,
+            target_word_count=active_config.target_word_count,
+            min_word_count=active_config.min_word_count,
         )
         await mark_stage("ai_review", review_started_at, detail="AI 评审阶段完成")
         runtime_metadata["review_status"] = (ai_review_result or {}).get("status", "skipped")
@@ -5284,681 +5310,6 @@ class PipelineOrchestrator:
         return None
 
     @staticmethod
-    def _collect_fallback_mission_keywords(chapter_mission: Optional[dict]) -> List[str]:
-        if not isinstance(chapter_mission, dict):
-            return []
-
-        candidates: List[str] = []
-
-        def add_phrase(value: Any) -> None:
-            if not value:
-                return
-            if isinstance(value, dict):
-                for item in value.values():
-                    add_phrase(item)
-                return
-            if isinstance(value, list):
-                for item in value:
-                    add_phrase(item)
-                return
-
-            text = str(value).strip()
-            if not text:
-                return
-            if 2 <= len(text) <= 24:
-                candidates.append(text)
-            for token in re.split(r"[，。；、,\s/]+", text):
-                normalized = token.strip("：:- ").strip()
-                if 2 <= len(normalized) <= 12:
-                    candidates.append(normalized)
-
-        add_phrase(chapter_mission.get("chapter_purpose"))
-        add_phrase((chapter_mission.get("continuity_anchor") or {}).get("inherit_from_previous"))
-        add_phrase((chapter_mission.get("continuity_anchor") or {}).get("deliver_to_next"))
-        add_phrase(chapter_mission.get("character_arc_task"))
-        add_phrase((chapter_mission.get("dialogue_strategy") or {}).get("purpose"))
-        add_phrase((chapter_mission.get("dialogue_strategy") or {}).get("subtext"))
-        for scene in chapter_mission.get("scene_list") or []:
-            if isinstance(scene, dict):
-                for key in ("goal", "conflict", "turn", "emotion_shift", "dialogue_value", "end_hook"):
-                    add_phrase(scene.get(key))
-
-        deduped: List[str] = []
-        seen = set()
-        for item in candidates:
-            if item not in seen:
-                seen.add(item)
-                deduped.append(item)
-        return deduped[:24]
-
-    @staticmethod
-    def _chapter_mission_expects_dialogue(chapter_mission: Optional[dict]) -> bool:
-        if not isinstance(chapter_mission, dict):
-            return False
-        dialogue_strategy = chapter_mission.get("dialogue_strategy")
-        if isinstance(dialogue_strategy, dict) and dialogue_strategy:
-            return True
-        for scene in chapter_mission.get("scene_list") or []:
-            if isinstance(scene, dict) and any(scene.get(key) for key in ("dialogue_value", "conflict", "turn")):
-                return True
-        return False
-
-    @staticmethod
-    def _extract_quality_tokens(value: Any) -> List[str]:
-        if not value:
-            return []
-        if isinstance(value, dict):
-            tokens: List[str] = []
-            for item in value.values():
-                tokens.extend(PipelineOrchestrator._extract_quality_tokens(item))
-            return tokens
-        if isinstance(value, list):
-            tokens: List[str] = []
-            for item in value:
-                tokens.extend(PipelineOrchestrator._extract_quality_tokens(item))
-            return tokens
-
-        text = str(value).strip()
-        if not text:
-            return []
-        stop_tokens = {
-            "本章", "主角", "目标", "冲突", "转折", "压力", "下一章", "下一场",
-            "必须", "不能", "需要", "继续", "同时", "最终", "真正", "方式",
-        }
-        tokens = [text] if 2 <= len(text) <= 32 and text not in stop_tokens else []
-        for token in re.split(r"[，。；、！？：:\s/|,.;!?()\[\]{}<>《》“”\"'\\-]+", text):
-            token = token.strip()
-            if 2 <= len(token) <= 12:
-                tokens.append(token)
-            compact = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", token)
-            if 5 <= len(compact) <= 18:
-                # 章节任务常把“潮宗正式发缉印令”这类动作+名词写成一整句，
-                # 正文更可能只落到“缉印令”。补充较短的命名片段，减少硬关键词误杀。
-                for size in (5, 4, 3):
-                    for start in range(0, max(0, len(compact) - size + 1)):
-                        piece = compact[start:start + size]
-                        if piece and piece not in stop_tokens:
-                            tokens.append(piece)
-
-        deduped: List[str] = []
-        seen = set()
-        for token in tokens:
-            if token not in seen and token not in stop_tokens:
-                seen.add(token)
-                deduped.append(token)
-        return deduped[:20]
-
-    @classmethod
-    def _score_text_hits(cls, value: Any, condensed_text: str) -> Tuple[int, List[str]]:
-        tokens = cls._extract_quality_tokens(value)
-        hits = [token for token in tokens if token and token in condensed_text]
-        return len(hits), hits[:6]
-
-    @classmethod
-    def _evaluate_scene_fulfillment(cls, chapter_mission: Optional[dict], condensed_text: str) -> Dict[str, Any]:
-        scene_list = (chapter_mission or {}).get("scene_list") if isinstance(chapter_mission, dict) else []
-        if not isinstance(scene_list, list) or not scene_list:
-            return {
-                "scene_count": 0,
-                "fulfilled_scene_count": 0,
-                "scene_fulfillment_rate": 1.0,
-                "structure_passed_scene_count": 0,
-                "scene_structure_rate": 1.0,
-                "scene_details": [],
-            }
-
-        tracked_keys = (
-            "goal",
-            "conflict",
-            "turn",
-            "must_happen",
-            "outcome",
-            "pressure_shift",
-            "dialogue_value",
-            "end_hook",
-            "payoff",
-            "bridge",
-        )
-        structure_groups = {
-            "goal": ("goal", "must_happen"),
-            "conflict": ("conflict", "dialogue_value"),
-            "turn": ("turn", "outcome", "pressure_shift", "payoff"),
-            "bridge": ("bridge", "end_hook"),
-        }
-        details: List[Dict[str, Any]] = []
-        fulfilled_count = 0
-        structure_passed_count = 0
-        for index, scene in enumerate(scene_list[:8], start=1):
-            if not isinstance(scene, dict):
-                continue
-            required_fields = 0
-            hit_fields = 0
-            hit_by_key: Dict[str, bool] = {}
-            field_results = []
-            for key in tracked_keys:
-                value = scene.get(key)
-                if not value:
-                    continue
-                required_fields += 1
-                hit_count, hits = cls._score_text_hits(value, condensed_text)
-                field_hit = hit_count > 0
-                hit_fields += 1 if field_hit else 0
-                hit_by_key[key] = field_hit
-                field_results.append({"field": key, "hit": field_hit, "hits": hits})
-
-            required_to_pass = max(1, min(3, math.ceil(required_fields * 0.45)))
-            fulfilled = bool(required_fields == 0 or hit_fields >= required_to_pass)
-            structure_hits = 0
-            structure_results: Dict[str, bool] = {}
-            for group_name, keys in structure_groups.items():
-                group_hit = any(hit_by_key.get(key) for key in keys)
-                structure_results[group_name] = group_hit
-                structure_hits += 1 if group_hit else 0
-            structure_required = 2 if required_fields <= 3 else 3
-            structure_passed = bool(required_fields == 0 or structure_hits >= structure_required)
-            fulfilled_count += 1 if fulfilled else 0
-            structure_passed_count += 1 if structure_passed else 0
-            details.append(
-                {
-                    "scene_index": index,
-                    "required_fields": required_fields,
-                    "hit_fields": hit_fields,
-                    "required_to_pass": required_to_pass,
-                    "fulfilled": fulfilled,
-                    "structure_hits": structure_hits,
-                    "structure_required": structure_required,
-                    "structure_passed": structure_passed,
-                    "structure_results": structure_results,
-                    "fields": field_results,
-                }
-            )
-
-        scene_count = len(details)
-        return {
-            "scene_count": scene_count,
-            "fulfilled_scene_count": fulfilled_count,
-            "scene_fulfillment_rate": round(fulfilled_count / max(1, scene_count), 4),
-            "structure_passed_scene_count": structure_passed_count,
-            "scene_structure_rate": round(structure_passed_count / max(1, scene_count), 4),
-            "scene_details": details,
-        }
-
-    STORY_PROGRESSION_MARKERS = (
-        "逼问", "质问", "追问", "反问", "试探", "压迫", "威胁", "拒绝", "反制", "让步",
-        "改口", "承认", "暴露", "揭开", "揭露", "证实", "发现", "意识到", "明白", "决定",
-        "选择", "交换", "代价", "风险", "危险", "失控", "反转", "翻脸", "背叛", "线索",
-        "证据", "期限", "后果", "付出", "受伤", "倒下", "失去", "得到", "夺回", "打开",
-        "推开", "抓住", "按住", "拔出", "砸开", "冲进", "闯入", "逃出", "追上", "救下",
-        "杀", "死", "活", "必须", "否则", "来不及", "下一步", "转而", "却", "但", "然而",
-    )
-
-    @classmethod
-    def _story_units(cls, text: str) -> List[str]:
-        units = [unit.strip() for unit in re.split(r"[。！？!?\n]+", str(text or "")) if unit.strip()]
-        expanded: List[str] = []
-        for unit in units:
-            if len(unit) <= 180:
-                expanded.append(unit)
-                continue
-            for index in range(0, len(unit), 140):
-                chunk = unit[index:index + 140].strip()
-                if chunk:
-                    expanded.append(chunk)
-        return expanded
-
-    @classmethod
-    def _unit_has_progression(cls, unit: str) -> bool:
-        if not unit:
-            return False
-        if any(mark in unit for mark in ("“", "”", "「", "」", "『", "』", '"')):
-            return True
-        return any(marker in unit for marker in cls.STORY_PROGRESSION_MARKERS)
-
-    @classmethod
-    def _evaluate_event_density(cls, text: str, *, word_count: int) -> Dict[str, Any]:
-        if word_count < 800:
-            return {
-                "event_density_passed": True,
-                "long_chapter_density_passed": True,
-                "state_change_interval_passed": True,
-                "progression_unit_count": 0,
-                "story_unit_count": 0,
-                "progression_unit_rate": 1.0,
-                "event_density_per_1000": 0.0,
-                "state_change_window_pass_rate": 1.0,
-                "max_plain_unit_run": 0,
-            }
-
-        units = cls._story_units(text)
-        progression_flags = [cls._unit_has_progression(unit) for unit in units]
-        progression_count = sum(1 for item in progression_flags if item)
-        story_unit_count = len(units)
-        max_plain_run = 0
-        current_plain_run = 0
-        for flag in progression_flags:
-            if flag:
-                current_plain_run = 0
-            else:
-                current_plain_run += 1
-                max_plain_run = max(max_plain_run, current_plain_run)
-
-        condensed = "".join(str(text or "").split())
-        window_size = 1200 if word_count >= 7000 else 950
-        windows = [condensed[index:index + window_size] for index in range(0, len(condensed), window_size)] or [condensed]
-        window_hits = sum(1 for window in windows if cls._unit_has_progression(window))
-        window_pass_rate = round(window_hits / max(1, len(windows)), 4)
-
-        density_per_1000 = round(progression_count / max(1.0, word_count / 1000), 4)
-        progression_rate = round(progression_count / max(1, story_unit_count), 4)
-        density_floor = 1.0 if word_count < 2500 else 1.25 if word_count < 7000 else 1.45
-        unit_rate_floor = 0.16 if word_count < 2500 else 0.2 if word_count < 7000 else 0.22
-        window_floor = 0.6 if word_count < 2500 else 0.68 if word_count < 7000 else 0.74
-        plain_run_limit = 5 if word_count < 7000 else 4
-
-        state_interval_passed = bool(window_pass_rate >= window_floor)
-        dense_progression_override = bool(
-            state_interval_passed
-            and density_per_1000 >= density_floor * 2
-            and progression_rate >= unit_rate_floor * 1.6
-        )
-        event_density_passed = bool(
-            density_per_1000 >= density_floor
-            and progression_rate >= unit_rate_floor
-            and (max_plain_run <= plain_run_limit or dense_progression_override)
-        )
-        long_chapter_passed = True
-        if word_count >= 7000:
-            long_chapter_passed = bool(event_density_passed and state_interval_passed and progression_count >= 12)
-
-        return {
-            "event_density_passed": event_density_passed,
-            "long_chapter_density_passed": long_chapter_passed,
-            "state_change_interval_passed": state_interval_passed,
-            "progression_unit_count": progression_count,
-            "story_unit_count": story_unit_count,
-            "progression_unit_rate": progression_rate,
-            "event_density_per_1000": density_per_1000,
-            "state_change_window_count": len(windows),
-            "state_change_window_hit_count": window_hits,
-            "state_change_window_pass_rate": window_pass_rate,
-            "max_plain_unit_run": max_plain_run,
-        }
-
-    @staticmethod
-    def _count_dialogue_state_change_markers(text: str) -> int:
-        markers = (
-            "逼问", "反问", "拒绝", "改口", "让步", "沉默", "威胁", "试探", "压低",
-            "盯", "笑了", "停住", "转而", "暴露", "发现", "意识到", "决定", "条件",
-            "交换", "代价", "风险", "失控",
-        )
-        normalized_markers = (
-            "逼问", "反问", "质问", "追问", "试探", "压迫", "压住", "拒绝", "沉默", "打断",
-            "反制", "威胁", "翻脸", "让步", "改口", "承认", "暴露", "泄露", "发现", "意识到",
-            "决定", "选择", "条件", "交换", "代价", "风险", "危险", "失控", "反转", "退路",
-        )
-        return sum(str(text or "").count(marker) for marker in markers + normalized_markers)
-
-    @classmethod
-    def _evaluate_dialogue_changes_state(cls, text: str, *, expected_dialogue: bool, dialogue_markers: int) -> Dict[str, Any]:
-        marker_count = cls._count_dialogue_state_change_markers(text)
-        passed = None if not expected_dialogue else dialogue_markers >= 2 and marker_count >= 2
-        return {
-            "expected_dialogue": expected_dialogue,
-            "dialogue_marker_count": dialogue_markers,
-            "state_change_marker_count": marker_count,
-            "dialogue_changes_state": passed,
-        }
-
-    @classmethod
-    def _evaluate_ending_pressure(cls, condensed_text: str, chapter_mission: Optional[dict]) -> Dict[str, Any]:
-        ending_excerpt = condensed_text[-260:]
-        continuity = (chapter_mission or {}).get("continuity_anchor") if isinstance(chapter_mission, dict) else {}
-        deliver_to_next = continuity.get("deliver_to_next") if isinstance(continuity, dict) else []
-        _, deliver_hits = cls._score_text_hits(deliver_to_next, ending_excerpt)
-        mission_hook_sources: List[Any] = []
-        if isinstance(chapter_mission, dict):
-            for key in (
-                "suspense_hook",
-                "chapter_role",
-                "chapter_purpose",
-                "payoff_window",
-                "conflict_escalation",
-                "foreshadowing_tasks",
-            ):
-                if chapter_mission.get(key):
-                    mission_hook_sources.append(chapter_mission.get(key))
-            scene_list = chapter_mission.get("scene_list")
-            if isinstance(scene_list, list) and scene_list:
-                last_scene = scene_list[-1] if isinstance(scene_list[-1], dict) else {}
-                for key in ("end_hook", "bridge", "outcome", "pressure_shift", "payoff", "turn"):
-                    if last_scene.get(key):
-                        mission_hook_sources.append(last_scene.get(key))
-        _, mission_hook_hits = cls._score_text_hits(mission_hook_sources, ending_excerpt)
-        hook_markers = (
-            "却", "突然", "忽然", "门外", "脚步", "消息", "期限", "代价", "危险",
-            "线索", "证据", "下一刻", "来不及", "问题", "？", "?", "！", "!",
-        )
-        closure_markers = ("终于结束", "告一段落", "松了口气", "一切都", "暂时平静", "圆满", "尘埃落定")
-        zh_hook_markers = (
-            "\u4e0b\u4e00", "\u4e0b\u4e00\u8f6e", "\u4e0b\u4e00\u7ae0",
-            "\u6da8\u6f6e", "\u6f6e\u6c34", "\u5371\u9669", "\u5371\u673a",
-            "\u538b\u529b", "\u4ee3\u4ef7", "\u540e\u679c", "\u8bc1\u636e",
-            "\u7ebf\u7d22", "\u5f02\u5e38", "\u4e0d\u81ea\u7136",
-            "\u6765\u4e0d\u53ca", "\u5fc5\u987b", "\u5426\u5219",
-            "\u9000\u8def", "\u5c01\u9501", "\u7f09\u5370\u4ee4", "\u901a\u7f09",
-            "\u5012\u8ba1\u65f6", "\u8ffd\u7d22", "\u8ffd\u6740", "\u903c\u8fd1",
-            "\u5835\u6b7b", "\u9501\u6b7b", "\u53ea\u80fd", "\u4e0d\u5f97\u4e0d",
-            "\u4f1a\u5148\u6b7b", "\u6b7b\u5728", "\u65e7\u6728\u7247",
-            "\u6b7b\u4eba", "\u4f1a\u6b7b\u4eba", "\u771f\u4f1a\u6b7b",
-            "\u65e7\u5357\u6e20", "\u836f\u6e23", "\u836f\u5473", "\u836f\u8017",
-            "\u89c1\u4e86\u5730", "\u4eba\u547d", "\u75c5\u4eba",
-        )
-        hook_hits = [marker for marker in (*hook_markers, *zh_hook_markers) if marker in ending_excerpt]
-        closure_hits = [marker for marker in closure_markers if marker in ending_excerpt]
-        mission_hook_pass = bool(mission_hook_hits and hook_hits)
-        passed = bool((deliver_hits or len(hook_hits) >= 2 or mission_hook_pass) and not closure_hits)
-        return {
-            "ending_pressure_passed": passed,
-            "ending_pressure_hits": (deliver_hits + mission_hook_hits + hook_hits)[:10],
-            "mission_hook_hits": mission_hook_hits[:6],
-            "flat_closure_markers": closure_hits[:4],
-        }
-
-    @staticmethod
-    def _estimate_static_description_runs(paragraphs: List[str]) -> Dict[str, int]:
-        static_count = 0
-        max_run = 0
-        current_run = 0
-        action_markers = ("说", "问", "答", "走", "退", "伸手", "抬头", "看", "盯", "推", "抓", "按", "转身", "决定", "发现", "却", "但")
-        for paragraph in paragraphs:
-            plain = "".join(str(paragraph or "").split())
-            is_static = len(plain) >= 100 and not any(marker in plain for marker in action_markers)
-            if is_static:
-                static_count += 1
-                current_run += 1
-                max_run = max(max_run, current_run)
-            else:
-                current_run = 0
-        return {"static_paragraph_count": static_count, "max_static_run": max_run}
-
-    @classmethod
-    def _score_fallback_candidate(
-        cls,
-        *,
-        content: str,
-        violations: List[Dict[str, Any]],
-        chapter_mission: Optional[dict],
-        target_word_count: Optional[int] = None,
-        min_word_count: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        text = str(content or "")
-        condensed = "".join(text.split())
-        word_count = len(condensed)
-        target_floor = max(0, int(target_word_count or 0))
-        minimum_floor = max(0, int(min_word_count or 0))
-        if target_floor and minimum_floor > target_floor:
-            minimum_floor = target_floor
-        preferred_floor = max(minimum_floor, int(target_floor * 0.92)) if target_floor else minimum_floor
-        word_count_below_min = bool(minimum_floor and word_count < minimum_floor)
-        word_count_far_below_target = bool(preferred_floor and word_count < preferred_floor)
-        upper_target = int(target_floor * 1.25) if target_floor else 0
-        word_count_far_above_target = bool(upper_target and word_count > upper_target)
-        paragraphs = [segment for segment in text.splitlines() if segment.strip()]
-        paragraph_count = len(paragraphs)
-        dialogue_markers = sum(text.count(marker) for marker in ("“", "”", "「", "」", "『", "』", '"'))
-        mission_keywords = cls._collect_fallback_mission_keywords(chapter_mission)
-        mission_hits = [keyword for keyword in mission_keywords if keyword and keyword in condensed]
-        expected_dialogue = cls._chapter_mission_expects_dialogue(chapter_mission)
-        ending_excerpt = condensed[-220:]
-        hook_markers = ("？", "！", "?", "!", "忽然", "却", "竟", "脚步", "敲门", "消息", "声音", "目光", "门外", "下一瞬")
-        ending_hook = any(marker in ending_excerpt for marker in hook_markers)
-        static_description_risk = dialogue_markers == 0 and paragraph_count <= 4 and word_count >= 1800
-
-        score = 0
-        score += len(mission_hits) * 180
-        score += min(paragraph_count, 12) * 18
-        score += min(dialogue_markers, 10) * 12
-        score += 80 if ending_hook else 0
-        score += min(word_count, 2400) // 50
-        score -= len(violations) * 500
-        score -= 160 if static_description_risk else 0
-
-        return {
-            "score": score,
-            "word_count": word_count,
-            "paragraph_count": paragraph_count,
-            "dialogue_marker_count": dialogue_markers,
-            "guardrail_violation_count": len(violations),
-            "mission_hit_count": len(mission_hits),
-            "mission_hits": mission_hits[:8],
-            "expected_dialogue": expected_dialogue,
-            "ending_hook_detected": ending_hook,
-            "static_description_risk": static_description_risk,
-            "word_count_below_min": word_count_below_min,
-            "word_count_far_below_target": word_count_far_below_target,
-            "word_count_far_above_target": word_count_far_above_target,
-            "preferred_floor": preferred_floor,
-        }
-
-    @staticmethod
-    def _detect_chapter_artifact_markers(text):
-        """Detect chapter artifact markers in content."""
-        if not text:
-            return {"chapter_artifact_markers": False, "chapter_artifact_marker_count": 0, "chapter_artifact_marker_examples": []}
-        
-        import re
-        patterns = [
-            re.compile(r'^\s*#{1,6}\s*(?:场景|scene|扩写|修订|完整章节正文|本章正文|章节大纲|章节导演)\s*\d*\s*[|\uff5c:\uff1a\u3011]?\s*\S*', re.IGNORECASE | re.MULTILINE),
-            re.compile(r'^\s*(?:【|\*\*【)?\s*场景\s*\d+\s*(?:[|\uff5c:\uff1a\u3011]|$)', re.MULTILINE),
-            re.compile(r'^\s*(?:【|\*\*【)?\s*扩写部分\s*\d*\s*(?:[|\uff5c:\uff1a\u3011]|$)', re.MULTILINE),
-            re.compile(r'^\s*(?:修改说明|修订说明|以下是|本章正文|完整章节正文)\s*[:\uff1a]', re.MULTILINE),
-            re.compile(r'(?:写作指令|写作要求|质量方向|基础质量底线|首稿执行要求)\s*[:\uff1a]'),
-            re.compile(r'约\s*\d+\s*字'),
-        ]
-        
-        examples = []
-        for p in patterns:
-            for m in p.finditer(text):
-                example = m.group(0).strip()
-                if example and len(example) <= 100:
-                    examples.append(example)
-                    if len(examples) >= 5:
-                        break
-            if len(examples) >= 5:
-                break
-        
-        # Also check for structural bold headings
-        for m in re.finditer(r'\*\*(.+?)\*\*', text):
-            s = m.group(1)
-            if any(kw in s for kw in ['场景', '章节', '扩写', '修订']):
-                examples.append(m.group(0).strip())
-                if len(examples) >= 5:
-                    break
-        
-        return {"chapter_artifact_markers": len(examples) > 0, "chapter_artifact_marker_count": len(examples), "chapter_artifact_marker_examples": examples[:5]}
-
-    @classmethod
-    def _score_story_quality_candidate(
-        cls,
-        *,
-        content: str,
-        violations: List[Dict[str, Any]],
-        chapter_mission: Optional[dict],
-        target_word_count: Optional[int] = None,
-        min_word_count: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        text = str(content or "")
-        condensed = "".join(text.split())
-        word_count = len(condensed)
-        target_floor = max(0, int(target_word_count or 0))
-        minimum_floor = max(0, int(min_word_count or 0))
-        if target_floor and minimum_floor > target_floor:
-            minimum_floor = target_floor
-        preferred_floor = max(minimum_floor, int(target_floor * 0.92)) if target_floor else minimum_floor
-        word_count_below_min = bool(minimum_floor and word_count < minimum_floor)
-        word_count_far_below_target = bool(preferred_floor and word_count < preferred_floor)
-        word_count_far_above_target = bool(target_floor and word_count > int(target_floor * 1.25))
-        paragraphs = [segment for segment in text.splitlines() if segment.strip()]
-        paragraph_count = len(paragraphs)
-        dialogue_markers = sum(text.count(marker) for marker in ("“", "”", "「", "」", "『", "』", '"'))
-        mission_keywords = cls._collect_fallback_mission_keywords(chapter_mission)
-        mission_hits = [keyword for keyword in mission_keywords if keyword and keyword in condensed]
-        expected_dialogue = cls._chapter_mission_expects_dialogue(chapter_mission)
-        scene_fulfillment = cls._evaluate_scene_fulfillment(chapter_mission, condensed)
-        dialogue_state = cls._evaluate_dialogue_changes_state(
-            text,
-            expected_dialogue=expected_dialogue,
-            dialogue_markers=dialogue_markers,
-        )
-        ending_pressure = cls._evaluate_ending_pressure(condensed, chapter_mission)
-        ending_hook = bool(ending_pressure.get("ending_pressure_passed"))
-        static_runs = cls._estimate_static_description_runs(paragraphs)
-        event_density = cls._evaluate_event_density(text, word_count=word_count)
-        artifact_markers = cls._detect_chapter_artifact_markers(text)
-        static_description_risk = bool(
-            (dialogue_markers == 0 and paragraph_count <= 4 and word_count >= 1800)
-            or (word_count >= 1500 and static_runs.get("max_static_run", 0) >= 3)
-            or (word_count >= 2500 and event_density.get("event_density_passed") is False and static_runs.get("max_static_run", 0) >= 2)
-        )
-        scene_rate = float(scene_fulfillment.get("scene_fulfillment_rate", 1.0) or 0)
-        scene_structure_rate = float(scene_fulfillment.get("scene_structure_rate", 1.0) or 0)
-        scene_count = int(scene_fulfillment.get("scene_count") or 0)
-
-        score = 0
-        score += len(mission_hits) * 180
-        score += min(paragraph_count, 12) * 18
-        score += min(dialogue_markers, 10) * 12
-        score += int(scene_rate * 280) if scene_count else 80
-        score += int(scene_structure_rate * 140) if scene_count else 40
-        dialogue_state_passed = dialogue_state.get("dialogue_changes_state")
-        if dialogue_state_passed is True:
-            score += 140
-        elif dialogue_state_passed is False:
-            score -= 140
-        score += 140 if ending_hook else -120
-        score += min(int(event_density.get("progression_unit_count") or 0), 18) * 16
-        score += 80 if event_density.get("event_density_passed") else -180
-        score += 60 if event_density.get("state_change_interval_passed") else -130
-        score += 90 if event_density.get("long_chapter_density_passed") else -180
-        score += min(word_count, 2400) // 50
-        score -= 180 if word_count_far_below_target else 0
-        score -= 80 if word_count_far_above_target else 0
-        score -= len(violations) * 500
-        score -= 260 if static_description_risk else 0
-
-        quality_metric_snapshot = {
-            "word_count": word_count,
-            "target_word_count": target_floor,
-            "min_word_count": minimum_floor,
-            "preferred_floor": preferred_floor,
-            "word_count_below_min": word_count_below_min,
-            "word_count_far_below_target": word_count_far_below_target,
-            "word_count_far_above_target": word_count_far_above_target,
-            "paragraph_count": paragraph_count,
-            "mission_hit_count": len(mission_hits),
-            "scene_fulfillment_rate": scene_rate,
-            "fulfilled_scene_count": scene_fulfillment.get("fulfilled_scene_count", 0),
-            "scene_count": scene_count,
-            "scene_structure_rate": scene_structure_rate,
-            "structure_passed_scene_count": scene_fulfillment.get("structure_passed_scene_count", 0),
-            "dialogue_changes_state": dialogue_state.get("dialogue_changes_state"),
-            "dialogue_state_change_markers": dialogue_state.get("state_change_marker_count", 0),
-            "ending_pressure_passed": ending_hook,
-            "static_description_risk": static_description_risk,
-            "static_paragraph_count": static_runs.get("static_paragraph_count", 0),
-            "max_static_run": static_runs.get("max_static_run", 0),
-            "event_density_passed": bool(event_density.get("event_density_passed")),
-            "chapter_artifact_markers": artifact_markers.get("chapter_artifact_markers"),
-            "chapter_artifact_marker_examples": artifact_markers.get("chapter_artifact_marker_examples", []),
-            "long_chapter_density_passed": bool(event_density.get("long_chapter_density_passed")),
-            "state_change_interval_passed": bool(event_density.get("state_change_interval_passed")),
-            "progression_unit_count": event_density.get("progression_unit_count", 0),
-            "story_unit_count": event_density.get("story_unit_count", 0),
-            "progression_unit_rate": event_density.get("progression_unit_rate", 0),
-            "event_density_per_1000": event_density.get("event_density_per_1000", 0),
-            "state_change_window_pass_rate": event_density.get("state_change_window_pass_rate", 0),
-            "max_plain_unit_run": event_density.get("max_plain_unit_run", 0),
-        }
-        quality_issue_summary = cls._build_quality_issue_summary(story_guard=quality_metric_snapshot)
-        quality_metric_snapshot["quality_issue_summary"] = quality_issue_summary
-        quality_metric_snapshot["quality_issue_codes"] = quality_issue_summary.get("codes", [])
-        quality_metric_snapshot["quality_issue_labels"] = quality_issue_summary.get("labels", [])
-
-        return {
-            "score": score,
-            "word_count": word_count,
-            "target_word_count": target_floor,
-            "min_word_count": minimum_floor,
-            "preferred_floor": preferred_floor,
-            "word_count_below_min": word_count_below_min,
-            "word_count_far_below_target": word_count_far_below_target,
-            "word_count_far_above_target": word_count_far_above_target,
-            "paragraph_count": paragraph_count,
-            "dialogue_marker_count": dialogue_markers,
-            "guardrail_violation_count": len(violations),
-            "mission_hit_count": len(mission_hits),
-            "mission_hits": mission_hits[:8],
-            "expected_dialogue": expected_dialogue,
-            "ending_hook_detected": ending_hook,
-            "static_description_risk": static_description_risk,
-            "scene_fulfillment_rate": scene_rate,
-            "fulfilled_scene_count": scene_fulfillment.get("fulfilled_scene_count", 0),
-            "scene_count": scene_count,
-            "scene_structure_rate": scene_structure_rate,
-            "structure_passed_scene_count": scene_fulfillment.get("structure_passed_scene_count", 0),
-            "scene_fulfillment": scene_fulfillment,
-            "dialogue_changes_state": dialogue_state.get("dialogue_changes_state"),
-            "dialogue_state_change_markers": dialogue_state.get("state_change_marker_count", 0),
-            "ending_pressure_passed": ending_pressure.get("ending_pressure_passed"),
-            "ending_pressure": ending_pressure,
-            "static_description_runs": static_runs,
-            "event_density": event_density,
-            "event_density_passed": event_density.get("event_density_passed"),
-            "long_chapter_density_passed": event_density.get("long_chapter_density_passed"),
-            "state_change_interval_passed": event_density.get("state_change_interval_passed"),
-            "progression_unit_count": event_density.get("progression_unit_count", 0),
-            "event_density_per_1000": event_density.get("event_density_per_1000", 0),
-            "state_change_window_pass_rate": event_density.get("state_change_window_pass_rate", 0),
-            "quality_issue_summary": quality_issue_summary,
-            "quality_issue_codes": quality_issue_summary.get("codes", []),
-            "quality_issue_labels": quality_issue_summary.get("labels", []),
-            "quality_metric_snapshot": quality_metric_snapshot,
-            **artifact_markers,
-        }
-
-    @classmethod
-    def _fallback_select_best_version(
-        cls,
-        versions: List[Dict[str, Any]],
-        chapter_mission: Optional[dict] = None,
-    ) -> Tuple[int, Dict[str, Any]]:
-        scored: List[Tuple[int, int, Dict[str, Any]]] = []
-        for idx, variant in enumerate(versions):
-            metadata = dict(variant.get("metadata") or {})
-            guardrail = metadata.get("guardrail") or {}
-            violations = guardrail.get("violations") or []
-            content = variant.get("content") or ""
-            candidate_summary = cls._score_story_quality_candidate(
-                content=content,
-                violations=violations,
-                chapter_mission=chapter_mission,
-            )
-            candidate_summary.update(
-                {
-                    "index": idx,
-                    "guardrail_passed": bool(guardrail.get("passed", not violations)),
-                }
-            )
-            scored.append((candidate_summary["score"], idx, candidate_summary))
-
-        scored.sort(key=lambda item: (item[0], item[2]["guardrail_passed"], item[2]["mission_hit_count"]), reverse=True)
-        best = scored[0] if scored else (0, 0, {"index": 0, "word_count": 0, "guardrail_passed": False, "guardrail_violation_count": 0})
-        return best[1], {
-            "strategy": "heuristic_story_progression_guardrails",
-            "candidates": [item[2] for item in scored],
-        }
-
-    @staticmethod
     def _find_candidate_summary(
         fallback_summary: Optional[Dict[str, Any]],
         index: int,
@@ -6059,6 +5410,8 @@ class PipelineOrchestrator:
         versions: List[Dict[str, Any]],
         chapter_mission: Optional[dict],
         user_id: int,
+        target_word_count: Optional[int] = None,
+        min_word_count: Optional[int] = None,
     ) -> Tuple[int, Optional[Dict[str, Any]]]:
         if len(versions) <= 1:
             candidate = versions[0] if versions else {}
@@ -6086,6 +5439,8 @@ class PipelineOrchestrator:
         fallback_index, fallback_summary = self._fallback_select_best_version(
             versions,
             chapter_mission=chapter_mission,
+            target_word_count=target_word_count,
+            min_word_count=min_word_count,
         )
         try:
             ai_review_service = AIReviewService(self.llm_service, self.prompt_service)
