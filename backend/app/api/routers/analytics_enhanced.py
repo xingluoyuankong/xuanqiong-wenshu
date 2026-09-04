@@ -16,6 +16,7 @@ from ...db.session import get_session
 from ...models.novel import Chapter, ChapterOutline, ChapterVersion, NovelProject
 from ...models.foreshadowing import Foreshadowing
 from ...schemas.user import UserInDB
+from ...services.project_access_service import ProjectAccessService
 from ...services.emotion_analyzer_enhanced import analyze_multidimensional_emotion
 from ...services.story_trajectory_analyzer import analyze_story_trajectory
 from ...services.creative_guidance_system import generate_creative_guidance
@@ -146,16 +147,8 @@ async def get_enhanced_emotion_curve(
     - 情感节奏分析
     - 转折点检测
     """
-    # 检查项目权限
-    stmt = select(NovelProject).where(
-        NovelProject.id == project_id,
-        NovelProject.user_id == current_user.id
-    )
-    result = await session.execute(stmt)
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在或无权访问")
+    access = await ProjectAccessService(session).require_project_read(project_id, current_user)
+    project = access.project
     
     # 尝试从缓存获取
     cache_service = CacheService()
@@ -255,16 +248,8 @@ async def get_story_trajectory(
     - 波动性统计
     - 优化建议
     """
-    # 检查项目权限
-    stmt = select(NovelProject).where(
-        NovelProject.id == project_id,
-        NovelProject.user_id == current_user.id
-    )
-    result = await session.execute(stmt)
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在或无权访问")
+    access = await ProjectAccessService(session).require_project_read(project_id, current_user)
+    project = access.project
     
     # 尝试从缓存获取
     cache_service = CacheService()
@@ -345,16 +330,8 @@ async def get_creative_guidance(
     - 下一章建议
     - 长期规划指导
     """
-    # 检查项目权限
-    stmt = select(NovelProject).where(
-        NovelProject.id == project_id,
-        NovelProject.user_id == current_user.id
-    )
-    result = await session.execute(stmt)
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在或无权访问")
+    access = await ProjectAccessService(session).require_project_read(project_id, current_user)
+    project = access.project
     
     # 尝试从缓存获取
     cache_service = CacheService()
@@ -509,16 +486,8 @@ async def invalidate_analysis_cache(
     - 章节更新后强制重新分析
     - 手动刷新分析结果
     """
-    # 检查项目权限
-    stmt = select(NovelProject).where(
-        NovelProject.id == project_id,
-        NovelProject.user_id == current_user.id
-    )
-    result = await session.execute(stmt)
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在或无权访问")
+    access = await ProjectAccessService(session).require_project_write(project_id, current_user)
+    project = access.project
     
     # 清除所有相关缓存
     cache_service = CacheService()

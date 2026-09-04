@@ -20,6 +20,7 @@ from ...schemas.user import UserInDB
 from ...services.generation_call_service import GenerationCallPolicy, call_generation_json
 from ...services.llm_service import LLMService
 from ...services.prompt_service import PromptService
+from ...services.project_access_service import ProjectAccessService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analytics", tags=["Analytics"])
@@ -326,16 +327,8 @@ async def get_emotion_curve(
 ) -> EmotionCurveResponse:
     """获取小说的情感曲线数据"""
 
-    # 获取项目
-    result = await session.execute(
-        select(NovelProject).where(
-            NovelProject.id == project_id,
-            NovelProject.user_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    access = await ProjectAccessService(session).require_project_read(project_id, current_user)
+    project = access.project
 
     # 获取所有章节和大纲
     chapters_result = await session.execute(
@@ -402,16 +395,8 @@ async def get_foreshadowing(
 ) -> ForeshadowingResponse:
     """获取小说的伏笔追踪数据"""
 
-    # 获取项目
-    result = await session.execute(
-        select(NovelProject).where(
-            NovelProject.id == project_id,
-            NovelProject.user_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    access = await ProjectAccessService(session).require_project_read(project_id, current_user)
+    project = access.project
 
     # 获取所有章节和大纲
     chapters_result = await session.execute(
@@ -526,16 +511,8 @@ async def analyze_emotion_with_ai(
 ) -> EmotionCurveResponse:
     """使用AI深度分析情感曲线（更准确但较慢）"""
     
-    # 获取项目
-    result = await session.execute(
-        select(NovelProject).where(
-            NovelProject.id == project_id,
-            NovelProject.user_id == current_user.id
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    access = await ProjectAccessService(session).require_project_read(project_id, current_user)
+    project = access.project
     
     # 获取所有章节
     chapters_result = await session.execute(

@@ -11,7 +11,7 @@ from ...core.dependencies import get_current_user
 from ...db.session import get_session
 from ...schemas.user import UserInDB
 from ...services.clue_tracker_service import ClueTrackerService
-from ...services.novel_service import NovelService
+from ...services.project_access_service import ProjectAccessService
 from ...services.project_ledger_lease_service import project_ledger_lease
 
 router = APIRouter(prefix="/projects", tags=["clue-tracker"])
@@ -112,8 +112,8 @@ async def create_clue(
     current_user: UserInDB = Depends(get_current_user)
 ) -> dict:
     """创建新线索"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_write(project_id, current_user)
     service = ClueTrackerService(session)
     clue = await service.create_clue(
         project_id=project_id,
@@ -158,8 +158,8 @@ async def get_project_clues(
     current_user: UserInDB = Depends(get_current_user)
 ) -> List[dict]:
     """获取项目的所有线索"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_read(project_id, current_user)
     service = ClueTrackerService(session)
     await service.sync_from_foreshadowings(project_id)
     clues = await service.get_project_clues(
@@ -201,7 +201,7 @@ async def get_clue_overview(
     current_user: UserInDB = Depends(get_current_user),
 ) -> dict:
     """Return a consistent clue snapshot after one serialized ledger sync."""
-    await NovelService(session).ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
     service = ClueTrackerService(session)
     async with project_ledger_lease(project_id):
         sync = await service.sync_from_foreshadowings(project_id, commit=True)
@@ -247,8 +247,8 @@ async def analyze_clue_threads(
     current_user: UserInDB = Depends(get_current_user)
 ) -> dict:
     """分析项目的线索网络"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_read(project_id, current_user)
     service = ClueTrackerService(session)
     await service.sync_from_foreshadowings(project_id)
     analysis = await service.analyze_clue_threads(project_id)
@@ -262,8 +262,8 @@ async def get_red_herrings(
     current_user: UserInDB = Depends(get_current_user)
 ) -> List[dict]:
     """获取红鲱鱼线索列表"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_read(project_id, current_user)
     service = ClueTrackerService(session)
     herrings = await service.identify_red_herrings(project_id)
     return herrings
@@ -276,8 +276,8 @@ async def get_unresolved_clues(
     current_user: UserInDB = Depends(get_current_user)
 ) -> List[dict]:
     """获取未回收的伏笔列表"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_read(project_id, current_user)
     service = ClueTrackerService(session)
     unresolved = await service.find_unresolved_clues(project_id)
     return unresolved
@@ -291,8 +291,8 @@ async def get_clue(
     current_user: UserInDB = Depends(get_current_user)
 ) -> dict:
     """获取单个线索详情"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_read(project_id, current_user)
     service = ClueTrackerService(session)
     clue = await service.get_clue_by_id(clue_id)
 
@@ -331,8 +331,8 @@ async def update_clue(
     current_user: UserInDB = Depends(get_current_user)
 ) -> dict:
     """更新线索"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_write(project_id, current_user)
     service = ClueTrackerService(session)
     clue = await service.update_clue(clue_id, **request.model_dump(exclude_none=True))
 
@@ -370,8 +370,8 @@ async def delete_clue(
     current_user: UserInDB = Depends(get_current_user)
 ) -> dict:
     """删除线索"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_write(project_id, current_user)
     service = ClueTrackerService(session)
     success = await service.delete_clue(clue_id)
 
@@ -393,8 +393,8 @@ async def link_clue_to_chapter(
     current_user: UserInDB = Depends(get_current_user)
 ) -> dict:
     """将线索关联到章节"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_write(project_id, current_user)
     service = ClueTrackerService(session)
 
     # 验证线索存在
@@ -433,8 +433,8 @@ async def get_clue_timeline(
     current_user: UserInDB = Depends(get_current_user)
 ) -> dict:
     """获取线索的时间线"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_read(project_id, current_user)
     service = ClueTrackerService(session)
     timeline = await service.get_clue_timeline(clue_id)
 

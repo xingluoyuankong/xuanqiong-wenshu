@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...db.session import get_session
 from ...services.knowledge_graph_service import KnowledgeGraphService, PlotThread
-from ...services.novel_service import NovelService
+from ...services.project_access_service import ProjectAccessService
 from ...services.project_ledger_lease_service import project_ledger_lease
 from ...core.dependencies import get_current_user
 
@@ -233,8 +233,7 @@ async def create_graph_node(
 ):
     """创建角色节点"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_write(project_id, current_user)
         service = KnowledgeGraphService(session)
         node = await service.create_node(
             project_id=project_id,
@@ -274,8 +273,7 @@ async def get_graph_nodes(
 ):
     """获取项目的所有角色节点"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_read(project_id, current_user)
         service = KnowledgeGraphService(session)
         await service.sync_from_story_memory(project_id)
         graph_data = await service.get_project_graph(project_id)
@@ -297,8 +295,7 @@ async def update_graph_node(
 ):
     """更新角色节点"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_write(project_id, current_user)
         service = KnowledgeGraphService(session)
         current_node = await service.get_node(node_id)
         if current_node is None or current_node.project_id != project_id:
@@ -340,8 +337,7 @@ async def delete_graph_node(
 ):
     """删除角色节点（级联删除相关边）"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_write(project_id, current_user)
         service = KnowledgeGraphService(session)
         node = await service.get_node(node_id)
         if node is None or node.project_id != project_id:
@@ -366,8 +362,7 @@ async def create_graph_edge(
 ):
     """创建事件边"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_write(project_id, current_user)
         service = KnowledgeGraphService(session)
 
         # 验证源节点和目标节点存在且属于当前项目
@@ -420,8 +415,7 @@ async def get_graph_edges(
 ):
     """获取项目的所有事件边"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_read(project_id, current_user)
         service = KnowledgeGraphService(session)
         await service.sync_from_story_memory(project_id)
         graph_data = await service.get_project_graph(project_id)
@@ -442,8 +436,7 @@ async def delete_graph_edge(
 ):
     """删除事件边"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_write(project_id, current_user)
         service = KnowledgeGraphService(session)
         edge = await service.get_edge(edge_id)
         if edge is None or edge.project_id != project_id:
@@ -465,7 +458,7 @@ async def get_knowledge_graph_overview(
     current_user = Depends(get_current_user),
 ):
     """Return graph and plot-thread data from one serialized ledger snapshot."""
-    await NovelService(session).ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
     service = KnowledgeGraphService(session)
     async with project_ledger_lease(project_id):
         sync = await service.sync_from_story_memory(project_id)
@@ -488,8 +481,7 @@ async def get_full_graph(
 ):
     """获取完整知识图谱"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_read(project_id, current_user)
         service = KnowledgeGraphService(session)
         await service.sync_from_story_memory(project_id)
         graph_data = await service.get_project_graph(project_id)
@@ -520,8 +512,7 @@ async def get_character_timeline(
 ):
     """获取角色时间线"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_read(project_id, current_user)
         service = KnowledgeGraphService(session)
         node = await service.get_node(character_id)
         if node is None or node.project_id != project_id:
@@ -551,8 +542,7 @@ async def get_connected_characters(
 ):
     """获取与角色关联的其他角色"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_read(project_id, current_user)
         service = KnowledgeGraphService(session)
         node = await service.get_node(character_id)
         if node is None or node.project_id != project_id:
@@ -579,8 +569,7 @@ async def analyze_plot_threads(
 ):
     """分析情节线索"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_read(project_id, current_user)
         service = KnowledgeGraphService(session)
 
         # 分析当前项目的情节线索
@@ -607,8 +596,7 @@ async def export_graph(
 ):
     """导出图谱数据"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_read(project_id, current_user)
         service = KnowledgeGraphService(session)
         export_data = await service.export_graph(project_id, format)
 

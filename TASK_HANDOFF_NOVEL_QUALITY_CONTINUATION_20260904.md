@@ -1036,3 +1036,71 @@ viewer_allowed_commands=[]
 ```
 
 该结果验证了 Viewer 能读取 provider reasoning、公开活动和安全 Run state，且不会获得运行控制命令。
+
+## 2026-09-04 追加：UI-004-D 项目协作权限第二批路由收口
+
+### A. 已接入统一成员策略的模块
+
+```text
+clue_tracker.py
+foreshadowing.py
+knowledge_graph.py
+analytics.py
+analytics_enhanced.py
+```
+
+按端点语义划分为：
+
+```text
+Viewer/Editor/Owner/Admin 可读：
+- 线索列表、概览、线程、红鲱鱼、未解决线索、线索时间线
+- 伏笔列表、提醒、分析
+- 知识图谱节点、边、概览、角色时间线、关联节点、线程、导出
+- 情感曲线、伏笔分析、增强情感曲线、故事轨迹、创意指导、综合分析
+
+Editor/Owner/Admin 可改：
+- 线索创建、更新、删除、章节关联
+- 伏笔创建、解决、提醒关闭
+- 知识图谱节点/边创建、更新、删除
+- 分析缓存失效
+```
+
+所有迁移端点均使用 `ProjectAccessService.require_project_read()` 或 `require_project_write()`；旧 `ensure_project_owner` 和 `NovelProject.user_id == current_user.id` 限制已从上述模块的目标项目路径移除。
+
+### B. 新增回归
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_clue_foreshadowing_member_access.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_knowledge_analytics_member_access.py
+```
+
+覆盖：Viewer 可读、Viewer 写入拒绝、Editor 写入、非成员读写拒绝。第二个测试同时修正增强分析真实路由前缀为：
+
+```text
+/api/analytics/projects/{project_id}/...
+```
+
+### C. 实测
+
+```text
+成员权限路由专项：12 passed in 7.65s
+Python compile：通过
+git diff --check：通过
+```
+
+### D. 后续范围
+
+下一批继续处理：
+
+```text
+research.py
+style.py（含后台 worker 的 write 权限）
+outline.py
+review.py
+patch_diff.py
+token_budget.py
+writer.py
+Agent tool adapters / execution facts
+```
+
+每批继续保持 read/write 分类、失败测试先行、专项回归、真实 HTTP/SSE 验收和接续文档回写。

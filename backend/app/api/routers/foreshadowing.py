@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...db.session import get_session
 from ...services.foreshadowing_service import ForeshadowingService
-from ...services.novel_service import NovelService
+from ...services.project_access_service import ProjectAccessService
 from ...models.foreshadowing import Foreshadowing, ForeshadowingReminder, ForeshadowingAnalysis
 from ...models.novel import Chapter
 from ...core.dependencies import get_current_user
@@ -132,8 +132,7 @@ async def create_foreshadowing(
 ):
     """创建伏笔"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_write(project_id, current_user)
         chapter = await session.get(Chapter, data.chapter_id)
         if not chapter or chapter.project_id != project_id or chapter.chapter_number != data.chapter_number:
             raise HTTPException(status_code=404, detail="章节不存在")
@@ -172,8 +171,7 @@ async def list_foreshadowings(
 ):
     """获取伏笔列表"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_read(project_id, current_user)
         service = ForeshadowingService(session)
         foreshadowings, total = await service.get_foreshadowings(
             project_id=project_id,
@@ -206,8 +204,7 @@ async def resolve_foreshadowing(
 ):
     """标记伏笔回收"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_write(project_id, current_user)
         foreshadowing = await session.get(Foreshadowing, foreshadowing_id)
         if not foreshadowing or foreshadowing.project_id != project_id:
             raise HTTPException(status_code=404, detail="伏笔不存在")
@@ -247,8 +244,7 @@ async def get_reminders(
 ):
     """获取伏笔提醒"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_read(project_id, current_user)
         service = ForeshadowingService(session)
         reminders = await service.get_active_reminders(project_id=project_id, limit=limit)
         
@@ -284,8 +280,7 @@ async def dismiss_reminder(
 ):
     """忽略提醒"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_write(project_id, current_user)
         reminder = await session.get(ForeshadowingReminder, reminder_id)
         if not reminder or reminder.project_id != project_id:
             raise HTTPException(status_code=404, detail="提醒不存在")
@@ -313,8 +308,7 @@ async def get_analysis(
 ):
     """获取伏笔分析"""
     try:
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_read(project_id, current_user)
         service = ForeshadowingService(session)
         analysis = await service.analyze_foreshadowings(project_id=project_id)
         await session.commit()
