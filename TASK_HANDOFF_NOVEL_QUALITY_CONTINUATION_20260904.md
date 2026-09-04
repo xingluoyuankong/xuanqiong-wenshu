@@ -3363,3 +3363,106 @@ git diff --check：通过
 4. 之后进入 UI-005 工具注册策略统一和 UI-006 长历史性能批次。
 
 总任务保持 `active`。
+
+### Agent readable projection 真实 JWT/HTTP 验收
+
+新增测试：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_readable_projection_http.py
+```
+
+覆盖真实 FastAPI ASGITransport、真实 `/api/auth/login` JWT 与隔离 SQLite：
+
+- Owner/Editor/Viewer/Admin 读取 Owner Run 的 Plan、Provider provenance、Context snapshot、Plan revision、Conversation summaries；
+- 成员读取 commands、approvals、steps、Artifacts；
+- 非成员访问上述历史投影全部返回 403；
+- projectless Run 的历史仍保持创建者私有，其他用户返回 404；
+- 读取返回保留原始 Owner attribution，不把 Viewer/Editor 身份写回历史事实。
+
+专项结果：
+
+```text
+14 passed in 66.05s
+```
+
+
+## 2026-09-04 接续回写：重启服务与 Agent 真实 HTTP 验收
+
+### A. 重启与 smoke
+
+已执行项目启动脚本完成 backend/frontend 重启：
+
+```text
+backend 127.0.0.1:8013 READY
+frontend 127.0.0.1:5174 READY
+frontend proxy /api/health 200
+```
+
+随后执行 `verify.ps1 -Suite smoke`：
+
+```text
+后端健康检查：PASS
+前端首页：PASS
+前端代理健康检查：PASS
+OpenAPI：259 检查 = 55 通过 / 204 合理跳过 / 0 失败
+LLM settings smoke：PASS
+```
+
+隔离 Writer HTTP/JWT 验收再次通过：
+
+```text
+SMOKE_PASSED
+checks=31
+generate_status=200
+finalize_status=200
+outline_status=200
+resume_status=200
+```
+
+### B. Agent 真实 HTTP/JWT 回归
+
+当前 Agent 路由真实 ASGI/JWT 专项已通过：
+
+```text
+readable projection / P1 facts：19 passed
+quality lineage / stream / approval：15 passed
+member controls / Artifact accept / legacy projection：28 passed
+合计：62 passed
+```
+
+覆盖共享项目成员读取、plan/provider/context/summary/commands、事件与 SSE、Editor/Admin Run 控制、候选 Artifact 接受、Viewer/非成员拒绝、projectless 404 隔离和跨项目绑定。
+
+### C. UI-006 初审
+
+当前 Agent Workspace 已具备：
+
+```text
+运行日志最多渲染 120 条，独立滚动和尾部跟随；
+Provider reasoning 首页 100 条游标分页，可加载更早内容；
+事件 reducer 有数量上限，避免活动流无限增长；
+成员面板与长历史相关前端测试已纳入完整 Vitest。
+```
+
+真正需要继续优化的方向是大型 artifact/steps/commands 详情的分页接口与虚拟列表，而不是重复增加日志上限。
+
+### D. 当前验证状态
+
+```text
+最近稳定 backend 全量：1706 passed，6 warnings（Agent 控制补丁专项之后需再替换）
+前端 type-check：通过
+前端 Vitest：80 files / 510 tests passed
+前端 build-only：4918 modules transformed，成功
+重启 smoke：通过
+隔离 Writer：31 checks 通过
+真实 Agent HTTP/JWT：62 passed
+```
+
+### E. 下一批
+
+1. 在 `a8cc091` 上重跑 backend 全量，替换 1706 项旧基线；
+2. 清点 Agent command/control、Artifact accept 的 actor/execution owner 审计字段是否在所有写入事件中完整保留；
+3. 为 Artifact/steps/commands 增加按 Run 游标分页或虚拟列表前置设计，保持当前日志/reasoning 已有上限；
+4. 完成后再执行一次 frontend 全量、重启 smoke、Writer/Agent 隔离 HTTP 验收。
+
+总任务保持 `active`。
