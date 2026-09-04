@@ -2820,6 +2820,8 @@ class PipelineOrchestrator:
             "writer_prompt_budget_tokens": self._resolve_writer_prompt_budget(config.target_word_count),
         }
         runtime_metadata["writing_contract_snapshot"] = self._writing_contract_runtime_metadata()
+        # T-24 production candidates consume max_tokens=self._resolve_writer_prompt_budget(config.target_word_count)
+        # inside _generate_single_version, invoked by this orchestration path.
         # HTTP entrypoints have already authorized the actor. A queued worker
         # must load its project by project_id, not by the legacy project creator,
         # because its durable execution owner may be an Editor or Admin.
