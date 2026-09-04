@@ -1646,3 +1646,31 @@ async def test_provider_waiting_progress_serializes_concurrent_session_updates(m
     )
 
     assert max_active_operations == 1
+
+
+def test_non_dialogue_quality_check_is_not_applicable_and_does_not_become_a_failure():
+    evaluation = PipelineOrchestrator._evaluate_dialogue_changes_state(
+        "风雪压住了山道，主角拖着伤继续赶路。",
+        expected_dialogue=False,
+        dialogue_markers=0,
+    )
+    assert evaluation["dialogue_changes_state"] is None
+
+    summary = PipelineOrchestrator._build_quality_issue_summary(
+        story_guard={
+            "word_count": 2200,
+            "mission_hit_count": 2,
+            "expected_dialogue": False,
+            "dialogue_changes_state": None,
+            "scene_count": 1,
+            "scene_fulfillment_rate": 0.8,
+            "scene_structure_rate": 0.8,
+            "ending_pressure_passed": True,
+            "event_density_passed": True,
+            "state_change_interval_passed": True,
+            "static_description_risk": False,
+        }
+    )
+
+    assert "dialogue_does_not_change_state" not in summary["codes"]
+    assert "chapter_progression_weak" not in summary["codes"]

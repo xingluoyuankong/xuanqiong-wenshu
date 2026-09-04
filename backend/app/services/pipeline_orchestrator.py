@@ -491,7 +491,7 @@ class PipelineOrchestrator:
             rich_progression_evidence = (
                 float(guard.get("scene_fulfillment_rate") or 0.0) >= 0.75
                 and float(guard.get("scene_structure_rate") or 0.0) >= 0.7
-                and bool(guard.get("dialogue_changes_state", True))
+                and guard.get("dialogue_changes_state") is not False
                 and bool(guard.get("ending_pressure_passed", guard.get("ending_hook_detected", True)))
                 and bool(guard.get("event_density_passed", True))
                 and bool(guard.get("state_change_interval_passed", True))
@@ -510,7 +510,7 @@ class PipelineOrchestrator:
                 add("scene_fulfillment_weak")
             if int(guard.get("scene_count") or 0) > 0 and float(guard.get("scene_structure_rate") or 1.0) < 0.55:
                 add("scene_structure_weak")
-            if guard.get("expected_dialogue") and "dialogue_changes_state" in guard and not guard.get("dialogue_changes_state", True):
+            if guard.get("expected_dialogue") and "dialogue_changes_state" in guard and guard.get("dialogue_changes_state") is False:
                 add("dialogue_does_not_change_state")
             if int(guard.get("word_count") or 0) >= 1200 and not guard.get("ending_pressure_passed", guard.get("ending_hook_detected", True)):
                 add("ending_pressure_missing")
@@ -670,7 +670,7 @@ class PipelineOrchestrator:
                 and scene_structure_rate >= 0.7
                 and story_dialogue_markers >= 8
                 and not story_guard.get("static_description_risk")
-                and story_guard.get("dialogue_changes_state", True)
+                and story_guard.get("dialogue_changes_state") is not False
                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
                 and story_guard.get("event_density_passed", True)
                 and story_guard.get("state_change_interval_passed", True)
@@ -696,7 +696,7 @@ class PipelineOrchestrator:
             progression_soft_pass = (
                 story_dialogue_markers >= 8
                 and not story_guard.get("static_description_risk")
-                and story_guard.get("dialogue_changes_state", False)
+                and story_guard.get("dialogue_changes_state") is not False
                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", False))
                 and critique_critical == 0
                 and (critique_score is None or critique_score >= 70)
@@ -726,7 +726,7 @@ class PipelineOrchestrator:
                 )
                 and story_dialogue_markers >= 4
                 and not story_guard.get("static_description_risk")
-                and story_guard.get("dialogue_changes_state", True)
+                and story_guard.get("dialogue_changes_state") is not False
                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
                 and critique_critical == 0
                 and (critique_score is None or critique_score >= 60)
@@ -747,7 +747,7 @@ class PipelineOrchestrator:
                 scene_rate >= 0.75
                 and story_dialogue_markers >= 8
                 and not story_guard.get("static_description_risk")
-                and story_guard.get("dialogue_changes_state", True)
+                and story_guard.get("dialogue_changes_state") is not False
                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
                 and story_guard.get("event_density_passed", True)
                 and story_guard.get("state_change_interval_passed", True)
@@ -784,7 +784,7 @@ class PipelineOrchestrator:
             if (
                 story_guard.get("expected_dialogue")
                 and "dialogue_changes_state" in story_guard
-                and not story_guard.get("dialogue_changes_state", True)
+                and story_guard.get("dialogue_changes_state") is False
             ):
                 blockers.append({
                     "source": "story_progression_guard",
@@ -804,7 +804,7 @@ class PipelineOrchestrator:
             density_soft_pass = (
                 story_dialogue_markers >= 8
                 and story_mission_hits >= 3
-                and story_guard.get("dialogue_changes_state", True)
+                and story_guard.get("dialogue_changes_state") is not False
                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
                 and not story_guard.get("static_description_risk")
             )
@@ -931,7 +931,7 @@ class PipelineOrchestrator:
                 "suggestion": "把空转段改成行动、阻碍、反制、发现、代价、关系变化或短余波决策。",
                 "example": "每个长窗口至少出现一次新信息、主动权变化、风险升级或伏笔兑现。",
             })
-        if guard.get("expected_dialogue") and not guard.get("dialogue_changes_state", True):
+        if guard.get("expected_dialogue") and guard.get("dialogue_changes_state") is False:
             issues.append({
                 "dimension": "dialogue",
                 "severity": "major",
@@ -4659,14 +4659,14 @@ class PipelineOrchestrator:
             )
             and int(story_guard.get("dialogue_marker_count") or 0) >= 4
             and not story_guard.get("static_description_risk")
-            and story_guard.get("dialogue_changes_state", True)
+            and story_guard.get("dialogue_changes_state") is not False
             and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
             and story_guard.get("event_density_passed", True)
         )
         density_soft_pass = bool(
             int(story_guard.get("mission_hit_count") or 0) >= 4
             and int(story_guard.get("dialogue_marker_count") or 0) >= 8
-            and story_guard.get("dialogue_changes_state", True)
+            and story_guard.get("dialogue_changes_state") is not False
             and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True))
             and not story_guard.get("static_description_risk")
         )
@@ -4690,7 +4690,7 @@ class PipelineOrchestrator:
             and not scene_soft_pass
         ):
             reasons.append("scene_structure_weak")
-        if story_guard.get("expected_dialogue") and not story_guard.get("dialogue_changes_state", True):
+        if story_guard.get("expected_dialogue") and story_guard.get("dialogue_changes_state") is False:
             reasons.append("dialogue_does_not_change_state")
         if int(story_guard.get("word_count") or 0) >= 1200 and not story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected")):
             reasons.append("ending_pressure_missing")
@@ -5595,7 +5595,7 @@ class PipelineOrchestrator:
     @classmethod
     def _evaluate_dialogue_changes_state(cls, text: str, *, expected_dialogue: bool, dialogue_markers: int) -> Dict[str, Any]:
         marker_count = cls._count_dialogue_state_change_markers(text)
-        passed = True if not expected_dialogue else dialogue_markers >= 2 and marker_count >= 2
+        passed = None if not expected_dialogue else dialogue_markers >= 2 and marker_count >= 2
         return {
             "expected_dialogue": expected_dialogue,
             "dialogue_marker_count": dialogue_markers,
@@ -5810,7 +5810,11 @@ class PipelineOrchestrator:
         score += min(dialogue_markers, 10) * 12
         score += int(scene_rate * 280) if scene_count else 80
         score += int(scene_structure_rate * 140) if scene_count else 40
-        score += 140 if dialogue_state.get("dialogue_changes_state") else -140
+        dialogue_state_passed = dialogue_state.get("dialogue_changes_state")
+        if dialogue_state_passed is True:
+            score += 140
+        elif dialogue_state_passed is False:
+            score -= 140
         score += 140 if ending_hook else -120
         score += min(int(event_density.get("progression_unit_count") or 0), 18) * 16
         score += 80 if event_density.get("event_density_passed") else -180
@@ -5829,7 +5833,7 @@ class PipelineOrchestrator:
             "scene_count": scene_count,
             "scene_structure_rate": scene_structure_rate,
             "structure_passed_scene_count": scene_fulfillment.get("structure_passed_scene_count", 0),
-            "dialogue_changes_state": bool(dialogue_state.get("dialogue_changes_state")),
+            "dialogue_changes_state": dialogue_state.get("dialogue_changes_state"),
             "dialogue_state_change_markers": dialogue_state.get("state_change_marker_count", 0),
             "ending_pressure_passed": ending_hook,
             "static_description_risk": static_description_risk,
@@ -5961,7 +5965,7 @@ class PipelineOrchestrator:
             or (ai_candidate.get("expected_dialogue") and ai_word_count >= 1500 and ai_dialogue_markers < 4)
             or (ai_word_count >= 1500 and ai_mission_hits < 2)
             or (int(ai_candidate.get("scene_count") or 0) > 0 and ai_scene_rate < 0.5)
-            or (ai_candidate.get("expected_dialogue") and not ai_candidate.get("dialogue_changes_state", True))
+            or (ai_candidate.get("expected_dialogue") and ai_candidate.get("dialogue_changes_state") is False)
             or (ai_word_count >= 1200 and not ai_candidate.get("ending_pressure_passed", ai_candidate.get("ending_hook_detected")))
             or (not ai_candidate.get("guardrail_passed", True) and fallback_candidate.get("guardrail_passed", False))
         )
@@ -5970,7 +5974,7 @@ class PipelineOrchestrator:
             or fallback_mission_hits >= ai_mission_hits + 2
             or fallback_dialogue_markers >= ai_dialogue_markers + 4
             or fallback_scene_rate >= ai_scene_rate + 0.34
-            or (fallback_candidate.get("dialogue_changes_state") and not ai_candidate.get("dialogue_changes_state"))
+            or (fallback_candidate.get("dialogue_changes_state") is True and ai_candidate.get("dialogue_changes_state") is False)
             or (fallback_candidate.get("ending_pressure_passed") and not ai_candidate.get("ending_pressure_passed"))
             or (fallback_candidate.get("ending_hook_detected") and not ai_candidate.get("ending_hook_detected"))
             or (fallback_candidate.get("guardrail_passed", False) and not ai_candidate.get("guardrail_passed", True))
