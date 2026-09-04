@@ -1104,3 +1104,54 @@ Agent tool adapters / execution facts
 ```
 
 每批继续保持 read/write 分类、失败测试先行、专项回归、真实 HTTP/SSE 验收和接续文档回写。
+
+## 2026-09-04 追加：UI-004-E Research / Outline 成员权限闭环
+
+### A. Research 路由
+
+`research.py` 将旧 `_ensure_owner()` 拆分为：
+
+```text
+_ensure_read()
+_ensure_write()
+```
+
+并接入 `ProjectAccessService`：
+
+```text
+read：config、artifacts、run status
+write：config 更新、run、run/start、run cancel
+```
+
+### B. Outline 路由
+
+`outline.py` 的权限按语义迁移：
+
+```text
+write：evolve、next、generate-long
+read：alternatives、structure、history
+```
+
+`generate-long` 不再在通过成员写权限后再次调用旧 owner-scoped `get_project_schema()`；改为使用 `require_project_write()` 已解析的项目实体，避免 Editor 在第二层旧校验被截断。
+
+### C. 测试与兼容调整
+
+新增：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_research_outline_member_access.py
+```
+
+已有研究任务回归从旧 `NovelService` mock 调整为 `ProjectAccessService` mock，保持后台任务、取消、重启恢复的原测试意图。
+
+实测：
+
+```text
+Research/Outline 成员权限 + 既有研究任务/大纲回归：33 passed in 17.95s
+Python compile：通过
+git diff --check：通过
+```
+
+### D. 后续
+
+`style.py` 的 HTTP 与后台 worker 写权限、`review.py`、`patch_diff.py`、`token_budget.py`、`writer.py` 仍在后续队列。`test_style_member_access.py` 已存在红灯基线，待对应 style 实现同批收口。

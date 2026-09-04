@@ -12,7 +12,7 @@ from ...core.dependencies import get_current_user
 from ...db.session import AsyncSessionLocal, get_session
 from ...schemas.research import ResearchArtifactRead, ResearchConfigRead, ResearchConfigUpdate, ResearchJobRead, ResearchRunRequest
 from ...schemas.user import UserInDB
-from ...services.novel_service import NovelService
+from ...services.project_access_service import ProjectAccessService
 from ...services.research_service import ProjectResearchService, ResearchConsentRequired
 from ...services.task_runtime import TaskRuntimeConflict, TaskRuntimeError, TaskRuntimeNotFound, TaskRuntimeService
 from ...schemas.task_runtime import TaskRuntimeEventType, TaskRuntimeStatus
@@ -285,8 +285,12 @@ def _job_read(job: Dict[str, Any]) -> ResearchJobRead:
     )
 
 
-async def _ensure_owner(project_id: str, session: AsyncSession, current_user: UserInDB) -> None:
-    await NovelService(session).ensure_project_owner(project_id, current_user.id)
+async def _ensure_read(project_id: str, session: AsyncSession, current_user: UserInDB) -> None:
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
+
+
+async def _ensure_write(project_id: str, session: AsyncSession, current_user: UserInDB) -> None:
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
 
 
 @router.get("/config", response_model=ResearchConfigRead)
@@ -295,7 +299,7 @@ async def get_research_config(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> ResearchConfigRead:
-    await _ensure_owner(project_id, session, current_user)
+    await _ensure_read(project_id, session, current_user)
     return await ProjectResearchService(session).read_config(project_id)
 
 
@@ -306,7 +310,7 @@ async def update_research_config(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> ResearchConfigRead:
-    await _ensure_owner(project_id, session, current_user)
+    await _ensure_write(project_id, session, current_user)
     return await ProjectResearchService(session).update_config(project_id, payload)
 
 
@@ -318,7 +322,7 @@ async def list_research_artifacts(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> List[ResearchArtifactRead]:
-    await _ensure_owner(project_id, session, current_user)
+    await _ensure_read(project_id, session, current_user)
     return await ProjectResearchService(session).list_artifacts(
         project_id,
         scope=scope,
@@ -333,7 +337,7 @@ async def run_research(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> ResearchArtifactRead:
-    await _ensure_owner(project_id, session, current_user)
+    await _ensure_write(project_id, session, current_user)
     try:
         return await ProjectResearchService(session).run_research(
             project_id=project_id,
@@ -363,7 +367,7 @@ async def start_research_job(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> ResearchJobRead:
-    await _ensure_owner(project_id, session, current_user)
+    await _ensure_write(project_id, session, current_user)
     if payload.scope == "chapter" and not payload.chapter_number:
         raise HTTPException(status_code=400, detail="chapter scope requires chapter_number")
     config = await ProjectResearchService(session).get_or_create_config(project_id)
@@ -419,7 +423,7 @@ async def get_research_job_status(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> ResearchJobRead:
-    await _ensure_owner(project_id, session, current_user)
+    await _ensure_read(project_id, session, current_user)
     async with _RESEARCH_TASK_LOCK:
         job = _RESEARCH_JOBS.get(run_id)
         in_memory = job if job and job.get("project_id") == project_id else None
@@ -491,7 +495,7 @@ async def cancel_research_job(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> ResearchJobRead:
-    await _ensure_owner(project_id, session, current_user)
+    await _ensure_write(project_id, session, current_user)
     service = ProjectResearchService(session)
     artifact = await service.get_artifact(project_id, run_id)
     runtime_task = None

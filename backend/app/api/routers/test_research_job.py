@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 from contextlib import asynccontextmanager
 
 import pytest
@@ -24,12 +25,15 @@ def clear_research_jobs():
     research._RESEARCH_TASKS.clear()
 
 
-class _OwnerService:
+class _AccessService:
     def __init__(self, _session):
         pass
 
-    async def ensure_project_owner(self, _project_id, _user_id):
-        return object()
+    async def require_project_read(self, _project_id, _user):
+        return SimpleNamespace(project=object(), can_write=True)
+
+    async def require_project_write(self, _project_id, _user):
+        return SimpleNamespace(project=object(), can_write=True)
 
 
 class _ResearchService:
@@ -68,7 +72,7 @@ class _ResearchService:
 
 @pytest.mark.asyncio
 async def test_manual_research_job_start_status_and_queued_cancel(monkeypatch):
-    monkeypatch.setattr(research, "NovelService", _OwnerService)
+    monkeypatch.setattr(research, "ProjectAccessService", _AccessService)
     monkeypatch.setattr(research, "ProjectResearchService", _ResearchService)
     user = UserInDB(id=7, username="owner", email=None, hashed_password="x")
     background = BackgroundTasks()
@@ -93,7 +97,7 @@ async def test_manual_research_job_start_status_and_queued_cancel(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_manual_research_cancel_sends_signal_to_registered_task(monkeypatch):
-    monkeypatch.setattr(research, "NovelService", _OwnerService)
+    monkeypatch.setattr(research, "ProjectAccessService", _AccessService)
     monkeypatch.setattr(research, "ProjectResearchService", _ResearchService)
     user = UserInDB(id=7, username="owner", email=None, hashed_password="x")
     run_id = "run-active"
@@ -124,7 +128,7 @@ async def test_manual_research_cancel_recovers_database_job_after_restart(monkey
         async def mark_artifact_cancelled(self, project_id, run_id):
             return artifact.model_copy(update={"status": "cancelled"})
 
-    monkeypatch.setattr(research, "NovelService", _OwnerService)
+    monkeypatch.setattr(research, "ProjectAccessService", _AccessService)
     monkeypatch.setattr(research, "ProjectResearchService", _RestartedResearchService)
     user = UserInDB(id=7, username="owner", email=None, hashed_password="x")
 
@@ -147,7 +151,7 @@ async def test_manual_research_start_rejects_duplicate_active_scope(monkeypatch)
         async def get_active_artifact(self, _project_id, _scope, _chapter_number):
             return active
 
-    monkeypatch.setattr(research, "NovelService", _OwnerService)
+    monkeypatch.setattr(research, "ProjectAccessService", _AccessService)
     monkeypatch.setattr(research, "ProjectResearchService", _BusyResearchService)
     user = UserInDB(id=7, username="owner", email=None, hashed_password="x")
 
@@ -195,7 +199,7 @@ async def test_cancel_running_research_job_enters_cancelling_not_terminal(monkey
             marked_cancelled.append(run_id)
             return running_artifact.model_copy(update={"status": "cancelled"})
 
-    monkeypatch.setattr(research, "NovelService", _OwnerService)
+    monkeypatch.setattr(research, "ProjectAccessService", _AccessService)
     monkeypatch.setattr(research, "ProjectResearchService", _LiveResearchService)
     user = UserInDB(id=7, username="owner", email=None, hashed_password="x")
     run_id = "run-live"
@@ -339,7 +343,7 @@ async def test_research_status_uses_artifact_when_runtime_is_missing(monkeypatch
         async def execute(self, *_args, **_kwargs):
             raise AssertionError("service stubs should handle the legacy lookup")
 
-    monkeypatch.setattr(research, "NovelService", _OwnerService)
+    monkeypatch.setattr(research, "ProjectAccessService", _AccessService)
     monkeypatch.setattr(research, "ProjectResearchService", _LegacyResearchService)
     monkeypatch.setattr(research, "TaskRuntimeService", _MissingRuntime)
     research._RESEARCH_JOBS["run-legacy"] = {
@@ -383,7 +387,7 @@ async def test_research_status_prefers_task_runtime_over_stale_memory(monkeypatc
         async def execute(self, *_args, **_kwargs):  # 仅用于通过 hasattr 检查
             raise AssertionError("不应直接执行 SQL")
 
-    monkeypatch.setattr(research, "NovelService", _OwnerService)
+    monkeypatch.setattr(research, "ProjectAccessService", _AccessService)
     monkeypatch.setattr(research, "ProjectResearchService", _TruthResearchService)
     monkeypatch.setattr(research, "TaskRuntimeService", _RuntimeStub)
     user = UserInDB(id=7, username="owner", email=None, hashed_password="x")
@@ -443,7 +447,7 @@ async def test_research_cancel_prefers_persisted_running_runtime_after_restart(m
         async def execute(self, *_args, **_kwargs):
             raise AssertionError("取消语义必须由 TaskRuntimeService 决定")
 
-    monkeypatch.setattr(research, "NovelService", _OwnerService)
+    monkeypatch.setattr(research, "ProjectAccessService", _AccessService)
     monkeypatch.setattr(research, "ProjectResearchService", _PersistedResearchService)
     monkeypatch.setattr(research, "TaskRuntimeService", _RuntimeStub)
     user = UserInDB(id=7, username="owner", email=None, hashed_password="x")
@@ -476,7 +480,7 @@ async def test_research_status_rejects_runtime_from_another_project(monkeypatch)
         async def execute(self, *_args, **_kwargs):
             raise AssertionError("TaskRuntimeService stub owns database access")
 
-    monkeypatch.setattr(research, "NovelService", _OwnerService)
+    monkeypatch.setattr(research, "ProjectAccessService", _AccessService)
     monkeypatch.setattr(research, "ProjectResearchService", _ResearchService)
     monkeypatch.setattr(research, "TaskRuntimeService", _RuntimeStub)
     user = UserInDB(id=7, username="owner", email=None, hashed_password="x")
@@ -513,7 +517,7 @@ async def test_research_cancel_rejects_other_project_before_mutation(monkeypatch
         async def execute(self, *_args, **_kwargs):
             raise AssertionError("TaskRuntimeService stub owns database access")
 
-    monkeypatch.setattr(research, "NovelService", _OwnerService)
+    monkeypatch.setattr(research, "ProjectAccessService", _AccessService)
     monkeypatch.setattr(research, "ProjectResearchService", _ResearchService)
     monkeypatch.setattr(research, "TaskRuntimeService", _RuntimeStub)
     user = UserInDB(id=7, username="owner", email=None, hashed_password="x")
@@ -621,7 +625,7 @@ async def test_database_status_does_not_fall_back_to_memory_without_runtime(monk
         async def execute(self, *_args, **_kwargs):
             raise AssertionError("TaskRuntimeService stub owns database access")
 
-    monkeypatch.setattr(research, "NovelService", _OwnerService)
+    monkeypatch.setattr(research, "ProjectAccessService", _AccessService)
     monkeypatch.setattr(research, "ProjectResearchService", _ResearchService)
     monkeypatch.setattr(research, "TaskRuntimeService", _MissingRuntime)
     research._RESEARCH_JOBS["memory-only"] = {
@@ -663,7 +667,7 @@ async def test_research_cancel_rejects_same_project_non_research_runtime(monkeyp
         async def execute(self, *_args, **_kwargs):
             raise AssertionError("TaskRuntimeService stub owns database access")
 
-    monkeypatch.setattr(research, "NovelService", _OwnerService)
+    monkeypatch.setattr(research, "ProjectAccessService", _AccessService)
     monkeypatch.setattr(research, "ProjectResearchService", _ResearchService)
     monkeypatch.setattr(research, "TaskRuntimeService", _RuntimeStub)
     user = UserInDB(id=7, username="owner", email=None, hashed_password="x")

@@ -21,7 +21,7 @@ from ...services.llm_service import LLMService
 from ...services.outline_evolution_service import OutlineEvolutionService
 
 from ...services.long_novel_outline_generator import LongNovelOutlineGenerator
-from ...services.novel_service import NovelService
+from ...services.project_access_service import ProjectAccessService
 
 logger = logging.getLogger(__name__)
 
@@ -110,8 +110,7 @@ async def evolve_outline(
     session: AsyncSession = Depends(get_session)
 ):
     """基于当前大纲，生成 N 个剧情演进选项（抽卡式互动）"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access = await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     llm_service = LLMService(session)
     evolution_service = OutlineEvolutionService(session, llm_service)
@@ -173,8 +172,7 @@ async def select_alternative(
     session: AsyncSession = Depends(get_session)
 ):
     """选择某个演进选项，更新大纲"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access = await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     llm_service = LLMService(session)
     evolution_service = OutlineEvolutionService(session, llm_service)
@@ -214,8 +212,7 @@ async def get_alternatives(
     session: AsyncSession = Depends(get_session)
 ):
     """获取当前章节的所有可能走向"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access = await ProjectAccessService(session).require_project_read(project_id, current_user)
 
     llm_service = LLMService(session)
     evolution_service = OutlineEvolutionService(session, llm_service)
@@ -265,10 +262,9 @@ async def generate_long_novel_outline(
     session: AsyncSession = Depends(get_session)
 ):
     """生成完整的长篇小说大纲（多卷多章节结构）"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access = await ProjectAccessService(session).require_project_write(project_id, current_user)
 
-    novel = await novel_service.get_project_schema(project_id, current_user.id)
+    novel = access.project
     if not novel:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -396,8 +392,7 @@ async def get_outline_structure(
     session: AsyncSession = Depends(get_session)
 ):
     """获取当前小说的卷-章结构统计"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access = await ProjectAccessService(session).require_project_read(project_id, current_user)
 
     # 获取所有章节大纲
     from ...models.novel import ChapterOutline
@@ -443,8 +438,7 @@ async def get_evolution_history(
     session: AsyncSession = Depends(get_session)
 ):
     """获取演进历史记录"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access = await ProjectAccessService(session).require_project_read(project_id, current_user)
 
     llm_service = LLMService(session)
     evolution_service = OutlineEvolutionService(session, llm_service)
