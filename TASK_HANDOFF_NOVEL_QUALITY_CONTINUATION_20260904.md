@@ -3217,3 +3217,61 @@ git diff --check：通过
 4. 进入 UI-005 工具注册策略统一、UI-006 长历史虚拟列表与跨页缓存性能批次。
 
 总任务保持 `active`。
+
+## 2026-09-04 当前会话接续回写：Agent 历史投影与前端成员管理收口
+
+### A. Agent 历史投影
+
+`agent.py` 的项目上下文读取链已逐项接入成员读策略，覆盖：
+
+```text
+events / activity / provider provenance / plan / context snapshot /
+plan revision / conversation summaries / approvals / steps / artifacts
+```
+
+Owner、Editor、Viewer、Admin 均可读取共享项目投影；非成员隔离；projectless 资源仍按创建者边界返回 404。写入、审批、执行和运行控制没有批量放宽。相关服务投影辅助字段已补齐项目成员可读语义。
+
+验证：
+
+```text
+Agent 历史投影专项：17 passed in 12.11s
+Agent 相关既有组合：86 passed in 43.05s
+本地复核：21 passed in 15.58s
+```
+
+### B. 前端成员管理
+
+`ProjectMemberPanel` 与 `AgentWorkspace` 现有测试补齐了 Owner/Editor/Viewer/Admin 的 `can_manage`、只读状态、成员新增/角色更新/移除、403/404/通用错误、重试恢复和即时列表更新。
+
+验证：
+
+```text
+定向 Vitest：2 files / 36 tests passed
+完整 Vitest：80 files / 510 tests passed in 79.20s
+```
+
+既有 Pinia 注入提示、浏览器映射数据提示和 caniuse-lite 提示继续记录为非阻断告警。
+
+### C. 服务层调用点审查
+
+`NovelService.ensure_project_owner()` 的生产调用点已分类：当前保留在 `delete_projects()` 的真实 owner-only 删除语义；项目摘要、区段、章节详情、项目列表和成员业务不再依赖隐式 Owner-only 读取。反向验证把成员读取临时替换回旧门后准确失败，随后已恢复并完成字节校验。
+
+### D. 本批门禁状态
+
+```text
+完整后端：1694 passed in 727.86s
+前端 type-check：通过
+前端 Vitest：80 files / 496 tests passed in 86.63s（随后成员管理扩展专项完成 510 tests）
+前端 build-only：4918 modules，15.61s，成功
+verify.ps1 smoke：259 检查 = 55 通过 / 204 合理跳过 / 0 失败
+隔离 Writer HTTP/JWT：31 checks，SMOKE_PASSED
+```
+
+由于 Agent 历史投影和前端测试在上述完整门禁之后又新增了代码/测试，本节之后必须再替换一次完整后端与前端权威数字；当前总任务保持 active，不提前宣告最终完成。
+
+### E. 下一执行批次
+
+1. 立即以当前提交后的工作树重跑完整后端、前端 type-check、Vitest、build-only 和 smoke，替换旧基线。
+2. 复核 `agent.py` 变更后的真实重启 TCP HTTP/SSE，重点共享项目历史投影和 projectless 隔离。
+3. 继续处理报告中剩余“需人工确认”的产品语义，不做无证据的批量权限放宽。
+4. 完成后再进入分页/长历史性能、前端浏览器级真实服务验收和发布门禁。
