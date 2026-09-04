@@ -1962,3 +1962,33 @@ Writer H-2 的代码迁移范围已收口；下一阶段仅保留：
 
 1. 真实多用户 HTTP/SSE 验收：覆盖 Owner、Editor、Viewer、Admin、非成员的 Writer 写入、运行控制、状态读取、SSE cursor/replay、断线续传、终态围栏与跨项目隔离。
 2. 当前分支完整质量门禁：重新执行后端全量测试、前端 type-check、Vitest、build-only、服务启动/冒烟与跨项目隔离验证，并将权威实测基线回写本接续文档。
+
+
+## 2026-09-04 接续回写：当前分支完整质量门禁基线
+
+### A. 完整验证结果
+
+当前分支已完成完整后端、前端与静态差异门禁：
+
+```text
+Backend pytest：1586 passed, 6 warnings in 450.90s
+Frontend type-check：通过
+Frontend Vitest：80 files / 496 tests passed in 113.71s
+Frontend build-only：成功，4918 modules，14.83s
+git diff --check：通过
+```
+
+该基线覆盖当前 Writer H-2、项目成员访问、Agent workspace 与前端构建组合；结果以当前工作树与实际命令输出为准。
+
+### B. 已知非阻断告警
+
+后端测试通过时保留 6 条既有 warnings；前端构建链同时报告 `baseline-browser-mapping` 与 `caniuse-lite` 旧数据提示。它们属于 P2 依赖数据维护告警，不构成当前代码质量门禁失败，也未被通过跳过测试、降低断言或修改验证范围掩盖。
+
+### C. 剩余验收边界
+
+当前剩余工作只包括真实服务层验证：
+
+1. 重启后真实服务 smoke：重新启动 backend / frontend，执行 health、代理链与启动冒烟，确认最新 H-2 代码在真实进程中生效。
+2. 真实多用户 HTTP/SSE 验收：以 Owner、Editor、Viewer、Admin、非成员会话覆盖 Writer 写入、运行控制、状态读取、SSE cursor/replay、断线续传、终态围栏与跨项目隔离。
+
+本地模块回归、组合回归和完整质量门禁均不替代上述真实 HTTP/SSE 验收或重启后真实服务 smoke；完成条件必须取得对应真实请求链的独立证据并回写本接续文档。
