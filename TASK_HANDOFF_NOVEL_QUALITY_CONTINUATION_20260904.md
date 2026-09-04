@@ -1015,3 +1015,24 @@ app/agent/test_state_projection.py
 ```
 
 此批补齐 UI-004 所要求的 reasoning、activity、Run state 成员读取闭环。下一步仍是 SSE stream、Artifact/command 端点、其余业务路由与真实多用户 SSE 验收。
+
+### D. 真实成员 Reasoning / Activity / State 验收
+
+重启本地服务加载本批代码后，使用 Owner 创建项目关联 Agent Run，并以 Viewer Bearer 身份实际调用：
+
+```text
+GET /api/agent/runs/{run_id}/reasoning
+GET /api/agent/runs/{run_id}/activity
+GET /api/agent/runs/{run_id}/state
+```
+
+实际结果：
+
+```text
+reasoning_count=1
+activity_count=2
+state_owner_user_id=1
+viewer_allowed_commands=[]
+```
+
+该结果验证了 Viewer 能读取 provider reasoning、公开活动和安全 Run state，且不会获得运行控制命令。
