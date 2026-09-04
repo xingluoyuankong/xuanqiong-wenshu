@@ -123,3 +123,27 @@ async def test_access_service_does_not_treat_inactive_member_as_access(task_sess
 # Imported at the bottom intentionally: the first red run must fail before the model is implemented.
 from app.models.project_member import ProjectMemberRole
 
+
+
+@pytest.mark.asyncio
+async def test_access_service_keeps_owner_immutable(task_session):
+    owner = User(id=401, username="owner-immutable", hashed_password="x", is_admin=False, is_active=True)
+    editor = User(id=402, username="editor-immutable", hashed_password="x", is_admin=False, is_active=True)
+    project = NovelProject(id="owner-immutable-project", user_id=owner.id, title="Owner immutable")
+    task_session.add_all([owner, editor, project, ProjectMember(
+        project_id=project.id, user_id=owner.id, role=ProjectMemberRole.owner.value
+    )])
+    await task_session.commit()
+    service = ProjectAccessService(task_session)
+
+    with pytest.raises(HTTPException) as transfer:
+        await service.add_or_restore_member(project.id, editor.id, ProjectMemberRole.owner, owner)
+    assert transfer.value.status_code == 422
+
+    with pytest.raises(HTTPException) as remove:
+        await service.remove_member(project.id, owner.id, owner)
+    assert remove.value.status_code == 422
+
+    with pytest.raises(HTTPException) as demote:
+        await service.add_or_restore_member(project.id, owner.id, ProjectMemberRole.viewer, owner)
+    assert demote.value.status_code == 422

@@ -179,10 +179,16 @@ class ProjectAccessService:
         role_value = role.value if isinstance(role, ProjectMemberRole) else str(role)
         if role_value not in self._VALID_ROLES:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="项目成员角色无效")
+        # Ownership remains anchored to NovelProject.user_id until an explicit
+        # ownership-transfer workflow exists. This prevents multiple owners.
+        if role_value == ProjectMemberRole.owner.value and user_id != access.project.user_id:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="项目所有者角色不可转授")
         target = (await self.session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
         if target is None or not bool(target.is_active):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="成员用户不存在或未激活")
         member = await self.get_membership(project_id, user_id, include_deleted=True)
+        if member is not None and member.role == ProjectMemberRole.owner.value and role_value != ProjectMemberRole.owner.value:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="项目所有者角色不可降级")
         if member is None:
             member = ProjectMember(
                 id=str(uuid4()), project_id=project_id, user_id=user_id, role=role_value
@@ -196,6 +202,33 @@ class ProjectAccessService:
         await self.session.refresh(member)
         return member
 
+    async def update_member_role(
+        self,
+        project_id: str,
+        user_id: int,
+        role: ProjectMemberRole | str,
+        actor: Any,
+    ) -> ProjectMember:
+        """Update an active member role without allowing ownership corruption."""
+        access = await self.require_project_read(project_id, actor)
+        if not access.can_manage_members:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权管理项目成员")
+        role_value = role.value if isinstance(role, ProjectMemberRole) else str(role)
+        if role_value not in self._VALID_ROLES:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="项目成员角色无效")
+        member = await self.get_membership(project_id, user_id)
+        if member is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目成员不存在")
+        if member.role == ProjectMemberRole.owner.value and role_value != ProjectMemberRole.owner.value:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="项目所有者角色不可降级")
+        if role_value == ProjectMemberRole.owner.value and user_id != access.project.user_id:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="项目所有者角色不可转授")
+        member.role = role_value
+        member.updated_at = datetime.now(timezone.utc)
+        await self.session.commit()
+        await self.session.refresh(member)
+        return member
+
     async def remove_member(self, project_id: str, user_id: int, actor: Any) -> ProjectMember:
         access = await self.require_project_read(project_id, actor)
         if not access.can_manage_members:
@@ -203,6 +236,8 @@ class ProjectAccessService:
         member = await self.get_membership(project_id, user_id, include_deleted=True)
         if member is None or member.deleted_at is not None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目成员不存在")
+        if member.role == ProjectMemberRole.owner.value or user_id == access.project.user_id:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="项目所有者不可移除")
         member.deleted_at = datetime.now(timezone.utc)
         await self.session.commit()
         await self.session.refresh(member)
