@@ -961,15 +961,10 @@ async def _try_claim_chapter_generation(
     *,
     chapter_id: int,
     chapter_number: int,
+    execution_owner_id: int,
     generation_timeout_seconds: Optional[int] = None,
 ) -> Optional[str]:
     run_id = str(uuid.uuid4())
-    owner_result = await session.execute(
-        select(NovelProject.user_id)
-        .join(Chapter, Chapter.project_id == NovelProject.id)
-        .where(Chapter.id == chapter_id)
-    )
-    owner_user_id = owner_result.scalar_one_or_none()
     runtime_extra: Dict[str, Any] = {
         "progress_stage": "queued",
         "progress_message": "章节已进入后台队列，等待任务启动",
@@ -1013,7 +1008,7 @@ async def _try_claim_chapter_generation(
         task_id=run_id,
         task_type="chapter_generation",
         idempotency_key=f"chapter-generation:{chapter_id}:{run_id}",
-        owner_user_id=owner_user_id,
+        owner_user_id=int(execution_owner_id),
         project_id=str((await session.get(Chapter, chapter_id)).project_id),
         chapter_id=str(chapter_id),
         payload={"chapter_number": chapter_number, "run_id": run_id},
@@ -3473,7 +3468,7 @@ async def advanced_generate_chapter(
     项目快照和 generation_runtime，前端/调用方通过章节 status 接口跟踪结果。
     """
     novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(request.project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(request.project_id, current_user.id)
     outline = await novel_service.get_outline(request.project_id, request.chapter_number)
     if not outline:
         logger.warning(
@@ -3532,6 +3527,7 @@ async def advanced_generate_chapter(
         session,
         chapter_id=chapter.id,
         chapter_number=request.chapter_number,
+        execution_owner_id=int(current_user.id),
         generation_timeout_seconds=_calculate_generation_timeout_seconds(flow_config),
     )
     if not run_id:
@@ -3755,7 +3751,7 @@ async def generate_chapter(
     保留用户显式传入的字数与质量方向，并统一接入当前章节生成质量基线。
     """
     novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user.id)
     writing_notes_parts: List[str] = [
         "基础质量底线：优先保证章级推进、对话博弈、逻辑递进、关系变化；描写必须服务冲突，禁止空转景物、空转心理和解释性旁白。",
         "本章必须至少完成一个清晰的局势升级或局部反转，并通过至少两轮有效对话攻防或同等级动作博弈推动局势。",
@@ -3847,6 +3843,7 @@ async def generate_chapter(
         session,
         chapter_id=chapter.id,
         chapter_number=request.chapter_number,
+        execution_owner_id=int(current_user.id),
         generation_timeout_seconds=_calculate_generation_timeout_seconds(flow_config),
     )
     if not run_id:
@@ -3976,7 +3973,7 @@ async def cancel_chapter_generation(
     current_user: UserInDB = Depends(get_current_user),
 ) -> NovelProjectSchema:
     novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user.id)
     chapter = await novel_service.get_or_create_chapter(project_id, request.chapter_number)
 
     if chapter.status not in _BUSY_CHAPTER_STATUSES:
@@ -4005,11 +4002,20 @@ async def cancel_chapter_generation(
     # 已取消的章节任务重新推进为成功。
     if current_run_id and hasattr(session, "execute"):
         try:
-            await TaskRuntimeService(session).request_cancel(
-                current_run_id,
-                owner_user_id=int(current_user.id),
-                finalize_unclaimed=True,
+            runtime_task = await _find_chapter_runtime_task(
+                session,
+                project_id=project_id,
+                chapter_number=request.chapter_number,
+                chapter_id=chapter.id,
+                owner_user_id=None,
+                run_id=current_run_id,
             )
+            if runtime_task is not None:
+                await TaskRuntimeService(session).request_cancel(
+                    current_run_id,
+                    owner_user_id=int(runtime_task.owner_user_id),
+                    finalize_unclaimed=True,
+                )
         except (TaskRuntimeNotFound, TaskRuntimeConflict):
             logger.info("章节运行时取消请求未写入：run_id=%s", current_run_id)
     chapter.real_summary = _build_failed_generation_runtime_state(
@@ -4040,10 +4046,10 @@ async def resume_chapter_generation(
 ) -> NovelProjectSchema:
     """从同一 TaskRuntime 的持久化 checkpoint 恢复因重启中断的长篇任务。"""
     novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user.id)
     runtime_service = TaskRuntimeService(session)
     try:
-        task = await runtime_service.get_task(request.run_id, owner_user_id=int(current_user.id))
+        task = await runtime_service.get_task(request.run_id)
     except TaskRuntimeNotFound as exc:
         raise HTTPException(status_code=404, detail="待恢复的章节任务不存在") from exc
     if task.task_type != "chapter_generation" or task.project_id != project_id:
@@ -4076,12 +4082,13 @@ async def resume_chapter_generation(
     if _get_generation_run_id(chapter) not in {None, task.task_id}:
         raise HTTPException(status_code=409, detail="章节已被新的生成任务接管，不能恢复旧任务")
 
+    execution_owner_id = int(task.owner_user_id)
     try:
         resumed = await runtime_service.retry(
             task.task_id,
             idempotency_key=f"chapter-resume:{task.task_id}:{task.retry_count + 1}",
             message="chapter queued for checkpoint resume",
-            owner_user_id=int(current_user.id),
+            owner_user_id=execution_owner_id,
         )
     except TaskRuntimeConflict as exc:
         raise HTTPException(status_code=409, detail="章节任务已被其他恢复请求处理") from exc
@@ -4096,7 +4103,7 @@ async def resume_chapter_generation(
         _schedule_generate_task,
         project_id,
         chapter.chapter_number,
-        int(current_user.id),
+        execution_owner_id,
         writing_notes,
         flow_config,
         resumed.task_id,

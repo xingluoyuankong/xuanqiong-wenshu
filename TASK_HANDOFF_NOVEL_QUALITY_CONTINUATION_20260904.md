@@ -1675,3 +1675,151 @@ Writer H-1 合并验证：34 passed（28 + 6）
 2. Writer H-2 写路径：在独立成员 write 矩阵下迁移章节生成、取消、恢复、版本选择、正文编辑与大纲写入；Viewer 持续 403。
 3. H-2 处理 `_load_project_schema()`、章节/大纲回包序列化与后台定稿，消除 Editor 在通过入口校验后遭遇 Owner-only 二次过滤的路径。
 4. H-2 收口后，执行真实多用户 Writer HTTP/SSE 验收，并回写完整后端、前端与启动冒烟的新基线。
+
+
+## 2026-09-04 接续回写：UI-004 Writer H-2 首批成员写路径闭环
+
+### A. 提交与完成范围
+
+当前完成提交：
+
+```text
+dbef259
+```
+
+Writer H-2 首批已将项目成员写权限接入项目 schema 回包与以下章节操作。通过写权限后，回包不再因遗留 Owner-only schema 加载而把 Editor 截断：
+
+```text
+项目成员 schema 可读回包
+章节版本选择
+正文编辑
+快速正文编辑
+章节大纲更新
+章节删除
+候选版本删除
+```
+
+### B. 成员写入矩阵
+
+```text
+Owner / Editor / Admin：可执行版本选择、正文编辑、快速编辑、章节大纲更新、章节删除、候选版本删除，并取得项目 schema 可读回包
+Viewer：上述写路径统一 403
+非成员：项目 schema、章节资源与上述写路径统一 403
+```
+
+读模型继续使用项目成员权限，写入模型仅赋予 Owner / Editor / Admin 项目 write 权限；本批未将 Viewer 提升为可写成员。
+
+### C. TaskRuntime 与协作 actor 边界
+
+H-2 首批不改写既有运行控制归属：
+
+```text
+协作 actor：用于 ProjectAccessService 的项目 write 权限裁决
+TaskRuntime owner_user_id：保留任务发起者、审计与运行归属
+lease / worker ownership：保持既有控制边界
+终态、claim、恢复协调：不因协作成员执行章节写操作而迁移给该 actor
+```
+
+因此，Editor 可对项目章节资源完成已纳入本批的协作写入，但不会重写 Owner 创建任务的 owner、lease 或 worker 执行控制。
+
+### D. 验证与反向验证
+
+```text
+Writer H-2 首批成员写路径专项：15 passed
+Writer H-1 / H-2 / 相邻组合回归：41 passed
+```
+
+旧 Owner gate 已执行反向验证：临时保留旧 Owner-only 校验时，Editor 章节写操作明确返回：
+
+```text
+Editor = 403
+```
+
+恢复成员 write 实现后专项与组合回归重新通过。该证据确认 H-2 的 Editor 可写合同来自项目成员权限迁移，而非测试替身或放宽 Viewer / worker 控制边界。
+
+### E. 下一批：H-2 运行控制 actor / execution owner 分离
+
+下一批按以下范围继续，保持“项目写权限”与“运行控制归属”分层：
+
+1. 章节生成：Editor 可发起项目生成，但创建者、TaskRuntime owner、worker lease 与 execution owner 的字段语义显式分离。
+2. 章节取消与恢复：定义协作成员操作项目运行时的 actor、原 execution owner、lease holder 与 terminal fence 合同，避免静默接管或错误拒绝。
+3. finalize：清理项目 schema、记忆刷新和后台定稿中的遗留 `NovelProject.user_id` 二次过滤，使 Editor 发起的闭环不在后台阶段截断。
+4. outline start / cancel：将大纲运行启动与取消迁移到同一 actor/execution owner 模型，Viewer 持续 403，非成员持续 403。
+5. 上述写路径收口后，补真实多用户 HTTP/SSE 验收与完整质量门禁回写。
+
+
+## 2026-09-04 接续回写：UI-004 Writer H-2 运行控制与协作恢复闭环
+
+### A. 新 generation 的 execution owner 合同
+
+本批将 Writer 新建章节生成的项目 write 权限与 TaskRuntime 执行归属显式分层：
+
+```text
+generate / advanced generate：必须通过项目 write gate
+可发起身份：Owner / Editor / Admin
+new generation TaskRuntime execution owner：实际发起生成的 Owner / Editor / Admin
+Viewer / 非成员：403
+```
+
+因此，Editor 或 Admin 发起的新章节生成会以该发起者作为 TaskRuntime 的 execution owner；项目协作权限不再依赖项目创建者身份，且运行审计、worker 调度和后续恢复具有明确的创建者归属。
+
+### B. 既有 Run 的取消与恢复
+
+Owner、Editor、Admin 均可对同项目既有章节 Run 发起取消或恢复请求；协作 actor 的权限仅用于项目 write 裁决，不重写原 Run 的执行控制身份：
+
+```text
+Editor 取消 / 恢复 Owner 既有 Run：允许
+TaskRuntime cancel / retry：继续使用原 execution owner
+worker 调度：继续使用原 execution owner
+lease / owner_user_id：不因协作 actor 的取消或恢复改变
+Viewer / 非成员：403
+```
+
+该合同既允许项目成员协作处理卡住或需要恢复的生成，又避免取消、重试、worker 调度和终态事件被操作成员静默接管。
+
+### C. 已迁移 Writer 路径
+
+```text
+POST generate
+POST advanced generate
+POST cancel chapter generation
+POST resume chapter generation
+```
+
+所有上述入口使用项目 write gate。对于既有运行，读写请求先按项目成员身份授权，再在 TaskRuntime 层保留原 execution owner 的调度和 lease 语义。
+
+### D. 专项与组合回归
+
+新增专项：
+
+```text
+backend/app/api/routers/test_writer_member_generation_control_access.py
+```
+
+验证：
+
+```text
+Writer H-2 generation-control 成员专项：11 passed
+Writer route regressions + stream + H-1 / H-2 合并回归：87 passed
+```
+
+专项覆盖 Owner / Editor / Admin 发起新 generation、Viewer/非成员 403、Editor 取消/恢复 Owner 既有 Run、原 execution owner 保持、lease 不改写及 worker 调度继续使用原运行归属。
+
+### E. H-2 剩余范围与下一步
+
+H-2 尚待处理的写路径：
+
+```text
+finalize
+outline / rewrite-outline start
+outline / rewrite-outline cancel
+deprecated outline generation 路径
+```
+
+收口顺序：
+
+1. 迁移 finalize，确保 Editor 发起的项目定稿在项目 schema、记忆刷新和后台处理阶段不被遗留 Owner-only 过滤截断。
+2. 迁移 outline / rewrite-outline start 与 cancel，建立与章节生成一致的 actor / execution owner / lease 合同。
+3. 审计并迁移 deprecated outline generation 路径，防止旧入口绕开项目成员 write gate 或复活 Owner-only 二次过滤。
+4. 完成真实多用户 HTTP 验收，覆盖 Owner、Editor、Viewer、Admin、非成员的生成、取消、恢复、状态和 SSE 流合同。
+5. H-2 全部收口后回写完整后端、前端、启动冒烟与跨项目隔离的权威实测基线。

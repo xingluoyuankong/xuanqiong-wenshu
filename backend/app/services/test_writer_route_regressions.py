@@ -79,6 +79,23 @@ class _DummySession:
         return None
 
 
+class _PermissiveProjectAccess:
+    """Route-regression doubles isolate flow wiring from the access service."""
+    def __init__(self, session):
+        self.session = session
+
+    async def require_project_write(self, project_id, user_id):
+        return types.SimpleNamespace(project_id=project_id, user_id=user_id)
+
+    async def require_project_read(self, project_id, user_id):
+        return types.SimpleNamespace(project_id=project_id, user_id=user_id)
+
+
+@pytest.fixture(autouse=True)
+def _route_regression_project_access(monkeypatch):
+    monkeypatch.setattr(writer, "ProjectAccessService", _PermissiveProjectAccess)
+
+
 class _DummyNovelService:
     def __init__(self, session):
         self.session = session
@@ -409,6 +426,7 @@ async def test_resume_route_reuses_stale_run_and_checkpoint(monkeypatch):
 
     task = types.SimpleNamespace(
         task_id="resume-run",
+        owner_user_id=7,
         task_type="chapter_generation",
         project_id="project-resume",
         chapter_id="12",
