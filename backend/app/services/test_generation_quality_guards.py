@@ -1584,3 +1584,24 @@ def test_append_style_hint_uses_one_readable_label_and_ignores_blank_values():
     assert PipelineOrchestrator._append_style_hint("基础提示", "冷峻克制") == (
         "基础提示\n\n[版本风格提示]\n冷峻克制"
     )
+
+
+@pytest.mark.anyio
+async def test_cancel_and_drain_generation_tasks_waits_for_candidate_finalizers():
+    started = asyncio.Event()
+    finalized = asyncio.Event()
+
+    async def candidate():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            finalized.set()
+
+    task = asyncio.create_task(candidate())
+    await started.wait()
+
+    await PipelineOrchestrator._cancel_and_drain_generation_tasks([task])
+
+    assert task.cancelled()
+    assert finalized.is_set()

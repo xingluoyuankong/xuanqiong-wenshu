@@ -2205,11 +2205,15 @@ class PipelineOrchestrator:
                     )
                 )
 
-            # 在LLM调用前强制提交并释放数据库session锁，允许其他请求在生成期间读取
-            await self.session.commit()
-            await self.session.flush()
-            self.session.expire_all()
-            generation_results = await asyncio.gather(*generation_tasks, return_exceptions=True)
+            # 在 LLM 调用前提交并释放数据库写锁，允许其他请求读取运行态。
+            # commit 已经隐式 flush；再次 flush 只会增加一次无效会话操作。
+            try:
+                await self.session.commit()
+                self.session.expire_all()
+                generation_results = await asyncio.gather(*generation_tasks, return_exceptions=True)
+            except BaseException:
+                await self._cancel_and_drain_generation_tasks(generation_tasks)
+                raise
             generation_attempt_duration_ms = round((time.perf_counter() - generation_attempt_started_at) * 1000, 2)
             await self._assert_generation_active(
                 chapter,
@@ -3569,6 +3573,15 @@ class PipelineOrchestrator:
         stable.enable_six_dimension = False
         stable.allow_truncated_response = config.allow_truncated_response
         return stable
+
+    @staticmethod
+    async def _cancel_and_drain_generation_tasks(tasks: List[asyncio.Task[Any]]) -> None:
+        """Stop every pending candidate task before an attempt exits exceptionally."""
+        pending = [task for task in tasks if not task.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
     @staticmethod
     def _append_style_hint(prompt: str, style_hint: Optional[str]) -> str:
