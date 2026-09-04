@@ -2151,19 +2151,11 @@ Writer 成员写入、finalize 与 outline 组合专项结果：
 
 ### D. 当前验证边界
 
-本次真实 HTTP/SSE 验收与最新专项修复均已具备独立证据；但此前的完整后端基线发生在本节所列末尾修复之前。因此以下完整质量门禁必须按最新工作树重新执行后，才可作为当前权威基线：
-
-```text
-cd backend; .\.venv\Scripts\python.exe -m pytest -q
-cd frontend; npm run type-check
-cd frontend; npm run test:run
-cd frontend; npm run build-only
-git diff --check
-```
+本节末尾修复后的完整后端、前端与静态差异质量门禁已经按最新工作树重跑完成；最新权威实测基线见本文末尾“最新最终质量门禁回写”。此前“必须重跑”的前置条件已解除，不再以旧基线作为当前分支验证依据。
 
 ### E. 后续执行计划
 
-1. 按最新修复后的工作树完整重跑后端、前端和静态差异质量门禁，并把实际命令结果回写本文档。
+1. 最新工作树的完整后端、前端与静态差异质量门禁已重跑并已回写；后续改动进入前必须重新执行对应完整门禁，再替换权威基线。
 2. 重启 backend / frontend 真实服务，复验 health、前端代理、OpenAPI 与当前代码已加载，排除旧进程承载旧路由或旧 worker 的可能。
 3. 继续以 `live-http-1788555354` 或等价隔离文件 SQLite fixture 运行真实 HTTP 写执行链：Editor / Admin 的 `generate`、对既有 Run 的 `cancel`、`resume`、状态转移、worker claim、终态事件、SSE cursor 与跨项目隔离；Provider 调用使用确定性测试替身，避免将权限与外部模型稳定性混淆。
 4. 继续审查和收口 P1/P2 不变量：
@@ -2174,3 +2166,38 @@ git diff --check
    - 所有 Run 恢复、取消、读取和 SSE 均持续保持 `project_id + chapter_id/chapter_number + run_id + task_type` 的精确绑定。
 
 只有完成最新完整质量门禁、真实服务重启验收和真实 generation/cancel/resume 执行链验证后，Writer H-2 才能从“路由与读取/控制链闭合”升级为“当前分支端到端执行基线已确认”。
+
+## 2026-09-04 接续回写：最新最终质量门禁回写
+
+### A. 最新工作树完整质量门禁
+
+在本节所列 Writer H-2 末尾修复、Pipeline 协作生成修复、evaluate/finalize/outline 类型绑定修复全部纳入当前工作树后，已重新执行完整后端、前端与静态差异门禁。权威实测结果如下：
+
+```text
+Backend pytest：1592 passed, 6 warnings in 458.76s
+Frontend type-check：通过
+Frontend Vitest：80 files / 496 tests passed in 84.28s
+Frontend build-only：成功，4918 modules in 26.62s
+git diff --check：通过
+```
+
+本次结果替换此前发生在末尾修复之前的完整质量基线；“完整质量门禁必须重跑”的事项现已完成。
+
+### B. P2 依赖数据告警
+
+后端完整测试仍保留 6 条既有 warnings；前端依赖链的浏览器映射与兼容性数据提示继续保留并列入 P2 依赖数据维护。该告警不改变本轮测试、类型检查、Vitest、构建和静态差异门禁均通过的事实，也没有通过删减测试、放宽断言或缩小验证范围获得通过。
+
+### C. 仍需保持的真实执行验收与不变量
+
+最新完整质量门禁不替代真实进程和真实多用户写执行链验收。后续只保留以下边界：
+
+1. 重启 backend / frontend 真实服务，复验 health、前端代理、OpenAPI、最新路由与 worker 代码已由新进程加载。
+2. 在隔离文件 SQLite fixture 的真实 JWT/HTTP 链路中完成 Editor / Admin 的 `generate`、对既有 Run 的 `cancel`、`resume`、worker claim、状态转移、终态事件与 SSE cursor/replay 验证；继续验证 Viewer / 非成员拒绝和跨项目隔离。Provider 调用使用确定性测试替身，避免将执行权限与外部模型稳定性混淆。
+3. 持续收口 P1/P2 不变量：
+   - `actor_user_id` 与 `execution_owner_id` 在后台入口、retry、lease、计量、审计和终态事件中的命名与传递一致；
+   - outline/rewrite-outline 后台 Admin 身份完整恢复，不因重建用户对象遗漏 `is_admin`；
+   - `edit-fast` 使用语义明确的项目成员读取序列化路径；
+   - legacy outline DB fallback 明确区分 active、terminal 与 idle；
+   - 所有 Run 的恢复、取消、读取和 SSE 持续保持 `project_id + chapter_id/chapter_number + run_id + task_type` 精确绑定。
+
+只有在上述真实服务重启与真实 HTTP `generate` / `cancel` / `resume` 执行链验收也形成独立证据后，当前 Writer H-2 才能确认完整端到端执行基线。
