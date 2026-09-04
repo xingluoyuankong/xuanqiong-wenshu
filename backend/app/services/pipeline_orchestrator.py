@@ -514,6 +514,8 @@ class PipelineOrchestrator:
                 add("dialogue_does_not_change_state")
             if int(guard.get("word_count") or 0) >= 1200 and not guard.get("ending_pressure_passed", guard.get("ending_hook_detected", True)):
                 add("ending_pressure_missing")
+            if guard.get("word_count_far_below_target") is True:
+                add("word_count_far_below_target")
             if int(guard.get("word_count") or 0) >= 1800 and guard.get("event_density_passed") is False:
                 add("event_density_weak")
             if int(guard.get("word_count") or 0) >= 2500 and guard.get("state_change_interval_passed") is False:
@@ -4641,13 +4643,15 @@ class PipelineOrchestrator:
         target_word_count: int,
         min_word_count: int,
     ) -> Tuple[bool, Dict[str, Any], List[str]]:
+        target_word_count = max(0, int(target_word_count or 0))
+        min_word_count = max(0, int(min_word_count or 0))
         story_guard = cls._score_story_quality_candidate(
             content=content,
             violations=list(violations or []),
             chapter_mission=chapter_mission,
+            target_word_count=target_word_count,
+            min_word_count=min_word_count,
         )
-        target_word_count = max(0, int(target_word_count or 0))
-        min_word_count = max(0, int(min_word_count or 0))
         draft_contract = cls._resolve_chapter_draft_contract(target_word_count, min_word_count)
         preferred_floor = int(draft_contract.get("retry_floor") or max(min_word_count, int(target_word_count * 0.88))) if target_word_count else min_word_count
         scene_floor = 0.72 if target_word_count >= 4500 else 0.58
@@ -5043,6 +5047,8 @@ class PipelineOrchestrator:
                     content=retry_candidate,
                     violations=retry_guardrail_metadata.get("violations") or [],
                     chapter_mission=chapter_mission,
+                    target_word_count=config.target_word_count,
+                    min_word_count=config.min_word_count,
                 )
                 retry_score = int(retry_story_guard.get("score") or 0)
                 current_score = int(initial_story_guard.get("score") or 0)
@@ -5682,6 +5688,8 @@ class PipelineOrchestrator:
         content: str,
         violations: List[Dict[str, Any]],
         chapter_mission: Optional[dict],
+        target_word_count: Optional[int] = None,
+        min_word_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         text = str(content or "")
         condensed = "".join(text.split())
@@ -5726,6 +5734,10 @@ class PipelineOrchestrator:
             "expected_dialogue": expected_dialogue,
             "ending_hook_detected": ending_hook,
             "static_description_risk": static_description_risk,
+            "word_count_below_min": word_count_below_min,
+            "word_count_far_below_target": word_count_far_below_target,
+            "word_count_far_above_target": word_count_far_above_target,
+            "preferred_floor": preferred_floor,
         }
 
     @staticmethod
@@ -5778,6 +5790,14 @@ class PipelineOrchestrator:
         text = str(content or "")
         condensed = "".join(text.split())
         word_count = len(condensed)
+        target_floor = max(0, int(target_word_count or 0))
+        minimum_floor = max(0, int(min_word_count or 0))
+        if target_floor and minimum_floor > target_floor:
+            minimum_floor = target_floor
+        preferred_floor = max(minimum_floor, int(target_floor * 0.92)) if target_floor else minimum_floor
+        word_count_below_min = bool(minimum_floor and word_count < minimum_floor)
+        word_count_far_below_target = bool(preferred_floor and word_count < preferred_floor)
+        word_count_far_above_target = bool(target_floor and word_count > int(target_floor * 1.25))
         paragraphs = [segment for segment in text.splitlines() if segment.strip()]
         paragraph_count = len(paragraphs)
         dialogue_markers = sum(text.count(marker) for marker in ("“", "”", "「", "」", "『", "』", '"'))
@@ -5821,11 +5841,19 @@ class PipelineOrchestrator:
         score += 60 if event_density.get("state_change_interval_passed") else -130
         score += 90 if event_density.get("long_chapter_density_passed") else -180
         score += min(word_count, 2400) // 50
+        score -= 180 if word_count_far_below_target else 0
+        score -= 80 if word_count_far_above_target else 0
         score -= len(violations) * 500
         score -= 260 if static_description_risk else 0
 
         quality_metric_snapshot = {
             "word_count": word_count,
+            "target_word_count": target_floor,
+            "min_word_count": minimum_floor,
+            "preferred_floor": preferred_floor,
+            "word_count_below_min": word_count_below_min,
+            "word_count_far_below_target": word_count_far_below_target,
+            "word_count_far_above_target": word_count_far_above_target,
             "paragraph_count": paragraph_count,
             "mission_hit_count": len(mission_hits),
             "scene_fulfillment_rate": scene_rate,
@@ -5859,6 +5887,12 @@ class PipelineOrchestrator:
         return {
             "score": score,
             "word_count": word_count,
+            "target_word_count": target_floor,
+            "min_word_count": minimum_floor,
+            "preferred_floor": preferred_floor,
+            "word_count_below_min": word_count_below_min,
+            "word_count_far_below_target": word_count_far_below_target,
+            "word_count_far_above_target": word_count_far_above_target,
             "paragraph_count": paragraph_count,
             "dialogue_marker_count": dialogue_markers,
             "guardrail_violation_count": len(violations),

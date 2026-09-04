@@ -1674,3 +1674,45 @@ def test_non_dialogue_quality_check_is_not_applicable_and_does_not_become_a_fail
 
     assert "dialogue_does_not_change_state" not in summary["codes"]
     assert "chapter_progression_weak" not in summary["codes"]
+
+def test_fallback_candidate_scoring_accepts_word_count_targets_without_name_error():
+    result = PipelineOrchestrator._score_fallback_candidate(
+        content="林七握紧缉印令。门外忽然传来脚步声！",
+        violations=[],
+        chapter_mission={"chapter_purpose": "守住缉印令"},
+        target_word_count=1000,
+        min_word_count=600,
+    )
+
+    assert result["word_count_below_min"] is True
+    assert result["word_count_far_below_target"] is True
+    assert result["word_count_far_above_target"] is False
+    assert result["preferred_floor"] == 920
+
+
+def test_fallback_candidate_scoring_remains_compatible_without_targets():
+    result = PipelineOrchestrator._score_fallback_candidate(
+        content="主角抬头看向门外。",
+        violations=[],
+        chapter_mission=None,
+    )
+
+    assert result["word_count_below_min"] is False
+    assert result["word_count_far_below_target"] is False
+    assert result["word_count_far_above_target"] is False
+
+def test_story_quality_metrics_track_active_word_count_target():
+    guard = PipelineOrchestrator._score_story_quality_candidate(
+        content="林七推门而入，门外的脚步声突然停了。",
+        violations=[],
+        chapter_mission={"chapter_purpose": "确认门外来人"},
+        target_word_count=2000,
+        min_word_count=1500,
+    )
+
+    assert guard["target_word_count"] == 2000
+    assert guard["min_word_count"] == 1500
+    assert guard["preferred_floor"] == 1840
+    assert guard["word_count_below_min"] is True
+    assert guard["word_count_far_below_target"] is True
+    assert "word_count_far_below_target" in guard["quality_issue_codes"]
