@@ -169,9 +169,11 @@ async def test_project_members_http_admin_can_manage_and_editor_viewer_cannot(ta
     )
     assert admin_add.status_code == 200
 
-    for actor in (editor, viewer, outsider):
+    for actor in (editor, viewer):
         response = await http_client("GET", f"/api/projects/{project.id}/members", user=actor)
-        assert response.status_code == 403
+        assert response.status_code == 200
+        assert response.json()["can_manage"] is False
+        assert response.json()["access_role"] == ("editor" if actor.id == editor.id else "viewer")
         response = await http_client(
             "POST",
             f"/api/projects/{project.id}/members",
@@ -191,6 +193,16 @@ async def test_project_members_http_admin_can_manage_and_editor_viewer_cannot(ta
             f"/api/projects/{project.id}/members/{target.id}",
             user=actor,
         )
+        assert response.status_code == 403
+
+    outsider_list = await http_client("GET", f"/api/projects/{project.id}/members", user=outsider)
+    assert outsider_list.status_code == 403
+    for method, url, kwargs in (
+        ("POST", f"/api/projects/{project.id}/members", {"json": {"user_id": target.id, "role": "editor"}}),
+        ("PATCH", f"/api/projects/{project.id}/members/{target.id}", {"json": {"role": "viewer"}}),
+        ("DELETE", f"/api/projects/{project.id}/members/{target.id}", {}),
+    ):
+        response = await http_client(method, url, user=outsider, **kwargs)
         assert response.status_code == 403
 
 

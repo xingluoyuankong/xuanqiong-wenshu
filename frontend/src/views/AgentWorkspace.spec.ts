@@ -29,6 +29,7 @@ const {
   submitRunCommandMock,
   getSectionMock,
   getChapterMock,
+  listProjectMembersMock,
   store,
 } = vi.hoisted(() => ({
   pushMock: vi.fn(),
@@ -56,6 +57,7 @@ const {
   submitRunCommandMock: vi.fn(),
   getSectionMock: vi.fn(),
   getChapterMock: vi.fn(),
+  listProjectMembersMock: vi.fn(),
   store: {
     projects: [{ id: 'p1', title: '星河旧梦', completed_chapters: 2, total_chapters: 8 }],
     loadProjects: vi.fn(),
@@ -68,6 +70,14 @@ vi.mock('vue-router', () => ({
 vi.mock('@/stores/novel', () => ({ useNovelStore: () => store }))
 vi.mock('@/api/novel', () => ({
   NovelAPI: { getSection: getSectionMock, getChapter: getChapterMock },
+}))
+vi.mock('@/api/projectMembers', () => ({
+  ProjectMembersAPI: {
+    list: listProjectMembersMock,
+    add: vi.fn(),
+    updateRole: vi.fn(),
+    remove: vi.fn(),
+  },
 }))
 vi.mock('@/api/agent', () => ({
   buildAgentRunCommandIdempotencyKey: (runId: string, command: string, version: number) =>
@@ -153,6 +163,13 @@ describe('AgentWorkspace', () => {
     submitRunCommandMock.mockReset()
     getSectionMock.mockReset()
     getChapterMock.mockReset()
+    listProjectMembersMock.mockReset()
+    listProjectMembersMock.mockResolvedValue({
+      members: [{ id: 'owner-p1', project_id: 'p1', user_id: 1, role: 'owner', created_at: 'now', updated_at: 'now', deleted_at: null }],
+      count: 1,
+      access_role: 'owner',
+      can_manage: true,
+    })
     replaceMock.mockResolvedValue(undefined)
     listToolsMock.mockResolvedValue({
       count: 1,
@@ -233,6 +250,18 @@ describe('AgentWorkspace', () => {
       events: [],
     })
   })
+  it('在数据面板挂载项目成员管理，并由服务端访问投影决定是否可管理', async () => {
+    Object.assign(routeQuery, { project_id: 'p1' })
+    listSessionsMock.mockResolvedValue([])
+
+    const wrapper = mount(AgentWorkspace)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="agent-project-members-section"]').exists()).toBe(true)
+    expect(listProjectMembersMock).toHaveBeenCalledWith('p1')
+    expect(wrapper.find('[data-testid="project-members-role-1"]').exists()).toBe(true)
+  })
+
   it('按当前 Run 请求 Provider 统计并把失败留在数据面板', async () => {
     Object.assign(routeQuery, { project_id: 'p1', session_id: 's-usage', run_id: 'run-usage' })
     const session = { id: 's-usage', user_id: 1, project_id: 'p1', status: 'active', created_at: 'now', updated_at: 'now' }

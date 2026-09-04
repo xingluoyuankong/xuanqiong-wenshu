@@ -43,6 +43,8 @@ class ProjectMemberRead(BaseModel):
 class ProjectMemberListResponse(BaseModel):
     members: list[ProjectMemberRead]
     count: int
+    access_role: str
+    can_manage: bool
 
 
 @router.get("", response_model=ProjectMemberListResponse)
@@ -51,10 +53,14 @@ async def list_project_members(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> ProjectMemberListResponse:
-    members = await ProjectAccessService(session).list_members(project_id, current_user)
+    service = ProjectAccessService(session)
+    access = await service.require_project_read(project_id, current_user)
+    members = await service.list_members(project_id, current_user)
     return ProjectMemberListResponse(
         members=[ProjectMemberRead.model_validate(member) for member in members],
         count=len(members),
+        access_role=access.role,
+        can_manage=access.can_manage_members,
     )
 
 

@@ -14,7 +14,7 @@ from ...services.constitution_service import ConstitutionService
 from ...services.faction_service import FactionService
 from ...services.llm_service import LLMService
 from ...services.memory_layer_service import MemoryLayerService
-from ...services.novel_service import NovelService
+from ...services.project_access_service import ProjectAccessService
 from ...services.prompt_service import PromptService
 from ...services.writer_persona_service import WriterPersonaService
 from ...models.project_memory import ProjectMemory
@@ -101,8 +101,8 @@ async def get_constitution(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_read(project_id, current_user)
 
     constitution_service = ConstitutionService(session, LLMService(session), PromptService(session))
     constitution = await constitution_service.get_constitution(project_id)
@@ -116,8 +116,8 @@ async def put_constitution(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_write(project_id, current_user)
 
     constitution_service = ConstitutionService(session, LLMService(session), PromptService(session))
     constitution = await constitution_service.create_or_update_constitution(project_id, payload)
@@ -130,8 +130,8 @@ async def get_persona(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_read(project_id, current_user)
 
     persona_service = WriterPersonaService(session, LLMService(session), PromptService(session))
     persona = await persona_service.get_active_persona(project_id)
@@ -145,8 +145,8 @@ async def put_persona(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_write(project_id, current_user)
 
     persona_service = WriterPersonaService(session, LLMService(session), PromptService(session))
     payload_dict = payload.model_dump(exclude_unset=True)
@@ -172,8 +172,8 @@ async def get_project_memory(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_read(project_id, current_user)
 
     result = await session.execute(
         select(ProjectMemory).where(ProjectMemory.project_id == project_id)
@@ -189,8 +189,8 @@ async def put_project_memory(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_write(project_id, current_user)
 
     result = await session.execute(
         select(ProjectMemory).where(ProjectMemory.project_id == project_id)
@@ -218,8 +218,8 @@ async def incremental_memory_update(
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """增量更新记忆 - 追加而非全量替换（CoLong 动态记忆回写）"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_write(project_id, current_user)
 
     memory_service = MemoryLayerService(session, LLMService(session), PromptService(session))
     with LLMService.daily_limit_scope(
@@ -246,8 +246,8 @@ async def get_memory_snapshots(
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """获取记忆快照历史（支持回溯）"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_read(project_id, current_user)
 
     memory_service = MemoryLayerService(session, LLMService(session), PromptService(session))
     snapshots = await memory_service.get_memory_snapshots(
@@ -277,8 +277,8 @@ async def compress_memory(
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """压缩记忆 - 合并旧版本以节省空间"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_write(project_id, current_user)
 
     memory_service = MemoryLayerService(session, LLMService(session), PromptService(session))
     with LLMService.daily_limit_scope(
@@ -300,8 +300,8 @@ async def rollback_memory(
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """回滚记忆到指定版本"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_write(project_id, current_user)
 
     memory_service = MemoryLayerService(session, LLMService(session), PromptService(session))
     result = await memory_service.rollback_to_version(
@@ -318,8 +318,8 @@ async def get_character_states(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_read(project_id, current_user)
 
     if chapter_number is None:
         result = await session.execute(
@@ -343,8 +343,8 @@ async def get_factions(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_read(project_id, current_user)
 
     faction_service = FactionService(session, PromptService(session))
     factions = await faction_service.get_factions_by_project(project_id)
@@ -358,8 +358,8 @@ async def put_factions(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    access_service = ProjectAccessService(session)
+    await access_service.require_project_write(project_id, current_user)
 
     faction_service = FactionService(session, PromptService(session))
     saved = []

@@ -160,6 +160,15 @@
               :selected-entity-refs="manualEntityContextRefs"
               @toggle-entity="toggleEntityContextRef"
             />
+            <details class="workspace-section" data-testid="agent-project-members-section">
+              <summary>
+                <span>项目成员</span>
+                <small>共享与权限</small>
+              </summary>
+              <div class="workspace-section-body">
+                <ProjectMemberPanel :project-id="selectedProjectId || null" />
+              </div>
+            </details>
           </div>
         </details>
       </div>
@@ -437,6 +446,7 @@ import AgentRunInspector from '@/features/agent/run/AgentRunInspector.vue'
 import AgentArtifactWorkbench from '@/features/agent/artifacts/AgentArtifactWorkbench.vue'
 import AgentDataPanel from '@/features/agent/data/AgentDataPanel.vue'
 import AgentProjectDataWorkbench from '@/features/agent/data/AgentProjectDataWorkbench.vue'
+import ProjectMemberPanel from '@/features/agent/ProjectMemberPanel.vue'
 import { buildAgentContextRefs, type AgentManualEntityRef, type AgentManualQualityFindingRef } from '@/features/agent/contextRefs'
 import ProjectContentTree from '@/features/agent/content-tree/ProjectContentTree.vue'
 import { useProjectContentTree } from '@/features/agent/content-tree/useProjectContentTree'

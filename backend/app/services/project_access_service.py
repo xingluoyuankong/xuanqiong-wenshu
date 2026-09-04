@@ -244,9 +244,9 @@ class ProjectAccessService:
         return member
 
     async def list_members(self, project_id: str, actor: Any) -> list[ProjectMember]:
-        access = await self.require_project_read(project_id, actor)
-        if not access.can_manage_members:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看成员管理列表")
+        # Membership is project metadata: every active project reader may view
+        # it, while mutations remain owner/admin-only.
+        await self.require_project_read(project_id, actor)
         result = await self.session.execute(
             select(ProjectMember)
             .where(ProjectMember.project_id == project_id, ProjectMember.deleted_at.is_(None))

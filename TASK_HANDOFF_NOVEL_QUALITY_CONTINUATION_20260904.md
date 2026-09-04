@@ -903,3 +903,81 @@ owner_delete_status=422
 git push origin codex/bohrium-integration-20260831
 ```
 
+
+## 2026-09-04 追加：UI-004-B 项目资源成员权限与成员面板接线
+
+### A. 项目资源 API 权限贯穿
+
+`backend/app/api/routers/projects.py` 的 13 个项目资源端点已经从旧 `NovelService.ensure_project_owner()` 收敛到统一 `ProjectAccessService`：
+
+```text
+读取（Viewer / Editor / Owner / Admin）：
+- constitution
+- persona
+- memory
+- memory snapshots
+- character states
+- factions
+
+改写（Editor / Owner / Admin）：
+- constitution
+- persona
+- memory
+- incremental memory
+- compress memory
+- rollback memory
+- factions
+```
+
+新增回归：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_projects_member_access.py
+```
+
+锁定 Viewer 读取、Viewer 写入拒绝、Editor 写入、非成员读写拒绝。
+
+### B. 成员列表的访问投影
+
+成员列表属于项目共享元数据，现改为所有活动项目成员可读取；写入管理仍限定 Owner/Admin。
+
+`GET /api/projects/{project_id}/members` 新增：
+
+```text
+access_role
+can_manage
+```
+
+前端不再根据本地猜测所有权决定操作权限，而是以服务端 `can_manage` 投影决定是否启用管理操作。
+
+### C. 前端成员管理接线
+
+新增：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\api\projectMembers.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\api\projectMembers.spec.ts
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\ProjectMemberPanel.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\ProjectMemberPanel.spec.ts
+```
+
+并在：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\views\AgentWorkspace.vue
+```
+
+的数据与候选区域新增“项目成员”折叠面板。面板支持列表、刷新、添加、角色变更、移除、Owner 控件锁定、服务端错误展示、只读成员态和移动端布局。
+
+### D. 本批实测
+
+```text
+后端成员专项：11 passed in 60.05s
+前端 AgentWorkspace + 成员 API + 成员面板专项：3 files / 24 tests passed in 36.25s
+前端 type-check：通过
+git diff --check：通过
+```
+
+### E. 下一项
+
+UI-004 继续推进：对 `analytics`、`clue_tracker`、`foreshadowing`、`knowledge_graph`、`research`、`style`、`outline`、`writer` 和 Agent 工具执行入口按 read/write 分类逐批接入统一成员策略，并补真实多用户 SSE 验收。
