@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models.agent import AgentRun
 from ..models.novel import NovelProject
 from ..models.agent_catalog import AgentCapabilityExecution
+from ..services.project_access_service import ProjectAccessService
 
 
 class AgentExecutionFactNotFound(LookupError):
@@ -41,10 +42,35 @@ def _safe_fact(row: AgentCapabilityExecution) -> dict[str, Any]:
 
 
 class AgentExecutionFactService:
-    """Read-only, user-scoped projection of durable capability executions."""
+    """Read-only projection of durable capability executions."""
 
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def _readable_run(self, *, run_id: str, user_id: int) -> AgentRun:
+        """Resolve a Run without widening projectless or worker control scope.
+
+        Project-bound Runs are shared read models for active project members.
+        Projectless Runs remain private to their creator.  This method is used
+        only by read projections; durable worker claims and writes retain their
+        creator-scoped runtime contracts.
+        """
+        run = (await self.session.execute(
+            select(AgentRun).where(AgentRun.id == run_id),
+        )).scalar_one_or_none()
+        if run is None:
+            raise AgentExecutionFactNotFound('Agent Run 不存在')
+
+        if run.project_id:
+            await ProjectAccessService(self.session).require_project_read(
+                run.project_id,
+                user_id,
+            )
+            return run
+
+        if run.user_id != user_id:
+            raise AgentExecutionFactNotFound('Agent Run 不存在或不属于当前用户')
+        return run
 
     async def list_for_run(
         self,
@@ -53,11 +79,7 @@ class AgentExecutionFactService:
         user_id: int,
         limit: int = 200,
     ) -> list[dict[str, Any]]:
-        run = (await self.session.execute(
-            select(AgentRun).where(AgentRun.id == run_id, AgentRun.user_id == user_id),
-        )).scalar_one_or_none()
-        if run is None:
-            raise AgentExecutionFactNotFound('Agent Run 不存在或不属于当前用户')
+        run = await self._readable_run(run_id=run_id, user_id=user_id)
 
         bounded_limit = min(max(int(limit), 1), 500)
         rows = (await self.session.execute(
@@ -158,12 +180,8 @@ class AgentExecutionFactService:
         run_id: str,
         user_id: int,
     ) -> dict[str, Any]:
-        """Aggregate persisted Provider attempt metadata for one user-owned Run."""
-        run = (await self.session.execute(
-            select(AgentRun).where(AgentRun.id == run_id, AgentRun.user_id == user_id),
-        )).scalar_one_or_none()
-        if run is None:
-            raise AgentExecutionFactNotFound('Agent Run 不存在或不属于当前用户')
+        """Aggregate redacted Provider attempt metadata for one readable Run."""
+        run = await self._readable_run(run_id=run_id, user_id=user_id)
 
         context = run.context_json if isinstance(run.context_json, Mapping) else {}
         summary = self._provider_attempt_summary(context)
@@ -188,7 +206,6 @@ class AgentExecutionFactService:
         since: datetime | None = None,
         limit: int = 100,
     ) -> dict[str, Any]:
-        from ..services.project_access_service import ProjectAccessService
         await ProjectAccessService(self.session).require_project_read(project_id, user_id)
         bounded_limit = min(max(int(limit), 1), 100)
         project = (await self.session.execute(
