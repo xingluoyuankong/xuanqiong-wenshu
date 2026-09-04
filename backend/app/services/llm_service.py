@@ -63,6 +63,9 @@ class LLMService:
         self.usage_service = UsageService(session)
         self._embedding_dimensions: Dict[str, int] = {}
         self._resolved_llm_config_cache: Dict[tuple[int, bool, bool], Dict[str, Any]] = {}
+        # Candidate chapter tasks share this service and may resolve the same
+        # user config concurrently through one AsyncSession.
+        self._resolved_llm_config_lock = asyncio.Lock()
 
     async def _recover_from_stale_session(self, operation: str, exc: OperationalError) -> None:
         logger.warning("LLM 服务在 %s 阶段检测到陈旧数据库会话：%s", operation, exc)
@@ -1213,6 +1216,24 @@ class LLMService:
         if cached is not None:
             return dict(cached)
 
+        async with self._resolved_llm_config_lock:
+            cached = self._resolved_llm_config_cache.get(cache_key)
+            if cached is not None:
+                return dict(cached)
+            return await self._resolve_llm_config_uncached(
+                user_id,
+                enforce_daily_limit=enforce_daily_limit,
+                require_primary_api_key=require_primary_api_key,
+            )
+
+    async def _resolve_llm_config_uncached(
+        self,
+        user_id: Optional[int],
+        *,
+        enforce_daily_limit: bool,
+        require_primary_api_key: bool,
+    ) -> Dict[str, Any]:
+        cache_key = (int(user_id or 0), bool(enforce_daily_limit), bool(require_primary_api_key))
         resolved: Dict[str, Any]
         if user_id:
             try:

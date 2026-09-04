@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -864,3 +865,43 @@ async def test_memory_compress_scope_reuses_outer_logical_run():
     assert "压缩后的早期剧情摘要" in memory.global_summary
     assert len(llm.scope_ids) == 1
     assert all(scope_id == outer_scope_id for scope_id in llm.scope_ids)
+
+
+@pytest.mark.anyio
+async def test_llm_config_resolution_serializes_concurrent_cache_misses():
+    service = LLMService(object())
+    active_calls = 0
+    max_active_calls = 0
+
+    class ConfigRepo:
+        calls = 0
+
+        async def get_by_user(self, user_id):
+            nonlocal active_calls, max_active_calls
+            self.calls += 1
+            active_calls += 1
+            max_active_calls = max(max_active_calls, active_calls)
+            await asyncio.sleep(0.01)
+            active_calls -= 1
+            return SimpleNamespace(
+                llm_provider_profiles=None,
+                llm_provider_api_key="key-1",
+                llm_provider_url="https://provider.example/v1",
+                llm_provider_model="model-1",
+            )
+
+    repo = ConfigRepo()
+    service.llm_repo = repo
+
+    first, second = await asyncio.gather(
+        service._resolve_llm_config(9),
+        service._resolve_llm_config(9),
+    )
+
+    assert first == second == {
+        "api_key": "key-1",
+        "base_url": "https://provider.example/v1",
+        "model": "model-1",
+    }
+    assert repo.calls == 1
+    assert max_active_calls == 1
