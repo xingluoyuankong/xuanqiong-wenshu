@@ -1605,3 +1605,44 @@ async def test_cancel_and_drain_generation_tasks_waits_for_candidate_finalizers(
 
     assert task.cancelled()
     assert finalized.is_set()
+
+
+@pytest.mark.anyio
+async def test_provider_waiting_progress_serializes_concurrent_session_updates(monkeypatch):
+    orchestrator = object.__new__(PipelineOrchestrator)
+    orchestrator._generation_runtime_lock = asyncio.Lock()
+    active_operations = 0
+    max_active_operations = 0
+
+    async def fake_update(*args, **kwargs):
+        nonlocal active_operations, max_active_operations
+        active_operations += 1
+        max_active_operations = max(max_active_operations, active_operations)
+        await asyncio.sleep(0.01)
+        active_operations -= 1
+
+    async def fake_assert(*args, **kwargs):
+        nonlocal active_operations, max_active_operations
+        active_operations += 1
+        max_active_operations = max(max_active_operations, active_operations)
+        await asyncio.sleep(0.01)
+        active_operations -= 1
+
+    monkeypatch.setattr(orchestrator, "_update_generation_runtime", fake_update)
+    monkeypatch.setattr(orchestrator, "_assert_generation_active", fake_assert)
+    monkeypatch.setattr(orchestrator, "_infer_stage_progress_percent", lambda stage: 62)
+
+    await asyncio.gather(
+        orchestrator._record_provider_waiting_progress(
+            chapter=object(), generation_run_id="run-1", stage="generate_variants",
+            message="candidate one waiting", target_word_count=5000,
+            min_word_count=4500, soft_timeout_seconds=540.0,
+        ),
+        orchestrator._record_provider_waiting_progress(
+            chapter=object(), generation_run_id="run-1", stage="generate_variants",
+            message="candidate two waiting", target_word_count=5000,
+            min_word_count=4500, soft_timeout_seconds=540.0,
+        ),
+    )
+
+    assert max_active_operations == 1

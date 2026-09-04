@@ -125,6 +125,9 @@ class PipelineOrchestrator:
         self.context_builder = WriterContextBuilder()
         self.guardrails = ChapterGuardrails()
         self.cache_service = CacheService(getattr(settings, "redis_url", "redis://localhost:6379/0"))
+        # Candidate tasks can emit provider heartbeats concurrently; an AsyncSession
+        # only permits one in-flight database operation at a time.
+        self._generation_runtime_lock = asyncio.Lock()
         if PipelineOrchestrator._generation_semaphore is None:
             limit = max(1, int(getattr(settings, "writer_chapter_versions", 1) or 1))
             PipelineOrchestrator._generation_semaphore = asyncio.Semaphore(max(2, min(8, limit)))
@@ -1633,6 +1636,41 @@ class PipelineOrchestrator:
         chapter.real_summary = json.dumps({"generation_runtime": normalized_runtime}, ensure_ascii=False)
         await self.session.commit()
 
+    async def _record_provider_waiting_progress(
+        self,
+        *,
+        chapter: Chapter,
+        generation_run_id: Optional[str],
+        stage: str,
+        message: str,
+        target_word_count: int,
+        min_word_count: int,
+        soft_timeout_seconds: Optional[float],
+    ) -> None:
+        """Serialize heartbeat persistence from concurrent candidate tasks."""
+        async with self._generation_runtime_lock:
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage=stage,
+                message=message,
+                progress_percent=self._infer_stage_progress_percent(stage),
+                event_kind="progress",
+                title="Provider 等待中",
+                summary=message,
+                extra={
+                    "provider_waiting": True,
+                    "target_word_count": target_word_count,
+                    "min_word_count": min_word_count,
+                    "soft_timeout_seconds": soft_timeout_seconds,
+                },
+            )
+            await self._assert_generation_active(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage=f"{stage}_provider_wait",
+            )
+
     async def _safe_session_rollback(self, reason: str) -> None:
         try:
             await self.session.rollback()
@@ -2148,31 +2186,24 @@ class PipelineOrchestrator:
         generation_variants_started_at = time.perf_counter()
 
         async def report_generation_call_progress(stage: str, message: str) -> None:
-            await self._update_generation_runtime(
-                chapter,
+            await self._record_provider_waiting_progress(
+                chapter=chapter,
                 generation_run_id=generation_run_id,
                 stage=stage,
                 message=message,
-                progress_percent=self._infer_stage_progress_percent(stage),
-                event_kind="progress",
-                title="Provider 等待中",
-                summary=message,
-                extra={
-                    "provider_waiting": True,
-                    "target_word_count": config.target_word_count,
-                    "min_word_count": config.min_word_count,
-                    "soft_timeout_seconds": self._resolve_chapter_generation_soft_timeout(config.target_word_count),
-                },
-            )
-            await self._assert_generation_active(
-                chapter,
-                generation_run_id=generation_run_id,
-                stage=f"{stage}_provider_wait",
+                target_word_count=config.target_word_count,
+                min_word_count=config.min_word_count,
+                soft_timeout_seconds=self._resolve_chapter_generation_soft_timeout(config.target_word_count),
             )
 
         for attempt_idx, attempt_config in enumerate(attempt_configs):
             version_count = attempt_config.version_count
             version_style_hints = self._resolve_style_hints(enhanced_context, version_count)
+
+            # Commit before candidate tasks are scheduled. This releases the
+            # session write lock without racing their heartbeat callbacks.
+            await self.session.commit()
+            self.session.expire_all()
 
             generation_tasks: List[asyncio.Task] = []
             generation_attempt_started_at = time.perf_counter()
@@ -2203,11 +2234,7 @@ class PipelineOrchestrator:
                     )
                 )
 
-            # 在 LLM 调用前提交并释放数据库写锁，允许其他请求读取运行态。
-            # commit 已经隐式 flush；再次 flush 只会增加一次无效会话操作。
             try:
-                await self.session.commit()
-                self.session.expire_all()
                 generation_results = await asyncio.gather(*generation_tasks, return_exceptions=True)
             except BaseException:
                 await self._cancel_and_drain_generation_tasks(generation_tasks)
