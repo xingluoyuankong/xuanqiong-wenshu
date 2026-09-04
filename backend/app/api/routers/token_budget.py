@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...core.dependencies import get_current_user
 from ...db.session import get_session
 from ...schemas.user import UserInDB
-from ...services.novel_service import NovelService
+from ...services.project_access_service import ProjectAccessService
 from ...services.token_budget_service import TokenBudgetService
 
 router = APIRouter(prefix="/projects", tags=["token-budget"])
@@ -94,8 +94,7 @@ async def get_token_budget(
     current_user: UserInDB = Depends(get_current_user)
 ) -> dict:
     """获取项目的 Token 预算配置"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
     service = TokenBudgetService(session)
     config = await service.get_budget_config(project_id)
     return config
@@ -109,8 +108,7 @@ async def update_token_budget(
     current_user: UserInDB = Depends(get_current_user)
 ) -> dict:
     """更新项目的 Token 预算配置"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
     service = TokenBudgetService(session)
     budget = await service.update_budget(
         project_id=project_id,
@@ -136,8 +134,7 @@ async def record_token_usage(
     current_user: UserInDB = Depends(get_current_user)
 ) -> dict:
     """记录一次 Token 使用"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
     service = TokenBudgetService(session)
     usage = await service.record_usage(
         project_id=project_id,
@@ -173,8 +170,7 @@ async def get_token_usage(
     current_user: UserInDB = Depends(get_current_user)
 ) -> dict:
     """获取项目的 Token 使用统计"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
     service = TokenBudgetService(session)
 
     # 解析日期参数
@@ -197,8 +193,7 @@ async def get_module_usage(
     current_user: UserInDB = Depends(get_current_user)
 ) -> dict:
     """获取各模块的使用量"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
     service = TokenBudgetService(session)
     usage = await service.get_module_usage(project_id)
     return usage
@@ -212,8 +207,7 @@ async def get_budget_alerts(
     current_user: UserInDB = Depends(get_current_user)
 ) -> List[dict]:
     """获取项目的预算预警列表"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
     service = TokenBudgetService(session)
     alerts = await service.get_alerts(project_id, include_resolved)
     return alerts
@@ -227,8 +221,7 @@ async def resolve_budget_alert(
     current_user: UserInDB = Depends(get_current_user)
 ) -> dict:
     """标记预警为已处理"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
     service = TokenBudgetService(session)
     success = await service.resolve_alert(alert_id)
 
@@ -249,8 +242,7 @@ async def allocate_module_budget(
     current_user: UserInDB = Depends(get_current_user)
 ) -> dict:
     """批量分配模块预算"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
     service = TokenBudgetService(session)
 
     # 构建模块分配字典

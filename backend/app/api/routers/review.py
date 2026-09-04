@@ -11,7 +11,7 @@ from ...schemas.user import UserInDB
 from ...services.constitution_service import ConstitutionService
 from ...services.consistency_service import ConsistencyService
 from ...services.llm_service import LLMService
-from ...services.novel_service import NovelService
+from ...services.project_access_service import ProjectAccessService
 from ...services.prompt_service import PromptService
 from ...services.six_dimension_review_service import SixDimensionReviewService
 from ...services.writer_persona_service import WriterPersonaService
@@ -42,8 +42,7 @@ async def review_six_dimension(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(request.project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(request.project_id, current_user)
 
     llm_service = LLMService(session)
     prompt_service = PromptService(session)
@@ -76,8 +75,7 @@ async def review_consistency(
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
 ) -> Dict[str, Any]:
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(request.project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(request.project_id, current_user)
 
     consistency_service = ConsistencyService(session, LLMService(session))
     with LLMService.daily_limit_scope(

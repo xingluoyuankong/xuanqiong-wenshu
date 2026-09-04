@@ -12,6 +12,7 @@ from ...core.dependencies import get_current_user
 from ...db.session import get_session
 from ...schemas.user import UserInDB
 from ...services.patch_diff_service import PatchDiffService, DiffLineResult
+from ...services.project_access_service import ProjectAccessService
 
 logger = logging.getLogger(__name__)
 
@@ -141,10 +142,7 @@ async def apply_patch(
     service = PatchDiffService(session)
 
     try:
-        # 验证项目所有权
-        from ...services.novel_service import NovelService
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_write(project_id, current_user)
 
         # 应用 Patch
         chapter = await service.apply_patch_to_chapter(
@@ -188,10 +186,7 @@ async def get_diff(
     service = PatchDiffService(session)
 
     try:
-        # 验证项目所有权
-        from ...services.novel_service import NovelService
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_read(project_id, current_user)
 
         original_text = request.original_text
         patched_text = request.patched_text
@@ -231,10 +226,7 @@ async def get_version_diff(
     service = PatchDiffService(session)
 
     try:
-        # 验证项目所有权
-        from ...services.novel_service import NovelService
-        novel_service = NovelService(session)
-        project = await novel_service.ensure_project_owner(project_id, current_user.id)
+        project = (await ProjectAccessService(session).require_project_read(project_id, current_user)).project
 
         # 获取章节
         chapter = await service.get_chapter_by_number(project_id, chapter_number)
@@ -275,10 +267,7 @@ async def get_patch_history(
     service = PatchDiffService(session)
 
     try:
-        # 验证项目所有权
-        from ...services.novel_service import NovelService
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_read(project_id, current_user)
 
         # 获取章节
         chapter = await service.get_chapter_by_number(project_id, chapter_number)
@@ -330,10 +319,7 @@ async def revert_patch(
     service = PatchDiffService(session)
 
     try:
-        # 验证项目所有权
-        from ...services.novel_service import NovelService
-        novel_service = NovelService(session)
-        await novel_service.ensure_project_owner(project_id, current_user.id)
+        await ProjectAccessService(session).require_project_write(project_id, current_user)
 
         # 获取章节
         chapter = await service.get_chapter_by_number(project_id, chapter_number)

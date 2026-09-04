@@ -1193,3 +1193,38 @@ git diff --check：通过
 ### D. 队列更新
 
 下一批优先：`review.py`、`patch_diff.py`、`token_budget.py`、`writer.py` 和 Agent 工具执行层；其中 `writer.py` 范围大，先做端点/服务调用图与测试矩阵，再按功能域分批迁移。
+
+## 2026-09-04 追加：UI-004-G Review / Patch Diff / Token Budget 成员权限闭环
+
+本批迁移：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\review.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\patch_diff.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\token_budget.py
+```
+
+权限分类：
+
+```text
+write：six-dimension review、consistency review、Patch apply/revert、预算配置/记录/告警处理/分配
+read：文本 Diff、版本 Diff、Patch history、预算/使用量/模块使用量/告警
+```
+
+新回归：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_review_patch_budget_member_access.py
+```
+
+覆盖 Editor 写入、Viewer 读取、Viewer 写入拒绝和非成员拒绝；测试替身隔离 LLM、Patch 和预算持久化副作用。
+
+实测：
+
+```text
+Review/Patch/Token 成员专项 + TokenBudget 服务回归：11 passed in 4.44s
+Python compile：通过
+git diff --check：通过
+```
+
+下一批进入 Writer H-1 读路径/运行态可见性和 Agent ContextRef P0 迁移。
