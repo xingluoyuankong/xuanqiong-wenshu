@@ -1294,7 +1294,6 @@ class PipelineOrchestrator:
         return 300.0
 
     @staticmethod
-    @staticmethod
     def _resolve_chapter_mission_max_tokens(target_word_count: int) -> int:
         words = max(500, int(target_word_count or 0))
         if words < 2500:
@@ -1484,7 +1483,6 @@ class PipelineOrchestrator:
         normalized["schema_version"] = "chapter_mission.v2"
         return normalized
 
-    @staticmethod
     @staticmethod
     def _resolve_chapter_generation_max_tokens(target_word_count: int) -> int:
         words = max(500, int(target_word_count or 0))
