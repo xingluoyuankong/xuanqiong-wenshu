@@ -80,6 +80,17 @@ class DummyChapter:
         self.__dict__.update(values)
 
 
+class _PermissiveProjectAccess:
+    def __init__(self, session):
+        self.session = session
+
+    async def require_project_write(self, project_id, user_id):
+        return DummyChapter(id=project_id, user_id=user_id)
+
+    async def require_project_read(self, project_id, user_id):
+        return DummyChapter(id=project_id, user_id=user_id)
+
+
 class FakeLLMService:
     def __init__(self, response):
         self.response = response
