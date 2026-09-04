@@ -3275,3 +3275,91 @@ verify.ps1 smoke：259 检查 = 55 通过 / 204 合理跳过 / 0 失败
 2. 复核 `agent.py` 变更后的真实重启 TCP HTTP/SSE，重点共享项目历史投影和 projectless 隔离。
 3. 继续处理报告中剩余“需人工确认”的产品语义，不做无证据的批量权限放宽。
 4. 完成后再进入分页/长历史性能、前端浏览器级真实服务验收和发布门禁。
+### 2026-09-04 最新最终后端全量基线
+
+Agent 历史投影补丁落盘后，重新执行完整后端门禁：
+
+```text
+1706 passed in 587.61s (0:09:47)
+```
+
+该数字替换此前 1694 项的旧基线，后续以后续工作树变更为准继续递增验证。
+
+### Agent 成员控制链最终回归
+
+新增专项：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_member_controls.py
+```
+
+覆盖：
+
+- Editor/Admin 暂停并恢复 Owner 创建的 Run；
+- Viewer/非成员控制 Owner Run 被 403 拒绝；
+- 成员提交 Run command 时使用 Owner 作为 execution owner，同时在 payload 保留 actor_user_id；
+- Run 状态、Owner ID 与控制命令归属不漂移。
+
+最新结果：
+
+```text
+5 passed in 5.25s
+```
+
+当前 HEAD 已包含 Agent readable projection 与成员 UI 覆盖提交：
+
+```text
+1808ecd test: close agent projections and member UI coverage
+```
+
+工作树仅保留 Agent 路由的增量调整、接续文档回写、成员控制专项测试和既有二进制运行工件；不执行批量清理。
+
+### 基线说明修正
+
+`1706 passed in 587.61s` 是 Agent readable projection 增量落盘后的最近一次完整后端基线；其后新增的 Agent 成员控制专项已单独验证：
+
+```text
+5 passed in 5.25s
+```
+
+因此当前证据采用：
+
+```text
+完整后端基线：1706 passed
+其后增量专项：Agent 成员控制 5 passed；Agent 历史投影/上下文/会话 53 passed
+```
+
+后续若再修改后端生产代码，先重跑受影响专项，再重新替换完整后端基线。
+
+
+## 2026-09-04 接续回写：Agent Run 控制与候选 Artifact 协作闭环
+
+### A. 控制边界
+
+- 共享项目 Run 的 pause/resume/cancel 与 command 提交先通过项目 write；
+- 实际状态变更、取消副作用、命令记录和终态事件继续使用原始 Run `user_id` 作为 execution owner；
+- command payload 自动记录 `actor_user_id`，不修改 Run/Command 的原始归属；
+- 共享项目 `chapter_candidate` Artifact 的 accept 先通过项目 write，随后以 Artifact/Run 原始 owner 完成 approval、执行与版本落库；
+- Viewer 和非成员继续拒绝；projectless Run/Artifact 继续创建者私有；
+- `claim/release/recover` 保留后台 lease/恢复器的 owner-scoped 语义，不把成员读取或项目写权限直接升级成 worker 租约控制。
+
+### B. 验证
+
+```text
+Agent Run controls + Artifact accept：9 passed
+Agent readable projection + TaskRuntime member routes：26 passed
+backend 全量（控制补丁前最近稳定提交）：1706 passed，6 warnings
+前端 type-check：通过
+前端 Vitest：80 files / 510 tests passed
+前端 build-only：4918 modules transformed，成功
+git diff --check：通过
+```
+
+### C. 下一步
+
+1. 提交当前 Agent 控制补丁后重新执行 backend 全量，替换 1706 项基线；
+2. 重启 backend/frontend，执行 smoke、OpenAPI、隔离 JWT Writer/TaskRuntime 验收；
+3. 补真实 JWT Agent 只读与控制矩阵，重点 command history、plan/context/summaries、Artifact accept；
+4. 之后进入 UI-005 工具注册策略统一和 UI-006 长历史性能批次。
+
+总任务保持 `active`。

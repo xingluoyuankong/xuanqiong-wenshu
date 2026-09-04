@@ -48,6 +48,7 @@ from ...services.agent_runtime import (
     AgentConflict, AgentNotFound, AgentRuntimeError, AgentRuntimeService, AgentScopeViolation,
     clean_provider_attempt_snapshot,
 )
+from ...services.project_access_service import ProjectAccessService
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 _STEP_WORKER_ID = f"api:{socket.gethostname()}:{os.getpid()}"[:128]
@@ -78,6 +79,30 @@ def _error(exc: Exception) -> HTTPException:
     if isinstance(exc, AgentJobError):
         return HTTPException(status_code=409, detail={"code": "AGENT_JOB_CONFLICT", "message": str(exc)})
     return HTTPException(status_code=409, detail={"code": "AGENT_CONFLICT", "message": str(exc)})
+
+
+async def _resolve_writable_artifact(
+    *,
+    artifact_id: str,
+    session: AsyncSession,
+    current_user: UserInDB,
+) -> tuple[AgentArtifactRef, int]:
+    """Authorize a shared candidate for the actor, retaining its execution owner."""
+    artifact = (
+        await session.execute(
+            select(AgentArtifactRef).where(AgentArtifactRef.id == artifact_id)
+        )
+    ).scalar_one_or_none()
+    if artifact is None:
+        raise AgentNotFound("artifact not found")
+    if artifact.project_id:
+        await ProjectAccessService(session).require_project_write(
+            artifact.project_id,
+            current_user,
+        )
+    elif artifact.user_id != int(current_user.id):
+        raise AgentNotFound("artifact not found")
+    return artifact, int(artifact.user_id)
 
 
 async def _execute_registered_approval(*, approval_id: str, session: AsyncSession, user_id: int):
@@ -600,6 +625,21 @@ async def recover_agent_run(run_id: str, session: AsyncSession = Depends(get_ses
         raise _error(exc) from exc
 
 
+async def _resolve_writable_run(
+    runtime: AgentRuntimeService,
+    run_id: str,
+    current_user: UserInDB,
+) -> tuple[AgentRun, int]:
+    """Authorize a project Run for a member while preserving execution ownership."""
+    run = await runtime.get_readable_run(run_id, current_user.id)
+    if run.project_id:
+        await ProjectAccessService(runtime.session).require_project_write(
+            run.project_id,
+            current_user,
+        )
+    return run, int(run.user_id)
+
+
 async def _apply_cancel_side_effects(run: AgentRun, *, session: AsyncSession, user_id: int) -> None:
     errors: list[tuple[str, str]] = []
     try:
@@ -672,21 +712,28 @@ async def submit_agent_run_command(
 ) -> AgentRunCommandRead:
     try:
         runtime = AgentRuntimeService(session)
+        _run, execution_owner_id = await _resolve_writable_run(
+            runtime,
+            run_id,
+            current_user,
+        )
+        command_payload = dict(request.payload_json or {})
+        command_payload.setdefault("actor_user_id", int(current_user.id))
         command = await runtime.submit_run_command(
             run_id=run_id,
-            user_id=current_user.id,
+            user_id=execution_owner_id,
             command_type=request.command_type,
             reason=request.reason,
-            payload=request.payload_json,
+            payload=command_payload,
             idempotency_key=request.idempotency_key,
             expected_state_version=request.expected_state_version,
             apply=request.execution_mode == "inline",
         )
         if command.command_type == "cancel" and command.status == "applied":
             await _apply_cancel_side_effects(
-                await runtime.get_run(run_id, current_user.id),
+                await runtime.get_run(run_id, execution_owner_id),
                 session=session,
-                user_id=current_user.id,
+                user_id=execution_owner_id,
             )
         return AgentRunCommandRead.model_validate(command)
     except (AgentRuntimeError, SQLAlchemyError) as exc:
@@ -696,7 +743,9 @@ async def submit_agent_run_command(
 @router.post("/runs/{run_id}/pause", response_model=AgentRunRead)
 async def pause_agent_run(run_id: str, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> AgentRunRead:
     try:
-        return await AgentRuntimeService(session).pause_run(run_id=run_id, user_id=current_user.id)
+        runtime = AgentRuntimeService(session)
+        _run, execution_owner_id = await _resolve_writable_run(runtime, run_id, current_user)
+        return await runtime.pause_run(run_id=run_id, user_id=execution_owner_id)
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
@@ -704,7 +753,9 @@ async def pause_agent_run(run_id: str, session: AsyncSession = Depends(get_sessi
 @router.post("/runs/{run_id}/resume", response_model=AgentRunRead)
 async def resume_agent_run(run_id: str, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> AgentRunRead:
     try:
-        return await AgentRuntimeService(session).resume_run(run_id=run_id, user_id=current_user.id)
+        runtime = AgentRuntimeService(session)
+        _run, execution_owner_id = await _resolve_writable_run(runtime, run_id, current_user)
+        return await runtime.resume_run(run_id=run_id, user_id=execution_owner_id)
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
@@ -713,8 +764,9 @@ async def resume_agent_run(run_id: str, session: AsyncSession = Depends(get_sess
 async def cancel_agent_run(run_id: str, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> AgentRunRead:
     try:
         runtime = AgentRuntimeService(session)
-        run = await runtime.cancel_run(run_id=run_id, user_id=current_user.id)
-        await _apply_cancel_side_effects(run, session=session, user_id=current_user.id)
+        _run, execution_owner_id = await _resolve_writable_run(runtime, run_id, current_user)
+        run = await runtime.cancel_run(run_id=run_id, user_id=execution_owner_id)
+        await _apply_cancel_side_effects(run, session=session, user_id=execution_owner_id)
         return run
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
@@ -1158,15 +1210,11 @@ async def read_agent_artifact_content(artifact_id: str, session: AsyncSession = 
 async def accept_agent_artifact(artifact_id: str, payload: AgentArtifactAcceptRequest, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> AgentArtifactRead:
     """Compatibility UI endpoint: an explicit accept click becomes a registered approval execution."""
     try:
-        artifact = (await session.execute(
-            select(AgentArtifactRef).join(AgentRun, AgentRun.id == AgentArtifactRef.run_id).where(
-                AgentArtifactRef.id == artifact_id,
-                AgentArtifactRef.user_id == current_user.id,
-                AgentRun.user_id == current_user.id,
-            )
-        )).scalar_one_or_none()
-        if artifact is None:
-            raise AgentNotFound("artifact not found")
+        artifact, execution_owner_id = await _resolve_writable_artifact(
+            artifact_id=artifact_id,
+            session=session,
+            current_user=current_user,
+        )
         metadata = dict(artifact.metadata_json or {})
         if artifact.kind != "chapter_candidate" or not artifact.project_id:
             raise AgentConflict("artifact is not an acceptable chapter candidate")
@@ -1177,22 +1225,33 @@ async def accept_agent_artifact(artifact_id: str, payload: AgentArtifactAcceptRe
         runtime = AgentRuntimeService(session)
         approval = await runtime.request_approval(
             run_id=artifact.run_id,
-            user_id=current_user.id,
+            user_id=execution_owner_id,
             tool_name="chapter.version.accept",
             project_id=artifact.project_id,
-            arguments={"artifact_id": artifact.id, "note": payload.note or ""},
+            arguments={
+                "artifact_id": artifact.id,
+                "note": payload.note or "",
+                "actor_user_id": int(current_user.id),
+            },
         )
         await runtime.append_event(
             run_id=artifact.run_id,
-            user_id=current_user.id,
+            user_id=execution_owner_id,
             event_type="approval_required",
             summary="接受候选版本等待用户确认",
             data={"approval_id": approval.id, "tool_name": approval.tool_name, "artifact_id": artifact.id},
         )
         approval = await runtime.decide_approval(
-            approval_id=approval.id, user_id=current_user.id, approved=True, reason="explicit_artifact_accept"
+            approval_id=approval.id,
+            user_id=execution_owner_id,
+            approved=True,
+            reason="explicit_artifact_accept",
         )
-        accepted = await _execute_registered_approval(approval_id=approval.id, session=session, user_id=current_user.id)
+        accepted = await _execute_registered_approval(
+            approval_id=approval.id,
+            session=session,
+            user_id=execution_owner_id,
+        )
         return AgentArtifactRead.model_validate(accepted)
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
