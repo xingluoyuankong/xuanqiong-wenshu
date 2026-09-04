@@ -5,6 +5,7 @@
 > 工作区：`D:\小说写作\xuanqiong-wenshu`  
 > 编写角色：执行子智能体 E  
 > 本次范围：全面审查、证据盘点、分支差异核对、接续计划更新；本次仅新增本文件，未编辑业务代码。
+> **最新执行状态（2026-09-04）**：本文件早期第 1—9 节记录的是 `main` 质量主线审查证据；当前实际接续分支已切换为 `codex/bohrium-integration-20260831`，最新 UI-004 实施、测试、真实服务冒烟和下一步均以文末追加记录为准。质量主线的独立证据附录位于 `docs/reports/quality-continuity-evidence-20260904.md`。
 
 ---
 
@@ -901,3 +902,4 @@ owner_delete_status=422
 ```powershell
 git push origin codex/bohrium-integration-20260831
 ```
+
