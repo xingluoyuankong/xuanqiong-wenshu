@@ -1344,3 +1344,23 @@ git diff --check：通过
 前端构建继续报告 `baseline-browser-mapping` 与 `caniuse-lite` 数据较旧，列为 P2 依赖数据更新，不影响本轮构建产物。
 
 当前 UI-004 仍为 active：下一 P0 是 Agent `write_executor.py` 与 `execution_facts.py` 的成员可读/可写投影，随后进入 Writer H-1 运行态和 SSE 成员读取；其余旧 Owner-only 业务域继续按小批次迁移，不把本轮全绿当作总任务完成。
+
+## 2026-09-04 追加：重启后的真实服务冒烟
+
+本批代码已重新启动到本地 SQLite 服务：
+
+```text
+backend: 127.0.0.1:8013
+frontend: 127.0.0.1:5174
+```
+
+验证：
+
+```text
+backend health：200
+frontend proxy health：200
+verify.ps1 smoke：通过
+OpenAPI smoke：259 检查，55 通过、204 因缺真实资源合理跳过、0 失败
+```
+
+该结果验证当前已提交分支可以启动并完成基础 API/代理冒烟；项目成员的完整多用户 SSE、Writer H-1、Agent write executor 与 execution facts 仍是后续验收范围。
