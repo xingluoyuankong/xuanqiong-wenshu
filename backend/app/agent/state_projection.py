@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.agent import AgentApproval, AgentArtifactRef, AgentJob, AgentRun, AgentRunCommand, AgentRunStep
 from ..models.task_runtime import TaskRuntime
-from ..services.agent_runtime import AgentNotFound, allowed_commands_for_run, command_projection
+from ..services.agent_runtime import AgentRuntimeService, allowed_commands_for_run, command_projection
 
 _TERMINAL = {"completed", "succeeded", "failed", "cancelled", "dead_letter"}
 
@@ -36,54 +36,57 @@ class AgentStateProjectionService:
         self.session = session
 
     async def get_run_state(self, *, run_id: str, user_id: int) -> dict[str, Any]:
-        run = (
-            await self.session.execute(
-                select(AgentRun).where(AgentRun.id == run_id, AgentRun.user_id == user_id)
-            )
-        ).scalar_one_or_none()
-        if run is None:
-            raise AgentNotFound("agent run not found")
+        # Resolve readability through the same project-membership policy used by
+        # reasoning and activity replay. The durable rows themselves remain
+        # attributed to the run owner, not the viewing member.
+        run = await AgentRuntimeService(self.session).get_readable_run(run_id, user_id)
+        source_user_id = run.user_id
+        can_control = source_user_id == user_id
+        if run.project_id:
+            from ..services.project_access_service import ProjectAccessService
+            access = await ProjectAccessService(self.session).require_project_read(run.project_id, user_id)
+            can_control = access.can_write
 
         correlation_id = run.correlation_id
         steps = list((await self.session.execute(
             select(AgentRunStep).where(
                 AgentRunStep.run_id == run.id,
-                AgentRunStep.user_id == user_id,
+                AgentRunStep.user_id == source_user_id,
                 AgentRunStep.correlation_id == correlation_id,
             ).order_by(AgentRunStep.step_order.asc(), AgentRunStep.id.asc())
         )).scalars().all())
         approvals = list((await self.session.execute(
             select(AgentApproval).where(
                 AgentApproval.run_id == run.id,
-                AgentApproval.user_id == user_id,
+                AgentApproval.user_id == source_user_id,
                 AgentApproval.correlation_id == correlation_id,
             ).order_by(AgentApproval.decision_at.asc().nullsfirst(), AgentApproval.id.asc())
         )).scalars().all())
         artifacts = list((await self.session.execute(
             select(AgentArtifactRef).where(
                 AgentArtifactRef.run_id == run.id,
-                AgentArtifactRef.user_id == user_id,
+                AgentArtifactRef.user_id == source_user_id,
                 AgentArtifactRef.correlation_id == correlation_id,
             ).order_by(AgentArtifactRef.created_at.asc(), AgentArtifactRef.id.asc())
         )).scalars().all())
         jobs = list((await self.session.execute(
             select(AgentJob).where(
                 AgentJob.run_id == run.id,
-                AgentJob.user_id == user_id,
+                AgentJob.user_id == source_user_id,
                 AgentJob.correlation_id == correlation_id,
             ).order_by(AgentJob.created_at.asc(), AgentJob.id.asc())
         )).scalars().all())
         commands = list((await self.session.execute(
             select(AgentRunCommand).where(
                 AgentRunCommand.run_id == run.id,
-                AgentRunCommand.user_id == user_id,
+                AgentRunCommand.user_id == source_user_id,
                 AgentRunCommand.correlation_id == correlation_id,
             ).order_by(AgentRunCommand.requested_at.asc(), AgentRunCommand.id.asc())
         )).scalars().all())
         tasks = list((await self.session.execute(
             select(TaskRuntime).where(
                 TaskRuntime.correlation_id == correlation_id,
-                TaskRuntime.owner_user_id == user_id,
+                TaskRuntime.owner_user_id == source_user_id,
             ).order_by(TaskRuntime.created_at.asc(), TaskRuntime.task_id.asc())
         )).scalars().all())
 
@@ -98,7 +101,7 @@ class AgentStateProjectionService:
         active_command = next((item for item in reversed(commands) if item.status == "requested"), None)
         allowed_commands = (
             []
-            if run.status == "paused" and run.current_phase == "recovery_ready"
+            if not can_control or (run.status == "paused" and run.current_phase == "recovery_ready")
             else allowed_commands_for_run(run.status, run.current_phase)
         )
         return {

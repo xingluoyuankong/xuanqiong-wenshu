@@ -981,3 +981,37 @@ git diff --check：通过
 ### E. 下一项
 
 UI-004 继续推进：对 `analytics`、`clue_tracker`、`foreshadowing`、`knowledge_graph`、`research`、`style`、`outline`、`writer` 和 Agent 工具执行入口按 read/write 分类逐批接入统一成员策略，并补真实多用户 SSE 验收。
+
+## 2026-09-04 追加：UI-004-C Agent State Projection 成员读取修复
+
+### A. 发现
+
+真实 HTTP 成员回归先覆盖 reasoning、activity 与 state。Viewer 对 reasoning/activity 已可读，但 `GET /api/agent/runs/{run_id}/state` 仍按 `AgentRun.user_id == requester_id` 查询，导致项目 Viewer 返回 404。这与已定义的成员读取模型不一致。
+
+### B. 修复
+
+修改：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\agent\state_projection.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_project_member_http.py
+```
+
+State projection 现在：
+
+- 先通过 `AgentRuntimeService.get_readable_run()` 统一解析 project member 可读性；
+- 后续步骤、审批、Artifact、Job、Command、TaskRuntime 查询使用 Run 所属用户，而不是查看成员的用户 ID；
+- Viewer 可获得安全状态投影，但 `allowed_commands=[]`；
+- Editor/Owner/Admin 的可控制性仍由 `ProjectAccessService.require_project_read()` 返回的 write 能力决定；
+- projectless Run 保持原有创建者隔离。
+
+### C. 定向门禁
+
+```text
+app/api/routers/test_agent_project_member_http.py
+app/agent/test_state_projection.py
+
+11 passed in 19.45s
+```
+
+此批补齐 UI-004 所要求的 reasoning、activity、Run state 成员读取闭环。下一步仍是 SSE stream、Artifact/command 端点、其余业务路由与真实多用户 SSE 验收。
