@@ -1239,7 +1239,7 @@ async def accept_agent_artifact(artifact_id: str, payload: AgentArtifactAcceptRe
             user_id=execution_owner_id,
             event_type="approval_required",
             summary="接受候选版本等待用户确认",
-            data={"approval_id": approval.id, "tool_name": approval.tool_name, "artifact_id": artifact.id},
+            data={"approval_id": approval.id, "tool_name": approval.tool_name, "artifact_id": artifact.id, "actor_user_id": int(current_user.id), "execution_owner_id": execution_owner_id},
         )
         approval = await runtime.decide_approval(
             approval_id=approval.id,
