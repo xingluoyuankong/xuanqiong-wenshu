@@ -871,3 +871,25 @@ verify.ps1 smoke：通过
 - 冒烟不替代带真实多用户项目、成员管理、Agent reasoning、SSE 断线恢复的端到端验收；
 - MySQL 部署路径仍要求由部署环境提供正确 `mysqld.exe` 或 `XUANQIONG_WENSHU_MYSQLD_PATH`；
 - 服务保持运行，后续可直接基于 8013/5174 继续多用户 UI/API 验收。
+
+### D. 真实成员管理 API 验收补充
+
+在已启动的本地 SQLite 服务上创建隔离项目后，实际调用：
+
+```text
+POST /api/novels
+GET /api/projects/{project_id}/members
+PATCH /api/projects/{project_id}/members/{owner_user_id}
+DELETE /api/projects/{project_id}/members/{owner_user_id}
+```
+
+实际结果：
+
+```text
+member_count=1
+owner_role=owner
+owner_demote_status=422
+owner_delete_status=422
+```
+
+该验收确认创建项目会同步生成 Owner 成员行，且 HTTP 层同样拒绝 Owner 降级与删除。该本地 API 验收使用的隔离项目 ID 为 `5e7bbd69-5509-45c8-ac09-255b3a13626d`；没有调用 Provider。
