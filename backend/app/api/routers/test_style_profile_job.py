@@ -12,11 +12,14 @@ from app.schemas.task_runtime import TaskRuntimeEventType, TaskRuntimeStatus
 from app.services.task_runtime import TaskRuntimeConflict, TaskRuntimeNotFound, TaskRuntimeService
 
 
-class _FakeNovelService:
+class _FakeProjectAccessService:
     def __init__(self, session):
         self.session = session
 
-    async def ensure_project_owner(self, project_id, user_id):
+    async def require_project_read(self, project_id, user):
+        return object()
+
+    async def require_project_write(self, project_id, user):
         return object()
 
 
@@ -45,7 +48,7 @@ def clear_style_profile_jobs():
 
 @pytest.mark.asyncio
 async def test_style_profile_job_has_start_status_and_cancel(monkeypatch):
-    monkeypatch.setattr(style, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(style, "ProjectAccessService", _FakeProjectAccessService)
     current_user = UserInDB(id=7, username="tester", email=None, hashed_password="x")
     request = style.CreateStyleProfileRequest(source_ids=["src-1"], name="冷峻叙事")
     background_tasks = BackgroundTasks()
@@ -90,7 +93,7 @@ async def test_style_profile_job_has_start_status_and_cancel(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_style_source_upload_job_has_start_status_and_cancel(monkeypatch):
-    monkeypatch.setattr(style, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(style, "ProjectAccessService", _FakeProjectAccessService)
     current_user = UserInDB(id=7, username="tester", email=None, hashed_password="x")
     background_tasks = BackgroundTasks()
     upload = UploadFile(
@@ -145,7 +148,7 @@ async def test_style_source_upload_job_has_start_status_and_cancel(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_style_source_upload_cancel_does_not_abort_saving(monkeypatch):
-    monkeypatch.setattr(style, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(style, "ProjectAccessService", _FakeProjectAccessService)
     current_user = UserInDB(id=7, username="tester", email=None, hashed_password="x")
     run_id = "style-upload-saving"
     style._STYLE_SOURCE_UPLOAD_JOBS[run_id] = {
@@ -168,7 +171,7 @@ async def test_style_source_upload_cancel_does_not_abort_saving(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_style_profile_status_rebuilds_from_task_runtime_after_restart(task_session, monkeypatch):
-    monkeypatch.setattr(style, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(style, "ProjectAccessService", _FakeProjectAccessService)
     run_id = "style-profile-restart"
     snapshot = {
         "run_id": run_id,
@@ -216,7 +219,7 @@ async def test_style_profile_status_rebuilds_from_task_runtime_after_restart(tas
 
 @pytest.mark.asyncio
 async def test_style_source_upload_status_rebuilds_from_task_runtime_after_restart(task_session, monkeypatch):
-    monkeypatch.setattr(style, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(style, "ProjectAccessService", _FakeProjectAccessService)
     run_id = "style-upload-restart"
     snapshot = {
         "run_id": run_id,
@@ -270,7 +273,7 @@ async def test_style_source_upload_status_rebuilds_from_task_runtime_after_resta
 async def test_style_source_upload_status_recovers_persisted_file_once_after_restart(
     task_session, monkeypatch, tmp_path
 ):
-    monkeypatch.setattr(style, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(style, "ProjectAccessService", _FakeProjectAccessService)
     storage_root = tmp_path / "style_uploads"
     monkeypatch.setattr(style, "_STYLE_UPLOAD_STORAGE_ROOT", storage_root)
     run_id = f"style-upload-queued-recovery-{uuid.uuid4().hex}"
@@ -340,7 +343,7 @@ async def test_style_source_upload_status_recovers_persisted_file_once_after_res
 async def test_style_source_upload_recovery_rejects_external_or_cross_project_path(
     task_session, monkeypatch, tmp_path
 ):
-    monkeypatch.setattr(style, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(style, "ProjectAccessService", _FakeProjectAccessService)
     storage_root = tmp_path / "style_uploads"
     monkeypatch.setattr(style, "_STYLE_UPLOAD_STORAGE_ROOT", storage_root)
     outside = tmp_path / "outside.bin"
@@ -391,7 +394,7 @@ async def test_style_source_upload_recovery_rejects_external_or_cross_project_pa
 
 @pytest.mark.asyncio
 async def test_style_profile_cancel_recovers_persisted_runtime_after_restart(task_session, monkeypatch):
-    monkeypatch.setattr(style, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(style, "ProjectAccessService", _FakeProjectAccessService)
     run_id = f"style-profile-cancel-restart-{uuid.uuid4().hex}"
     snapshot = {
         "run_id": run_id,
@@ -437,7 +440,7 @@ async def test_style_profile_cancel_recovers_persisted_runtime_after_restart(tas
 
 @pytest.mark.asyncio
 async def test_style_source_upload_cancel_recovers_persisted_runtime_after_restart(task_session, monkeypatch, tmp_path):
-    monkeypatch.setattr(style, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(style, "ProjectAccessService", _FakeProjectAccessService)
     storage_root = tmp_path / "style_uploads"
     monkeypatch.setattr(style, "_STYLE_UPLOAD_STORAGE_ROOT", storage_root)
     run_id = f"style-upload-cancel-restart-{uuid.uuid4().hex}"
@@ -497,7 +500,7 @@ async def test_style_source_upload_cancel_recovers_persisted_runtime_after_resta
 @pytest.mark.asyncio
 async def test_style_profile_start_uses_runtime_not_stale_memory(task_session, monkeypatch):
     """持久化终态必须释放槽位，旧内存 profiling 快照不得阻止新任务。"""
-    monkeypatch.setattr(style, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(style, "ProjectAccessService", _FakeProjectAccessService)
     old_run_id = "style-profile-memory-stale"
     await TaskRuntimeService(task_session).create_task(
         task_id=old_run_id,
@@ -538,7 +541,7 @@ async def test_style_profile_start_uses_runtime_not_stale_memory(task_session, m
 @pytest.mark.asyncio
 async def test_style_profile_start_reuses_persisted_active_runtime_after_restart(task_session, monkeypatch):
     """重启后无内存缓存时，第二次启动不得重复创建同项目文风任务。"""
-    monkeypatch.setattr(style, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(style, "ProjectAccessService", _FakeProjectAccessService)
     run_id = "style-profile-active-restart"
     await TaskRuntimeService(task_session).create_task(
         task_id=run_id,
@@ -578,7 +581,7 @@ async def test_style_profile_start_reuses_persisted_active_runtime_after_restart
 @pytest.mark.asyncio
 async def test_style_profile_queued_cancel_finalizes_unclaimed_runtime(task_session, monkeypatch):
     """未领取的文风任务取消后必须终态化，避免 SSE 永久停在 cancelling。"""
-    monkeypatch.setattr(style, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(style, "ProjectAccessService", _FakeProjectAccessService)
     run_id = "style-profile-queued-cancel"
     await TaskRuntimeService(task_session).create_task(
         task_id=run_id,
@@ -603,7 +606,7 @@ async def test_style_profile_queued_cancel_finalizes_unclaimed_runtime(task_sess
 
 @pytest.mark.asyncio
 async def test_style_source_cancel_rejects_cross_project_runtime(task_session, monkeypatch):
-    monkeypatch.setattr(style, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(style, "ProjectAccessService", _FakeProjectAccessService)
     run_id = "style-source-cross-project"
     runtime = TaskRuntimeService(task_session)
     await runtime.create_task(
@@ -628,7 +631,7 @@ async def test_style_source_cancel_rejects_cross_project_runtime(task_session, m
 
 @pytest.mark.asyncio
 async def test_style_profile_cancel_ignores_same_project_other_task_type(task_session, monkeypatch):
-    monkeypatch.setattr(style, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(style, "ProjectAccessService", _FakeProjectAccessService)
     run_id = "style-source-not-profile"
     runtime = TaskRuntimeService(task_session)
     await runtime.create_task(
@@ -651,7 +654,7 @@ async def test_style_profile_cancel_ignores_same_project_other_task_type(task_se
 
 @pytest.mark.asyncio
 async def test_style_status_does_not_fallback_to_memory_after_runtime_missing(task_session, monkeypatch):
-    monkeypatch.setattr(style, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(style, "ProjectAccessService", _FakeProjectAccessService)
     run_id = "style-profile-runtime-missing"
     style._STYLE_PROFILE_JOBS[run_id] = {
         "run_id": run_id,
@@ -785,7 +788,7 @@ async def test_style_profile_heartbeat_cancels_parent_worker(monkeypatch):
             await asyncio.sleep(60)
 
     monkeypatch.setattr(style, "AsyncSessionLocal", _DbContext)
-    monkeypatch.setattr(style, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(style, "ProjectAccessService", _FakeProjectAccessService)
     monkeypatch.setattr(style, "StyleRAGService", _SlowStyleService)
     style._STYLE_PROFILE_JOBS[run_id] = {
         "run_id": run_id,
@@ -808,7 +811,7 @@ async def test_style_profile_heartbeat_cancels_parent_worker(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_style_profile_cancel_persistence_conflict_does_not_fake_cancel(task_session, monkeypatch):
-    monkeypatch.setattr(style, "NovelService", _FakeNovelService)
+    monkeypatch.setattr(style, "ProjectAccessService", _FakeProjectAccessService)
     run_id = "style-cancel-persist-conflict"
     runtime = TaskRuntimeService(task_session)
     snapshot = {

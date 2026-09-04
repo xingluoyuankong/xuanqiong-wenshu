@@ -1155,3 +1155,41 @@ git diff --check：通过
 ### D. 后续
 
 `style.py` 的 HTTP 与后台 worker 写权限、`review.py`、`patch_diff.py`、`token_budget.py`、`writer.py` 仍在后续队列。`test_style_member_access.py` 已存在红灯基线，待对应 style 实现同批收口。
+
+## 2026-09-04 追加：UI-004-F Style HTTP 与后台任务成员写权限闭环
+
+### A. Style 路由
+
+`style.py` 已把 21 个 HTTP 项目校验从旧 owner-only 逻辑迁移到 `ProjectAccessService`：
+
+```text
+read：sources、library、upload status、profiles、profile status、active、style summary
+write：sources 上传/删除、profile 创建/取消/更新、apply、active 删除、extract、style 删除、generate
+```
+
+### B. 后台 worker
+
+以下后台链路也改为统一写权限校验：
+
+```text
+_run_style_source_upload_job()
+_run_style_profile_job()
+```
+
+这样 Editor 发起的风格素材上传/画像任务不会在 worker 阶段被旧 owner-only 检查截断。
+
+### C. 兼容回归
+
+已有 `test_style_profile_job.py` 的权限 seam 从旧 `NovelService` mock 更新为 `ProjectAccessService` mock，保留任务启动、心跳、取消、恢复、跨项目阻断等原测试意图。
+
+实测：
+
+```text
+Style 成员路由 + Style profile/source job 回归：21 passed in 16.53s
+Python compile：通过
+git diff --check：通过
+```
+
+### D. 队列更新
+
+下一批优先：`review.py`、`patch_diff.py`、`token_budget.py`、`writer.py` 和 Agent 工具执行层；其中 `writer.py` 范围大，先做端点/服务调用图与测试矩阵，再按功能域分批迁移。

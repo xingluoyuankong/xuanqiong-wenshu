@@ -26,7 +26,7 @@ from ...db.session import AsyncSessionLocal, get_session
 from ...schemas.user import UserInDB
 from ...services.llm_service import LLMService
 from ...services.style_rag_service import StyleRAGService, StyleFeature, StyleProfile
-from ...services.novel_service import NovelService
+from ...services.project_access_service import ProjectAccessService
 from ...schemas.task_runtime import TaskRuntimeEventType, TaskRuntimeStatus
 from ...services.task_runtime import TERMINAL_STATUSES, TaskRuntimeConflict, TaskRuntimeNotFound, TaskRuntimeService
 
@@ -845,7 +845,7 @@ async def _run_style_source_upload_job(
             raise _StyleRuntimeCancellation(f"style runtime {run_id} is cancelling")
 
         async with AsyncSessionLocal() as job_session:
-            await NovelService(job_session).ensure_project_owner(project_id, user_id)
+            await ProjectAccessService(job_session).require_project_write(project_id, user_id)
             style_service = StyleRAGService(job_session, LLMService(job_session))
             await _style_worker_checkpoint(
                 run_id, project_id, user_id, "style_source_upload"
@@ -1062,7 +1062,7 @@ async def _run_style_profile_job(
             raise _StyleRuntimeCancellation(f"style runtime {run_id} is cancelling")
 
         async with AsyncSessionLocal() as job_session:
-            await NovelService(job_session).ensure_project_owner(project_id, user_id)
+            await ProjectAccessService(job_session).require_project_write(project_id, user_id)
             style_service = StyleRAGService(job_session, LLMService(job_session))
             before_profiles = [
                 profile.to_dict()
@@ -1178,8 +1178,7 @@ async def list_style_sources(
     current_user: UserInDB = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
 
     style_service = StyleRAGService(session, LLMService(session))
     sources = await style_service.list_style_sources(current_user.id)
@@ -1192,8 +1191,7 @@ async def get_style_library(
     current_user: UserInDB = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
 
     style_service = StyleRAGService(session, LLMService(session))
     sources = await style_service.list_style_sources(current_user.id)
@@ -1215,8 +1213,7 @@ async def create_style_source(
     current_user: UserInDB = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     style_service = StyleRAGService(session, LLMService(session))
     try:
@@ -1239,8 +1236,7 @@ async def delete_style_source(
     current_user: UserInDB = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     style_service = StyleRAGService(session, LLMService(session))
     deleted = await style_service.delete_style_source(current_user.id, source_id)
@@ -1260,8 +1256,7 @@ async def start_style_source_upload(
     current_user: UserInDB = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> StyleSourceUploadJobResponse:
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     try:
         parsed_extra = json.loads(extra) if extra else {}
@@ -1357,8 +1352,7 @@ async def get_style_source_upload_status(
     current_user: UserInDB = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> StyleSourceUploadJobResponse:
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
 
     async with _STYLE_SOURCE_UPLOAD_JOB_LOCK:
         resolved_run_id = run_id or _STYLE_SOURCE_UPLOAD_PROJECT_RUNS.get(project_id)
@@ -1414,7 +1408,7 @@ async def cancel_style_source_upload(
     current_user: UserInDB = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> StyleSourceUploadJobResponse:
-    await NovelService(session).ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
     db_backed = hasattr(session, "execute")
 
     if db_backed:
@@ -1515,8 +1509,7 @@ async def upload_style_source(
     current_user: UserInDB = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     style_service = StyleRAGService(session, LLMService(session))
     try:
@@ -1550,8 +1543,7 @@ async def list_style_profiles(
     current_user: UserInDB = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
 
     style_service = StyleRAGService(session, LLMService(session))
     profiles = await style_service.list_style_profiles(current_user.id)
@@ -1566,8 +1558,7 @@ async def start_style_profile_generation(
     current_user: UserInDB = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> StyleProfileJobResponse:
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     persisted_active = await _load_active_persisted_style_job(
         session,
@@ -1640,8 +1631,7 @@ async def get_style_profile_generation_status(
     current_user: UserInDB = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> StyleProfileJobResponse:
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
 
     async with _STYLE_PROFILE_JOB_LOCK:
         run_id = _STYLE_PROFILE_PROJECT_RUNS.get(project_id)
@@ -1688,7 +1678,7 @@ async def cancel_style_profile_generation(
     current_user: UserInDB = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> StyleProfileJobResponse:
-    await NovelService(session).ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
     db_backed = hasattr(session, "execute")
 
     if db_backed:
@@ -1785,8 +1775,7 @@ async def create_style_profile(
     current_user: UserInDB = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     style_service = StyleRAGService(session, LLMService(session))
     try:
@@ -1809,8 +1798,7 @@ async def update_style_profile(
     current_user: UserInDB = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     style_service = StyleRAGService(session, LLMService(session))
     try:
@@ -1832,8 +1820,7 @@ async def get_active_style_profile(
     current_user: UserInDB = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
 
     style_service = StyleRAGService(session, LLMService(session))
     project_profile = await style_service.get_project_applied_style_profile(project_id, current_user.id)
@@ -1853,8 +1840,7 @@ async def apply_style_profile(
     current_user: UserInDB = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     style_service = StyleRAGService(session, LLMService(session))
     try:
@@ -1876,8 +1862,7 @@ async def clear_active_style_profile(
     current_user: UserInDB = Depends(get_current_user),
     session: AsyncSession = Depends(get_session)
 ):
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     style_service = StyleRAGService(session, LLMService(session))
     await style_service.clear_style_application(
@@ -1896,8 +1881,7 @@ async def extract_style_from_chapters(
     session: AsyncSession = Depends(get_session)
 ):
     """从指定章节提取写作风格特征"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     llm_service = LLMService(session)
     style_service = StyleRAGService(session, llm_service)
@@ -1931,8 +1915,7 @@ async def get_project_style(
     session: AsyncSession = Depends(get_session)
 ):
     """获取项目当前风格配置"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_read(project_id, current_user)
 
     llm_service = LLMService(session)
     style_service = StyleRAGService(session, llm_service)
@@ -1953,8 +1936,7 @@ async def clear_project_style(
     session: AsyncSession = Depends(get_session)
 ):
     """清除项目的风格配置"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     llm_service = LLMService(session)
     style_service = StyleRAGService(session, llm_service)
@@ -1972,8 +1954,7 @@ async def generate_with_style(
     session: AsyncSession = Depends(get_session)
 ):
     """带风格上下文的续写生成"""
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
+    await ProjectAccessService(session).require_project_write(project_id, current_user)
 
     llm_service = LLMService(session)
     style_service = StyleRAGService(session, llm_service)
