@@ -3466,3 +3466,222 @@ Provider reasoning 首页 100 条游标分页，可加载更早内容；
 4. 完成后再执行一次 frontend 全量、重启 smoke、Writer/Agent 隔离 HTTP 验收。
 
 总任务保持 `active`。
+
+### Agent 全域聚合回归
+
+在 Agent Artifact accept、成员控制、readable projection 真实 HTTP 变更之后，全部 Agent 相关后端测试聚合通过：
+
+```text
+493 passed in 430.42s (0:07:10)
+```
+
+覆盖目录/文件族：
+
+- `backend/app/agent/test_*.py`
+- `backend/app/api/routers/test_agent*.py`
+- `backend/app/services/test_agent*.py`
+
+当前 Agent 生产边界：
+
+- 项目成员可读共享 Run 历史与安全投影；
+- Editor/Admin 控制共享 Run 时以 Owner execution identity 执行；
+- Artifact accept 使用项目 write gate，并保留 Artifact 原始 execution owner；
+- Viewer/非成员控制或接受写入被拒绝；
+- projectless Run/Session/Artifact 继续创建者私有。
+
+## 2026-09-04 接续回写：Agent 成员控制与 Artifact 接受闭环
+
+### A. Agent Run 控制成员化
+
+生产文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+```
+
+新增统一 `_resolve_writable_run()`：
+
+- 先通过 `AgentRuntimeService.get_readable_run()` 确认 Run 可见；
+- 项目 Run 再通过 `ProjectAccessService.require_project_write()` 判定 Editor/Owner/Admin 写权限；
+- Viewer 和非成员返回一致的 403；
+- Runtime 状态机、lease、事件、计量继续使用持久化 `run.user_id` 作为 `execution_owner_id`；
+- 命令 payload 保留 `actor_user_id`，区分当前操作者和执行归属。
+
+覆盖端点：
+
+```text
+POST /api/agent/runs/{run_id}/commands
+POST /api/agent/runs/{run_id}/pause
+POST /api/agent/runs/{run_id}/resume
+POST /api/agent/runs/{run_id}/cancel
+```
+
+### B. Agent Artifact 接受成员化
+
+同一生产文件新增 `_resolve_writable_artifact()`：
+
+- 项目 Artifact 先执行项目成员写权限；
+- projectless Artifact 继续保持创建者私有隔离；
+- Editor/Admin 可接受 Owner 创建的候选；
+- 审批、质量门、版本写入和终态事件继续使用 Artifact 原始 `user_id`；
+- 接受请求的成员身份记录到审批参数 `actor_user_id`。
+
+### C. Agent Runtime 成员可读投影
+
+生产文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+```
+
+保留 creator-scoped 的原方法，同时提供独立 readable 投影：
+
+```text
+list_steps_readable()
+list_approvals_readable()
+list_artifacts_readable()
+```
+
+三者都先使用 `get_readable_run()`，项目成员可以读取共享 Run 的步骤、审批历史和 Artifact 元数据；lease/claim/执行协调方法没有被扩成成员可接管。
+
+### D. 新增/对齐测试
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_member_controls.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_artifact_member_accept.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_task_runtime_member_routes.py
+```
+
+既有旧测试已将非成员项目访问合同统一为：
+
+```text
+HTTP 403 + “无权访问该项目”
+```
+
+### E. 验证结果
+
+Agent Run 控制定向：
+
+```text
+5 passed
+```
+
+Artifact 接受定向：
+
+```text
+4 passed
+```
+
+全部 Agent API 路由：
+
+```text
+112 passed in 44.38s
+```
+
+TaskRuntime 成员路由：
+
+```text
+2 passed in 10.51s
+```
+
+Agent Runtime 核心集合：
+
+```text
+51 passed in 19.77s
+```
+
+后端当前最新全量回归：
+
+```text
+1729 passed in 717.96s
+```
+
+静态检查：
+
+```text
+python -m py_compile agent.py / agent_runtime.py / writer.py / optimizer.py → 通过
+git diff --check → 通过
+```
+
+反向验证：
+
+```text
+Run 控制执行归属临时改为当前成员 → 3 failed，确认 owner 绑定断言有效
+Artifact 接受执行归属临时改为当前成员 → 2 failed，确认原始 Artifact owner 绑定断言有效
+```
+
+### F. 当前运行时验证状态
+
+之前服务重启后的 smoke 已通过，但本批 `agent.py` 与 `agent_runtime.py` 修改是在该次重启之后落盘；因此必须再次重启服务并重跑 smoke，确认 8013/5174 实际加载当前代码。
+
+### G. 接续计划
+
+```text
+P0：重启服务并重跑 smoke + Agent/TaskRuntime HTTP 验收
+P1：继续审查 Agent 写审批决策、recover/claim/release 与成员策略边界
+P1：真实 Provider 条件下的 generate/cancel/resume 执行链
+P2：前端 Agent 长历史分页/虚拟列表性能
+P2：最终完整后端/前端/构建/静态基线替换
+```
+
+
+## 2026-09-04 最新最终门禁回写：Agent 控制补丁纳入后的完整验证
+
+### A. 完整 backend 门禁
+
+在 `a8cc091 feat: enable shared agent run controls` 及其测试/文档提交后，于正确目录 `D:\小说写作\xuanqiong-wenshu\backend` 执行：
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+结果：
+
+```text
+1729 passed in 704.80s (0:11:44)
+6 warnings
+```
+
+6 条 warning 均为既有 FastAPI 状态码弃用提示，未影响测试结果。
+
+### B. 前端与运行时证据
+
+当前仍有效的完整前端门禁：
+
+```text
+npm run type-check：通过
+npm run test:run：80 files / 510 tests passed
+npm run build-only：4918 modules transformed，成功
+```
+
+Agent 控制补丁落盘后已执行真实服务重启：
+
+```text
+backend 127.0.0.1:8013 READY
+frontend 127.0.0.1:5174 READY
+verify.ps1 -Suite smoke：5/5 阶段通过
+OpenAPI：259 检查 = 55 通过 / 204 合理跳过 / 0 失败
+隔离 Writer HTTP/JWT：SMOKE_PASSED，31 checks
+Agent HTTP/JWT 相关专项：62 passed
+```
+
+### C. 当前完成范围
+
+```text
+项目成员模型与成员管理 API/前端面板
+Writer H-1 状态/SSE 与 H-2 写入、生成、取消、恢复、定稿、大纲控制
+Agent readable Run 投影、reasoning、activity、plan、context、summary、approval、step、artifact
+Agent Editor/Admin Run pause/resume/cancel/command 与候选 Artifact accept
+TaskRuntime 项目成员读/列/事件/SSE/cancel/retry 与 actor/execution-owner 分离
+optimizer、writing-skills、novels 主要项目访问边界
+``
+
+### D. 仍需继续的队列
+
+1. 真实 TCP HTTP 下补 Agent 成员只读/控制矩阵（当前已有 ASGI/JWT 与内存回归，服务重启 smoke 已完成）；
+2. 对 Agent command/control、Artifact accept、审批决定的审计字段做跨请求持久化检查；
+3. UI-006：Artifact/steps/commands 详情的分页或虚拟列表，保留日志 120 条和 reasoning 100 条窗口；
+4. 处理审计报告列出的 `novels` 低优先级导出/蓝图、项目列表、成员移除即时失效和前端浏览器级证据；
+5. 所有后续代码批次完成后重新替换 backend/frontend/smoke/HTTP 最终基线。
+
+总任务继续保持 `active`，不返回历史卡住会话。
