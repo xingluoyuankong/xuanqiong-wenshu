@@ -1364,3 +1364,314 @@ OpenAPI smoke：259 检查，55 通过、204 因缺真实资源合理跳过、0 
 ```
 
 该结果验证当前已提交分支可以启动并完成基础 API/代理冒烟；项目成员的完整多用户 SSE、Writer H-1、Agent write executor 与 execution facts 仍是后续验收范围。
+
+
+## 2026-09-04 接续回写：UI-004 Agent Execution Facts 单 Run 成员读取
+
+### A. 本轮合并与范围审计
+
+已对比根目录接续文档与误放置副本：
+
+```text
+根文档：D:/小说写作/xuanqiong-wenshu/TASK_HANDOFF_NOVEL_QUALITY_CONTINUATION_20260904.md
+误放置副本：D:/小说写作/xuanqiong-wenshu/backend/TASK_HANDOFF_NOVEL_QUALITY_CONTINUATION_20260904.md
+```
+
+根文档此前仅将 `execution_facts.py` 标记为 Agent P0 待办；误放置副本包含本批完成记录。现已将该记录归并到本权威根文档，并删除误放置副本，避免后续接续读取到重复且位置错误的任务状态。
+
+本轮文档维护只涉及上述两份接续文档：未编辑源码、测试文件、运行数据库、导入二进制或其他工作区工件。
+
+### B. 已完成：项目单 Run execution facts 成员读取
+
+当前提交：
+
+```text
+ddfce68 feat: expose execution facts to project members
+```
+
+实现文件：
+
+```text
+backend/app/agent/execution_facts.py
+```
+
+`AgentExecutionFactService` 新增项目 Run 的统一可读解析，并由以下两个单 Run 只读投影复用：
+
+```text
+list_for_run()
+provider_usage_summary()
+```
+
+项目关联 Run 的读取合同：
+
+```text
+Owner / Editor / Viewer / Admin：通过 ProjectAccessService.require_project_read() 读取
+非成员：HTTP 403
+```
+
+该规则适用于 Owner 创建的同项目 Run；Viewer 与 Editor 读取执行事实、调用状态、摘要统计时不再被 `AgentRun.user_id` 的创建者过滤截断。返回仍保持安全投影：execution facts 不返回 input/output JSON，Provider summary 不返回原始 provider attempts 载荷。
+
+无项目关联的 Run 保持创建者私有：
+
+```text
+projectless Run：仅创建者读取
+其他用户：AgentExecutionFactNotFound
+```
+
+本批没有扩大 worker 控制范围；以下执行协调写路径继续按原有创建者/worker 语义隔离：
+
+```text
+Run claim
+lease
+step claim
+execution facts 写入
+事件追加
+状态机终态写入
+```
+
+### C. 回归与反向验证
+
+新增专项：
+
+```text
+backend/app/agent/test_execution_facts_member_access.py
+```
+
+覆盖：
+
+```text
+Viewer：读取项目 Run execution facts 与 provider usage summary 成功
+Editor：读取项目 Run execution facts 与 provider usage summary 成功
+非成员：两类项目 Run 读取均返回 403
+projectless Run：继续仅允许创建者读取
+安全投影：正文与原始 provider attempts 载荷不出现在读模型中
+```
+
+实测基线：
+
+```text
+专项实现前：3 failed, 1 passed
+专项实现后：4 passed in 2.68s
+execution facts 既有 + 成员专项：8 passed in 4.03s
+Python compile：通过
+git diff --check：通过
+```
+
+反向验证已执行：临时移除项目 Run 的成员读取门后，专项立即变为：
+
+```text
+3 failed, 1 passed
+```
+
+失败覆盖 Viewer、Editor 与非成员的读取合同；随后按原始字节恢复实现，组合回归重新达到 `8 passed`。
+
+### D. 当前全面审查结论
+
+UI-004 的成员权限主线已经从项目成员管理、项目资源读写、Agent state/reasoning/activity、ContextRef、十个只读工具，推进到单 Run execution facts 和 Provider summary 的读取投影。当前确认：
+
+```text
+项目成员可读：Run、Reasoning、Activity、单 Run execution facts、单 Run Provider summary、项目级 Provider 汇总、十个 Agent 只读工具
+Owner / Editor 可写：项目 Session / Run 创建及已迁移的项目业务写入口
+Viewer：保持项目只读，未获得 Agent worker 控制权或候选接受权
+非成员：项目资源与 Agent 读模型统一以 403 拒绝
+projectless Agent 资源：继续按创建者隔离
+```
+
+仍未完成的 P0 缺口：
+
+```text
+write_executor.py：项目 Artifact / rewrite instruction 的成员可读投影；Editor 对候选创建、版本差异、候选接受的项目写权限；Creator/worker 控制权与协作成员权限分离
+writer.py H-1：章节生成状态、大纲状态、SSE 进度、TaskRuntime 查询按项目成员读取；不再把 TaskRuntime.owner_user_id 作为项目资源读边界
+Agent runtime readable projections：Artifact 列表、Approval 历史、事件分页的成员可读 API/HTTP 验收统一
+```
+
+当前工作树 HEAD 已包含 execution facts 修复；此前记录的完整后端/前端门禁是该批之前的稳定参考，不代替本提交后的全量门禁。执行 facts 本批已经取得专项与既有模块组合回归；后续完成下一 P0 闭环后，统一重跑完整后端、前端 type-check、Vitest、build-only 与真实多成员 HTTP/SSE 验收。
+
+### E. 下一阶段 P0 执行计划
+
+1. `write_executor.py`：先写成员矩阵测试，覆盖 Viewer 读取 Owner/Editor 生成的项目 Artifact、Editor 生成 rewrite 候选/版本 Diff/接受候选、非成员 403；保持 projectless Artifact 创建者隔离与 worker claim 隔离。
+2. 将 `context_refs.py`、`tool_adapters.py`、`write_executor.py` 共同使用的项目 Artifact 读取/写入判定收敛为一致的 `ProjectAccessService` 语义，避免重新引入 `AgentArtifactRef.user_id == user_id` 或 `NovelProject.user_id == user_id` 的创建者过滤。
+3. `writer.py H-1`：先完成状态与 SSE 的 read-only 路径，再迁移写入、运行恢复与后台定稿；TaskRuntime 保留发起者审计字段，但项目成员可读性仅以项目访问权限裁决。
+4. 补真实多用户 HTTP/SSE 验收：Owner 创建项目 Run / 章节任务后，Viewer 可读取状态与安全投影，Editor 可执行项目写操作，非成员持续得到 403；并验证断线重连、终态围栏与跨项目隔离。
+5. 在上述 P0 批次收口后，执行当前分支的完整质量门禁并回写新的权威实测数字，不使用历史报告替代当前结果。
+
+
+## 2026-09-04 接续回写：UI-004 Agent write_executor 项目成员读写闭环
+
+### A. 已完成范围
+
+本批完成 `backend/app/agent/write_executor.py` 的项目成员访问闭环。项目关联的候选 Artifact、rewrite instruction、章节版本差异与候选接受不再仅按资源创建者 `user_id` 判定；读取与写入统一按项目成员角色裁决。
+
+成员读写矩阵：
+
+```text
+项目 Owner / Editor：可读取项目 Artifact、rewrite instruction、候选质量结果、版本差异；可创建/执行候选写入并接受候选 Artifact
+项目 Viewer：可读取项目 Artifact、rewrite instruction、候选质量 Gate 与版本差异；不可创建候选、不可接受候选、不可改变正式章节版本
+项目非成员：项目 Artifact、质量、差异、候选接受及写入路径统一 403
+项目无关 Artifact / instruction：继续仅对创建者可见与可操作
+```
+
+### B. actor_user_id 与 execution_owner_id 分离
+
+项目协作写入不再把“当前操作成员”与“原运行创建者/执行协调者”混为一个身份：
+
+```text
+actor_user_id：当前发起读取、创建候选、接受候选或版本操作的项目成员；由 ProjectAccessService 进行 read/write 权限裁决
+execution_owner_id：原 Run / candidate / worker 的创建者与执行协调归属；保留用于审计、运行恢复、lease 与 worker 控制
+```
+
+由此保证：Editor 对项目资源的协作写入不被 Owner 创建的 Run、Artifact 或版本记录截断；同时 Viewer 和其他协作成员未获得 worker claim、lease、终态控制或跨创建者执行接管权限。
+
+### C. projectless 隔离、质量 Gate 与运行事件归属
+
+```text
+projectless Artifact / rewrite instruction：维持创建者私有隔离
+项目 Artifact / instruction：成员读取投影按项目 read 权限开放
+候选接受、正式版本写入：仅 Owner / Editor 的项目 write 权限允许
+质量 Gate：成员读取同项目候选的安全质量投影；Gate 结果、finding、质量 lineage 保留原 Run / candidate 归属
+运行事件：保留 execution_owner_id 作为事件与 worker 执行归属；成员读取不会改变事件写入者、序列、lease 或终态围栏
+```
+
+### D. 专项、既有与相邻回归
+
+新增/更新的 write executor 成员访问专项覆盖：
+
+```text
+Viewer：读取 Owner / Editor 创建的项目候选 Artifact、instruction、质量 Gate 与版本差异
+Editor：创建 rewrite 候选、读取版本差异、接受项目候选 Artifact
+Viewer：候选创建与接受均被拒绝
+非成员：项目读写路径均返回 403
+projectless：非创建者仍隔离
+```
+
+实测：
+
+```text
+write_executor 成员专项：5 passed
+既有 write_executor / Agent 相邻回归：15 passed
+Agent Runtime、质量 Gate、Artifact / ContextRef 相邻回归：63 passed
+```
+
+这些回归确认本批没有通过放宽 worker 控制、删除 Gate 或降低事件归属约束制造通过；成员协作仅扩展项目资源的 read/write 投影。
+
+### E. 当前未完成：Writer H-1 审查发现
+
+Writer 路由仍是 UI-004 的最大剩余 P0 域。审查确认以下 Owner/创建者绑定尚需按依赖顺序迁移：
+
+```text
+1. 章节生成状态读取：get_chapter_generation_status() 仍经 NovelService.get_chapter_status_schema() 触发旧 Owner 校验
+2. 大纲运行状态：get_chapters_outline_generation_status() 及 rewrite 状态仍是 Owner-only
+3. SSE 章节进度：stream_chapter_progress() 顶层和 _find_chapter_runtime_task() 仍把 TaskRuntime.owner_user_id 作为资源读取过滤
+4. 大纲恢复：_load_active_outline_job_from_runtime() 按 TaskRuntime.owner_user_id 过滤，协作成员无法读取 Owner 启动的活动运行
+5. 章节生成/回包：_load_project_schema() 与 NovelService.get_project_schema() 存在二次 Owner 校验，Editor 即使通过入口也可能在回包阶段被截断
+6. 后台定稿：_run_finalize_pipeline() 仍以 NovelProject.user_id 查询，Editor 发起后可能跳过记忆刷新或项目上下文处理
+```
+
+### F. 精确下一步：Writer H-1
+
+1. 先新增 Writer H-1 成员 HTTP/服务回归：Viewer 读取章节状态、大纲状态、SSE 安全进度；Editor 发起/取消/恢复项目运行；非成员统一 403。
+2. 将状态与 SSE read-only 路径迁移到 `ProjectAccessService.require_project_read()`；按 `project_id` 查询 TaskRuntime，再由项目成员权限裁决可见性，`owner_user_id` 仅保留审计与执行归属。
+3. 改造 `_load_project_schema()`、章节状态序列化与大纲状态序列化，使其接收已验证的项目访问结果或项目实体，清除回包阶段的第二层 Owner 校验。
+4. 再迁移章节生成、取消、恢复、版本选择、正文编辑等 write 路径到 `require_project_write()`，并保持 Viewer 403。
+5. 最后处理大纲任务恢复、SSE 终态围栏、后台定稿和 TaskRuntime 关联查询，验证 Editor 发起的后台流程不被 `NovelProject.user_id` 过滤截断。
+6. Writer H-1 收口后执行真实多用户 HTTP/SSE 验收，再重跑当前分支完整后端、前端 type-check、Vitest、build-only 与启动冒烟，回写新的权威实测数字。
+
+
+### G. write_executor 成果归档与接续游标
+
+`write_executor.py` 的 UI-004 P0 成员读写闭环状态为已完成；本批交付的边界与回归证据固定如下：
+
+```text
+项目成员读取：Owner / Editor / Viewer 读取项目 Artifact、instruction、质量 Gate 与版本差异
+项目成员写入：Owner / Editor 创建候选、执行候选写入、接受候选 Artifact
+只读边界：Viewer 不可创建、接受或改变正式版本
+隔离边界：非成员 403；projectless 保持创建者私有；worker claim / lease / 终态控制保持 execution_owner_id 归属
+验证基线：专项 5 passed；既有/相邻回归 15 + 63 passed
+```
+
+接续游标已前移至 `Writer H-1`：先建立成员读取状态、SSE 和 TaskRuntime 的回归矩阵，再逐层清除状态序列化、运行恢复、项目 schema 回包和后台定稿中的 Owner-only 二次过滤。
+
+
+## 2026-09-04 接续回写：UI-004 Writer H-1 成员读取与运行态绑定闭环
+
+### A. 已完成：Writer H-1 项目成员 read 路径
+
+本批完成 Writer H-1 的项目成员读取闭环，以下 read-only 路径已按 `ProjectAccessService.require_project_read()` 进行项目成员可见性裁决：
+
+```text
+章节生成状态：get_chapter_generation_status()
+大纲生成状态：get_chapters_outline_generation_status()
+章节大纲改写状态：get_chapter_outline_rewrite_status()
+章节进度 SSE：stream_chapter_progress()
+```
+
+Owner / Editor / Viewer / Admin 可读取同项目的安全运行状态与进度；非成员按项目访问合同返回 403。Viewer 获得的是状态、进度和安全事件投影，不获得章节生成、取消、恢复、版本选择或 worker 控制能力。
+
+### B. TaskRuntime 项目 + 章节绑定
+
+章节运行态查询不再仅把 `TaskRuntime.owner_user_id` 当作项目资源读取边界。H-1 已将运行态定位收敛到项目与章节绑定：
+
+```text
+project_id + chapter_number：定位章节运行任务
+项目成员 read 权限：裁决 Owner / Editor / Viewer 的运行态可见性
+owner_user_id：保留为发起者/审计/执行归属字段
+lease / worker ownership：保持原有执行协调语义
+```
+
+因此，Owner 发起的章节运行和大纲运行可被同项目 Editor、Viewer 读取状态与 SSE 进度，同时未改变任务创建者、lease、终态围栏或 worker 处理权。
+
+### C. 边界保持
+
+本批只迁移 Writer 的成员读取路径：
+
+```text
+读操作：项目成员 read 权限；Owner / lease 归属不变
+写入路由：继续 creator-scoped，尚未扩大到项目成员协作写入
+worker claim / cancel ownership / terminal transition：保持既有执行控制边界
+```
+
+这确保 H-1 不会通过放宽运行控制来实现状态可见性；Writer 写入协作将在 H-2 按独立的成员 write 矩阵和运行归属规则处理。
+
+### D. 实际验证
+
+```text
+Writer H-1 成员读取专项：12 passed
+Writer H-1 合并验证：34 passed（28 + 6）
+```
+
+覆盖章节状态、大纲状态、rewrite-outline 状态、章节 SSE、Owner/Editor/Viewer 读取、非成员 403、TaskRuntime 项目+章节定位、重启恢复相邻合同与既有 Owner/lease 执行边界。
+
+### E. 已完成：H-1 SSE durable replay route-integration 覆盖
+
+新增路由集成回归：
+
+```text
+backend/app/api/routers/test_writer_member_stream_access.py
+```
+
+覆盖 Writer H-1 的持久运行事件回放合同：
+
+```text
+Viewer / Editor：读取 Owner 创建的 TaskRuntime 章节 SSE 事件回放
+after_event_id：按事件游标仅补发后续事件
+Last-Event-ID：HTTP SSE 重连游标与 after_event_id 合同一致
+非成员：读取章节流统一 403
+跨项目隔离：不返回其他项目 TaskRuntime 事件
+跨章节隔离：不返回同项目其他章节的 TaskRuntime 事件
+```
+
+专项实测：
+
+```text
+Writer H-1 SSE durable replay route-integration：6 passed
+Writer H-1 合并验证：34 passed（28 + 6）
+```
+
+该批仅补齐成员读取与 durable replay 的路由合同；Owner/lease、worker claim、事件写入者和终态控制继续维持既有执行归属。
+
+### F. 下一 P0
+
+1. 真实 HTTP 多用户 SSE 验收：使用 Owner、Editor、Viewer 与非成员会话验证连接、断线重连、after_event_id / Last-Event-ID 补发、终态围栏、跨项目/跨章节隔离及 403 合同。
+2. Writer H-2 写路径：在独立成员 write 矩阵下迁移章节生成、取消、恢复、版本选择、正文编辑与大纲写入；Viewer 持续 403。
+3. H-2 处理 `_load_project_schema()`、章节/大纲回包序列化与后台定稿，消除 Editor 在通过入口校验后遭遇 Owner-only 二次过滤的路径。
+4. H-2 收口后，执行真实多用户 Writer HTTP/SSE 验收，并回写完整后端、前端与启动冒烟的新基线。
