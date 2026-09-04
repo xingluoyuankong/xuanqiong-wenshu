@@ -3,7 +3,7 @@
 
 提供角色状态表、时间线、因果链的数据结构定义。
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from sqlalchemy import (
     Column, Integer, BigInteger, String, Text, JSON, 
@@ -15,6 +15,11 @@ import enum
 from ..db.base import Base
 
 PROJECT_ID_TYPE = String(36).with_variant(String(36, collation="utf8mb4_unicode_ci"), "mysql")
+
+
+def _utcnow_naive() -> datetime:
+    """Return UTC in the legacy timezone-naive column format without utcnow()."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class CharacterStateType(str, enum.Enum):
@@ -81,8 +86,8 @@ class CharacterState(Base):
     
     # 元数据
     extra = Column(JSON)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow_naive)
+    updated_at = Column(DateTime, default=_utcnow_naive, onupdate=_utcnow_naive)
 
 
 class TimelineEvent(Base):
@@ -120,7 +125,7 @@ class TimelineEvent(Base):
     importance = Column(Integer, default=5)  # 重要性 1-10
     is_turning_point = Column(Boolean, default=False)  # 是否为转折点
     extra = Column(JSON)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow_naive)
 
 
 class CausalChain(Base):
@@ -156,8 +161,8 @@ class CausalChain(Base):
     # 元数据
     importance = Column(Integer, default=5)  # 重要性 1-10
     extra = Column(JSON)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow_naive)
+    updated_at = Column(DateTime, default=_utcnow_naive, onupdate=_utcnow_naive)
 
 
 class StoryTimeTracker(Base):
@@ -186,5 +191,5 @@ class StoryTimeTracker(Base):
     
     # 元数据
     extra = Column(JSON)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow_naive)
+    updated_at = Column(DateTime, default=_utcnow_naive, onupdate=_utcnow_naive)
