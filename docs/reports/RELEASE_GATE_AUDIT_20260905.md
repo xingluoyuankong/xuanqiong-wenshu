@@ -2,7 +2,7 @@
 
 > **状态标记：本文原始审计快照及中间复核附录均已被文末 2026-09-06 当前 task 权威探针附录覆盖。**
 > 原始章节和中间附录中的旧 HEAD、旧测试失败、旧文件统计和旧 smoke 数字只保留作历史证据；当前权威状态见文末“2026-09-06 当前 task 接续探针附录”，并与 `TASK_HANDOFF_NOVEL_QUALITY_CONTINUATION_20260904.md` 文末权威复核保持一致。
-> 历史附录曾记录 `62d4d8c`、`beec949`、`08531cc`、`23f7b0b`、`dbab070`；历史快照曾记录 `d8dcfcd`；当前最新 HEAD 为 `04f2a6e`（完整值见文末 2026-09-06 附录）。当前发布结论：`active / NO-GO`。
+> 历史附录曾记录 `62d4d8c`、`beec949`、`08531cc`、`23f7b0b`、`dbab070`；历史快照曾记录 `d8dcfcd`；`04f2a6e` 仅为历史快照；当前最新 HEAD 为 `2781212`（完整值见文末 2026-09-06 附录）。当前发布结论：`active / NO-GO`。
 
 
 
@@ -808,3 +808,19 @@ git diff --check：PASS
 ```
 
 本次提交把 fixture 审计扩展为确定性只读 dry-run：输出 owner、runtime 明细、marker、年龄和决策统计，并对空任务集及活动任务采用 hold 规则；本次回收动作仍为 0。Docker Compose runtime、正式 MySQL 迁移恢复回滚和完整真实资源 smoke 仍待对应资源节点。
+## 2026-09-06 当前 HEAD 最终同步（2781212）
+
+```text
+HEAD：2781212a49fda0d484943641154d19fc033cf68e
+HEAD 提交：docs: sync current handoff audit head
+分支：codex/bohrium-integration-20260831
+本次新增：将当前 task 的最终 HEAD、fixture dry-run 和 Docker/MySQL 探针同步到接续文档与发布审计
+定向回归：2 passed
+fixture dry-run：SMOKE_FIXTURE_AUDIT_PASSED / 21 条 / candidate=21
+Docker Compose 静态 config：PASS；Docker Server：未响应
+MySQL TCP 3306/3309：均未监听
+git diff --check：PASS
+当前发布结论：active / NO-GO
+```
+
+本附录覆盖此前 `d26466f`、`04f2a6e`、`441fedf` 等旧快照；旧数字和旧工作树描述仅作历史证据。当前运行工件继续保留在工作区外发布边界，未执行 fixture 回收。
