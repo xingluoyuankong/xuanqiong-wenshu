@@ -255,4 +255,11 @@ describe('AgentAPI timeline and artifact diff', () => {
     expect(String(fetchMock.mock.calls[2][0])).toBe('/api/agent/runs/run%2Fpage/artifacts?limit=2&offset=7')
   })
 
+
+  it('请求会话消息分页并规范化 limit 与 before_sequence', async () => {
+    await AgentAPI.listSessionMessagesPage('session/page', { limit: 999, beforeSequence: 61 })
+    const [url] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe('/api/agent/sessions/session%2Fpage/messages?limit=200&before_sequence=61')
+  })
+
 })

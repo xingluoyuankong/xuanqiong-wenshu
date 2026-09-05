@@ -98,6 +98,12 @@ export interface AgentMessage {
   sequence: number
   created_at: string
 }
+export interface AgentMessagePage {
+  session_id: string
+  items: AgentMessage[]
+  next_cursor?: number | null
+  has_more: boolean
+}
 export interface AgentProviderAttemptSnapshot {
   provider_attempts: Array<Record<string, unknown>>
   selected_provider_attempt?: number | null
@@ -828,6 +834,15 @@ export const AgentAPI = {
     }),
   getSession: (sessionId: string) =>
     request<AgentSessionDetail>(`/agent/sessions/${encodeURIComponent(sessionId)}`),
+  listSessionMessagesPage: (sessionId: string, input: { limit?: number; beforeSequence?: number } = {}) => {
+    const limit = Math.max(1, Math.min(200, input.limit ?? 60))
+    const before = Number.isInteger(input.beforeSequence) && (input.beforeSequence as number) > 0
+      ? `&before_sequence=${input.beforeSequence}`
+      : ''
+    return request<AgentMessagePage>(
+      `/agent/sessions/${encodeURIComponent(sessionId)}/messages?limit=${limit}${before}`,
+    )
+  },
   sendMessage: (sessionId: string, input: string | AgentMessageCreateInput) => {
     const payload: AgentMessageCreateInput = typeof input === 'string' ? { content: input } : input
     return request<AgentMessageResponse>(
