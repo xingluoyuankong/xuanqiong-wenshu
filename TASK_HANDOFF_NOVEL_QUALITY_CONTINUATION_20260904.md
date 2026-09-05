@@ -5690,3 +5690,40 @@ P1：为 smoke 建立最小可回收真实资源 fixture，降低 210 项跳过�
 P2：以当前 HEAD 生成最终发布审计快照；
 P2：所有证据闭环后再重判 GO/NO-GO。
 ```
+
+## 2026-09-05 最新发布节点复核
+
+### 当前头
+
+```text
+HEAD：7797aa5 docs: record run pagination gate status
+```
+
+### 最新实测
+
+```text
+前端全量：81 files / 536 tests passed
+前端 type-check：通过
+前端 build-only：4918 modules transformed，成功
+后端全量：1761 passed in 19:29
+真实 TCP/JWT projectless：180 条消息，3 页，0 重复，1..180 完整
+真实 TCP/JWT 多用户成员：125 条消息，3 页，viewer=200，共享越权=403，私有越权=404
+迁移备份恢复：MIGRATION_BACKUP_RESTORE_MATRIX_PASSED，退出码 0
+生产 smoke：261 checks，51 passed，210 skipped，0 failed
+生产配置 Worker --once：Agent/Command 两个入口均退出码 0
+Compose 静态配置：注入 SECRET_KEY 与管理员密码后 config --quiet 退出码 0
+```
+
+### 部署环境事实
+
+当前 Docker CLI 可用，但 `desktop-linux` daemon 未运行，`docker version` 无法连接 `dockerDesktopLinuxEngine`；因此本机只能完成 Compose 静态解析，无法伪造容器健康证据。MySQL 端口当前无监听，正式 MySQL 迁移/恢复证据仍待部署节点。
+
+### 当前剩余闭环
+
+```text
+P1：Docker daemon 或正式部署节点可用后，执行 compose migrate/app/agent-worker/agent-command-worker 全编排健康矩阵；
+P1：正式 MySQL 节点执行 run_migrations.sh、verify_migration.sh --strict、备份/恢复与回滚；
+P1：为 smoke 210 个真实资源跳过项建立可回收 fixture，减少匿名占位检查；
+P2：更新 RELEASE_GATE_AUDIT_20260905.md 为当前 HEAD 快照；
+P2：完成最终 GO/NO-GO 审计，当前保持 active / NO-GO。
+```
