@@ -255,7 +255,7 @@ def main() -> int:
     if not auth_ok:
         print(f"[失败] smoke 认证配置无效：{auth_detail}")
         return 1
-    print(f"[正常] smoke 认证模式：{AUTH_MODE}")
+    print(f"[正常] smoke 认证模式：{auth_detail}")
     cleanup_errors: list[str] = []
     try:
         with urllib.request.urlopen(OPENAPI_URL, timeout=10) as resp:
