@@ -4429,3 +4429,64 @@ P2：重新执行后端全量门禁并更新发布前 smoke 证据
 ```
 
 本批未创建 Codex task；现有未提交业务改动与运行工件继续保留。
+
+## 2026-09-05 当前批次最终收口：分页、懒加载与运行时能力闸门
+
+### A. 本批提交
+
+当前分支：`codex/bohrium-integration-20260831`
+
+```text
+43b1f3f feat: add agent history pagination contracts
+a) steps/commands/artifacts 可选 offset 分页 envelope，保留旧数组响应
+b) AgentConversation 60 条尾部窗口化与性能边界测试
+
+4508103 perf: lazy load agent workspace details
+a) Agent Workspace 数据详情区首开懒加载
+b) Provider/治理/实体/成员详情请求延后到首次展开
+
+ e770a96 feat: enforce run capability contract fences
+ a) RunBoundToolRegistry 冻结 manifest/provider/generation 合同
+ b) 执行期拒绝 live registry 漂移
+```
+
+### B. 已验证门禁
+
+```text
+后端全量：1744 passed in 661.95s
+前端全量：81 files / 520 tests passed
+前端 type-check：通过
+前端 build-only：4918 modules transformed，成功
+UI-005 定向组合：37 passed
+分页/时间线/可读投影：稳定相关回归通过（实验性 timeline cursor 已撤销）
+AgentWorkspace + AgentConversation 定向：45 passed
+```
+
+固定提示仍为浏览器数据包过期告警和测试环境 Pinia 注入提示，不影响门禁结果。
+
+### C. 当前能力边界
+
+1. steps/commands/artifacts 只有显式 `offset` 才返回页对象，旧调用保持裸数组兼容；前端已补充 page client，但 Workspace 详情消费仍待独立接入。
+2. AgentConversation 已控制 DOM 窗口，但 `getSession()` 仍一次返回完整消息数组；后续继续做消息 API cursor 分页，不能把本地窗口化当作 payload 优化完成。
+3. Agent Workspace 数据与候选区已改为首次展开加载，运行时错误可以重试；Artifact 质量/血缘的逐项懒加载仍是下一批优化点。
+4. RunBoundToolRegistry 已在默认 registry 上校验 generation、provider 元数据、handler identity 和 manifest 合同；旧 Run 缺失完整 release 上下文时保持兼容路径。成员角色最终执行闸门仍需在 Capability Resolver/执行入口做统一绑定验证。
+5. 跨会话 timeline 仍保持成熟的 `offset + limit` 稳定旧实现；此前试验的 keyset cursor 因直接路由函数调用中的 FastAPI Query 默认对象兼容问题及测试推进问题已撤销，不计入完成项。
+
+### D. 当前工作区与发布状态
+
+业务代码工作区当前已清洁；剩余未跟踪内容主要是运行产生的 `.bin` 导入/上传工件和 `.vite/` 缓存，不提交、不批量清理。
+
+最新完整门禁已通过，但发布报告仍保留 `NO-GO` 历史审查结论，原因包括生产默认配置告警、真实服务 smoke 证据需要用当前 HEAD 替换，以及迁移/恢复矩阵需继续归档。因此当前总任务状态保持 `active`。
+
+### E. 下一执行顺序
+
+```text
+P0：用当前 HEAD 重启 backend/frontend，重跑真实 HTTP/JWT/SSE、成员隔离和共享 Run 控制验收
+P1：把 Agent Workspace steps/commands/artifacts 接入 page client，完成详情区分页消费与空页/错误/切换 Run 回归
+P1：在 Capability Resolver/执行入口统一接入当前成员角色与 allowed_project_roles，补 projectless/Viewer/Editor/Owner/Admin 矩阵
+P1：Artifact 列表摘要与质量/血缘事实拆成两阶段加载，保留深链和接受候选流程
+P2：完成 fresh/upgrade/downgrade/备份恢复矩阵，替换当前 HEAD 的 release gate 证据
+P2：最终后端/前端全量门禁、smoke 证据归档，重新评估 GO/NO-GO
+```
+
+当前接续策略继续有效：只在本任务和当前工作区推进，不回历史卡死会话，不创建新的 Codex task；子智能体按独立范围并行审查，结果由主任务统一集成。
