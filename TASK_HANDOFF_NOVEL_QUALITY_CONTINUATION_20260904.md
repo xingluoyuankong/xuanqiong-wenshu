@@ -6261,3 +6261,151 @@ git diff --check：PASS
 ```
 
 本附录覆盖此前 `d26466f` 及更早快照；后续任何代码或文档提交都必须继续追加新的 HEAD 和对应验证数字。未跟踪运行工件保留，不执行批量清理。
+## 2026-09-06 当前 HEAD 最终复核（f31cd8f）
+
+```text
+HEAD：f31cd8f566d9b76c10df014b2f889cf18c8c5fe2
+HEAD 提交：audit: honor smoke fixture markers and age gate
+分支：codex/bohrium-integration-20260831
+fixture dry-run：SMOKE_FIXTURE_AUDIT_PASSED / 21 条
+决策：candidate=20；hold-marked-fixture=1
+固定复核时间：2026-09-06T00:00:00+08:00
+年龄门槛：3600 秒
+定向回归：2 passed
+git diff --check：PASS
+```
+
+本次修复将 marker 解析改为读取项目标题和 `initial_prompt` 的显式 `xq-smoke-fixture:<id>`，带 marker 的项目默认保留观察；同时加入 1 小时年龄门槛，避免新建 fixture 过早进入候选。当前仍只做只读 dry-run，未执行回收。
+## 2026-09-06 当前 HEAD smoke 资源身份分组复核（7aefff1）
+
+```text
+HEAD：7aefff1b7af20d62cd5957119ffb3df0f4d03454
+HEAD 提交：test: group resource identity smoke skips
+开发栈：backend 8013、frontend 5174、proxy /api/health 均已就绪
+OpenAPI smoke：261 checks / 53 passed / 208 skipped / 0 failed
+resource-identity：198 项，现已按参数族输出
+定向回归：3 passed（smoke 认证、资源身份分组、fixture dry-run）
+git diff --check：PASS
+```
+
+本轮新增资源身份分组：`project_id=135`、`run_id=26`、`task_id=14`、`artifact_id=8`、`prompt_id=3`、`session_id=7`、`skill_id=4`、`clue_id=5`、`approval_id=2`、`job_id=2`、`log_id=2`、`user_id=2`，以及其余单项参数族。后续优先为 project/chapter/run/task/artifact 建立可回收真实 fixture，再逐组减少跳过数量。
+
+当前 tracked 未提交修改仅为本文件与发布审计文档的最新口径同步；未跟踪日志、数据库和上传工件继续保留，不纳入发布提交。
+## 当前提交后 smoke 复核（cc83270）
+
+```text
+HEAD：cc83270a4cffaff81ea7792b3d7f9ce6cbf28b4f
+HEAD 提交：fix: close smoke-discovered clue and stream gaps
+真实服务：backend 8013、frontend 5174、frontend proxy 均健康
+OpenAPI smoke：261 checks / 114 passed / 147 skipped / 0 failed
+跳过分类：resource-identity=136；mutating=6；expensive=2；live-resource-prerequisite=2；streaming=1
+资源身份分组：project_id=73；run_id=26；task_id=14；artifact_id=8；session_id=7；clue_id=5；skill_id=4；prompt_id=3；其他参数族按日志记录
+定向回归：4 passed（clue overview、smoke auth、资源身份分组、fixture dry-run）
+```
+
+本轮修复了 `ClueTrackerService.sync_from_foreshadowings()` 参数契约错误，`GET /api/projects/{project_id}/clues/overview` 已从 500 恢复为 200；并将章节 SSE 长连接从普通短请求 smoke 中分离，改由独立流式验收。当前 tracked 未提交内容仅为本接续文档和发布审计文档的口径同步。
+## 当前提交后全量门禁复核（HEAD cc83270）
+
+```text
+HEAD：cc83270a4cffaff81ea7792b3d7f9ce6cbf28b4f
+后端全量 pytest：1766 passed in 639.84s (0:10:39)
+前端全量 Vitest：81 files / 544 tests passed in 279.44s
+前端 type-check：PASS
+前端 build-only：PASS / 4918 modules transformed
+OpenAPI smoke：261 checks / 114 passed / 147 skipped / 0 failed
+定向回归：4 passed
+Git diff check：PASS
+```
+
+本次全量复核覆盖 clue overview 修复、项目级 GET 真实 fixture 请求、资源身份分组、SSE 专项分类和 fixture marker/年龄 dry-run。当前发布仍保持 `active / NO-GO`，仅剩 Docker Engine runtime、正式 MySQL 矩阵和更深层资源身份 fixture 覆盖。
+## 当前提交后 clue fixture 覆盖复核（cdd2907）
+
+```text
+HEAD：cdd29070372171bef0df29fe17f9e9abef4a8f6e
+HEAD 提交：test: cover clue resources in smoke fixture
+OpenAPI smoke：261 checks / 116 passed / 145 skipped / 0 failed
+clue fixture：创建临时 clue 后，GET clue detail=200、GET clue timeline=200
+资源身份跳过：134 项
+定向回归：3 passed
+```
+
+本轮将可回收 clue 写入最小 smoke fixture context，项目清理时由项目级联关系回收；未执行独立批量删除。后续优先处理 artifact、run、task 等仍占主要比例的资源族。
+## 当前提交后 runtime 清理复核（e0b242a）
+
+```text
+HEAD：e0b242abd109a916df8f454343fe72cf72116283
+HEAD 提交：fix: clean project runtime tasks during smoke
+定向回归：8 passed
+真实 smoke：exit=0；261 checks / 115 passed / 146 skipped / 0 failed
+跳过分类：mutating=7；resource-identity=134；streaming=1；expensive=2；live-resource-prerequisite=2
+临时项目数：21 -> 21
+TaskRuntime 总数：83 -> 83
+generation_log（project_id=NULL）数量：38 -> 38
+```
+
+本轮修复项目删除时的 TaskRuntime/TaskRuntimeEvent 清理，并把 `POST /api/updates/stream/create` 纳入写入型 smoke 跳过；前后数据库计数一致，未新增孤儿运行任务。当前 tracked 未提交内容仍只有本接续文档和发布审计文档同步。
+## 当前提交后 acceptance 全量复核（HEAD e0b242a）
+
+```text
+HEAD：e0b242abd109a916df8f454343fe72cf72116283
+verify.ps1 -Suite acceptance：PASS / 6 of 6
+TCP message pagination：180 messages / 3 pages / duplicate_count=0
+TCP member pagination：125 messages / shared outsider=403 / private outsider=404
+TCP Run pagination：125 runs / 3 pages / duplicate_count=0
+SQLite migration backup/restore：MIGRATION_BACKUP_RESTORE_MATRIX_PASSED
+SQLite source/restored SHA256：bdb7b58ab2f21f4e7f44606ad28bf02f29a4d4689cc7fdc344911f1fc89d9cb3
+sentinel_count：1
+Agent worker --once：PASS
+Agent command worker --once：PASS
+OpenAPI smoke：261 / 115 passed / 146 skipped / 0 failed
+```
+
+本轮 acceptance 验收确认 runtime task 删除清理没有破坏消息、成员、Run、迁移恢复和 worker 入口；当前仍缺 Docker Server、正式 MySQL 和更深层资源身份 fixture 证据。
+## 当前提交后 task fixture 覆盖复核（74ae303）
+
+```text
+HEAD：74ae303e5be70a95c27ffb1f4482fc75811bfaef
+HEAD 提交：test: cover generated task runtime routes
+真实 smoke：261 checks / 117 passed / 144 skipped / 0 failed
+resource-identity：129
+streaming：4
+定向回归：3 passed
+TaskRuntime 总数：83 -> 83
+generation_log 全局任务：38 -> 38
+```
+
+本轮从章节生成响应中的 `generation_runtime.run_id` 绑定真实 `task_id`，让 TaskRuntime 详情/事件 GET 路由使用真实任务验收；长连接 task stream 继续走独立 streaming 分类。项目和任务清理前后计数一致。
+## 当前提交后 Agent session fixture 覆盖复核（7322537）
+
+```text
+HEAD：7322537fa80c427e59622fe7c6c64362a3a3e3aa
+HEAD 提交：test: cover agent sessions in smoke fixture
+真实 smoke：261 checks / 119 passed / 142 skipped / 0 failed
+resource-identity：126
+streaming：4
+定向回归：7 passed
+项目数：21 -> 21
+TaskRuntime：83 -> 83
+AgentSession：44 -> 44
+generation_log（project_id=NULL）：38 -> 38
+```
+
+本轮创建可回收的项目绑定 AgentSession，使 session detail、messages、runs GET 使用真实 `session_id`；同时项目删除显式清理 AgentSession，避免数据库残留。当前仍未触发 Provider 运行，不新增 AgentRun/Artifact 历史数据。
+## 当前 HEAD Agent session 后 acceptance 复核（7322537）
+
+```text
+HEAD：7322537fa80c427e59622fe7c6c64362a3a3e3aa
+verify.ps1 -Suite acceptance：PASS / 6 of 6
+TCP message：180 / 3 pages / duplicate_count=0
+TCP member：125 / shared outsider=403 / private outsider=404
+TCP Run：125 / 3 pages / duplicate_count=0
+SQLite migration backup/restore：PASS
+source/restored SHA256：ab250b5a71df04915fa994da3545ee2e9a5d86c9ec97eb7b98c8d3c56f3f68a7
+sentinel_count：1
+Agent worker --once：PASS
+Agent command worker --once：PASS
+OpenAPI smoke：261 / 119 passed / 142 skipped / 0 failed
+项目数：21 -> 21；TaskRuntime：83 -> 83；AgentSession：44 -> 44；generation_log：38 -> 38
+```
+
+本轮确认 AgentSession 项目级清理不会影响消息/成员/Run 分页、迁移恢复或 worker 生命周期；Provider/AgentRun/Artifact 深层 fixture 继续单独排期。
