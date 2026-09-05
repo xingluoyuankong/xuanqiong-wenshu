@@ -4546,3 +4546,67 @@ P2：更新 release gate 报告为当前 HEAD，完成最终发布评估
 ```
 
 当前总任务继续保持 `active`，按接续文档逐批推进。
+
+## 2026-09-05 当前 HEAD 真实服务复验
+
+### A. 服务重启
+
+```text
+启动脚本：D:\小说写作\xuanqiong-wenshu\start.ps1
+日志目录：D:\小说写作\xuanqiong-wenshu\logs\run-20260905-104230
+Backend：http://127.0.0.1:8013
+Frontend：http://127.0.0.1:5174
+Frontend proxy：http://127.0.0.1:5174/api/health
+```
+
+启动结果：
+
+```text
+BACKEND_READY=True
+FRONTEND_READY=True
+FRONTEND_PROXY_READY=True
+```
+
+### B. 当前 HEAD smoke
+
+```text
+verify.ps1 smoke：259 检查
+通过：55
+合理跳过：204
+失败：0
+```
+
+通过范围包括：backend health、frontend 首页、frontend proxy health、OpenAPI 路由冒烟和 LLM settings health-check。需要真实资源 ID 的项目/章节接口按脚本约定跳过，不能把跳过项等同于完整业务验收。
+
+### C. 隔离 Writer HTTP/JWT 验收
+
+```text
+脚本：D:\小说写作\xuanqiong-wenshu\backend\scripts\run_writer_member_acceptance.py
+结果：SMOKE_PASSED
+checks=31
+generate_status=200
+finalize_status=200
+outline_status=200
+resume_status=200
+dispatch_kinds=[generate, generate, finalize, outline]
+```
+
+脚本使用临时 SQLite，迁移从初始 schema 到 `029_project_members`，结束后清理隔离目录，不污染主数据库。
+
+### D. 发布状态复核
+
+当前业务门禁与真实服务基本探针均通过；发布状态仍保持 `NO-GO`，原因没有改变：
+
+- 生产配置仍需明确替换默认管理员密码并关闭 DEBUG；
+- 真实资源型 smoke 仍有大量合理跳过，需要隔离 fixture 或真实资源矩阵补齐；
+- fresh/upgrade/downgrade/备份恢复证据仍需以当前 HEAD 重新归档；
+- `.vite/` 与导入/上传 `.bin` 是运行工件，必须排除在发布提交之外。
+
+下一步优先级保持：
+
+```text
+P0：生产配置门禁与当前 HEAD 的 fresh/upgrade/restore 证据
+P1：Workspace 分页 page client 的正式消费（不带入未通过的半成品）
+P1：Artifact 摘要与质量/血缘事实两阶段加载
+P2：更新 release gate 报告并完成 GO/NO-GO 重评
+```
