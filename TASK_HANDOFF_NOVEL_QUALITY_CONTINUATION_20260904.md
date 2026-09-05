@@ -4799,3 +4799,33 @@ git diff --check：通过（提交前除已知运行文档空行外）
 ### C. 当前边界
 
 本提交只交付后端分页合同；前端当前仍通过 `getSession()` 读取完整消息数组，下一批将改造 `useAgentSessionLifecycle`：首屏读取消息页，加载更早消息时调用 page endpoint，并与 `AgentConversation` 的本地窗口/锚点合并。当前不能把后端 endpoint 单独视为首屏 payload 已降低。
+
+## 2026-09-05 消息分页路由当前 HEAD 服务复验
+
+### A. 当前服务
+
+```text
+日志目录：D:\小说写作\xuanqiong-wenshu\logs\run-20260905-111959
+Backend ready：True
+Frontend ready：True
+Frontend proxy ready：True
+```
+
+### B. smoke 结果
+
+```text
+verify.ps1 smoke：261 检查
+通过：55
+合理跳过：206
+失败：0
+```
+
+新增 `GET /api/agent/sessions/{session_id}/messages` 已进入 OpenAPI 路由检查集合，没有引入 500 级错误。需要真实资源 ID 的检查仍按既有脚本规则跳过。
+
+### C. 下一动作
+
+```text
+P1：补前端 AgentAPI.listSessionMessagesPage 客户端和独立 API 回归
+P1：将 useAgentSessionLifecycle 改为可选分页历史消费，保留旧 getSession fallback
+P1：补前端 prepend、锚点、会话切换和 projectless/member HTTP 验收
+```
