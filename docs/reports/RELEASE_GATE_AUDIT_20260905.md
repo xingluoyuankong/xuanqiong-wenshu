@@ -560,3 +560,24 @@ Docker Compose config：default/maintenance/mysql profiles 解析通过
 5. 发布审计只在正式 Docker/MySQL/真实资源节点完成后重判 GO/NO-GO。
 
 前述报告正文和旧附录中的 `599da4a`、`62d4d8c`、204 skipped、旧 UI-005 失败等内容均为历史快照；当前结论以本附录和接续文档最新章节为准。
+
+## 当前 HEAD 最新复核附录（2026-09-05，08531cc）
+
+```text
+HEAD: 08531cc test: harden run pagination and refresh audit
+Frontend lifecycle targeted: 14 passed
+Frontend full baseline: 81 files / 536 passed
+Backend full baseline: 1761 passed
+TCP message pagination: 180 messages / 3 pages / no duplicates
+TCP member pagination: 125 messages / viewer=200 / shared outsider=403 / private outsider=404
+TCP Run pagination: 125 runs / limit=50 / 3 pages / no duplicates
+SQLite backup/restore matrix: PASS / exit=0
+Production smoke: 261 checks / 51 passed / 210 skipped / 0 failed
+Agent worker --once: exit=0
+Agent command worker --once: exit=0
+Docker daemon: unavailable
+MySQL TCP resource: unavailable
+
+Current conclusion: active / NO-GO
+Remaining gates: real Compose orchestration, formal MySQL migration and restore, real-resource smoke coverage.
+```

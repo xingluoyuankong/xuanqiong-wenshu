@@ -5727,3 +5727,37 @@ P1：为 smoke 210 个真实资源跳过项建立可回收 fixture，减少匿�
 P2：更新 RELEASE_GATE_AUDIT_20260905.md 为当前 HEAD 快照；
 P2：完成最终 GO/NO-GO 审计，当前保持 active / NO-GO。
 ```
+
+## 2026-09-05 当前任务最新验证（Run 分页测试增强后）
+
+```text
+HEAD：08531cc test: harden run pagination and refresh audit
+前端生命周期定向：14 tests passed
+前端 Run/消息/Workspace/API 定向：已通过
+前端全量基线：81 files / 536 tests passed
+后端全量基线：1761 passed
+真实 TCP 消息分页：180 条 / 3 页 / 0 重复
+真实 TCP 成员矩阵：125 条 / 3 页 / shared outsider=403 / private outsider=404
+真实 TCP Run 分页：125 runs / limit=50 / 3 pages / 0 重复
+隔离 SQLite 备份恢复：MIGRATION_BACKUP_RESTORE_MATRIX_PASSED / exit=0
+生产 smoke：261 checks / 51 passed / 210 skipped / 0 failed
+Compose 静态解析：注入必需 SECRET_KEY 与管理员密码后通过
+Docker daemon：当前主机不可用
+MySQL TCP：当前主机无资源
+发布结论：active / NO-GO
+```
+
+### 本轮新增收口
+
+- 增加 `backend/scripts/agent_tcp_run_pagination_acceptance.py`，真实 TCP/JWT 验证 125 个 Run 的 `created_at + id` 复合游标，fixture 结束后回收。
+- 增加 Run 分页生命周期深链跨页、旧页格式异常、消息旧页格式异常、重复触发和跨项目隔离回归。
+- 更新发布审计文档，明确旧快照与当前 HEAD 的边界。
+
+### 唯一剩余门禁
+
+1. Docker Engine/正式部署节点上的 Compose 全编排存活与健康证据；
+2. 正式 MySQL migration、backup/restore、rollback；
+3. 210 个真实资源 smoke 跳过项的可回收 fixture 覆盖；
+4. 发布审计最终复核与 GO/NO-GO 重判。
+
+本任务继续在当前 task 与当前工作区推进，不回历史卡住 task，不创建新的 Codex task；运行工件继续保留并排除在发布提交之外。
