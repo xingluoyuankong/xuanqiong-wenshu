@@ -1000,8 +1000,16 @@ const loadProjectProviderUsageSummary = async (projectId = selectedProjectId.val
 const refreshSessionMessages = async () => {
   if (!session.value || typeof AgentAPI.getSession !== 'function') return
   try {
-    const detail = await AgentAPI.getSession(session.value.id)
-    appendMessages(detail.messages || [])
+    const supportsMessagePaging = typeof AgentAPI.listSessionMessagesPage === 'function'
+    const detail = supportsMessagePaging
+      ? await AgentAPI.getSession(session.value.id, { includeMessages: false })
+      : await AgentAPI.getSession(session.value.id)
+    if (supportsMessagePaging) {
+      const page = await AgentAPI.listSessionMessagesPage(session.value.id, { limit: 60 })
+      appendMessages(page.items || [])
+    } else {
+      appendMessages(detail.messages || [])
+    }
     runProjection.replaceRuns(detail.runs || [])
     const selected = activeRun.value
     if (selected && typeof AgentAPI.listApprovals === 'function')
