@@ -5761,3 +5761,53 @@ MySQL TCP：当前主机无资源
 4. 发布审计最终复核与 GO/NO-GO 重判。
 
 本任务继续在当前 task 与当前工作区推进，不回历史卡住 task，不创建新的 Codex task；运行工件继续保留并排除在发布提交之外。
+
+## 2026-09-05 认证 smoke 与 fixture 回收优化
+
+### 新增实现
+
+`tools/smoke_api_routes.py` 现在支持：
+
+- `XUANQIONG_WENSHU_SMOKE_TOKEN` Bearer token；
+- `XUANQIONG_WENSHU_SMOKE_USERNAME` / `XUANQIONG_WENSHU_SMOKE_PASSWORD` 环境变量登录；
+- 认证请求头贯穿 OpenAPI 路由和临时 Writer 资源创建；
+- 临时项目使用 UUID marker，避免 Windows `os.times().elapsed=0` 造成标题重复；
+- DELETE fixture 真实发送 JSON body，并校验清理状态；
+- 输出按 `skipped-mutating-route`、`skipped-expensive-route`、`skipped-resource-identity-route` 分类统计。
+
+提交：
+
+```text
+23f7b0b test: add authenticated smoke fixture coverage
+```
+
+### 认证 smoke 实测
+
+```text
+认证模式：credentials
+Writer live generate：200
+Writer live cancel：200
+Writer live select：400（无候选时的业务状态）
+Writer live evaluate：400（无候选时的业务状态）
+检查总数：261
+通过：55
+跳过：206
+失败：0
+跳过分类：
+  skipped-expensive-route: 2
+  skipped-mutating-route: 6
+  skipped-resource-identity-route: 198
+```
+
+临时 smoke 项目清理请求已完成且未新增清理失败。旧数据库中此前发现的历史 `OpenAPI Smoke 0` 项目未批量触碰，继续保留等待独立 orphan 盘点与人工确认。
+
+### 当前最新头
+
+```text
+HEAD：23f7b0b
+tracked 未提交：无
+未跟踪：.vite、日志、backend/storage/**/*.bin 运行工件
+发布结论：active / NO-GO
+```
+
+剩余门禁：Docker Engine 实际 Compose 编排、正式 MySQL migration/backup/restore/rollback、完整真实资源覆盖和最终发布重判。

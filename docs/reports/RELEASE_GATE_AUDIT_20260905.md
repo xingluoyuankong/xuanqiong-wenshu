@@ -581,3 +581,22 @@ MySQL TCP resource: unavailable
 Current conclusion: active / NO-GO
 Remaining gates: real Compose orchestration, formal MySQL migration and restore, real-resource smoke coverage.
 ```
+
+## 最新当前 HEAD 附录（23f7b0b，2026-09-05）
+
+```text
+HEAD: 23f7b0b test: add authenticated smoke fixture coverage
+Authenticated smoke: credentials mode
+Writer live create/generate/cancel path: exercised; cleanup status checked
+Smoke: 261 total / 55 passed / 206 skipped / 0 failed
+Skip categories: expensive=2, mutating=6, resource-identity=198
+Frontend full baseline: 81 files / 536 passed
+Backend full baseline: 1761 passed
+TCP message: 180 messages / 3 pages / no duplicates
+TCP member: 125 messages / viewer=200 / shared outsider=403 / private outsider=404
+TCP Run: 125 runs / 3 pages / no duplicates
+SQLite backup/restore: PASS
+Docker daemon: unavailable
+MySQL TCP: unavailable
+Conclusion: active / NO-GO
+```
