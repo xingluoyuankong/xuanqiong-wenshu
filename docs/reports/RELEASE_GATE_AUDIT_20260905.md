@@ -1,8 +1,8 @@
 # 玄穹文枢发布门禁审计（2026-09-05）
 
-> **状态标记：本文原始审计快照已被 2026-09-05 后续复核覆盖。**
-> 原始章节中的旧 HEAD、旧测试失败、旧文件统计只保留作历史证据；当前权威状态见 `TASK_HANDOFF_NOVEL_QUALITY_CONTINUATION_20260904.md` 的“当前任务权威续接状态”“Run 分页迁移当前验收”和“最新发布节点复核”。
-> 历史附录曾记录 `62d4d8c`；当前最新 HEAD 以文末“当前 HEAD 复核附录”为准。当前发布结论：`active / NO-GO`。
+> **状态标记：本文原始审计快照及中间复核附录均已被文末 2026-09-05 当前 HEAD 权威复核覆盖。**
+> 原始章节和中间附录中的旧 HEAD、旧测试失败、旧文件统计和旧 smoke 数字只保留作历史证据；当前权威状态见文末“当前 HEAD 复核附录（d8dcfcd）”，并与 `TASK_HANDOFF_NOVEL_QUALITY_CONTINUATION_20260904.md` 文末权威复核保持一致。
+> 历史附录曾记录 `62d4d8c`、`beec949`、`08531cc`、`23f7b0b`、`dbab070`；当前最新 HEAD 为 `d8dcfcd`（完整值见文末权威附录）。当前发布结论：`active / NO-GO`。
 
 
 
@@ -646,3 +646,53 @@ git diff --check: PASS
 ```
 
 本轮已关闭 smoke 匿名认证初始化阻断；历史 fixture 仅盘点未删除。发布结论继续为 `active / NO-GO`，剩余原因是 Docker Compose、正式 MySQL 和完整真实资源 smoke 证据。
+
+
+## 当前 HEAD 复核附录（2026-09-05，d8dcfcd，覆盖前述所有旧快照）
+
+> 本附录是本报告唯一的当前权威口径。第 1—11 节及其后 `62d4d8c`、`beec949`、`08531cc`、`23f7b0b`、`dbab070` 等附录中的不同 HEAD、`1761 passed`、旧前端测试数和旧 smoke 数字均为历史快照。
+
+### Git 与全量门禁
+
+```text
+分支：codex/bohrium-integration-20260831
+HEAD：d8dcfcdd1ff521131d8721cf256b54fa21f3ae7c
+HEAD 提交：docs: record smoke gate closure and fixture audit
+验证采集时 tracked 源码/测试未提交文件：无
+本次文档同步产生的 tracked 修改：TASK_HANDOFF_NOVEL_QUALITY_CONTINUATION_20260904.md、docs/reports/RELEASE_GATE_AUDIT_20260905.md
+未跟踪内容：.vite、logs、backend/storage/**/*.bin 等运行工件，保留在发布包边界之外
+
+后端全量 pytest：1763 passed in 899.01s (0:14:59)
+前端全量 Vitest：81 files / 536 tests passed in 84.59s
+前端 type-check：PASS
+前端 build-only：4918 modules transformed，PASS，built in 35.65s
+git diff --check：PASS
+```
+
+### Run 分页权威证据
+
+```text
+后端 Run/消息/Runtime 专项：36 passed in 39.11s
+前端 Agent API/Session Lifecycle/Conversation/Workspace：4 files / 69 tests passed in 8.20s
+TCP_JWT_RUN_PAGINATION_PASSED
+125 runs / limit=50 / 3 pages / duplicate_count=0
+游标：before_created_at + before_id；页内 created_at + id 升序；fixture 已回收
+```
+
+真实验收命令：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe scripts\agent_tcp_run_pagination_acceptance.py --count 125 --limit 50
+```
+
+### 当前发布结论与剩余门禁
+
+```text
+发布结论：active / NO-GO
+最新已记录 smoke：261 checks / 53 passed / 208 skipped / 0 failed
+已闭合：Run 分页服务—客户端链路、真实 125 Run TCP/JWT 复合游标验收、后端/前端全量回归、前端 type-check/build
+未闭合：Docker Engine 实际 Compose app/migrate/agent-worker/agent-command-worker 健康矩阵；正式 MySQL migration/backup/restore/rollback；完整真实资源 smoke 覆盖
+```
+
+后续任何提交后，必须以新 HEAD 重新执行并更新本附录；旧附录不得继续充当当前发布证据。

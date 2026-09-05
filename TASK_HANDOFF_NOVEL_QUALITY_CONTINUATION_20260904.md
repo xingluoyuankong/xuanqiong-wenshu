@@ -1,11 +1,11 @@
 # 玄穹文枢质量优化任务接续计划
 
 > 文件：`TASK_HANDOFF_NOVEL_QUALITY_CONTINUATION_20260904.md`  
-> 审查时点：2026-09-04  
+> 初始审查时点：2026-09-04；当前权威复核时点：2026-09-05
 > 工作区：`D:\小说写作\xuanqiong-wenshu`  
 > 编写角色：执行子智能体 E  
 > 本次范围：全面审查、证据盘点、分支差异核对、接续计划更新；本次仅新增本文件，未编辑业务代码。
-> **最新执行状态（2026-09-04）**：本文件早期第 1—9 节记录的是 `main` 质量主线审查证据；当前实际接续分支已切换为 `codex/bohrium-integration-20260831`，最新 UI-004 实施、测试、真实服务冒烟和下一步均以文末追加记录为准。质量主线的独立证据附录位于 `docs/reports/quality-continuity-evidence-20260904.md`。
+> **文档口径**：前部第 1—9 节及其后的中间追加段落保留历史审查证据；截至 2026-09-05 的当前分支、HEAD、Run 分页与全量验证，以文末“当前 HEAD 与全量验证权威复核（最终覆盖前述快照）”为准。质量主线的独立证据附录位于 `docs/reports/quality-continuity-evidence-20260904.md`。
 
 ---
 
@@ -25,7 +25,7 @@
 
 ## 2. 基线
 
-### 2.1 Git 基线与分支定位
+### 2.1 Git 基线与分支定位（历史快照）
 
 | 项目 | 实测值 |
 |---|---|
@@ -5917,3 +5917,74 @@ fixture_count=21
 2. 正式 MySQL migration、backup/restore/rollback；
 3. 真实资源 smoke fixture 继续覆盖资源身份路由，并建立历史 smoke fixture 的确认后清理策略；
 4. 以当前最新提交重新生成最终发布审计并重判 GO/NO-GO。
+
+
+## 2026-09-05 当前 HEAD 与全量验证权威复核（最终覆盖前述快照）
+
+> 本节以 2026-09-05 当前工作区、实际命令输出和真实 TCP/JWT 验收结果为准；此前所有记录中不同的 HEAD、`1761 passed`、`534 tests`、旧 smoke 数字和旧“最新”标题均降级为历史快照，不再作为当前发布判断依据。
+
+### 当前 Git 状态
+
+```text
+分支：codex/bohrium-integration-20260831
+HEAD：d8dcfcdd1ff521131d8721cf256b54fa21f3ae7c
+HEAD 提交：docs: record smoke gate closure and fixture audit
+验证采集时 tracked 源码/测试未提交文件：无
+本次文档同步产生的 tracked 修改：TASK_HANDOFF_NOVEL_QUALITY_CONTINUATION_20260904.md、docs/reports/RELEASE_GATE_AUDIT_20260905.md
+未跟踪内容：.vite、logs、backend/storage/**/*.bin 等运行工件；继续保留且不纳入发布提交
+```
+
+### 当前 Run 分页与定向证据
+
+```text
+后端 Run/消息/Runtime 专项：36 passed in 39.11s
+前端 Agent API/Session Lifecycle/Conversation/Workspace 定向：4 files / 69 tests passed in 8.20s
+真实 TCP/JWT Run 分页：TCP_JWT_RUN_PAGINATION_PASSED
+Run fixture：125 runs / limit=50 / 3 pages / duplicate_count=0
+游标：before_created_at + before_id；各页按 created_at + id 升序；fixture 已回收
+```
+
+复现命令：
+
+```powershell
+# 后端 Run/消息/Runtime 定向
+cd D:\小说写作\xuanqiong-wenshu
+backend\.venv\Scripts\python.exe -m pytest -q `
+  backend/app/api/routers/test_agent_session_pagination.py `
+  backend/app/api/routers/test_agent_message_pagination.py `
+  backend/app/api/routers/test_agent_runtime_route.py
+
+# 前端 Agent 分页定向
+cd D:\小说写作\xuanqiong-wenshu\frontend
+npm run test:run -- src/api/agent.spec.ts `
+  src/features/agent/composables/useAgentSessionLifecycle.spec.ts `
+  src/features/agent/AgentConversation.spec.ts `
+  src/views/AgentWorkspace.spec.ts
+
+# 真实 TCP/JWT Run 分页
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe scripts\agent_tcp_run_pagination_acceptance.py --count 125 --limit 50
+```
+
+### 当前全量门禁证据
+
+```text
+后端全量：1763 passed in 899.01s (0:14:59)
+前端全量 Vitest：81 files / 536 tests passed in 84.59s
+前端 npm run type-check：通过
+前端 npm run build-only：通过，4918 modules transformed，built in 35.65s
+git diff --check：通过
+```
+
+后端全量的权威启动目录是 `D:\小说写作\xuanqiong-wenshu\backend`，命令为 `.\.venv\Scripts\python.exe -m pytest -q`；从仓库根目录调用造成的 fixture 解析失败不属于发布证据，也不改变上述正确目录结果。
+
+### 当前发布口径
+
+```text
+发布结论：active / NO-GO
+当前仍未闭合：Docker Engine 实际 Compose 编排、正式 MySQL migration/backup/restore/rollback、完整真实资源 smoke 覆盖
+当前已闭合：Run 分页服务—客户端链路、125 Run TCP/JWT 复合游标验收、后端/前端全量回归、前端 type-check/build
+最新已记录 smoke：261 checks / 53 passed / 208 skipped / 0 failed
+```
+
+后续若新增提交，必须重新生成本节的 HEAD、Run 分页、后端全量、前端全量、type-check、build 和 smoke 数字；不得沿用本节之前的旧快照。
