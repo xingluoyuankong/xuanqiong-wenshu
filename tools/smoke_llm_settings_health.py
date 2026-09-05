@@ -59,7 +59,7 @@ def main() -> int:
         expect_status(f"{BACKEND_BASE}/docs", 200)
         expect_status(f"{FRONTEND_BASE}", 200)
         expect_status(f"{BACKEND_BASE}/api/updates/latest", 200)
-        expect_one_of(f"{BACKEND_BASE}/api/llm-config", (200, 404))
+        expect_one_of(f"{BACKEND_BASE}/api/llm-config", (200, 401, 404))
 
         # LLM settings feature APIs should be present in OpenAPI.
         status, body = http_get(f"{BACKEND_BASE}/openapi.json")

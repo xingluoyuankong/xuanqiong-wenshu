@@ -5181,3 +5181,11 @@ duplicate_count=0
 该结果说明：生产认证语义已生效，但 `verify.ps1` 的 LLM settings smoke 尚未适配生产 Bearer 认证。下一步应给 smoke 检查增加可选的测试 JWT/登录凭据注入，或将“生产环境未认证请求返回 401”作为明确通过分支，同时保留 health 与 OpenAPI 合同检查。
 
 当前发布结论仍为 `NO-GO`，原因从“启动配置警告”收敛为“发布 smoke 认证适配、备份恢复证据、详情 payload 策略与完整门禁尚未闭环”。
+
+## 2026-09-05 生产认证 smoke 兼容修复
+
+- `tools/smoke_llm_settings_health.py` 已将生产环境下匿名访问 `/api/llm-config` 返回 `401` 纳入合法鉴权语义分支；OpenAPI 与 health-check 仍分别校验。
+- `python -m py_compile tools/smoke_llm_settings_health.py`：通过。
+- 生产配置服务复跑 `verify.ps1 smoke`：通过，261 checks，51 passed，210 skipped，0 failed。
+- 当前 smoke 的 210 个跳过项仍是缺少真实资源 ID 的既有规则，不代表完整资源 E2E。
+- 下一步继续处理：真实 TCP 多用户 token 成员边界、备份恢复证据、会话详情默认 payload 策略、最终全量门禁。
