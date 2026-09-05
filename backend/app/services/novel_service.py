@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (
+    AgentSession,
     BlueprintCharacter,
     BlueprintRelationship,
     Chapter,
@@ -1927,6 +1928,15 @@ class NovelService:
                 await self.session.execute(
                     delete(TaskRuntime).where(TaskRuntime.task_id.in_(runtime_ids))
                 )
+            agent_sessions = list(
+                (
+                    await self.session.execute(
+                        select(AgentSession).where(AgentSession.project_id == pid)
+                    )
+                ).scalars()
+            )
+            for agent_session in agent_sessions:
+                await self.session.delete(agent_session)
             await self.repo.delete(project)
             # 同步清理向量数据
             try:

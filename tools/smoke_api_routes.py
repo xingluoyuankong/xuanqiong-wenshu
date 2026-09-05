@@ -31,6 +31,7 @@ SKIPPED_MUTATING_ROUTES = {
     ("POST", "/api/projects/{project_id}/chapters/{chapter_number}/patch/revert"),
     ("POST", "/api/optimizer/apply-optimization"),
     ("POST", "/api/updates/stream/create"),
+    ("POST", "/api/agent/sessions"),
 }
 SKIPPED_STREAMING_ROUTES = {
     ("GET", "/api/writer/novels/{project_id}/chapters/{chapter_number}/stream"),
@@ -69,6 +70,7 @@ class SmokeResourceContext:
     chapter_number: int
     clue_id: int | None = None
     task_id: str | None = None
+    session_id: str | None = None
     generated: bool = False
 
 
@@ -98,6 +100,8 @@ def has_unresolved_resource_identity(path: str, context: SmokeResourceContext | 
         available.add("clue_id")
     if context is not None and context.task_id:
         available.add("task_id")
+    if context is not None and context.session_id:
+        available.add("session_id")
     for name in (match.group(1).lower() for match in PATH_PARAM_PATTERN.finditer(path)):
         if "chapter" in name and "number" in name:
             continue
@@ -116,6 +120,8 @@ def substitute_path_params(path: str, context: SmokeResourceContext | None = Non
             return str(context.clue_id)
         if name == "task_id" and context is not None and context.task_id:
             return context.task_id
+        if name == "session_id" and context is not None and context.session_id:
+            return context.session_id
         if "chapter" in name and "number" in name:
             return str(context.chapter_number if context is not None else 1)
         return "test"
@@ -259,7 +265,16 @@ def create_smoke_project() -> tuple[SmokeResourceContext | None, str]:
         except (TypeError, ValueError):
             clue_id = None
 
-    return SmokeResourceContext(project_id=project_id, chapter_number=1, clue_id=clue_id), ""
+    session_status, session_payload, _ = request_json(
+        "POST",
+        f"{BASE_URL}/api/agent/sessions",
+        json_body={"project_id": project_id, "title": "OpenAPI smoke session"},
+    )
+    session_id = None
+    if session_status in {200, 201} and session_payload and session_payload.get("id"):
+        session_id = str(session_payload["id"])
+
+    return SmokeResourceContext(project_id=project_id, chapter_number=1, clue_id=clue_id, session_id=session_id), ""
 
 
 def capture_generation_task_id(context: SmokeResourceContext, detail: str) -> None:

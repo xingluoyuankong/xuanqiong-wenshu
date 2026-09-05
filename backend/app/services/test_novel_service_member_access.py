@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import select
 from fastapi import HTTPException
 
-from app.models import NovelProject, ProjectMember, ProjectMemberRole, TaskRuntime, TaskRuntimeEvent, User
+from app.models import AgentSession, NovelProject, ProjectMember, ProjectMemberRole, TaskRuntime, TaskRuntimeEvent, User
 from app.schemas.novel import NovelSectionType
 from app.services.novel_service import NovelService
 
@@ -122,6 +122,14 @@ async def test_delete_projects_preserves_true_owner_only_compatibility(task_sess
         await service.delete_projects([project.id], editor.id)
     assert denied.value.status_code == 403
 
+    agent_session = AgentSession(
+        user_id=owner.id,
+        project_id=project.id,
+        title="delete-project-agent-session",
+    )
+    task_session.add(agent_session)
+    await task_session.flush()
+
     runtime = TaskRuntime(
         task_id="delete-project-runtime-task",
         owner_user_id=owner.id,
@@ -145,4 +153,5 @@ async def test_delete_projects_preserves_true_owner_only_compatibility(task_sess
     service._vector_store.delete_by_project.assert_awaited_once_with(project.id)
     assert await service.repo.get_by_id(project.id) is None
     assert await task_session.get(TaskRuntime, runtime.task_id) is None
+    assert await task_session.get(AgentSession, agent_session.id) is None
     assert (await task_session.execute(select(TaskRuntimeEvent).where(TaskRuntimeEvent.task_id == runtime.task_id))).scalars().all() == []
