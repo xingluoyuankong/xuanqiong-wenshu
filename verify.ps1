@@ -1,5 +1,5 @@
 ﻿param(
-    [ValidateSet('quick', 'smoke', 'full')]
+    [ValidateSet('quick', 'smoke', 'acceptance', 'full')]
     [string]$Suite = 'quick'
 )
 
@@ -322,7 +322,7 @@ if ($dbProvider -eq 'mysql') {
     }
 }
 
-$requiresLiveStack = $Suite -in @('smoke', 'full')
+$requiresLiveStack = $Suite -in @('smoke', 'acceptance', 'full')
 if ($requiresLiveStack) {
     $backendHealthUrl = "$backendBaseUrl/api/health"
     $frontendHealthUrl = $frontendBaseUrl
@@ -359,6 +359,20 @@ if ($Suite -in @('smoke', 'full')) {
 
     Invoke-ExternalStep 'OpenAPI 路由冒烟检查' { & $backendPython (Join-Path $repo 'tools\smoke_api_routes.py') }
     Invoke-ExternalStep 'LLM 设置冒烟检查' { & $backendPython (Join-Path $repo 'tools\smoke_llm_settings_health.py') }
+}
+
+if ($Suite -eq 'acceptance') {
+    Push-Location $backendDir
+    try {
+        Invoke-ExternalStep '真实 TCP/JWT 消息分页验收' { & .\.venv\Scripts\python.exe scripts\agent_tcp_message_pagination_acceptance.py --count 180 --limit 60 }
+        Invoke-ExternalStep '真实 TCP/JWT 成员分页验收' { & .\.venv\Scripts\python.exe scripts\agent_tcp_member_pagination_acceptance.py --count 125 --limit 60 }
+        Invoke-ExternalStep '真实 TCP/JWT Run 分页验收' { & .\.venv\Scripts\python.exe scripts\agent_tcp_run_pagination_acceptance.py --count 125 --limit 50 }
+        Invoke-ExternalStep 'SQLite 迁移备份恢复验收' { & .\.venv\Scripts\python.exe scripts\migration_backup_restore_acceptance.py }
+        Invoke-ExternalStep 'Agent worker 一次轮询验收' { & .\.venv\Scripts\python.exe scripts\agent_worker.py --once --worker-id verify-acceptance-agent }
+        Invoke-ExternalStep 'Agent command worker 一次轮询验收' { & .\.venv\Scripts\python.exe scripts\agent_command_worker.py --once --worker-id verify-acceptance-command }
+    } finally {
+        Pop-Location
+    }
 }
 
 if ($Suite -eq 'full') {

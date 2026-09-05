@@ -696,3 +696,18 @@ cd D:\小说写作\xuanqiong-wenshu\backend
 ```
 
 后续任何提交后，必须以新 HEAD 重新执行并更新本附录；旧附录不得继续充当当前发布证据。
+
+## 当前 HEAD 复核附录（2026-09-05，acceptance 套件实测）
+
+```text
+验收入口：verify.ps1 acceptance
+结果：exit=0
+TCP message pagination：PASS / 180 messages / 3 pages / duplicate_count=0
+TCP member pagination：PASS / 125 messages / viewer=200 / shared outsider=403 / private outsider=404
+TCP Run pagination：PASS / 125 runs / 3 pages / duplicate_count=0
+SQLite migration backup/restore：PASS / fresh-repeat-downgrade-restore-reupgrade
+Agent worker --once：PASS
+Agent command worker --once：PASS
+```
+
+该套件已把当前主机可执行的成员权限、消息/Run 长历史、迁移恢复和 Worker 入口验收固化为单一命令。Docker Compose 实际容器编排和正式 MySQL TCP 仍需对应资源节点。

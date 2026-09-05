@@ -5988,3 +5988,30 @@ git diff --check：通过
 ```
 
 后续若新增提交，必须重新生成本节的 HEAD、Run 分页、后端全量、前端全量、type-check、build 和 smoke 数字；不得沿用本节之前的旧快照。
+
+## 2026-09-05 acceptance 验收套件接线与实测
+
+### 接线
+
+`verify.ps1` 新增 `acceptance` 套件，并将以下已存在的可回收验收入口统一编排：
+
+- 真实 TCP/JWT 消息分页：180 条、limit=60；
+- 真实 TCP/JWT 成员分页：125 条、limit=60；
+- 真实 TCP/JWT Run 分页：125 条、limit=50；
+- SQLite fresh/repeat/downgrade/restore/re-upgrade；
+- Agent worker `--once`；
+- Agent command worker `--once`。
+
+### 当前实测
+
+```text
+verify.ps1 acceptance：exit=0
+TCP_MESSAGE_PAGINATION_PASSED
+TCP_MEMBER_PAGINATION_PASSED
+TCP_JWT_RUN_PAGINATION_PASSED
+MIGRATION_BACKUP_RESTORE_MATRIX_PASSED
+Agent worker 一次轮询：PASS
+Agent command worker 一次轮询：PASS
+```
+
+本套件要求 backend/frontend live stack 已就绪；它不把 Docker daemon 或正式 MySQL 的缺失伪装成通过。当前正式发布仍保持 `active / NO-GO`，真实 Docker Compose、正式 MySQL 和完整真实资源 smoke 仍是剩余门禁。
