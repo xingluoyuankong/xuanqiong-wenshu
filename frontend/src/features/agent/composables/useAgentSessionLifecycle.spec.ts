@@ -20,6 +20,7 @@ vi.mock('@/api/agent', () => ({
   },
 }))
 
+import { AgentAPI } from '@/api/agent'
 import { useAgentSessionLifecycle } from './useAgentSessionLifecycle'
 import { useAgentRunProjection } from '@/features/agent/stores/agentRunProjection'
 
@@ -51,7 +52,7 @@ describe('useAgentSessionLifecycle', () => {
     listSessionRunsPageMock.mockResolvedValue({ session_id: '', items: [], total: 0, limit: 50, next_before_created_at: null, next_before_id: null, has_more: false })
   })
 
-  const createLifecycle = () => {
+  const createLifecycle = (route: Record<string, string> = {}) => {
     const selectedProjectId = ref('project')
     const sessionLoading = ref(false)
     const sessionError = ref('')
@@ -67,7 +68,7 @@ describe('useAgentSessionLifecycle', () => {
       selectedProjectId,
       selectedProjectTitle: computed(() => '项目'),
       runtimeSupported: computed(() => true),
-      routeIntent: computed(() => ({})),
+      routeIntent: computed(() => route),
       runProjection,
       sessionLoading,
       sessionError,
@@ -86,7 +87,7 @@ describe('useAgentSessionLifecycle', () => {
       addActivity,
     })
     return {
-      lifecycle, selectedProjectId, sessionLoading, session, sessions,
+      lifecycle, selectedProjectId, sessionLoading, session, sessions, runProjection,
       selectedSessionId, messages, hydrateSelectedRun, syncRoute, addActivity,
     }
   }
@@ -222,6 +223,216 @@ describe('useAgentSessionLifecycle', () => {
     expect(getSessionMock).toHaveBeenNthCalledWith(2, sessionItem.id)
     expect(state.messages.value.map((item) => item.content)).toEqual(['完整回退正文'])
     expect(state.lifecycle.messageHistoryError.value).toBe('')
+  })
+
+  it('resolves a deep-linked run on an older page and preserves the artifact intent', async () => {
+    const state = createLifecycle({ sessionId: 'deep-link-session', runId: 'run-1', artifactId: 'artifact-7' })
+    const sessionItem = { id: 'deep-link-session', user_id: 1, project_id: 'project', title: 'deep link', status: 'active', created_at: 'now', updated_at: 'now' }
+    const run = (id: string, createdAt: string) => ({
+      id, session_id: sessionItem.id, user_id: 1, project_id: 'project', status: 'succeeded', progress: 100,
+      created_at: createdAt, updated_at: createdAt,
+    })
+    listSessionsMock.mockResolvedValue([sessionItem])
+    getSessionMock.mockResolvedValue({ ...sessionItem, messages: [], runs: [] })
+    listSessionMessagesPageMock.mockResolvedValue({ session_id: sessionItem.id, items: [], total: 0, limit: 60, next_cursor: null, has_more: false })
+    listSessionRunsPageMock
+      .mockResolvedValueOnce({
+        session_id: sessionItem.id,
+        items: [run('run-3', '2026-09-05T00:00:03Z'), run('run-2', '2026-09-05T00:00:02Z')],
+        total: 3,
+        limit: 50,
+        next_before_created_at: '2026-09-05T00:00:02Z',
+        next_before_id: 'run-2',
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        session_id: sessionItem.id,
+        items: [run('run-1', '2026-09-05T00:00:01Z')],
+        total: 3,
+        limit: 50,
+        next_before_created_at: null,
+        next_before_id: null,
+        has_more: false,
+      })
+
+    await state.lifecycle.restoreSession()
+
+    expect(listSessionRunsPageMock).toHaveBeenNthCalledWith(1, sessionItem.id, { limit: 50 })
+    expect(listSessionRunsPageMock).toHaveBeenNthCalledWith(2, sessionItem.id, {
+      limit: 50,
+      beforeCreatedAt: '2026-09-05T00:00:02Z',
+      beforeId: 'run-2',
+    })
+    expect(state.session.value?.runs.map((item: any) => item.id)).toEqual(['run-1', 'run-2', 'run-3'])
+    expect(state.lifecycle.runHistoryHasMore.value).toBe(false)
+    expect(state.hydrateSelectedRun).toHaveBeenCalledWith(
+      expect.objectContaining({ runs: expect.arrayContaining([expect.objectContaining({ id: 'run-1' })]) }),
+      'run-1',
+      'artifact-7',
+    )
+    expect(state.runProjection.selectedRunId.value).toBe('run-1')
+  })
+
+  it('keeps the current message history and exposes an error when an older page is malformed', async () => {
+    const state = createLifecycle()
+    const sessionItem = { id: 'malformed-older-message-session', user_id: 1, project_id: 'project', title: 'messages', status: 'active', created_at: 'now', updated_at: 'now' }
+    const newest = { id: 'message-2', session_id: sessionItem.id, user_id: 1, role: 'assistant', content: '最新', sequence: 2, created_at: 'now' }
+    listSessionsMock.mockResolvedValue([sessionItem])
+    getSessionMock.mockResolvedValue({ ...sessionItem, messages: [], runs: [] })
+    listSessionMessagesPageMock
+      .mockResolvedValueOnce({ session_id: sessionItem.id, items: [newest], total: 2, limit: 60, next_cursor: 2, has_more: true })
+      .mockResolvedValueOnce({ session_id: sessionItem.id, items: 'not-an-array', total: 2, limit: 60, next_cursor: 1, has_more: true })
+
+    await state.lifecycle.restoreSession()
+    await state.lifecycle.loadOlderMessages()
+
+    expect(state.messages.value.map((item) => item.sequence)).toEqual([2])
+    expect(state.lifecycle.messageHistoryHasMore.value).toBe(true)
+    expect(state.lifecycle.messageHistoryError.value).toBe('items.forEach is not a function')
+    expect(state.lifecycle.messageHistoryLoading.value).toBe(false)
+  })
+
+  it('keeps the current run history and exposes an error when an older run page is malformed', async () => {
+    const state = createLifecycle()
+    const sessionItem = { id: 'malformed-older-run-session', user_id: 1, project_id: 'project', title: 'runs', status: 'active', created_at: 'now', updated_at: 'now' }
+    const run = { id: 'run-2', session_id: sessionItem.id, user_id: 1, project_id: 'project', status: 'succeeded', progress: 100, created_at: '2026-09-05T00:00:02Z', updated_at: '2026-09-05T00:00:02Z' }
+    listSessionsMock.mockResolvedValue([sessionItem])
+    getSessionMock.mockResolvedValue({ ...sessionItem, messages: [], runs: [] })
+    listSessionMessagesPageMock.mockResolvedValue({ session_id: sessionItem.id, items: [], total: 0, limit: 60, next_cursor: null, has_more: false })
+    listSessionRunsPageMock
+      .mockResolvedValueOnce({ session_id: sessionItem.id, items: [run], total: 2, limit: 50, next_before_created_at: run.created_at, next_before_id: run.id, has_more: true })
+      .mockResolvedValueOnce({ session_id: sessionItem.id, items: undefined, total: 2, limit: 50, next_before_created_at: null, next_before_id: null, has_more: false })
+
+    await state.lifecycle.restoreSession()
+    await state.lifecycle.loadOlderRuns()
+
+    expect(state.session.value?.runs.map((item: any) => item.id)).toEqual(['run-2'])
+    expect(state.lifecycle.runHistoryHasMore.value).toBe(true)
+    expect(state.lifecycle.runHistoryError.value).toBe('Cannot read properties of undefined (reading \'forEach\')')
+    expect(state.lifecycle.runHistoryLoading.value).toBe(false)
+  })
+
+  it('falls back to the full session detail when the initial run page is malformed', async () => {
+    const state = createLifecycle()
+    const sessionItem = { id: 'run-fallback-session', user_id: 1, project_id: 'project', title: 'run fallback', status: 'active', created_at: 'now', updated_at: 'now' }
+    const fullDetail = {
+      ...sessionItem,
+      messages: [{ id: 'fallback-message', session_id: sessionItem.id, user_id: 1, role: 'assistant', content: '完整消息', sequence: 1, created_at: 'now' }],
+      runs: [{ id: 'fallback-run', session_id: sessionItem.id, user_id: 1, project_id: 'project', status: 'succeeded', progress: 100, created_at: '2026-09-05T00:00:01Z', updated_at: '2026-09-05T00:00:01Z' }],
+    }
+    listSessionsMock.mockResolvedValue([sessionItem])
+    getSessionMock.mockResolvedValueOnce({ ...sessionItem, messages: [], runs: [] }).mockResolvedValueOnce(fullDetail)
+    listSessionMessagesPageMock.mockResolvedValue({ session_id: sessionItem.id, items: [], total: 0, limit: 60, next_cursor: null, has_more: false })
+    listSessionRunsPageMock.mockResolvedValueOnce({ session_id: sessionItem.id, items: 'malformed', total: 1, limit: 50, next_before_created_at: null, next_before_id: null, has_more: false })
+
+    await state.lifecycle.restoreSession()
+
+    expect(getSessionMock).toHaveBeenNthCalledWith(2, sessionItem.id)
+    expect(state.messages.value.map((item) => item.content)).toEqual(['完整消息'])
+    expect(state.session.value?.runs.map((item: any) => item.id)).toEqual(['fallback-run'])
+    expect(state.lifecycle.runHistoryError.value).toBe('')
+  })
+
+  it('supports a legacy client with neither session history pager and preserves the old detail contract', async () => {
+    const state = createLifecycle()
+    const sessionItem = { id: 'legacy-client-session', user_id: 1, project_id: 'project', title: 'legacy', status: 'active', created_at: 'now', updated_at: 'now' }
+    const legacyDetail = {
+      ...sessionItem,
+      messages: [{ id: 'legacy-message', session_id: sessionItem.id, user_id: 1, role: 'user', content: '旧客户端消息', sequence: 1, created_at: 'now' }],
+      runs: [{ id: 'legacy-run', session_id: sessionItem.id, user_id: 1, project_id: 'project', status: 'succeeded', progress: 100, created_at: '2026-09-05T00:00:01Z', updated_at: '2026-09-05T00:00:01Z' }],
+    }
+    const originalMessagePager = AgentAPI.listSessionMessagesPage
+    const originalRunPager = AgentAPI.listSessionRunsPage
+    ;(AgentAPI as any).listSessionMessagesPage = undefined
+    ;(AgentAPI as any).listSessionRunsPage = undefined
+    try {
+      listSessionsMock.mockResolvedValue([sessionItem])
+      getSessionMock.mockResolvedValue(legacyDetail)
+
+      await state.lifecycle.restoreSession()
+
+      expect(getSessionMock).toHaveBeenCalledTimes(1)
+      expect(getSessionMock).toHaveBeenCalledWith(sessionItem.id)
+      expect(listSessionMessagesPageMock).not.toHaveBeenCalled()
+      expect(listSessionRunsPageMock).not.toHaveBeenCalled()
+      expect(state.messages.value.map((item) => item.content)).toEqual(['旧客户端消息'])
+      expect(state.session.value?.runs.map((item: any) => item.id)).toEqual(['legacy-run'])
+      expect(state.lifecycle.messageHistoryTotal.value).toBe(1)
+      expect(state.lifecycle.runHistoryTotal.value).toBe(1)
+    } finally {
+      ;(AgentAPI as any).listSessionMessagesPage = originalMessagePager
+      ;(AgentAPI as any).listSessionRunsPage = originalRunPager
+    }
+  })
+
+  it('ignores a stale paged response after switching sessions', async () => {
+    const state = createLifecycle()
+    const firstSession = { id: 'session-1', user_id: 1, project_id: 'project', title: 'one', status: 'active', created_at: 'now', updated_at: 'now' }
+    const secondSession = { id: 'session-2', user_id: 1, project_id: 'project', title: 'two', status: 'active', created_at: 'now', updated_at: 'now' }
+    const pendingFirstPage = deferred<any>()
+    listSessionsMock.mockResolvedValue([])
+    getSessionMock.mockResolvedValueOnce({ ...firstSession, messages: [], runs: [] }).mockResolvedValueOnce({ ...secondSession, messages: [], runs: [] })
+    listSessionMessagesPageMock
+      .mockReturnValueOnce(pendingFirstPage.promise)
+      .mockResolvedValueOnce({ session_id: secondSession.id, items: [{ id: 'session-2-message', session_id: secondSession.id, user_id: 1, role: 'assistant', content: '第二会话', sequence: 1, created_at: 'now' }], total: 1, limit: 60, next_cursor: null, has_more: false })
+    listSessionRunsPageMock.mockResolvedValue({ session_id: secondSession.id, items: [], total: 0, limit: 50, next_before_created_at: null, next_before_id: null, has_more: false })
+
+    state.selectedSessionId.value = firstSession.id
+    const firstLoad = state.lifecycle.loadSelectedSession()
+    await Promise.resolve()
+    state.selectedSessionId.value = secondSession.id
+    const secondLoad = state.lifecycle.loadSelectedSession()
+    pendingFirstPage.resolve({ session_id: firstSession.id, items: [{ id: 'stale-message', session_id: firstSession.id, user_id: 1, role: 'assistant', content: '旧会话', sequence: 1, created_at: 'now' }], total: 1, limit: 60, next_cursor: null, has_more: false })
+    await Promise.all([firstLoad, secondLoad])
+
+    expect(state.session.value?.id).toBe(secondSession.id)
+    expect(state.messages.value.map((item) => item.content)).toEqual(['第二会话'])
+    expect(state.hydrateSelectedRun).toHaveBeenCalledTimes(1)
+    expect(state.sessionLoading.value).toBe(false)
+  })
+
+  it('coalesces duplicate clicks on the older-message control while a page is in flight', async () => {
+    const state = createLifecycle()
+    const sessionItem = { id: 'duplicate-message-session', user_id: 1, project_id: 'project', title: 'duplicate', status: 'active', created_at: 'now', updated_at: 'now' }
+    const pendingOlderPage = deferred<any>()
+    listSessionsMock.mockResolvedValue([sessionItem])
+    getSessionMock.mockResolvedValue({ ...sessionItem, messages: [], runs: [] })
+    listSessionMessagesPageMock
+      .mockResolvedValueOnce({ session_id: sessionItem.id, items: [{ id: 'message-2', session_id: sessionItem.id, user_id: 1, role: 'assistant', content: '新', sequence: 2, created_at: 'now' }], total: 2, limit: 60, next_cursor: 2, has_more: true })
+      .mockReturnValueOnce(pendingOlderPage.promise)
+
+    await state.lifecycle.restoreSession()
+    const firstLoad = state.lifecycle.loadOlderMessages()
+    const duplicateLoad = state.lifecycle.loadOlderMessages()
+    expect(listSessionMessagesPageMock).toHaveBeenCalledTimes(2)
+    expect(state.lifecycle.messageHistoryLoading.value).toBe(true)
+
+    pendingOlderPage.resolve({ session_id: sessionItem.id, items: [{ id: 'message-1', session_id: sessionItem.id, user_id: 1, role: 'user', content: '旧', sequence: 1, created_at: 'now' }], total: 2, limit: 60, next_cursor: null, has_more: false })
+    await Promise.all([firstLoad, duplicateLoad])
+
+    expect(state.messages.value.map((item) => item.sequence)).toEqual([1, 2])
+    expect(state.lifecycle.messageHistoryLoading.value).toBe(false)
+    expect(state.lifecycle.messageHistoryError.value).toBe('')
+  })
+
+  it('lets the latest duplicate click for the same session win over an older delayed load', async () => {
+    const state = createLifecycle()
+    const pendingFirstDetail = deferred<any>()
+    getSessionMock.mockReturnValueOnce(pendingFirstDetail.promise).mockResolvedValueOnce(detail('same-session'))
+
+    state.selectedSessionId.value = 'same-session'
+    const firstLoad = state.lifecycle.loadSelectedSession()
+    const duplicateLoad = state.lifecycle.loadSelectedSession()
+    pendingFirstDetail.resolve(detail('same-session'))
+    await Promise.all([firstLoad, duplicateLoad])
+
+    expect(getSessionMock).toHaveBeenCalledTimes(2)
+    expect(getSessionMock).toHaveBeenNthCalledWith(1, 'same-session', { includeMessages: false, includeRuns: false })
+    expect(getSessionMock).toHaveBeenNthCalledWith(2, 'same-session', { includeMessages: false, includeRuns: false })
+    expect(state.session.value?.id).toBe('same-session')
+    expect(state.hydrateSelectedRun).toHaveBeenCalledTimes(1)
+    expect(state.syncRoute).toHaveBeenCalledTimes(1)
+    expect(state.sessionLoading.value).toBe(false)
   })
 
   it('lets the latest manual session selection win over an older delayed detail request', async () => {

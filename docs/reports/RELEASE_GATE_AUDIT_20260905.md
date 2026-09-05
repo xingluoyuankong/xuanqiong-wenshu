@@ -2,7 +2,7 @@
 
 > **状态标记：本文原始审计快照已被 2026-09-05 后续复核覆盖。**
 > 原始章节中的旧 HEAD、旧测试失败、旧文件统计只保留作历史证据；当前权威状态见 `TASK_HANDOFF_NOVEL_QUALITY_CONTINUATION_20260904.md` 的“当前任务权威续接状态”“Run 分页迁移当前验收”和“最新发布节点复核”。
-> 当前最新 HEAD：`62d4d8c`。当前发布结论：`active / NO-GO`。
+> 历史附录曾记录 `62d4d8c`；当前最新 HEAD 以文末“当前 HEAD 复核附录”为准。当前发布结论：`active / NO-GO`。
 
 
 
@@ -476,3 +476,87 @@ Current NO-GO reasons:
 3. Smoke still has 210 real-resource-dependent skips.
 ```
 
+
+
+## 当前 HEAD 复核附录（2026-09-05，覆盖前述所有旧快照）
+
+### 1. 当前提交与工作树
+
+```text
+分支：codex/bohrium-integration-20260831
+当前 HEAD：beec949 docs: supersede stale release audit snapshot
+当前 HEAD 已包含的关键提交链：
+  92a03cc perf: paginate agent run history in workspace
+  3cf7bdb test: lock session detail payload compatibility contract
+  508d53f test: add isolated migration backup restore matrix
+  d560d4f test: add tcp jwt member pagination acceptance
+  ce2b664 fix: accept authenticated production llm smoke
+跟踪文件未提交：无
+未跟踪内容：.vite、日志、backend/storage/**/*.bin 等运行工件，均保留在发布包边界之外
+```
+
+### 2. 当前代码与回归证据
+
+```text
+后端全量 pytest：1761 passed in 961.27s (0:16:01)
+前端全量 Vitest：81 files / 536 tests passed
+前端 npm run type-check：通过
+前端 npm run build-only：通过，4918 modules transformed
+git diff --check：通过
+前端 Run/Session/Workspace/API 定向：4 files / 69 tests passed
+迁移/项目成员/部署合同：16 passed
+```
+
+已验证的成员权限与执行身份主线继续保持通过：Owner/Editor/Viewer/非成员 project 读取边界、Writer 执行身份、Agent capability snapshot、Viewer 写入阻断、projectless 私有执行身份均有当前仓库专项证据。
+
+### 3. 当前分页与真实 HTTP 证据
+
+```text
+TCP_MESSAGE_PAGINATION_PASSED
+180 messages / limit=60 / 3 pages / duplicate_count=0
+
+TCP_MEMBER_PAGINATION_PASSED
+125 messages / 3 pages / viewer=200 / shared outsider=403 / projectless outsider=404
+
+TCP_JWT_RUN_PAGINATION_PASSED
+125 runs / limit=50 / 3 pages / duplicate_count=0
+```
+
+前端首屏已经使用：
+
+```text
+GET /sessions/{id}?include_messages=false&include_runs=false
+GET /sessions/{id}/messages?limit=60
+GET /sessions/{id}/runs?limit=50
+```
+
+旧详情无参数的 `include_messages=true`、`include_runs=true` 兼容合同由测试锁定，尚未翻转默认值。
+
+### 4. 当前迁移、生产配置和 Worker 证据
+
+```text
+MIGRATION_BACKUP_RESTORE_MATRIX_PASSED
+fresh/repeat/downgrade/restore/re-upgrade：通过
+backup_sha256 == restored_sha256：True
+
+显式 production API 临时配置：health=200，security_warnings=0
+Agent worker --once：exit=0
+Agent command worker --once：exit=0
+Docker Compose config：default/maintenance/mysql profiles 解析通过
+```
+
+### 5. 当前未闭合门禁与 NO-GO 原因
+
+```text
+发布结论：active / NO-GO
+```
+
+剩余原因仅按证据边界记录，不将缺失资源推断为通过：
+
+1. 当前主机 Docker Engine 不可用，只能完成 Compose 静态解析，尚无真实容器 app、migrate、agent-worker、agent-command-worker 健康矩阵。
+2. 当前主机没有 MySQL 客户端，3306 无监听，正式 MySQL TCP migration、backup/restore、rollback 尚未实测。
+3. `verify.ps1 smoke` 仍有约 210 项依赖真实项目/章节/Artifact 资源的跳过项，不能单独代表完整业务验收。
+4. Compose 静态解析时可选 Linux.do/SMTP 配置为空值提示仍需在正式部署配置中按功能开关注入。
+5. 发布审计只在正式 Docker/MySQL/真实资源节点完成后重判 GO/NO-GO。
+
+前述报告正文和旧附录中的 `599da4a`、`62d4d8c`、204 skipped、旧 UI-005 失败等内容均为历史快照；当前结论以本附录和接续文档最新章节为准。
