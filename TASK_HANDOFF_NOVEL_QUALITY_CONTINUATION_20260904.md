@@ -5201,3 +5201,89 @@ HEAD：ce2b664 fix: accept authenticated production llm smoke
 ```
 
 当前任务仍为 `active / NO-GO`。已经关闭的缺口：前端消息分页提交、prepend/实时追加锚点、终态刷新完整消息 payload、真实 TCP/JWT 长历史分页、生产 smoke 的匿名认证分支。剩余发布门禁集中在：备份恢复可复现证据、真实 TCP 多用户成员边界、详情接口默认 payload 策略、跳过项覆盖和最终全量发布审计。
+
+## 2026-09-05 当前任务权威续接状态
+
+### 当前代码与提交
+
+```text
+HEAD：4cc4c22 docs: update continuation head and release gates
+已提交前端消息分页、prepend 锚点、终态刷新 payload 优化
+已提交真实 TCP/JWT projectless 长历史验收脚本
+已提交生产认证 smoke 401 兼容修复
+```
+
+### 已实测证据
+
+```text
+前端全量：81 files / 533 tests passed
+前端 type-check：通过
+前端 build-only：通过，4918 modules transformed
+后端消息/会话/Runtime 组合：183 passed
+后端迁移/成员迁移/部署合同：16 passed
+真实 TCP/JWT projectless 分页：180 messages / 3 pages / duplicate_count=0
+生产进程级配置启动：Backend、Frontend、Proxy ready
+生产配置 smoke：261 checks / 51 passed / 210 skipped / 0 failed
+git diff --check：通过
+```
+
+### 当前尚未闭合的证据
+
+以下项目保留为待验收项，不能使用未经当前命令输出支持的数字替代：
+
+1. 真实 TCP 多用户 JWT 成员矩阵尚未由当前工作区中的独立脚本实测闭环；已有 ASGI/函数级成员合同回归，但不等于完整多用户 TCP 证据。
+2. 备份恢复矩阵尚未由当前工作区中的独立可复现实测脚本归档；已有迁移专项 16 passed，但不等于备份文件恢复证据。
+3. Agent Worker、Command Worker 在显式生产配置下的完整启动与健康矩阵尚未闭合。
+4. 默认 `GET /api/agent/sessions/{id}` 仍兼容返回完整 `messages/runs` 数组，长历史 payload 策略尚未最终定案。
+5. smoke 仍有 210 个真实资源相关跳过项，不能单独代表完整业务资源验收。
+
+### 下一执行顺序
+
+```text
+P1：完成真实 TCP 多用户 JWT 成员共享读取、项目越权和 projectless 隔离脚本并运行；
+P1：完成隔离 SQLite 备份 → 恢复 → hash/计数 → Alembic current → 再升级矩阵并保存证据；
+P1：检查生产部署入口是否包含 Agent Worker/Command Worker，补齐可执行启动与健康验证；
+P2：为会话详情默认 payload 策略补充兼容性测试并决定 metadata-first 或旧默认保留；
+P2：执行最终后端/前端全量门禁，更新发布审计，重新判定 GO/NO-GO。
+```
+
+### 当前任务规则
+
+- 继续使用当前 Codex task 和当前工作区。
+- 不回历史卡住会话，不创建新的 Codex task。
+- 子智能体只负责边界明确的并行工作；主任务审查所有结果并以实测证据收口。
+- `.vite`、日志和 `backend/storage/**/*.bin` 运行工件继续保留，不批量清理，不加入发布提交。
+- 当前任务保持 `active / NO-GO`，直到剩余证据逐项闭环。
+
+## 2026-09-05 真实 TCP 多用户 JWT 成员边界验收
+
+新增脚本：`backend/scripts/agent_tcp_member_pagination_acceptance.py`。
+
+脚本使用隔离数据库 fixture 创建 owner、viewer、outsider、共享项目、项目成员、共享会话和 projectless 私有会话；三名用户均通过真实 `/api/auth/login` 获取 JWT，随后通过真实 TCP 访问消息分页路由，最终回收全部 fixture。
+
+实测：
+
+```text
+TCP_MEMBER_PAGINATION_PASSED
+message_count=125
+page_limit=60
+pages=3
+viewer_first=66
+viewer_last=5
+shared_outsider_status=403
+private_outsider_status=404
+```
+
+该结果补齐了真实 TCP 下的成员共享读取、项目越权和 projectless 私有边界；viewer 的分页序列经过排序校验后覆盖 1..125 且无重复。
+
+## 2026-09-05 当前最新权威入口
+
+```text
+HEAD：4cc4c22 docs: update continuation head and release gates
+当前新增未提交：backend/scripts/agent_tcp_member_pagination_acceptance.py、接续文档
+当前最新真实 TCP：projectless 180 条通过；多用户成员 125 条通过
+当前生产 smoke：261 checks / 51 passed / 210 skipped / 0 failed
+当前发布结论：active / NO-GO
+```
+
+下一步继续：隔离 SQLite 备份恢复脚本与证据归档；生产 API/Worker/Command Worker 完整矩阵；会话详情默认 payload 策略；最终全量门禁与发布审计。
