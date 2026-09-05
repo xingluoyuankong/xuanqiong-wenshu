@@ -54,6 +54,12 @@ const mountWorkbench = (overrides: Record<string, unknown> = {}) =>
   })
 
 describe('AgentArtifactWorkbench', () => {
+  it('按单个 Artifact 显式读取质量与谱系事实', async () => {
+    const wrapper = mountWorkbench({ canLoadFacts: true })
+    await wrapper.get('[data-testid="agent-load-artifact-facts-button"]').trigger('click')
+    expect(wrapper.emitted('load-facts')?.[0]).toEqual([artifact])
+  })
+
   it('优先展示关系化 Gate 和 Finding，而不是 metadata 投影', () => {
     const wrapper = mountWorkbench({
       qualityFacts: {

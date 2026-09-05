@@ -27,6 +27,7 @@ import type { SSEConnectionState, StreamErrorData } from '@/utils/sseStream'
 export interface AgentWorkspaceRuntimeOptions {
   runProjection: AgentRunProjectionStore
   activeRun: ComputedRef<AgentRun | null>
+  runState: ComputedRef<AgentStateProjection | null>
   plan: ComputedRef<AgentPlanResponse | null>
   artifacts: ComputedRef<AgentArtifact[]>
   approvals: ComputedRef<AgentApproval[]>
@@ -79,6 +80,26 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
   const artifactLineageFactsErrors = ref<Record<string, string>>({})
   const providerProvenanceByRunId = ref<Record<string, AgentProviderProvenance | null>>({})
   const gapRepairStateByRunId = ref<Record<string, 'idle' | 'repairing' | 'repaired' | 'failed'>>({})
+  type RunDetailPageKind = 'steps' | 'commands' | 'artifacts'
+  type RunDetailPageState = {
+    loaded: boolean
+    loading: boolean
+    error: string
+    total: number | null
+    nextOffset: number | null
+    hasMore: boolean
+  }
+  const createRunDetailPageState = (): RunDetailPageState => ({
+    loaded: false,
+    loading: false,
+    error: '',
+    total: null,
+    nextOffset: null,
+    hasMore: true,
+  })
+  const runDetailPagesByRunId = ref<Record<string, Record<RunDetailPageKind, RunDetailPageState>>>({})
+  const runDetailPageRequests = new Map<string, Promise<void>>()
+  const RUN_DETAIL_PAGE_LIMIT = 50
   const GAP_REPAIR_PAGE_LIMIT = 500
   const GAP_REPAIR_MAX_PAGES = 8
   let lifecycleGeneration = 0
@@ -135,7 +156,141 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
         }
       })
 
+  const runDetailPageState = (runId: string, kind: RunDetailPageKind) =>
+    runDetailPagesByRunId.value[runId]?.[kind] || createRunDetailPageState()
+  const patchRunDetailPageState = (
+    runId: string,
+    kind: RunDetailPageKind,
+    patch: Partial<RunDetailPageState>,
+  ) => {
+    const current = runDetailPageState(runId, kind)
+    runDetailPagesByRunId.value = {
+      ...runDetailPagesByRunId.value,
+      [runId]: {
+        ...(runDetailPagesByRunId.value[runId] || {
+          steps: createRunDetailPageState(),
+          commands: createRunDetailPageState(),
+          artifacts: createRunDetailPageState(),
+        }),
+        [kind]: { ...current, ...patch },
+      },
+    }
+  }
+  const mergeById = <T extends { id: string }>(current: T[], incoming: T[]) => {
+    const byId = new Map(current.map((item) => [item.id, item]))
+    incoming.forEach((item) => byId.set(item.id, item))
+    return [...byId.values()]
+  }
+  const isCurrentRunDetailRequest = (runId: string) =>
+    options.selectedRunId.value === runId && options.runProjection.hasRun(runId)
+  const runDetailError = (error: unknown) =>
+    error instanceof Error && error.message ? error.message : '读取运行摘要失败'
+
+  const loadRunDetailPage = async (runId: string, kind: RunDetailPageKind, loadMore = false) => {
+    if (!isCurrentRunDetailRequest(runId)) return
+    const state = runDetailPageState(runId, kind)
+    if (state.loading || (state.loaded && (!state.hasMore || !loadMore))) return
+    const offset = loadMore && state.loaded && state.nextOffset !== null ? state.nextOffset : 0
+    const requestKey = `${runId}:${kind}:${offset}`
+    const existing = runDetailPageRequests.get(requestKey)
+    if (existing) return existing
+    patchRunDetailPageState(runId, kind, { loading: true, error: '' })
+    const request = (async () => {
+      try {
+        if (kind === 'steps' && typeof AgentAPI.listRunStepsPage === 'function') {
+          const page = await AgentAPI.listRunStepsPage(runId, { limit: RUN_DETAIL_PAGE_LIMIT, offset })
+          if (!isCurrentRunDetailRequest(runId)) return
+          const current = options.activeRun.value?.id === runId ? options.runProjection.activeRunSteps.value : []
+          const merged = mergeById(current, page.items).sort((left, right) => left.step_order - right.step_order)
+          options.runProjection.setRunSteps(runId, merged)
+          if (options.plan.value && merged.length) {
+            options.runProjection.setRunPlan(runId, { ...options.plan.value, steps: materializePlanSteps(merged) })
+          }
+          const nextOffset = Number.isSafeInteger(page.next_offset) && (page.next_offset as number) > offset ? page.next_offset as number : null
+          patchRunDetailPageState(runId, kind, { loaded: true, total: page.total, nextOffset, hasMore: Boolean(page.has_more && page.items.length && nextOffset !== null) })
+          return
+        }
+        if (kind === 'commands' && typeof AgentAPI.listRunCommandsPage === 'function') {
+          const page = await AgentAPI.listRunCommandsPage(runId, { limit: RUN_DETAIL_PAGE_LIMIT, offset })
+          if (!isCurrentRunDetailRequest(runId)) return
+          const stateProjection = options.runState.value || await loadRunState(runId)
+          if (stateProjection && options.activeRun.value?.id === runId) {
+            const current = Array.isArray(stateProjection.commands) ? stateProjection.commands : []
+            const commands = mergeById(current, page.items).sort((left, right) =>
+              right.requested_at.localeCompare(left.requested_at) || right.id.localeCompare(left.id),
+            )
+            options.runProjection.setRunState(runId, { ...stateProjection, commands })
+          }
+          const nextOffset = Number.isSafeInteger(page.next_offset) && (page.next_offset as number) > offset ? page.next_offset as number : null
+          patchRunDetailPageState(runId, kind, { loaded: true, total: page.total, nextOffset, hasMore: Boolean(page.has_more && page.items.length && nextOffset !== null) })
+          return
+        }
+        if (kind === 'artifacts' && typeof AgentAPI.listArtifactsPage === 'function') {
+          const page = await AgentAPI.listArtifactsPage(runId, { limit: RUN_DETAIL_PAGE_LIMIT, offset })
+          if (!isCurrentRunDetailRequest(runId)) return
+          const current = options.activeRun.value?.id === runId ? options.artifacts.value : []
+          const merged = mergeById(current, page.items).sort((left, right) =>
+            left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id),
+          )
+          options.runProjection.setRunArtifacts(runId, merged)
+          restoreArtifactProjection(runId, merged)
+          const nextOffset = Number.isSafeInteger(page.next_offset) && (page.next_offset as number) > offset ? page.next_offset as number : null
+          patchRunDetailPageState(runId, kind, { loaded: true, total: page.total, nextOffset, hasMore: Boolean(page.has_more && page.items.length && nextOffset !== null) })
+          return
+        }
+
+        if (kind === 'steps' && offset === 0 && typeof AgentAPI.listRunSteps === 'function') {
+          const items = await AgentAPI.listRunSteps(runId)
+          if (!isCurrentRunDetailRequest(runId)) return
+          options.runProjection.setRunSteps(runId, items)
+          if (options.plan.value && items.length) options.runProjection.setRunPlan(runId, { ...options.plan.value, steps: materializePlanSteps(items) })
+          patchRunDetailPageState(runId, kind, { loaded: true, total: items.length, nextOffset: null, hasMore: false })
+          return
+        }
+        if (kind === 'commands' && offset === 0 && typeof AgentAPI.listRunCommands === 'function') {
+          const items = await AgentAPI.listRunCommands(runId, RUN_DETAIL_PAGE_LIMIT)
+          if (!isCurrentRunDetailRequest(runId)) return
+          const stateProjection = options.runState.value || await loadRunState(runId)
+          if (stateProjection && options.activeRun.value?.id === runId) options.runProjection.setRunState(runId, { ...stateProjection, commands: items })
+          patchRunDetailPageState(runId, kind, { loaded: true, total: items.length, nextOffset: null, hasMore: false })
+          return
+        }
+        if (kind === 'artifacts' && offset === 0 && typeof AgentAPI.listArtifacts === 'function') {
+          const items = await AgentAPI.listArtifacts(runId)
+          if (!isCurrentRunDetailRequest(runId)) return
+          options.runProjection.setRunArtifacts(runId, items)
+          patchRunDetailPageState(runId, kind, { loaded: true, total: items.length, nextOffset: null, hasMore: false })
+          return
+        }
+        if (isCurrentRunDetailRequest(runId)) patchRunDetailPageState(runId, kind, { loaded: true, hasMore: false, nextOffset: null })
+      } catch (error) {
+        if (isCurrentRunDetailRequest(runId)) patchRunDetailPageState(runId, kind, { error: runDetailError(error) })
+      }
+    })()
+    runDetailPageRequests.set(requestKey, request)
+    try {
+      await request
+    } finally {
+      if (runDetailPageRequests.get(requestKey) === request) {
+        runDetailPageRequests.delete(requestKey)
+        patchRunDetailPageState(runId, kind, { loading: false })
+      }
+    }
+  }
+
+  const loadRunDetailSummaries = async (runId: string) => {
+    await Promise.all([
+      loadRunDetailPage(runId, 'steps'),
+      loadRunDetailPage(runId, 'commands'),
+      loadRunDetailPage(runId, 'artifacts'),
+    ])
+  }
+
   const loadRunSteps = async (runId: string) => {
+    if (typeof AgentAPI.listRunStepsPage === 'function') {
+      await loadRunDetailPage(runId, 'steps')
+      return
+    }
     if (typeof AgentAPI.listRunSteps !== 'function') return
     try {
       const loaded = await AgentAPI.listRunSteps(runId)
@@ -370,25 +525,6 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
       artifactPreview.value = artifactPreviewByKey.value[previewKey] || ''
       artifactPreviewError.value = artifactPreviewErrorByKey.value[previewKey] || ''
     }
-  }
-
-  const loadArtifactsWithFacts = async (runId: string) => {
-    if (typeof AgentAPI.listArtifacts !== 'function') return []
-    const batchGeneration = artifactViewGeneration
-    const selectedRunAtStart = options.selectedRunId.value
-    const isCurrentBatch = () =>
-      batchGeneration === artifactViewGeneration &&
-      selectedRunAtStart === runId &&
-      options.selectedRunId.value === runId &&
-      options.runProjection.hasRun(runId)
-    const artifacts = await AgentAPI.listArtifacts(runId)
-    if (!isCurrentBatch()) return artifacts
-    options.runProjection.setRunArtifacts(runId, artifacts)
-    await Promise.all(
-      artifacts.map((artifact) => loadArtifactFacts(artifact, batchGeneration).catch(() => undefined)),
-    )
-    restoreArtifactProjection(runId, artifacts)
-    return artifacts
   }
 
   const loadQualityBlockers = async (artifact: AgentArtifact) => {
@@ -753,15 +889,17 @@ export function useAgentWorkspaceRuntime(options: AgentWorkspaceRuntimeOptions) 
     artifactLineageFactsErrors,
     providerProvenanceByRunId,
     gapRepairStateByRunId,
+    runDetailPagesByRunId,
     materializePlanSteps,
     loadRunSteps,
+    loadRunDetailPage,
+    loadRunDetailSummaries,
     loadRunPlan,
     loadRunState,
     loadRunFacts,
     applyEvent,
     repairSequenceGap,
     loadArtifactFacts,
-    loadArtifactsWithFacts,
     loadQualityBlockers,
     loadRewriteInstructions,
     compareArtifact,

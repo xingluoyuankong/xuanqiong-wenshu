@@ -9,6 +9,9 @@ const {
   getRunPlanRevisionMock,
   listRunConversationSummariesMock,
   listArtifactsMock,
+  listRunStepsPageMock,
+  listRunCommandsPageMock,
+  listArtifactsPageMock,
   getArtifactQualityMock,
   getArtifactLineageMock,
   listArtifactQualityBlockersMock,
@@ -26,6 +29,9 @@ const {
   getRunPlanRevisionMock: vi.fn(),
   listRunConversationSummariesMock: vi.fn(),
   listArtifactsMock: vi.fn(),
+  listRunStepsPageMock: vi.fn(),
+  listRunCommandsPageMock: vi.fn(),
+  listArtifactsPageMock: vi.fn(),
   getArtifactQualityMock: vi.fn(),
   getArtifactLineageMock: vi.fn(),
   listArtifactQualityBlockersMock: vi.fn(),
@@ -46,6 +52,9 @@ vi.mock('@/api/agent', () => ({
     getRunPlanRevision: getRunPlanRevisionMock,
     listRunConversationSummaries: listRunConversationSummariesMock,
     listArtifacts: listArtifactsMock,
+    listRunStepsPage: listRunStepsPageMock,
+    listRunCommandsPage: listRunCommandsPageMock,
+    listArtifactsPage: listArtifactsPageMock,
     getArtifactQuality: getArtifactQualityMock,
     getArtifactLineage: getArtifactLineageMock,
     listArtifactQualityBlockers: listArtifactQualityBlockersMock,
@@ -99,6 +108,9 @@ describe('useAgentWorkspaceRuntime', () => {
     listArtifactRewriteInstructionsMock.mockResolvedValue([])
     listEventsMock.mockResolvedValue([])
     listRunActivityMock.mockResolvedValue([])
+    listRunStepsPageMock.mockReset()
+    listRunCommandsPageMock.mockReset()
+    listArtifactsPageMock.mockReset()
     sessionStreamUrlMock.mockImplementation((sessionId: string, runId: string, afterSequence: number) => `/stream/${sessionId}/${runId}/${afterSequence}`)
   })
 
@@ -115,6 +127,7 @@ describe('useAgentWorkspaceRuntime', () => {
     const runtime = useAgentWorkspaceRuntime({
       runProjection: projection,
       activeRun: projection.activeRun,
+      runState: projection.activeRunState,
       plan: computed(() => projection.activePlan.value),
       artifacts: computed(() => projection.activeArtifacts.value),
       approvals: computed(() => projection.activeApprovals.value),
@@ -131,23 +144,64 @@ describe('useAgentWorkspaceRuntime', () => {
   }
 
 
-  it('does not start stale Artifact fact loads after the selected Run changes during a batch', async () => {
+  it('consumes detail pages, merges them in stable order, and deduplicates repeated page requests', async () => {
+    const { runtime, projection } = createRuntime()
+    const stepOne = {
+      id: 'step-one', run_id: run.id, user_id: 1, step_order: 1, tool_name: 'outline.inspect',
+      idempotency_key: 'step-one', status: 'completed', attempt_count: 1, output_json: {},
+    }
+    const stepTwo = { ...stepOne, id: 'step-two', step_order: 2, tool_name: 'quality.inspect' }
+    listRunStepsPageMock
+      .mockResolvedValueOnce({ run_id: run.id, total: 2, limit: 50, offset: 0, has_more: true, next_offset: 50, items: [stepOne] })
+      .mockResolvedValueOnce({ run_id: run.id, total: 2, limit: 50, offset: 50, has_more: false, next_offset: null, items: [stepTwo] })
+
+    await Promise.all([
+      runtime.loadRunDetailPage(run.id, 'steps'),
+      runtime.loadRunDetailPage(run.id, 'steps'),
+    ])
+    expect(listRunStepsPageMock).toHaveBeenCalledTimes(1)
+    expect(listRunStepsPageMock).toHaveBeenCalledWith(run.id, { limit: 50, offset: 0 })
+    expect(runtime.runDetailPagesByRunId.value[run.id].steps).toMatchObject({ loaded: true, hasMore: true, total: 2 })
+
+    await runtime.loadRunDetailPage(run.id, 'steps', true)
+    expect(listRunStepsPageMock).toHaveBeenLastCalledWith(run.id, { limit: 50, offset: 50 })
+    expect(projection.activeRunSteps.value.map((item) => item.id)).toEqual(['step-one', 'step-two'])
+    expect(runtime.runDetailPagesByRunId.value[run.id].steps.hasMore).toBe(false)
+  })
+
+  it('keeps Artifact page ordering stable for equal timestamps without loading facts for every summary', async () => {
+    const { runtime, projection } = createRuntime()
+    const first = { ...artifact, id: 'artifact-b' }
+    const second = { ...artifact, id: 'artifact-a' }
+    listArtifactsPageMock.mockResolvedValueOnce({
+      run_id: run.id, total: 2, limit: 50, offset: 0, has_more: false, next_offset: null, items: [first, second],
+    })
+
+    await runtime.loadRunDetailPage(run.id, 'artifacts')
+
+    expect(projection.activeArtifacts.value.map((item) => item.id)).toEqual(['artifact-a', 'artifact-b'])
+    expect(getArtifactQualityMock).not.toHaveBeenCalled()
+    expect(getArtifactLineageMock).not.toHaveBeenCalled()
+  })
+
+  it('clears stale page loading state after switching Runs while a page request is pending', async () => {
     const { runtime, projection } = createRuntime()
     const runB = { ...run, id: 'runtime-run-b' }
-    let resolveArtifacts: (value: typeof artifact[]) => void = () => undefined
-    const artifactsPromise = new Promise<typeof artifact[]>((resolve) => { resolveArtifacts = resolve })
-    listArtifactsMock.mockReturnValueOnce(artifactsPromise)
+    let resolvePage: (value: unknown) => void = () => undefined
+    const pending = new Promise((resolve) => { resolvePage = resolve })
+    listRunStepsPageMock.mockReturnValueOnce(pending).mockResolvedValueOnce({
+      run_id: run.id, total: 0, limit: 50, offset: 0, has_more: false, next_offset: null, items: [],
+    })
 
-    const request = runtime.loadArtifactsWithFacts(run.id)
+    const request = runtime.loadRunDetailPage(run.id, 'steps')
     projection.upsertRun(runB, { select: true })
-    runtime.resetArtifactFacts()
-    resolveArtifacts([artifact])
+    resolvePage({ run_id: run.id, total: 0, limit: 50, offset: 0, has_more: false, next_offset: null, items: [] })
     await request
+    projection.selectRun(run.id)
+    await runtime.loadRunDetailPage(run.id, 'steps')
 
-    expect(getArtifactQualityMock).not.toHaveBeenCalledWith(artifact.id)
-    expect(getArtifactLineageMock).not.toHaveBeenCalledWith(artifact.id)
-    expect(runtime.artifactQualityFactsLoading.value).not.toHaveProperty(artifactStateKey(artifact))
-    expect(runtime.artifactQualityFactsErrors.value).not.toHaveProperty(artifactStateKey(artifact))
+    expect(listRunStepsPageMock).toHaveBeenCalledTimes(2)
+    expect(runtime.runDetailPagesByRunId.value[run.id].steps.loading).toBe(false)
   })
 
 
@@ -216,9 +270,11 @@ describe('useAgentWorkspaceRuntime', () => {
     expect(runtime.artifactPreviewByKey.value[artifactStateKey(artifact)]).toBe('Run-A 正文')
     expect(runtime.artifactPreviewByKey.value[artifactStateKey(artifactB)]).toBe('Run-B 正文')
 
-    listArtifactsMock.mockResolvedValueOnce([artifactB])
+    listArtifactsPageMock.mockResolvedValueOnce({
+      run_id: runB.id, total: 1, limit: 50, offset: 0, has_more: false, next_offset: null, items: [artifactB],
+    })
     runtime.resetArtifactFacts({ preserveScopedState: true })
-    await runtime.loadArtifactsWithFacts(runB.id)
+    await runtime.loadRunDetailPage(runB.id, 'artifacts')
 
     expect(runtime.qualityBlockers.value).toEqual([blockerB])
     expect(runtime.artifactDiff.value).toBeDefined()

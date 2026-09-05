@@ -263,7 +263,7 @@
           </div>
         </XqPanel>
 
-        <details ref="inspectorSectionEl" class="workspace-section workspace-inspector-section" data-testid="agent-inspector-section">
+        <details ref="inspectorSectionEl" class="workspace-section workspace-inspector-section" data-testid="agent-inspector-section" @toggle="onInspectorSectionToggle">
           <summary>
             <span>当前运行</span>
             <small>{{ activeRun ? `${runStatus(activeRun.status)} · ${Math.round(activeRun.progress)}%` : '暂无运行' }}</small>
@@ -288,10 +288,36 @@
               @recover="activeRun && recoverRunAction(activeRun)"
               @reconnect="reconnectActiveRun"
             />
+            <div v-if="activeRun" class="workspace-pagination" data-testid="agent-run-summary-pagination">
+              <span v-if="activeRunDetailPages?.steps?.error" class="error">步骤摘要读取失败：{{ activeRunDetailPages.steps.error }}</span>
+              <span v-else-if="!activeRunDetailPages?.steps?.loaded" class="muted">步骤摘要尚未载入。</span>
+              <span v-else-if="!runSteps.length" class="muted">暂无步骤摘要。</span>
+              <span v-else class="muted">已载入 {{ runSteps.length }} / {{ activeRunDetailPages.steps.total ?? runSteps.length }} 个步骤</span>
+              <XqButton
+                v-if="activeRunDetailPages?.steps?.hasMore"
+                variant="secondary"
+                size="sm"
+                data-testid="agent-load-more-steps"
+                :disabled="activeRunDetailPages.steps.loading"
+                @click="loadRunDetailPage(activeRun.id, 'steps', true)"
+              >{{ activeRunDetailPages.steps.loading ? '正在读取…' : '加载更多步骤' }}</XqButton>
+              <span v-if="activeRunDetailPages?.commands?.error" class="error">命令摘要读取失败：{{ activeRunDetailPages.commands.error }}</span>
+              <span v-else-if="!activeRunDetailPages?.commands?.loaded" class="muted">命令摘要尚未载入。</span>
+              <span v-else-if="!(runState?.commands?.length)" class="muted">暂无命令摘要。</span>
+              <span v-else class="muted">已载入 {{ runState.commands.length }} / {{ activeRunDetailPages.commands.total ?? runState.commands.length }} 个命令</span>
+              <XqButton
+                v-if="activeRunDetailPages?.commands?.hasMore"
+                variant="secondary"
+                size="sm"
+                data-testid="agent-load-more-commands"
+                :disabled="activeRunDetailPages.commands.loading"
+                @click="loadRunDetailPage(activeRun.id, 'commands', true)"
+              >{{ activeRunDetailPages.commands.loading ? '正在读取…' : '加载更多命令' }}</XqButton>
+            </div>
           </div>
         </details>
 
-        <details class="workspace-section workspace-activity-section" data-testid="agent-run-details-section">
+        <details ref="runDetailsSectionEl" class="workspace-section workspace-activity-section" data-testid="agent-run-details-section" @toggle="onRunDetailsSectionToggle">
           <summary><span>运行详情</span><small>计划、审批、候选</small></summary>
           <div class="workspace-section-body">
             <AgentRunFactPanel
@@ -364,6 +390,7 @@
               :can-locate-blockers="typeof AgentAPI.listArtifactQualityBlockers === 'function'"
               :can-load-rewrite-instructions="typeof AgentAPI.listArtifactRewriteInstructions === 'function'"
               :can-compare-with-version="typeof AgentAPI.getArtifactVersionDiff === 'function'"
+              :can-load-facts="typeof AgentAPI.getArtifactQuality === 'function' || typeof AgentAPI.getArtifactLineage === 'function'"
               :can-accept="typeof AgentAPI.acceptArtifact === 'function'"
               @preview="previewArtifact"
               @compare="compareArtifact"
@@ -373,7 +400,22 @@
               @accept="acceptArtifactAction"
               @toggle-quality-finding="toggleQualityFindingContextRef"
               @open-writing-desk="({ artifact, focus }) => openWritingDesk(artifact, focus)"
+              @load-facts="loadArtifactFacts"
             />
+            <div v-if="activeRun" class="workspace-pagination" data-testid="agent-artifact-summary-pagination">
+              <span v-if="activeRunDetailPages?.artifacts?.error" class="error">候选摘要读取失败：{{ activeRunDetailPages.artifacts.error }}</span>
+              <span v-else-if="!activeRunDetailPages?.artifacts?.loaded" class="muted">候选摘要尚未载入。</span>
+              <span v-else-if="!artifacts.length" class="muted">暂无候选摘要。</span>
+              <span v-else class="muted">已载入 {{ artifacts.length }} / {{ activeRunDetailPages.artifacts.total ?? artifacts.length }} 个候选</span>
+              <XqButton
+                v-if="activeRunDetailPages?.artifacts?.hasMore"
+                variant="secondary"
+                size="sm"
+                data-testid="agent-load-more-artifacts"
+                :disabled="activeRunDetailPages.artifacts.loading"
+                @click="loadRunDetailPage(activeRun.id, 'artifacts', true)"
+              >{{ activeRunDetailPages.artifacts.loading ? '正在读取…' : '加载更多候选' }}</XqButton>
+            </div>
           </div>
         </details>
 
@@ -501,6 +543,7 @@ const selectedRunId = runProjection.selectedRunId
 const selectedActionRef = ref<string | null>(null)
 const selectedResultRef = ref<string | null>(null)
 const inspectorSectionEl = ref<HTMLDetailsElement | null>(null)
+const runDetailsSectionEl = ref<HTMLDetailsElement | null>(null)
 const executionFactsByRunId = ref<Record<string, AgentExecutionFact[]>>({})
 const executionFactsErrorByRunId = ref<Record<string, string>>({})
 const providerUsageSummaryByRunId = ref<Record<string, AgentProviderUsageSummary>>({})
@@ -766,6 +809,7 @@ const {
 const workspaceRuntime = useAgentWorkspaceRuntime({
   runProjection,
   activeRun,
+  runState,
   plan,
   artifacts,
   approvals,
@@ -803,14 +847,16 @@ const {
   artifactLineageFactsErrors,
   providerProvenanceByRunId,
   gapRepairStateByRunId,
+  runDetailPagesByRunId,
   loadRunSteps,
+  loadRunDetailPage,
+  loadRunDetailSummaries,
   loadRunPlan,
   loadRunState,
   loadRunFacts,
   applyEvent,
   repairSequenceGap,
   loadArtifactFacts,
-  loadArtifactsWithFacts,
   loadQualityBlockers,
   loadRewriteInstructions,
   compareArtifact,
@@ -827,6 +873,9 @@ const providerProvenance = computed(() =>
 )
 const gapRepairState = computed(() =>
   activeRun.value ? gapRepairStateByRunId.value[activeRun.value.id] || 'idle' : 'idle',
+)
+const activeRunDetailPages = computed(() =>
+  activeRun.value ? runDetailPagesByRunId.value[activeRun.value.id] || null : null,
 )
 const runStatus = (status: string) =>
   ({
@@ -967,6 +1016,7 @@ const revealSelectedLocation = async () => {
   const section = inspectorSectionEl.value
   if (!section || !activeRun.value) return
   section.open = true
+  await loadRunDetailPage(activeRun.value.id, 'steps')
   await nextTick()
   const reference = selectedResultRef.value || selectedActionRef.value
   if (!reference) return
@@ -998,7 +1048,7 @@ const selectRunAction = async (runId: string) => {
   if (typeof AgentAPI.listApprovals === 'function') {
     loads.push(AgentAPI.listApprovals(run.id).then((items) => runProjection.setRunApprovals(run.id, items)))
   }
-  if (typeof AgentAPI.listArtifacts === 'function') loads.push(loadArtifactsWithFacts(run.id))
+  if (typeof AgentAPI.listArtifactsPage === 'function' || typeof AgentAPI.listArtifacts === 'function') loads.push(loadRunDetailPage(run.id, 'artifacts'))
   await Promise.all(loads)
   syncAgentRoute({
     projectId: selectedProjectId.value,
@@ -1135,8 +1185,8 @@ const submitMessage = async () => {
       result.run.id,
       Array.isArray(result.tool_results) ? result.tool_results : [],
     )
-    if (typeof AgentAPI.listArtifacts === 'function') {
-      await loadArtifactsWithFacts(result.run.id)
+    if (typeof AgentAPI.listArtifactsPage === 'function' || typeof AgentAPI.listArtifacts === 'function') {
+      await loadRunDetailPage(result.run.id, 'artifacts')
     }
     if (result.plan.steps.length) {
       add(
@@ -1204,6 +1254,19 @@ const onDataSectionToggle = (event: Event) => {
   dataDetailsLoaded.value = true
   void loadDataDetails()
 }
+const loadOpenRunDetailSummaries = () => {
+  if (activeRun.value && (inspectorSectionEl.value?.open || runDetailsSectionEl.value?.open)) {
+    void loadRunDetailSummaries(activeRun.value.id)
+  }
+}
+const onInspectorSectionToggle = (event: Event) => {
+  const section = event.currentTarget as HTMLDetailsElement | null
+  if (section?.open) loadOpenRunDetailSummaries()
+}
+const onRunDetailsSectionToggle = (event: Event) => {
+  const section = event.currentTarget as HTMLDetailsElement | null
+  if (section?.open) loadOpenRunDetailSummaries()
+}
 const switchProject = () => {
   manualEntityContextRefs.value = []
   manualQualityFindingContextRefs.value = []
@@ -1264,15 +1327,23 @@ const hydrateSessionRun = async (
     runProjection.setRunApprovals(selected.id, await AgentAPI.listApprovals(selected.id))
   }
   let artifactId: string | undefined
-  if (typeof AgentAPI.listArtifacts === 'function') {
-    const selectedArtifacts = await loadArtifactsWithFacts(selected.id)
-    const requestedArtifact = requestedArtifactId
+  if (typeof AgentAPI.listArtifactsPage === 'function' || typeof AgentAPI.listArtifacts === 'function') {
+    await loadRunDetailPage(selected.id, 'artifacts')
+    let selectedArtifacts = artifacts.value
+    let requestedArtifact = requestedArtifactId
       ? selectedArtifacts.find((item) => item.id === requestedArtifactId)
       : undefined
+    const artifactPageState = () => runDetailPagesByRunId.value[selected.id]?.artifacts
+    while (requestedArtifactId && !requestedArtifact && artifactPageState()?.hasMore) {
+      await loadRunDetailPage(selected.id, 'artifacts', true)
+      selectedArtifacts = artifacts.value
+      requestedArtifact = selectedArtifacts.find((item) => item.id === requestedArtifactId)
+    }
     if (requestedArtifactId && !requestedArtifact) {
       add('候选深链不可用', '请求的 Artifact 不属于当前运行，未载入候选内容。')
     } else if (requestedArtifact) {
       artifactId = requestedArtifact.id
+      await loadArtifactFacts(requestedArtifact).catch(() => undefined)
       await previewArtifact(requestedArtifact)
     }
   }

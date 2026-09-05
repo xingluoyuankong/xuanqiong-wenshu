@@ -323,7 +323,11 @@ describe('AgentWorkspace', () => {
     getSessionMock.mockResolvedValue({ ...session, messages: [], runs: [run] })
     listEventsMock.mockResolvedValue([])
     listApprovalsMock.mockResolvedValue([])
-    listArtifactsMock.mockResolvedValue([])
+    const artifact = {
+      id: 'lazy-artifact', run_id: run.id, user_id: 1, project_id: 'p1', kind: 'chapter_candidate',
+      uri: 'agent-artifact://lazy', metadata_json: { status: 'candidate' }, created_at: 'now',
+    }
+    listArtifactsMock.mockResolvedValue([artifact])
     listRunStepsMock.mockResolvedValue([])
     getRunStateMock.mockResolvedValue({ correlation_id: 'lazy', progress: 100, phase: 'completed', current_step: 1, terminal_status: 'completed', capability_snapshot: { generation: 1, providers: [], tools: [] } })
     const pinia = createPinia()
@@ -334,6 +338,7 @@ describe('AgentWorkspace', () => {
 
     expect(wrapper.get('[data-testid="agent-selected-run-id"]').text()).toContain(run.id)
     expect(getProviderUsageSummaryMock).not.toHaveBeenCalled()
+    expect(getArtifactQualityMock).not.toHaveBeenCalled()
     await expandDataDetails(wrapper)
 
     expect(listToolHealthMock).toHaveBeenCalledTimes(1)
@@ -1248,6 +1253,9 @@ describe('AgentWorkspace', () => {
     })
 
     const wrapper = mount(AgentWorkspace)
+    await flushPromises()
+    await flushPromises()
+    await wrapper.get('[data-testid="agent-load-artifact-facts-button"]').trigger('click')
     await flushPromises()
     await flushPromises()
     await wrapper.get('[data-testid="agent-quality-finding-quality-finding-17"]').trigger('click')

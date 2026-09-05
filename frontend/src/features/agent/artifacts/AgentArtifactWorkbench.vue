@@ -12,6 +12,13 @@
       <small v-if="artifactQualityFactsLoading(artifact)" class="muted" data-testid="agent-artifact-quality-loading">正在读取权威质量门禁…</small>
       <small v-else-if="artifactQualityFactsError(artifact)" class="error" data-testid="agent-artifact-quality-error">质量门禁读取失败：{{ artifactQualityFactsError(artifact) }}</small>
       <small v-else-if="!artifactQuality(artifact)" class="muted" data-testid="agent-artifact-quality-pending">尚未取得权威质量门禁，暂不能接受候选。</small>
+      <XqButton
+        v-if="canLoadFacts && !artifactQuality(artifact) && !artifactQualityFactsLoading(artifact)"
+        variant="secondary"
+        size="sm"
+        data-testid="agent-load-artifact-facts-button"
+        @click="emit('load-facts', artifact)"
+      >读取质量与谱系</XqButton>
       <small v-if="retestSide(artifact, 'before') && retestSide(artifact, 'after')">
         复测：before {{ retestSide(artifact, 'before')?.blocker_count ?? '?' }} → after
         {{ retestSide(artifact, 'after')?.blocker_count ?? '?' }}；阻断变化
@@ -159,6 +166,7 @@ const props = withDefaults(defineProps<{
   canLocateBlockers: boolean
   canLoadRewriteInstructions: boolean
   canCompareWithVersion: boolean
+  canLoadFacts?: boolean
   canAccept: boolean
   selectedQualityFindingIds?: string[]
 }>(), {
@@ -187,6 +195,7 @@ const props = withDefaults(defineProps<{
   canLocateBlockers: false,
   canLoadRewriteInstructions: false,
   canCompareWithVersion: false,
+  canLoadFacts: false,
   canAccept: false,
   selectedQualityFindingIds: () => [],
 })
@@ -197,6 +206,7 @@ const emit = defineEmits<{
   'locate-blockers': [artifact: AgentArtifact]
   'load-rewrite-instructions': [artifact: AgentArtifact]
   'compare-with-version': [artifact: AgentArtifact]
+  'load-facts': [artifact: AgentArtifact]
   accept: [artifact: AgentArtifact]
   'open-writing-desk': [payload: { artifact: AgentArtifact; focus: 'quality-blocker' | 'version' }]
   'toggle-quality-finding': [finding: AgentQualityFinding]
