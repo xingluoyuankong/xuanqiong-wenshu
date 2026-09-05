@@ -5316,3 +5316,34 @@ project_members=0
 - Agent Worker/Command Worker 生产部署矩阵仍待执行；
 - 默认会话详情完整消息/Run payload 策略仍待兼容性决策；
 - 总任务继续保持 `active / NO-GO`。
+
+## 2026-09-05 Agent Worker / Command Worker 生产配置一次性启动验收
+
+在 `ENVIRONMENT=production`、`DEBUG=false`、独立发布夹具密码的进程级配置下，分别运行：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe scripts/agent_worker.py --once --worker-id release-acceptance-agent
+.\.venv\Scripts\python.exe scripts/agent_command_worker.py --once --worker-id release-acceptance-command
+```
+
+结果：
+
+```text
+Agent worker started -> once completed: worked=False -> stopped
+Agent command worker started -> once completed: worked=False -> stopped
+退出码：0
+```
+
+该验收证明两个独立 worker 入口在生产配置下可启动、可轮询空队列并正常释放引擎；本轮未创建任务，因此 `worked=False` 是预期结果。完整长时间运行、真实任务领取和服务编排健康检查仍需部署环境继续验证。
+
+### 当前最新状态
+
+```text
+HEAD：508d53f test: add isolated migration backup restore matrix
+新增并已提交：真实 TCP 多用户成员矩阵脚本、隔离 SQLite 备份恢复脚本
+生产配置：API/Frontend/Proxy ready；Agent Worker/Command Worker --once 退出码 0
+发布结论：active / NO-GO
+```
+
+剩余工作收敛为：正式部署编排矩阵、默认会话详情 payload 策略、完整后端全量门禁与最终发布审计。
