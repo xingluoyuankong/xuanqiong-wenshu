@@ -225,8 +225,9 @@ def smoke_writer_route(
                 "min_word_count": 500,
             },
         )
-        if status < 500:
-            context.generated = True
+        # The generate route queues background work; a 2xx response does not
+        # mean a selectable completed version exists yet. Keep evaluate/select
+        # gated until a dedicated wait-for-terminal acceptance flow is used.
         return status, detail
 
     if method == "POST" and path == "/api/writer/novels/{project_id}/chapters/cancel":
