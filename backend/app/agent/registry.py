@@ -536,7 +536,7 @@ from .provider_catalog import PROVIDER_MANIFESTS
 
 DEFAULT_TOOL_REGISTRY = AgentToolRegistry()
 DEFAULT_TOOL_PROVIDER_HEALTH: list[dict[str, Any]] = []
-_DEFAULT_TOOL_REGISTRY_GENERATION = 1
+_DEFAULT_TOOL_REGISTRY_GENERATION = 2
 _CONFIGURED_PROVIDER_SIGNATURE: tuple[bool, tuple[str, ...], int, str] | None = None
 
 
@@ -690,3 +690,4 @@ def get_default_tool_registry_snapshot() -> dict[str, Any]:
             for tool, item in zip(DEFAULT_TOOL_REGISTRY.list_tools(), catalog["tools"], strict=True)
         ],
     }
+

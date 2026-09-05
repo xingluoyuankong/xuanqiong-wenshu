@@ -48,9 +48,10 @@ def test_resource_identity_families_are_stable_and_actionable():
     assert ("GET", "/api/writer/novels/{project_id}/chapters/{chapter_number}/stream") in smoke.SKIPPED_STREAMING_ROUTES
     assert ("POST", "/api/updates/stream/create") in smoke.SKIPPED_MUTATING_ROUTES
     assert ("POST", "/api/agent/sessions") in smoke.SKIPPED_MUTATING_ROUTES
-    session_context = smoke.SmokeResourceContext(project_id="fixture-project", chapter_number=1, session_id="session-1")
+    session_context = smoke.SmokeResourceContext(project_id="fixture-project", chapter_number=1, session_id="session-1", run_id="run-1")
     assert smoke.has_unresolved_resource_identity("/api/agent/sessions/{session_id}", session_context) is False
-    assert smoke.substitute_path_params("/api/agent/sessions/{session_id}", session_context) == "/api/agent/sessions/session-1"
+    assert smoke.has_unresolved_resource_identity("/api/agent/sessions/{session_id}/runs/{run_id}/events", session_context) is False
+    assert smoke.substitute_path_params("/api/agent/sessions/{session_id}/runs/{run_id}/events", session_context) == "/api/agent/sessions/session-1/runs/run-1/events"
 
 def test_capture_generation_task_id_binds_nested_runtime_id():
     smoke = _load_smoke_routes_module()

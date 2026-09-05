@@ -32,6 +32,7 @@ SKIPPED_MUTATING_ROUTES = {
     ("POST", "/api/optimizer/apply-optimization"),
     ("POST", "/api/updates/stream/create"),
     ("POST", "/api/agent/sessions"),
+    ("POST", "/api/agent/sessions/{session_id}/messages"),
 }
 SKIPPED_STREAMING_ROUTES = {
     ("GET", "/api/writer/novels/{project_id}/chapters/{chapter_number}/stream"),
@@ -71,6 +72,7 @@ class SmokeResourceContext:
     clue_id: int | None = None
     task_id: str | None = None
     session_id: str | None = None
+    run_id: str | None = None
     generated: bool = False
 
 
@@ -102,6 +104,8 @@ def has_unresolved_resource_identity(path: str, context: SmokeResourceContext | 
         available.add("task_id")
     if context is not None and context.session_id:
         available.add("session_id")
+    if context is not None and context.run_id:
+        available.add("run_id")
     for name in (match.group(1).lower() for match in PATH_PARAM_PATTERN.finditer(path)):
         if "chapter" in name and "number" in name:
             continue
@@ -122,6 +126,8 @@ def substitute_path_params(path: str, context: SmokeResourceContext | None = Non
             return context.task_id
         if name == "session_id" and context is not None and context.session_id:
             return context.session_id
+        if name == "run_id" and context is not None and context.run_id:
+            return context.run_id
         if "chapter" in name and "number" in name:
             return str(context.chapter_number if context is not None else 1)
         return "test"
@@ -271,10 +277,20 @@ def create_smoke_project() -> tuple[SmokeResourceContext | None, str]:
         json_body={"project_id": project_id, "title": "OpenAPI smoke session"},
     )
     session_id = None
+    run_id = None
     if session_status in {200, 201} and session_payload and session_payload.get("id"):
         session_id = str(session_payload["id"])
+        message_status, message_payload, _ = request_json(
+            "POST",
+            f"{BASE_URL}/api/agent/sessions/{session_id}/messages",
+            json_body={"content": "只返回“收到”。", "tools": [], "arguments": {}},
+        )
+        if message_status in {200, 201} and message_payload:
+            run = message_payload.get("run")
+            if isinstance(run, dict) and run.get("id"):
+                run_id = str(run["id"])
 
-    return SmokeResourceContext(project_id=project_id, chapter_number=1, clue_id=clue_id, session_id=session_id), ""
+    return SmokeResourceContext(project_id=project_id, chapter_number=1, clue_id=clue_id, session_id=session_id, run_id=run_id), ""
 
 
 def capture_generation_task_id(context: SmokeResourceContext, detail: str) -> None:
