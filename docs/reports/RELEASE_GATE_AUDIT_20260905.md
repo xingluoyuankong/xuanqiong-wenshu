@@ -632,3 +632,17 @@ git diff --check：通过
 ```
 
 本轮修复只涉及 smoke 认证状态初始化和对应回归测试，没有修改成员权限、Writer/Agent 业务授权逻辑。当前发布结论仍为 `active / NO-GO`；真实 Docker Compose、正式 MySQL 迁移恢复回滚和真实资源 smoke 覆盖仍需部署资源证据。
+
+## 当前 HEAD 复核附录（2026-09-05，smoke 门禁提交后）
+
+```text
+HEAD: dbab070 test: lock anonymous smoke auth initialization
+OpenAPI/LLM smoke: 261 checks / 53 passed / 208 skipped / 0 failed
+Smoke auth regression: 1 passed
+Member/Writer/Agent/TaskRuntime/migration/deployment targeted: 187 + 17 passed
+Default SQLite smoke fixture audit: 21 historical fixtures; 20 legacy OpenAPI Smoke 0 with stale TaskRuntime, 1 UUID fixture
+py_compile: PASS
+git diff --check: PASS
+```
+
+本轮已关闭 smoke 匿名认证初始化阻断；历史 fixture 仅盘点未删除。发布结论继续为 `active / NO-GO`，剩余原因是 Docker Compose、正式 MySQL 和完整真实资源 smoke 证据。

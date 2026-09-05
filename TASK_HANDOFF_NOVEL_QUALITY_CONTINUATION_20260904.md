@@ -5888,3 +5888,32 @@ git diff --check：通过
 OpenAPI smoke 的认证配置阻断已关闭，当前 smoke 可以完整执行到路由矩阵、LLM 设置检查和汇总阶段。剩余跳过项仍主要来自资源身份、真实写入和高成本接口，不把跳过计入通过。
 
 正式发布仍保持 `active / NO-GO`，剩余证据边界为：真实 Docker Compose 编排、正式 MySQL migration/backup/restore/rollback、真实资源 smoke fixture 覆盖和最终发布审计重判。
+
+## 2026-09-05 当前 smoke 门禁提交后复核
+
+```text
+HEAD：dbab070 test: lock anonymous smoke auth initialization
+新增回归：backend/app/services/test_smoke_api_routes.py
+成员/Writer/Agent/TaskRuntime/迁移/部署组合：187 passed
+发布/迁移/项目成员专项：17 passed
+匿名认证回归：1 passed
+OpenAPI + LLM smoke：261 checks / 53 passed / 208 skipped / 0 failed / exit=0
+py_compile：通过
+git diff --check：通过
+```
+
+默认 SQLite 只读 fixture 盘点：
+
+```text
+SMOKE_FIXTURE_AUDIT_PASSED
+fixture_count=21
+其中 20 个历史标题为 OpenAPI Smoke 0 且 TaskRuntime=status stale；1 个新 UUID 标题 fixture
+未执行自动删除，避免误触及历史运行数据
+```
+
+### 当前剩余闭环
+
+1. Docker Engine/正式部署节点上的 Compose 全编排健康矩阵；
+2. 正式 MySQL migration、backup/restore/rollback；
+3. 真实资源 smoke fixture 继续覆盖资源身份路由，并建立历史 smoke fixture 的确认后清理策略；
+4. 以当前最新提交重新生成最终发布审计并重判 GO/NO-GO。
