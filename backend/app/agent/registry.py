@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Iterable, Mapping
 from importlib import import_module
 from typing import Any, Awaitable, Callable
@@ -227,8 +228,35 @@ class AgentToolRegistry:
         return name in self._tools
 
 
+_RUN_BOUND_MANIFEST_FIELDS = (
+    "input_schema",
+    "output_schema",
+    "risk_level",
+    "requires_confirmation",
+    "project_scoped",
+    "supports_stream",
+    "access_level",
+    "allowed_project_roles",
+    "idempotency_key",
+    "manifest_version",
+    "timeout_seconds",
+    "cancellation_policy",
+    "idempotency_policy",
+    "audit_event_type",
+    "context_bindings",
+)
+_RUN_BOUND_PROVIDER_FIELDS = ("provider_id", "provider_version", "source")
+
+
+def _contract_equal(left: Any, right: Any) -> bool:
+    """Compare JSON-shaped frozen and live manifest values deterministically."""
+    return json.dumps(left, ensure_ascii=False, sort_keys=True, separators=(",", ":")) == json.dumps(
+        right, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+
+
 class RunBoundToolRegistry:
-    """Expose only the live handlers that match one immutable Run snapshot."""
+    """Expose only live tool contracts that exactly match one immutable Run release."""
 
     def __init__(
         self,
@@ -236,6 +264,9 @@ class RunBoundToolRegistry:
         *,
         allowed_names: Iterable[str],
         handler_identities: Mapping[str, str] | None = None,
+        manifest_contracts: Mapping[str, Mapping[str, Any]] | None = None,
+        catalog_generation: int | None = None,
+        provider_contracts: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> None:
         self._registry = registry
         self._allowed_names = frozenset(str(name).strip() for name in allowed_names if str(name).strip())
@@ -243,6 +274,17 @@ class RunBoundToolRegistry:
             str(name).strip(): str(identity).strip()
             for name, identity in (handler_identities or {}).items()
             if str(name).strip() and str(identity).strip()
+        }
+        self._manifest_contracts = {
+            str(name).strip(): {field: value for field, value in contract.items() if field in _RUN_BOUND_MANIFEST_FIELDS}
+            for name, contract in (manifest_contracts or {}).items()
+            if str(name).strip() and isinstance(contract, Mapping)
+        }
+        self._catalog_generation = catalog_generation if isinstance(catalog_generation, int) and not isinstance(catalog_generation, bool) and catalog_generation > 0 else None
+        self._provider_contracts = {
+            str(name).strip(): {field: value for field, value in contract.items() if field in _RUN_BOUND_PROVIDER_FIELDS}
+            for name, contract in (provider_contracts or {}).items()
+            if str(name).strip() and isinstance(contract, Mapping)
         }
 
     @classmethod
@@ -252,10 +294,14 @@ class RunBoundToolRegistry:
         release = context.get("catalog_release") if isinstance(context, Mapping) else None
         release_tools = release.get("tools") if isinstance(release, Mapping) else None
         release_tools = release_tools if isinstance(release_tools, list) else []
-        release_identities = {
-            str(item.get("name") or "").strip(): str(item.get("handler_identity") or "").strip()
+        released_by_name = {
+            str(item.get("name") or "").strip(): item
             for item in release_tools
             if isinstance(item, Mapping) and str(item.get("name") or "").strip()
+        }
+        release_identities = {
+            name: str(item.get("handler_identity") or "").strip()
+            for name, item in released_by_name.items()
         }
         if isinstance(resolution_tools, list):
             allowed = [
@@ -264,8 +310,40 @@ class RunBoundToolRegistry:
                 if isinstance(item, Mapping) and str(item.get("name") or "").strip()
             ]
         else:
-            allowed = list(release_identities)
-        return cls(registry, allowed_names=allowed, handler_identities=release_identities)
+            allowed = list(released_by_name)
+        return cls(
+            registry,
+            allowed_names=allowed,
+            handler_identities=release_identities,
+            manifest_contracts=released_by_name,
+            catalog_generation=release.get("generation") if isinstance(release, Mapping) else None,
+            provider_contracts=released_by_name,
+        )
+
+    def _assert_active_catalog_compatible(self) -> None:
+        """Fence default-registry Runs against provider/generation drift after creation."""
+        if self._registry is not DEFAULT_TOOL_REGISTRY or self._catalog_generation is None:
+            return
+        current = get_default_tool_registry_snapshot()
+        if current.get("generation") != self._catalog_generation:
+            raise ToolContractViolation("tool registry generation differs from the Run capability snapshot")
+        current_by_name = {
+            str(item.get("name") or "").strip(): item
+            for item in current.get("tools", [])
+            if isinstance(item, Mapping) and str(item.get("name") or "").strip()
+        }
+        for name in sorted(self._allowed_names):
+            expected = self._provider_contracts.get(name, {})
+            if not expected:
+                continue
+            actual = current_by_name.get(name)
+            if actual is None:
+                raise ToolContractViolation(f"tool {name} is missing from the active provider catalog")
+            drifted = [field for field, value in expected.items() if not _contract_equal(value, actual.get(field))]
+            if drifted:
+                raise ToolContractViolation(
+                    f"tool {name} provider metadata differs from the Run capability snapshot: {', '.join(drifted)}"
+                )
 
     def _manifest(self, name: str) -> ToolManifest:
         normalized = str(name or "").strip()
@@ -275,9 +353,21 @@ class RunBoundToolRegistry:
         expected = self._handler_identities.get(normalized)
         if expected and self._registry.get_handler_identity(normalized) != expected:
             raise ToolContractViolation(f"tool {normalized} handler identity differs from the Run capability snapshot")
+        frozen_contract = self._manifest_contracts.get(normalized, {})
+        if frozen_contract:
+            live_contract = manifest.model_dump(mode="json")
+            drifted = [
+                field for field, value in frozen_contract.items()
+                if not _contract_equal(value, live_contract.get(field))
+            ]
+            if drifted:
+                raise ToolContractViolation(
+                    f"tool {normalized} manifest differs from the Run capability snapshot: {', '.join(drifted)}"
+                )
         return manifest
 
     def assert_compatible(self) -> None:
+        self._assert_active_catalog_compatible()
         for name in sorted(self._allowed_names):
             self._manifest(name)
 
