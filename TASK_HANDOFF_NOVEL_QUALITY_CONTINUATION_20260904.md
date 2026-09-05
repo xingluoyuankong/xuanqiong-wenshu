@@ -4703,3 +4703,99 @@ DB_PROVIDER=sqlite
 ```
 
 在消息 API 合同和 HTTP 回归通过前，不把 `getSession()` 全量 payload 标记为性能问题已解决。
+
+
+## 2026-09-05 当前 HEAD 复验与 Agent 详情分页消费
+
+### A. 当前提交与工作树
+
+```text
+分支：codex/bohrium-integration-20260831
+HEAD：以本次记录生成时的 git log -1 为准
+源码工作树：前端详情分页消费改动待审查/提交；运行产生的 .vite/ 与 storage 工件保留原状
+```
+
+### B. 本批实现
+
+1. 能力解析请求新增 `project_role`，并将角色写入 resolver snapshot；`AgentRuntimeService.create_run` 对项目 Run 从 `ProjectAccessService` 解析并冻结 owner/editor/viewer/admin（管理员归一为 admin）。
+2. `AgentToolRegistry.execute` 在单一执行边界重新读取项目成员角色，写工具拒绝 viewer；projectless Run 通过 capability snapshot 保持创建用户私有执行身份。
+3. `RunBoundToolRegistry` 校验 snapshot 中的 execution user/project 与实际执行参数一致。
+4. Agent Workspace 详情区接入 `/runs/{run_id}/steps|commands|artifacts` page envelope：首屏 50 条、显式加载更多、按 ID 合并、同秒 Artifact 以 `created_at + id` 稳定排序、请求去重、过期请求 loading 清理。
+5. Artifact 列表摘要与质量/谱系事实分两阶段；列表首屏不批量读取事实，用户可按单个 Artifact 显式读取质量与谱系。
+6. 日志动作定位会先确保步骤摘要已载入；深链 Artifact 只对目标 Artifact 读取事实。
+
+### C. 当前真实验证
+
+```text
+后端全量 pytest：1754 passed in 779.99s (0:12:59)
+后端能力/成员/运行时定向：105 passed in 59.79s
+前端 type-check：通过
+前端全量 Vitest：81 files / 527 tests passed
+前端 Agent 分页、Artifact、Workspace、UI-006 定向：81 tests passed
+前端 build-only：4918 modules transformed，成功
+verify.ps1 smoke：259 checks = 55 passed / 204 skipped / 0 failed
+真实 Writer 成员验收：SMOKE_PASSED checks=31，generate/finalize/outline/resume 均为 200
+差异检查：git diff --check 通过
+```
+
+固定非阻塞提示：浏览器数据包过期提示、Vitest AgentWorkspace 测试环境 Pinia 注入提示。
+
+### D. 仍未完成的发布门禁
+
+```text
+1. 迁移 fresh/upgrade/repeat/downgrade/备份恢复矩阵尚未完整归档。
+2. verify smoke 仍有 204 项因缺少真实资源 ID 跳过，不能作为真实资源验收唯一证据。
+3. 真实生产配置默认 DEBUG/管理员配置告警仍需在显式发布配置下复验。
+4. 前端详情分页的真实 TCP/JWT 长历史页面验收仍需补充，当前 page envelope 已有单测和 API 合同验证。
+5. 需要对本批前端改动执行最终审查后提交，并再次运行发布前全量门禁。
+
+因此总任务继续保持 active / NO-GO，下一顺序为：提交前端详情分页改动 → 真实 TCP/JWT 分页长历史验收 → 迁移/恢复矩阵 → 最终全量门禁与发布报告。
+```
+
+## 2026-09-05 Agent 消息历史分页合同
+
+### A. 新增提交
+
+```text
+9e92cee feat: add paged agent message history
+```
+
+新增：
+
+```text
+GET /api/agent/sessions/{session_id}/messages?limit=60
+GET /api/agent/sessions/{session_id}/messages?limit=60&before_sequence=61
+```
+
+合同：
+
+- 默认返回最新消息页；
+- `before_sequence` 排除游标本身并向更早消息翻页；
+- 数据库按 `sequence DESC` 取 `limit + 1`，响应恢复为 `sequence ASC`；
+- 页对象包含 `session_id/items/next_cursor/has_more`；
+- `limit` 由路由限制在 `1..200`；
+- 复用 `_session_readable`，项目成员共享读取和 projectless 创建者私有边界保持不变；
+- 既有 `GET /api/agent/sessions/{session_id}` 不变，仍返回兼容的 `messages/runs` 数组。
+
+涉及文件：
+
+```text
+backend/app/agent/schemas.py
+backend/app/services/agent_runtime.py
+backend/app/api/routers/agent.py
+backend/app/api/routers/test_agent_message_pagination.py
+```
+
+### B. 验证
+
+```text
+消息分页 + 既有 Agent runtime route：30 passed
+py_compile：通过
+git diff --check：通过（提交前除已知运行文档空行外）
+```
+
+隔离测试覆盖：最新页、游标排除、空尾页、limit 边界、项目成员读取、项目越权 403、旧详情数组形状。
+
+### C. 当前边界
+
+本提交只交付后端分页合同；前端当前仍通过 `getSession()` 读取完整消息数组，下一批将改造 `useAgentSessionLifecycle`：首屏读取消息页，加载更早消息时调用 page endpoint，并与 `AgentConversation` 的本地窗口/锚点合并。当前不能把后端 endpoint 单独视为首屏 payload 已降低。
