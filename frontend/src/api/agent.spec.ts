@@ -256,6 +256,18 @@ describe('AgentAPI timeline and artifact diff', () => {
   })
 
 
+  it('请求 session 元数据时可关闭完整消息与运行数组', async () => {
+    await AgentAPI.getSession('session/meta', { includeMessages: false, includeRuns: false })
+    const [url] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe('/api/agent/sessions/session%2Fmeta?include_messages=false&include_runs=false')
+  })
+
+  it('请求会话运行分页并保留 created_at + id 游标', async () => {
+    await AgentAPI.listSessionRunsPage('session/runs', { limit: 3, beforeCreatedAt: '2026-09-05T01:00:00Z', beforeId: 'run-2' })
+    const [url] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe('/api/agent/sessions/session%2Fruns/runs?limit=3&before_created_at=2026-09-05T01%3A00%3A00Z&before_id=run-2')
+  })
+
   it('请求会话消息分页并规范化 limit 与 before_sequence', async () => {
     await AgentAPI.listSessionMessagesPage('session/page', { limit: 999, beforeSequence: 61 })
     const [url] = fetchMock.mock.calls[0]

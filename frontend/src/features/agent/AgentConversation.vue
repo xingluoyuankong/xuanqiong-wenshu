@@ -51,14 +51,15 @@
           variant="secondary"
           size="sm"
           data-testid="agent-load-older-messages"
-          :loading="loadingOlderMessages"
-          :disabled="loadingOlderMessages"
-          :aria-busy="loadingOlderMessages"
+          :loading="loadingMessageHistory"
+          :disabled="loadingMessageHistory"
+          :aria-busy="loadingMessageHistory"
           @click="loadOlderMessages"
         >
-          {{ loadingOlderMessages ? '正在加载更早消息…' : `加载更早消息（还剩 ${olderMessageCount} 条）` }}
+          {{ loadingMessageHistory ? '正在加载更早消息…' : (externalMessagePaging ? '加载更早消息' : `加载更早消息（还剩 ${olderMessageCount} 条）`) }}
         </XqButton>
       </div>
+      <small v-if="olderMessagesError" class="error" data-testid="agent-message-history-error">{{ olderMessagesError }}</small>
       <div ref="messagesList" class="messages" data-testid="agent-message-list">
         <article v-for="message in visibleMessages" :key="message.id" class="message" :class="`message-${message.role}`">
           <b>{{ message.role === 'user' ? '你' : 'Agent' }}</b><p>{{ message.content }}</p>
@@ -122,6 +123,9 @@ import { XqButton, XqPanel } from '@/shared/ui'
 const props = withDefaults(
   defineProps<{
     messages: AgentMessage[]
+    hasMoreMessages?: boolean
+    olderMessagesLoading?: boolean
+    olderMessagesError?: string
     sessionTitle?: string | null
     sessionLoading?: boolean
     streamConnectionState?: SSEConnectionState
@@ -156,6 +160,9 @@ const props = withDefaults(
     goal?: string
   }>(),
   {
+    hasMoreMessages: undefined,
+    olderMessagesLoading: false,
+    olderMessagesError: '',
     sessionTitle: null,
     sessionLoading: false,
     streamConnectionState: 'closed',
@@ -197,6 +204,7 @@ const emit = defineEmits<{
   (event: 'remove-context-ref', ref: AgentContextRef): void
   (event: 'close-artifact-preview'): void
   (event: 'load-previous-reasoning'): void
+  (event: 'load-older-messages'): void
 }>()
 
 const sessionLabel = computed(() => {
@@ -207,7 +215,10 @@ const sessionLabel = computed(() => {
 const MESSAGE_WINDOW_SIZE = 60
 const messageWindowSize = ref(MESSAGE_WINDOW_SIZE)
 const loadingOlderMessages = ref(false)
+const pendingExternalAnchor = ref<{ list: HTMLElement; scrollHeight: number; scrollTop: number } | null>(null)
 const messagesList = ref<HTMLElement | null>(null)
+const externalMessagePaging = computed(() => props.hasMoreMessages !== undefined)
+const loadingMessageHistory = computed(() => loadingOlderMessages.value || Boolean(props.olderMessagesLoading))
 
 // session_id stays stable when the same session is refreshed or older rows are prepended.
 // The first message id alone changes in both cases and would incorrectly collapse the window.
@@ -224,20 +235,46 @@ const visibleMessages = computed(() => {
   return props.messages.slice(start)
 })
 const olderMessageCount = computed(() => Math.max(0, props.messages.length - visibleMessages.value.length))
-const hasOlderMessages = computed(() => olderMessageCount.value > 0)
+const hasOlderMessages = computed(() => externalMessagePaging.value
+  ? Boolean(props.hasMoreMessages) || olderMessageCount.value > 0
+  : olderMessageCount.value > 0)
+
+watch(
+  () => props.olderMessagesLoading,
+  (loading) => {
+    if (!loading) loadingOlderMessages.value = false
+  },
+)
+watch(
+  () => props.messages.length,
+  async (length, previousLength) => {
+    const anchor = pendingExternalAnchor.value
+    if (!anchor || length <= previousLength) return
+    pendingExternalAnchor.value = null
+    await nextTick()
+    const addedHeight = Math.max(0, anchor.list.scrollHeight - anchor.scrollHeight)
+    const anchoredTop = anchor.scrollTop + addedHeight
+    if (typeof anchor.list.scrollTo === 'function') anchor.list.scrollTo({ top: anchoredTop, behavior: 'auto' })
+    else anchor.list.scrollTop = anchoredTop
+  },
+)
 
 const loadOlderMessages = async () => {
-  if (loadingOlderMessages.value || !hasOlderMessages.value) return
+  if (loadingMessageHistory.value || !hasOlderMessages.value) return
   const list = messagesList.value
   if (!list) return
 
   loadingOlderMessages.value = true
+  const previousScrollHeight = list.scrollHeight
+  const previousScrollTop = list.scrollTop
+  messageWindowSize.value += MESSAGE_WINDOW_SIZE
+  if (externalMessagePaging.value) {
+    pendingExternalAnchor.value = { list, scrollHeight: previousScrollHeight, scrollTop: previousScrollTop }
+    emit('load-older-messages')
+    return
+  }
   try {
-    const previousScrollHeight = list.scrollHeight
-    const previousScrollTop = list.scrollTop
-    messageWindowSize.value += MESSAGE_WINDOW_SIZE
     await nextTick()
-
     const addedHeight = Math.max(0, list.scrollHeight - previousScrollHeight)
     if (addedHeight <= 0) return
 

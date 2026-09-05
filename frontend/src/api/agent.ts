@@ -101,7 +101,18 @@ export interface AgentMessage {
 export interface AgentMessagePage {
   session_id: string
   items: AgentMessage[]
+  total?: number
+  limit?: number
   next_cursor?: number | null
+  has_more: boolean
+}
+export interface AgentSessionRunPage {
+  session_id: string
+  items: AgentRun[]
+  total: number
+  limit: number
+  next_before_created_at?: string | null
+  next_before_id?: string | null
   has_more: boolean
 }
 export interface AgentProviderAttemptSnapshot {
@@ -832,8 +843,22 @@ export const AgentAPI = {
     request<AgentSession>(`/agent/sessions/${encodeURIComponent(sessionId)}/archive`, {
       method: 'POST',
     }),
-  getSession: (sessionId: string) =>
-    request<AgentSessionDetail>(`/agent/sessions/${encodeURIComponent(sessionId)}`),
+  getSession: (sessionId: string, options: { includeMessages?: boolean; includeRuns?: boolean } = {}) => {
+    const params = new URLSearchParams()
+    if (options.includeMessages !== undefined) params.set('include_messages', String(options.includeMessages))
+    if (options.includeRuns !== undefined) params.set('include_runs', String(options.includeRuns))
+    const suffix = params.toString() ? `?${params.toString()}` : ''
+    return request<AgentSessionDetail>(`/agent/sessions/${encodeURIComponent(sessionId)}${suffix}`)
+  },
+  listSessionRunsPage: (sessionId: string, input: { limit?: number; beforeCreatedAt?: string; beforeId?: string } = {}) => {
+    const limit = Math.max(1, Math.min(100, input.limit ?? 50))
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (input.beforeCreatedAt) params.set('before_created_at', input.beforeCreatedAt)
+    if (input.beforeId) params.set('before_id', input.beforeId)
+    return request<AgentSessionRunPage>(
+      `/agent/sessions/${encodeURIComponent(sessionId)}/runs?${params.toString()}`,
+    )
+  },
   listSessionMessagesPage: (sessionId: string, input: { limit?: number; beforeSequence?: number } = {}) => {
     const limit = Math.max(1, Math.min(200, input.limit ?? 60))
     const before = Number.isInteger(input.beforeSequence) && (input.beforeSequence as number) > 0

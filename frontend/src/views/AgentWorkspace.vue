@@ -184,6 +184,9 @@
       <section class="workspace-chat-column" data-testid="agent-chat-column">
         <AgentConversation
           :messages="messages"
+          :has-more-messages="messageHistoryHasMore"
+          :older-messages-loading="messageHistoryLoading"
+          :older-messages-error="messageHistoryError"
           :session-title="session?.title || null"
           :session-loading="sessionLoading"
           :stream-connection-state="streamConnectionState"
@@ -219,6 +222,7 @@
           :goal="goal"
           @update:goal="goal = $event"
           @submit="submitMessage"
+          @load-older-messages="loadOlderMessages"
           @remove-context-ref="removeContextRef"
           @close-artifact-preview="artifactPreview = ''"
         />
@@ -1374,6 +1378,11 @@ const {
   loadSelectedSession,
   createNewSession,
   archiveCurrentSession,
+  loadOlderMessages,
+  messageHistoryHasMore,
+  messageHistoryLoading,
+  messageHistoryError,
+  messageHistoryTotal,
   invalidate: invalidateSessionLifecycle,
 } = sessionLifecycle
 const loadContentTree = async (selection?: { chapterNumber?: number; versionId?: number }) => {

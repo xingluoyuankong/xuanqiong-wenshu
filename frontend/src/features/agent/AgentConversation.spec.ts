@@ -194,6 +194,35 @@ describe('AgentConversation', () => {
   })
 
 
+  it('服务端历史存在时发出外部分页事件，并在父级补入旧页后保持滚动锚点', async () => {
+    const messages = Array.from({ length: 60 }, (_, index) => ({
+      ...message, id: `paged-${index + 61}`, sequence: index + 61, content: `当前页消息 ${index + 61}`,
+    }))
+    const wrapper = mount(AgentConversation, {
+      props: { messages, goal: '', hasMoreMessages: true, olderMessagesLoading: false },
+    })
+    const list = wrapper.get('[data-testid="agent-message-list"]')
+    const listElement = list.element as HTMLElement & { scrollTo?: (options: ScrollToOptions) => void }
+    Object.defineProperty(listElement, 'scrollHeight', { configurable: true, get: () => list.findAll('.message').length * 100 })
+    listElement.scrollTop = 400
+    const scrollTo = vi.fn()
+    listElement.scrollTo = scrollTo
+
+    await wrapper.get('[data-testid="agent-load-older-messages"]').trigger('click')
+    expect(wrapper.emitted('load-older-messages')).toHaveLength(1)
+    expect(wrapper.findAll('[data-testid="agent-message-list"] .message')).toHaveLength(60)
+
+    const older = Array.from({ length: 60 }, (_, index) => ({
+      ...message, id: `paged-${index + 1}`, sequence: index + 1, content: `更早消息 ${index + 1}`,
+    }))
+    await wrapper.setProps({ messages: [...older, ...messages], hasMoreMessages: false, olderMessagesLoading: false })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findAll('[data-testid="agent-message-list"] .message')).toHaveLength(120)
+    expect(scrollTo).toHaveBeenCalledWith({ top: 6400, behavior: 'auto' })
+    expect(wrapper.find('[data-testid="agent-load-older-messages"]').exists()).toBe(false)
+  })
+
   it('同一会话刷新首条消息后保留已展开的窗口', async () => {
     const messages = Array.from({ length: 125 }, (_, index) => ({
       ...message,

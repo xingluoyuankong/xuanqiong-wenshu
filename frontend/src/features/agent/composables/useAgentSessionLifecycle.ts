@@ -1,4 +1,4 @@
-import type { ComputedRef, Ref } from 'vue'
+import { ref, type ComputedRef, type Ref } from 'vue'
 import { AgentAPI, type AgentMessage, type AgentRun, type AgentSession, type AgentSessionDetail } from '@/api/agent'
 import type { AgentRunProjectionStore } from '@/features/agent/stores/agentRunProjection'
 
@@ -38,6 +38,11 @@ export interface AgentSessionLifecycleOptions {
  */
 export function useAgentSessionLifecycle(options: AgentSessionLifecycleOptions) {
   let lifecycleGeneration = 0
+  const messageHistoryHasMore = ref(false)
+  const messageHistoryLoading = ref(false)
+  const messageHistoryError = ref('')
+  const messageHistoryCursor = ref<number | null>(null)
+  const messageHistoryTotal = ref<number | null>(null)
 
   const isCurrent = (generation: number, projectId: string) =>
     lifecycleGeneration === generation && options.selectedProjectId.value === projectId
@@ -47,11 +52,88 @@ export function useAgentSessionLifecycle(options: AgentSessionLifecycleOptions) 
     options.sessions.value = []
     options.selectedSessionId.value = ''
     options.messages.value = []
+    messageHistoryHasMore.value = false
+    messageHistoryLoading.value = false
+    messageHistoryError.value = ''
+    messageHistoryCursor.value = null
+    messageHistoryTotal.value = null
   }
 
   const invalidate = () => {
     lifecycleGeneration += 1
     options.sessionLoading.value = false
+  }
+
+  const applyLegacyMessageDetail = (legacy: AgentSessionDetail) => {
+    messageHistoryHasMore.value = false
+    messageHistoryCursor.value = null
+    messageHistoryTotal.value = legacy.messages.length
+    messageHistoryError.value = ''
+    return legacy
+  }
+
+  const hydrateSessionMessages = async (
+    detail: AgentSessionDetail,
+    generation: number,
+    projectId: string,
+  ): Promise<AgentSessionDetail | null> => {
+    if (typeof AgentAPI.listSessionMessagesPage !== 'function') {
+      return applyLegacyMessageDetail(detail)
+    }
+    try {
+      messageHistoryLoading.value = true
+      messageHistoryError.value = ''
+      const page = await AgentAPI.listSessionMessagesPage(detail.id, { limit: 60 })
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error('历史消息分页响应格式无效')
+      }
+      if (!isCurrent(generation, projectId)) return null
+      messageHistoryCursor.value = page.next_cursor ?? null
+      messageHistoryHasMore.value = Boolean(page.has_more && page.next_cursor)
+      messageHistoryTotal.value = page.total ?? page.items.length
+      return { ...detail, messages: page.items }
+    } catch (error) {
+      if (!isCurrent(generation, projectId)) return null
+      try {
+        const legacy = await AgentAPI.getSession(detail.id)
+        if (!legacy || !Array.isArray(legacy.messages)) throw new Error('完整会话响应格式无效')
+        if (!isCurrent(generation, projectId)) return null
+        return applyLegacyMessageDetail(legacy)
+      } catch (fallbackError) {
+        messageHistoryError.value = fallbackError instanceof Error
+          ? fallbackError.message
+          : error instanceof Error
+            ? error.message
+            : '历史消息读取失败'
+        return null
+      }
+    } finally {
+      if (isCurrent(generation, projectId)) messageHistoryLoading.value = false
+    }
+  }
+
+  const loadOlderMessages = async () => {
+    const projectId = options.selectedProjectId.value
+    const sessionId = options.selectedSessionId.value
+    const cursor = messageHistoryCursor.value
+    if (typeof AgentAPI.listSessionMessagesPage !== 'function' || !projectId || !sessionId || cursor === null || !messageHistoryHasMore.value || messageHistoryLoading.value) return
+    const generation = lifecycleGeneration
+    messageHistoryLoading.value = true
+    messageHistoryError.value = ''
+    try {
+      const page = await AgentAPI.listSessionMessagesPage(sessionId, { limit: 60, beforeSequence: cursor })
+      if (!isCurrent(generation, projectId) || options.selectedSessionId.value !== sessionId) return
+      options.appendMessages(page.items)
+      messageHistoryCursor.value = page.next_cursor ?? null
+      messageHistoryHasMore.value = Boolean(page.has_more && page.next_cursor)
+      messageHistoryTotal.value = page.total ?? messageHistoryTotal.value
+    } catch (error) {
+      if (isCurrent(generation, projectId) && options.selectedSessionId.value === sessionId) {
+        messageHistoryError.value = error instanceof Error ? error.message : '更早消息读取失败'
+      }
+    } finally {
+      if (isCurrent(generation, projectId) && options.selectedSessionId.value === sessionId) messageHistoryLoading.value = false
+    }
   }
 
   const applyDetail = async (
@@ -77,6 +159,11 @@ export function useAgentSessionLifecycle(options: AgentSessionLifecycleOptions) 
     return resolved
   }
 
+  const getSessionDetail = (sessionId: string) =>
+    typeof AgentAPI.listSessionMessagesPage === 'function'
+      ? AgentAPI.getSession(sessionId, { includeMessages: false })
+      : AgentAPI.getSession(sessionId)
+
   const restoreSession = async () => {
     const projectId = options.selectedProjectId.value
     const generation = ++lifecycleGeneration
@@ -98,7 +185,7 @@ export function useAgentSessionLifecycle(options: AgentSessionLifecycleOptions) 
         options.addActivity('会话深链不可用', '请求的会话不属于当前项目，已安全降级为可访问会话。')
       }
       const detail = existing
-        ? await AgentAPI.getSession(existing.id)
+        ? await getSessionDetail(existing.id)
         : await AgentAPI.createSession({
             project_id: projectId,
             title: options.selectedProjectTitle.value
@@ -111,9 +198,11 @@ export function useAgentSessionLifecycle(options: AgentSessionLifecycleOptions) 
       if (!isCurrent(generation, projectId)) return
       const requestedRunId = options.routeIntent.value.runId
       const requestedArtifactId = options.routeIntent.value.artifactId
-      const resolved = await applyDetail(detail, generation, projectId, requestedRunId, requestedArtifactId)
+      const hydratedDetail = await hydrateSessionMessages(detail, generation, projectId)
+      if (!hydratedDetail) return
+      const resolved = await applyDetail(hydratedDetail, generation, projectId, requestedRunId, requestedArtifactId)
       if (!resolved || !isCurrent(generation, projectId)) return
-      options.addActivity('会话已恢复', `${detail.messages.length} 条历史消息，${detail.runs.length} 次运行记录。`)
+      options.addActivity('会话已恢复', `${messageHistoryTotal.value ?? hydratedDetail.messages.length} 条历史消息，${hydratedDetail.runs.length} 次运行记录。`)
     } catch (error) {
       if (!isCurrent(generation, projectId)) return
       options.sessionError.value = error instanceof Error ? error.message : '会话不可用'
@@ -131,10 +220,12 @@ export function useAgentSessionLifecycle(options: AgentSessionLifecycleOptions) 
     options.sessionLoading.value = true
     options.sessionError.value = ''
     try {
-      const detail = await AgentAPI.getSession(sessionId)
+      const detail = await getSessionDetail(sessionId)
       if (!isCurrent(generation, projectId) || options.selectedSessionId.value !== sessionId) return
+      const hydratedDetail = await hydrateSessionMessages(detail, generation, projectId)
+      if (!hydratedDetail) return
       options.runProjection.reset()
-      await applyDetail(detail, generation, projectId)
+      await applyDetail(hydratedDetail, generation, projectId)
     } catch (error) {
       if (!isCurrent(generation, projectId) || options.selectedSessionId.value !== sessionId) return
       options.addActivity('会话切换失败', error instanceof Error ? error.message : '无法切换会话')
@@ -182,6 +273,11 @@ export function useAgentSessionLifecycle(options: AgentSessionLifecycleOptions) 
     loadSelectedSession,
     createNewSession,
     archiveCurrentSession,
+    loadOlderMessages,
+    messageHistoryHasMore,
+    messageHistoryLoading,
+    messageHistoryError,
+    messageHistoryTotal,
     invalidate,
   }
 }
