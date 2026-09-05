@@ -5287,3 +5287,32 @@ HEAD：4cc4c22 docs: update continuation head and release gates
 ```
 
 下一步继续：隔离 SQLite 备份恢复脚本与证据归档；生产 API/Worker/Command Worker 完整矩阵；会话详情默认 payload 策略；最终全量门禁与发布审计。
+
+## 2026-09-05 隔离 SQLite 备份恢复矩阵实测
+
+新增：`backend/scripts/migration_backup_restore_acceptance.py`。
+
+脚本只操作临时 SQLite，不触碰当前服务数据库，执行 fresh upgrade、重复 upgrade、插入迁移哨兵、文件复制备份、恢复副本、hash/计数核对、恢复后再次 upgrade，以及 `028_agent_reasoning_chunks -> head` 往返。
+
+实测结果：
+
+```text
+MIGRATION_BACKUP_RESTORE_MATRIX_PASSED
+fresh_revision=029_project_members
+restored_revision=029_project_members
+restored_copy_hash_matches=true
+sentinel_count=1
+agent_sessions=1
+agent_messages=0
+project_members=0
+```
+
+脚本退出码为 0。Windows 临时目录清理仍受 SQLite 文件句柄影响，脚本使用 `ignore_cleanup_errors=True` 收口该系统现象；这不影响迁移、复制、恢复和数据哨兵断言，但正式发布环境仍需单独验证服务停止时的连接释放。
+
+### 当前门禁变化
+
+- 迁移 fresh/repeat/downgrade/re-upgrade 与临时文件备份恢复证据已形成；
+- MySQL TCP 迁移和正式部署数据库恢复仍未实测；
+- Agent Worker/Command Worker 生产部署矩阵仍待执行；
+- 默认会话详情完整消息/Run payload 策略仍待兼容性决策；
+- 总任务继续保持 `active / NO-GO`。
