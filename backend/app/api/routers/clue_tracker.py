@@ -204,7 +204,7 @@ async def get_clue_overview(
     await ProjectAccessService(session).require_project_read(project_id, current_user)
     service = ClueTrackerService(session)
     async with project_ledger_lease(project_id):
-        sync = await service.sync_from_foreshadowings(project_id, commit=True)
+        sync = await service.sync_from_foreshadowings(project_id)
         clues = await service.get_project_clues(
             project_id=project_id,
             status=status,

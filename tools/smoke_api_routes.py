@@ -31,6 +31,9 @@ SKIPPED_MUTATING_ROUTES = {
     ("POST", "/api/projects/{project_id}/chapters/{chapter_number}/patch/revert"),
     ("POST", "/api/optimizer/apply-optimization"),
 }
+SKIPPED_STREAMING_ROUTES = {
+    ("GET", "/api/writer/novels/{project_id}/chapters/{chapter_number}/stream"),
+}
 SKIPPED_EXPENSIVE_ROUTES = {
     ("GET", "/api/llm-config/health-check"),
     ("POST", "/api/optimizer/optimize"),
@@ -49,6 +52,7 @@ class CheckResult:
 SKIP_REASON_LABELS = {
     "skipped-mutating-route": "跳过：该接口会产生真实写入/变更，冒烟检查默认不执行。",
     "skipped-expensive-route": "跳过：该接口调用开销较高，冒烟检查默认不执行。",
+    "skipped-streaming-route": "跳过：该接口是长连接流式接口，使用独立 SSE 验收，不用普通短请求读取。",
     "skipped-resource-identity-route": "跳过：该接口依赖真实资源 ID，当前冒烟检查未提供可用资源，因此不再伪造占位 ID 请求。",
     "skipped-live-resource-prerequisite": "跳过：最小真实资源前置条件未满足，暂不继续后续写作台动作。",
     "live-resource-smoke": "使用最小真实资源执行写作台关键路由冒烟。",
@@ -81,11 +85,24 @@ def resource_identity_families(path: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(families))
 
 
-def substitute_path_params(path: str) -> str:
+def has_unresolved_resource_identity(path: str) -> bool:
+    """Return whether a route needs an ID absent from the minimal smoke fixture."""
+    for name in (match.group(1).lower() for match in PATH_PARAM_PATTERN.finditer(path)):
+        if "chapter" in name and "number" in name:
+            continue
+        if name.endswith("_id") or name == "id":
+            if name != "project_id":
+                return True
+    return False
+
+
+def substitute_path_params(path: str, context: SmokeResourceContext | None = None) -> str:
     def repl(match: re.Match[str]) -> str:
         name = match.group(1).lower()
+        if name == "project_id" and context is not None:
+            return context.project_id
         if "chapter" in name and "number" in name:
-            return "1"
+            return str(context.chapter_number if context is not None else 1)
         return "test"
 
     return PATH_PARAM_PATTERN.sub(repl, path)
@@ -290,7 +307,7 @@ def main() -> int:
         for path, methods in paths.items():
             if not isinstance(methods, dict):
                 continue
-            real_path = substitute_path_params(path)
+            real_path = substitute_path_params(path, smoke_context)
             path_requires_resource_identity = has_resource_identity_param(path)
             for method in HTTP_METHODS:
                 if method not in methods:
@@ -304,6 +321,17 @@ def main() -> int:
                             status=0,
                             ok=True,
                             detail="skipped-mutating-route",
+                        )
+                    )
+                    continue
+                if (method_upper, path) in SKIPPED_STREAMING_ROUTES:
+                    results.append(
+                        CheckResult(
+                            method=method_upper,
+                            path=path,
+                            status=0,
+                            ok=True,
+                            detail="skipped-streaming-route",
                         )
                     )
                     continue
@@ -347,16 +375,22 @@ def main() -> int:
                         results[-1].detail = detail
                     continue
                 if path_requires_resource_identity:
-                    results.append(
-                        CheckResult(
-                            method=method_upper,
-                            path=path,
-                            status=0,
-                            ok=True,
-                            detail="skipped-resource-identity-route",
-                        )
+                    resolvable_get = (
+                        method_upper == "GET"
+                        and smoke_context is not None
+                        and not has_unresolved_resource_identity(path)
                     )
-                    continue
+                    if not resolvable_get:
+                        results.append(
+                            CheckResult(
+                                method=method_upper,
+                                path=path,
+                                status=0,
+                                ok=True,
+                                detail="skipped-resource-identity-route",
+                            )
+                        )
+                        continue
                 url = f"{BASE_URL}{real_path}"
                 status, detail = request(method_upper, url)
                 ok = status in ALLOWED_STATUSES and status < 500

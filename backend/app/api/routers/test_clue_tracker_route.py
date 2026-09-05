@@ -28,7 +28,7 @@ class _ClueTrackerService:
     def __init__(self, _session):
         self.sync_calls = 0
 
-    async def sync_from_foreshadowings(self, project_id, *, commit=True):
+    async def sync_from_foreshadowings(self, project_id):
         self.sync_calls += 1
         _ClueTrackerService.last_sync_calls = getattr(_ClueTrackerService, "last_sync_calls", 0) + 1
         return {"created": 1, "updated": 0, "removed": 0, "links_created": 1, "links_reused": 0}
