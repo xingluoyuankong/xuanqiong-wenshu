@@ -8,8 +8,12 @@ from collections.abc import Iterable, Mapping
 from importlib import import_module
 from typing import Any, Awaitable, Callable
 
+from fastapi import HTTPException
+
 from .policy import requires_confirmation
 from .schemas import AgentRiskLevel, AgentToolAccess, ToolContextBinding, ToolManifest
+
+_PROJECT_ROLES = frozenset({"viewer", "editor", "owner", "admin"})
 
 AgentToolHandler = Callable[..., Awaitable[dict[str, Any]]]
 AgentToolProvider = Callable[['AgentToolRegistry'], None]
@@ -175,6 +179,38 @@ class AgentToolRegistry:
             payload["_approval_id"] = "__planned__"
         _validate_schema(payload, manifest.input_schema)
 
+    async def _assert_member_role(
+        self,
+        *,
+        manifest: ToolManifest,
+        session,
+        user_id: int,
+        project_id: str | None,
+    ) -> str | None:
+        """Re-check the live project role at the single execution boundary."""
+        if not manifest.project_scoped:
+            return None
+        if not project_id:
+            raise ToolContractViolation(f"project-scoped tool {manifest.name} requires project_id")
+        from ..services.project_access_service import ProjectAccessService
+
+        try:
+            access = await ProjectAccessService(session).require_project_read(project_id, user_id)
+        except HTTPException:
+            # Preserve the established API error contract for missing or
+            # inaccessible projects; callers already map these to 403/404.
+            raise
+        except Exception as exc:
+            raise ToolContractViolation(
+                f"tool {manifest.name} project access could not be established"
+            ) from exc
+        role = "admin" if access.is_admin else str(access.role).strip().lower()
+        if role not in _PROJECT_ROLES or role not in manifest.allowed_project_roles:
+            raise ToolContractViolation(
+                f"tool {manifest.name} requires one of {', '.join(manifest.allowed_project_roles)}; current project role is {role}"
+            )
+        return role
+
     async def execute(
         self,
         name: str,
@@ -184,13 +220,20 @@ class AgentToolRegistry:
         project_id: str | None,
         arguments: dict[str, Any] | None = None,
         cancel_event: asyncio.Event | None = None,
+        execution_owner_id: int | str | None = None,
     ) -> dict[str, Any]:
         from .policy import enforce_tool_scope
 
         manifest = self.get(name)
         enforce_tool_scope(manifest, project_id)
+        if execution_owner_id is not None and str(user_id) != str(execution_owner_id):
+            raise ToolContractViolation("execution user differs from the expected private owner")
         payload = arguments or {}
+        # Validate the declared tool contract before resolving project access so
+        # malformed requests retain the established ToolContractViolation
+        # semantics even when a test or legacy caller uses a placeholder project.
         _validate_schema(payload, manifest.input_schema)
+        await self._assert_member_role(manifest=manifest, session=session, user_id=user_id, project_id=project_id)
         handler_task = asyncio.create_task(self.get_handler(name)(session=session, user_id=user_id, project_id=project_id, arguments=payload))
         cancel_task: asyncio.Task[bool] | None = None
         try:
@@ -267,6 +310,9 @@ class RunBoundToolRegistry:
         manifest_contracts: Mapping[str, Mapping[str, Any]] | None = None,
         catalog_generation: int | None = None,
         provider_contracts: Mapping[str, Mapping[str, Any]] | None = None,
+        execution_user_id: int | str | None = None,
+        execution_project_id: str | None = None,
+        execution_context_bound: bool = False,
     ) -> None:
         self._registry = registry
         self._allowed_names = frozenset(str(name).strip() for name in allowed_names if str(name).strip())
@@ -286,6 +332,10 @@ class RunBoundToolRegistry:
             for name, contract in (provider_contracts or {}).items()
             if str(name).strip() and isinstance(contract, Mapping)
         }
+        self._execution_context_bound = bool(execution_context_bound)
+        self._execution_user_id = execution_user_id
+        normalized_project_id = str(execution_project_id or "").strip()
+        self._execution_project_id = normalized_project_id or None
 
     @classmethod
     def from_context(cls, registry: AgentToolRegistry, context: Mapping[str, Any]) -> "RunBoundToolRegistry":
@@ -311,6 +361,9 @@ class RunBoundToolRegistry:
             ]
         else:
             allowed = list(released_by_name)
+        request_payload = resolution.get("request") if isinstance(resolution, Mapping) else None
+        request_payload = request_payload if isinstance(request_payload, Mapping) else {}
+        execution_context_bound = isinstance(resolution.get("request"), Mapping) if isinstance(resolution, Mapping) else False
         return cls(
             registry,
             allowed_names=allowed,
@@ -318,6 +371,9 @@ class RunBoundToolRegistry:
             manifest_contracts=released_by_name,
             catalog_generation=release.get("generation") if isinstance(release, Mapping) else None,
             provider_contracts=released_by_name,
+            execution_user_id=request_payload.get("user_id"),
+            execution_project_id=request_payload.get("project_id"),
+            execution_context_bound=execution_context_bound,
         )
 
     def _assert_active_catalog_compatible(self) -> None:
@@ -393,6 +449,11 @@ class RunBoundToolRegistry:
         cancel_event: asyncio.Event | None = None,
     ) -> dict[str, Any]:
         self._manifest(name)
+        if self._execution_context_bound:
+            if self._execution_user_id is not None and str(user_id) != str(self._execution_user_id):
+                raise ToolContractViolation("execution user differs from the Run capability snapshot")
+            if self._execution_project_id != (str(project_id or "").strip() or None):
+                raise ToolContractViolation("execution project differs from the Run capability snapshot")
         return await self._registry.execute(
             name,
             session=session,
@@ -400,6 +461,7 @@ class RunBoundToolRegistry:
             project_id=project_id,
             arguments=arguments,
             cancel_event=cancel_event,
+            execution_owner_id=self._execution_user_id if self._execution_context_bound else None,
         )
 
 
@@ -419,9 +481,11 @@ def build_tool_manifest(
     project_scoped: bool = True,
     supports_stream: bool = False,
     input_schema: dict[str, Any] | None = None,
+    output_schema: dict[str, Any] | None = None,
     timeout_seconds: int | None = None,
     cancellation_policy: str = "cooperative",
     idempotency_policy: str | None = None,
+    idempotency_key: str | None = None,
     access_level: AgentToolAccess | None = None,
     allowed_project_roles: tuple[str, ...] = (),
     context_bindings: tuple[ToolContextBinding, ...] = (),
@@ -434,8 +498,12 @@ def build_tool_manifest(
         project_scoped=project_scoped,
         supports_stream=supports_stream,
         input_schema=input_schema or {"type": "object", "additionalProperties": False},
-        output_schema={"type": "object"},
-        idempotency_key=(f"agent:{name}" if (idempotency_policy or ("safe_read" if risk_level in {AgentRiskLevel.READ, AgentRiskLevel.SUGGEST} else "required")) != "not_applicable" else None),
+        output_schema=output_schema or {"type": "object"},
+        idempotency_key=(
+            idempotency_key
+            if idempotency_key is not None
+            else (f"agent:{name}" if (idempotency_policy or ("safe_read" if risk_level in {AgentRiskLevel.READ, AgentRiskLevel.SUGGEST} else "required")) != "not_applicable" else None)
+        ),
         manifest_version="1.0",
         timeout_seconds=(30 if risk_level in {AgentRiskLevel.READ, AgentRiskLevel.SUGGEST} else 120) if timeout_seconds is None else timeout_seconds,
         cancellation_policy=cancellation_policy,

@@ -75,12 +75,29 @@ def _normalise_project_id(value: str | None) -> str | None:
     return result or None
 
 
+_PROJECT_ROLES = frozenset({"viewer", "editor", "owner", "admin"})
+
+
+def _normalise_project_role(value: str | None, *, project_id: str | None) -> str | None:
+    if value is None:
+        return None
+    result = str(value).strip().lower()
+    if not result:
+        return None
+    if project_id is None:
+        raise CapabilityResolutionError("project_role requires project_id")
+    if result not in _PROJECT_ROLES:
+        raise CapabilityResolutionError("project_role is invalid")
+    return result
+
+
 @dataclass(frozen=True, slots=True)
 class CapabilityResolutionRequest:
     """Stable input policy for resolving capabilities for one user/project."""
 
     user_id: int | str
     project_id: str | None = None
+    project_role: str | None = None
     requested_capabilities: tuple[str, ...] = ()
     user_allowed_tools: tuple[str, ...] | None = None
     project_allowed_tools: tuple[str, ...] | None = None
@@ -90,6 +107,7 @@ class CapabilityResolutionRequest:
     def __post_init__(self) -> None:
         object.__setattr__(self, "user_id", _normalise_user_id(self.user_id))
         object.__setattr__(self, "project_id", _normalise_project_id(self.project_id))
+        object.__setattr__(self, "project_role", _normalise_project_role(self.project_role, project_id=self.project_id))
         object.__setattr__(self, "requested_capabilities", _normalise_requested(self.requested_capabilities))
         object.__setattr__(self, "user_allowed_tools", _normalise_values(self.user_allowed_tools, field_name="user_allowed_tools"))
         object.__setattr__(self, "project_allowed_tools", _normalise_values(self.project_allowed_tools, field_name="project_allowed_tools"))
@@ -101,6 +119,7 @@ class CapabilityResolutionRequest:
         return {
             "user_id": self.user_id,
             "project_id": self.project_id,
+            "project_role": self.project_role,
             "requested_capabilities": list(self.requested_capabilities),
             "user_allowed_tools": list(self.user_allowed_tools) if self.user_allowed_tools is not None else None,
             "project_allowed_tools": list(self.project_allowed_tools) if self.project_allowed_tools is not None else None,
@@ -185,6 +204,7 @@ class CapabilityResolver:
         *,
         user_id: int | str | None = None,
         project_id: str | None = None,
+        project_role: str | None = None,
         requested_capabilities: Iterable[Any] | str | None = None,
         user_allowed_tools: Iterable[Any] | str | None = None,
         project_allowed_tools: Iterable[Any] | str | None = None,
@@ -192,7 +212,7 @@ class CapabilityResolver:
         include_confirmation_required: bool = True,
     ) -> CapabilityResolverSnapshot:
         if request is not None:
-            if any(value is not None for value in (user_id, project_id, requested_capabilities, user_allowed_tools, project_allowed_tools, allowed_risk_levels)):
+            if any(value is not None for value in (user_id, project_id, project_role, requested_capabilities, user_allowed_tools, project_allowed_tools, allowed_risk_levels)):
                 raise CapabilityResolutionError("pass either request or keyword filters, not both")
             effective = request
         else:
@@ -201,6 +221,7 @@ class CapabilityResolver:
             effective = CapabilityResolutionRequest(
                 user_id=user_id,
                 project_id=project_id,
+                project_role=project_role,
                 requested_capabilities=_normalise_requested(requested_capabilities),
                 user_allowed_tools=_normalise_values(user_allowed_tools, field_name="user_allowed_tools"),
                 project_allowed_tools=_normalise_values(project_allowed_tools, field_name="project_allowed_tools"),
@@ -237,6 +258,8 @@ class CapabilityResolver:
             return "user_tool_not_allowed"
         if tool.project_scoped and request.project_id is None:
             return "project_context_required"
+        if tool.project_scoped and request.project_role is not None and request.project_role not in tool.allowed_project_roles:
+            return "project_role_not_allowed"
         if request.project_allowed_tools is not None and tool.name not in request.project_allowed_tools:
             return "project_tool_not_allowed"
         if request.allowed_risk_levels is not None and tool.risk_level not in request.allowed_risk_levels:
@@ -356,6 +379,7 @@ def resolve_capabilities(
     *,
     user_id: int | str,
     project_id: str | None = None,
+    project_role: str | None = None,
     requested_capabilities: Iterable[Any] | str | None = None,
     user_allowed_tools: Iterable[Any] | str | None = None,
     project_allowed_tools: Iterable[Any] | str | None = None,
@@ -366,6 +390,7 @@ def resolve_capabilities(
     return CapabilityResolver(release).resolve(
         user_id=user_id,
         project_id=project_id,
+        project_role=project_role,
         requested_capabilities=requested_capabilities,
         user_allowed_tools=user_allowed_tools,
         project_allowed_tools=project_allowed_tools,

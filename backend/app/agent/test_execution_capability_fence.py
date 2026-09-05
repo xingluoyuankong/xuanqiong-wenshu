@@ -3,9 +3,11 @@ from __future__ import annotations
 import pytest
 
 from app.agent.execution import _assert_plan_uses_resolved_capabilities
-from app.agent.registry import DEFAULT_TOOL_REGISTRY, RunBoundToolRegistry
+from app.agent.registry import AgentToolRegistry, DEFAULT_TOOL_REGISTRY, RunBoundToolRegistry, ToolContractViolation, build_tool_manifest
 from app.agent.executor import build_agent_plan
-from app.agent.schemas import AgentPlanRequest, AgentToolAccess
+from app.agent.schemas import AgentPlanRequest, AgentRiskLevel, AgentToolAccess
+from app.models import NovelProject, ProjectMember, User
+from app.models.project_member import ProjectMemberRole
 from app.services.agent_runtime import AgentConflict
 
 
@@ -123,3 +125,79 @@ def test_run_bound_registry_rejects_active_generation_drift(monkeypatch):
     with pytest.raises(Exception, match="generation differs"):
         bound.assert_compatible()
 
+
+
+@pytest.mark.asyncio
+async def test_run_bound_registry_rechecks_live_project_role_after_snapshot(task_session):
+    owner = User(id=99101, username="cap-owner", email="cap-owner@example.com", hashed_password="x", is_active=True)
+    editor = User(id=99102, username="cap-editor", email="cap-editor@example.com", hashed_password="x", is_active=True)
+    project = NovelProject(id="cap-role-project", user_id=owner.id, title="Capability role project")
+    member = ProjectMember(project_id=project.id, user_id=editor.id, role=ProjectMemberRole.editor.value)
+    task_session.add_all([owner, editor, project, member])
+    await task_session.flush()
+
+    async def handler(**kwargs):
+        return {"ok": True}
+
+    registry = AgentToolRegistry()
+    manifest = build_tool_manifest(
+        "role.write",
+        "role checked write tool",
+        AgentRiskLevel.WRITE,
+        input_schema={"type": "object", "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"], "additionalProperties": False},
+        idempotency_policy="required",
+        idempotency_key="role-write",
+    )
+    registry.register(manifest, handler=handler)
+    identity = registry.get_handler_identity(manifest.name)
+    context = {
+        "capability_resolution": {
+            "request": {"user_id": editor.id, "project_id": project.id, "project_role": "editor"},
+            "tools": [{"name": manifest.name}],
+        },
+        "catalog_release": {
+            "generation": 1,
+            "tools": [{**manifest.model_dump(mode="json"), "handler_identity": identity}],
+        },
+    }
+    bound = RunBoundToolRegistry.from_context(registry, context)
+    result = await bound.execute(manifest.name, session=task_session, user_id=editor.id, project_id=project.id)
+    assert result == {"ok": True}
+
+    member.role = ProjectMemberRole.viewer.value
+    await task_session.flush()
+    with pytest.raises(ToolContractViolation, match="requires one of"):
+        await bound.execute(manifest.name, session=task_session, user_id=editor.id, project_id=project.id)
+
+
+@pytest.mark.asyncio
+async def test_run_bound_projectless_execution_is_private_to_snapshot_user(task_session):
+    async def handler(**kwargs):
+        return {"ok": True}
+
+    registry = AgentToolRegistry()
+    manifest = build_tool_manifest(
+        "private.read",
+        "private projectless tool",
+        AgentRiskLevel.READ,
+        project_scoped=False,
+        input_schema={"type": "object", "additionalProperties": False},
+        output_schema={"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"], "additionalProperties": False},
+    )
+    registry.register(manifest, handler=handler)
+    identity = registry.get_handler_identity(manifest.name)
+    context = {
+        "capability_resolution": {
+            "request": {"user_id": 99201, "project_id": None},
+            "tools": [{"name": manifest.name}],
+        },
+        "catalog_release": {
+            "generation": 1,
+            "tools": [{**manifest.model_dump(mode="json"), "handler_identity": identity}],
+        },
+    }
+    bound = RunBoundToolRegistry.from_context(registry, context)
+    assert await bound.execute(manifest.name, session=task_session, user_id=99201, project_id=None) == {"ok": True}
+    with pytest.raises(ToolContractViolation, match="execution user differs"):
+        await bound.execute(manifest.name, session=task_session, user_id=99202, project_id=None)

@@ -49,6 +49,41 @@ def test_project_scoped_tools_require_project_context_but_unscoped_tools_can_res
     assert all(item.reason == "project_context_required" for item in snapshot.exclusions if item.tool_name != "project.list")
 
 
+
+def test_resolver_applies_project_role_to_released_tool_permissions(release):
+    viewer = CapabilityResolver(release).resolve(
+        user_id=42,
+        project_id="novel-a",
+        project_role="viewer",
+        requested_capabilities=("project.context", "chapter.generate"),
+    )
+    assert "project.context" in viewer.tool_names
+    assert "chapter.generate" not in viewer.tool_names
+    assert next(item for item in viewer.exclusions if item.tool_name == "chapter.generate").reason == "project_role_not_allowed"
+
+    editor = resolve_capabilities(
+        release,
+        user_id=42,
+        project_id="novel-a",
+        project_role="editor",
+        requested_capabilities="chapter.generate",
+    )
+    assert editor.tool_names == ("chapter.generate",)
+    assert editor.request.project_role == "editor"
+
+
+def test_resolver_rejects_invalid_project_role_and_requires_project_context(release):
+    with pytest.raises(CapabilityResolutionError, match="project_role requires project_id"):
+        CapabilityResolutionRequest(user_id=1, project_role="viewer")
+    with pytest.raises(CapabilityResolutionError, match="project_role is invalid"):
+        CapabilityResolutionRequest(user_id=1, project_id="p", project_role="maintainer")
+
+
+def test_resolver_projectless_capabilities_do_not_use_project_role_filter(release):
+    snapshot = CapabilityResolver(release).resolve(user_id=1, project_role=None)
+    assert snapshot.tool_names == ("project.list",)
+    assert snapshot.request.project_role is None
+
 def test_requested_provider_tag_and_tool_name_are_matchable(release):
     resolver = CapabilityResolver(release)
     by_tag = resolver.resolve(user_id=1, project_id="p", requested_capabilities="graph")

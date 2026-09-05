@@ -687,10 +687,17 @@ class AgentRuntimeService:
         registry_snapshot = get_default_tool_registry_snapshot()
         catalog_release = build_catalog_release(registry_snapshot)
         requested_capabilities = context_payload.get("requested_tools")
+        project_role = None
+        if project_id is not None:
+            from .project_access_service import ProjectAccessService
+
+            access = await ProjectAccessService(self.session).require_project_read(project_id, user_id)
+            project_role = "admin" if access.is_admin else str(access.role).strip().lower()
         resolved_capabilities = resolve_capabilities(
             catalog_release,
             user_id=user_id,
             project_id=project_id,
+            project_role=project_role,
             requested_capabilities=requested_capabilities if isinstance(requested_capabilities, list) and requested_capabilities else None,
         )
         # Keep the legacy registry snapshot for existing executor compatibility,
