@@ -5119,3 +5119,21 @@ P2：最终全量门禁、发布审计更新、GO/NO-GO 重判。
 - 未跟踪 storage 二进制和日志保留，不批量清理，不加入代码提交；
 - 历史发布报告中的旧 HEAD、旧失败项和旧文件统计不覆盖本节当前状态；
 - 当前任务继续在本会话与当前工作区推进，不回历史卡住任务，不创建新的 Codex task。
+
+## 2026-09-05 会话刷新 payload 优化
+
+- 修复 `AgentWorkspace.refreshSessionMessages` 在终态刷新时重新读取完整消息数组的问题。
+- 分页客户端存在时，刷新路径现在使用 `getSession(..., { includeMessages: false })` 加 `listSessionMessagesPage(limit=60)`；兼容旧 mock/旧客户端时继续走旧完整详情接口。
+- 相关验证：`AgentWorkspace.spec.ts` 与 `useAgentSessionLifecycle.spec.ts` 共 35 tests passed；`npm run type-check` 通过；`git diff --check` 通过。
+- 已提交：`f92885c perf: use paged messages during session refresh`。
+- 当前最新代码头：`f92885c`。
+
+### 当前待办重新排序
+
+```text
+P1：补真实 TCP 多用户 JWT 成员共享读取与 projectless 隔离验收；
+P1：以当前头重新归档备份 → 恢复 → hash/计数 → Alembic current → 服务健康 → 再升级证据；
+P1：显式发布配置重启并复验启动警告与 smoke；
+P2：审查会话详情默认 include_messages/include_runs 策略，兼容性与长历史 payload 二选一后配套合同测试；
+P2：最终全量门禁与发布审计更新，保持 GO/NO-GO 可追溯。
+```
