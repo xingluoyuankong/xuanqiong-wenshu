@@ -97,6 +97,9 @@ async def test_project_writers_can_accept_owner_candidate_with_owner_execution_i
     assert approval.request_json["actor_user_id"] == getattr(fixture, member_kind).id
     event = (await task_session.execute(select(AgentEventRecord).where(AgentEventRecord.run_id == fixture.artifact.run_id, AgentEventRecord.event_type == "approval_required"))).scalar_one()
     assert event.data_json["actor_user_id"] == getattr(fixture, member_kind).id
+    decision_event = (await task_session.execute(select(AgentEventRecord).where(AgentEventRecord.run_id == fixture.artifact.run_id, AgentEventRecord.event_type == "approval_granted"))).scalar_one()
+    assert decision_event.data_json["actor_user_id"] == getattr(fixture, member_kind).id
+    assert decision_event.data_json["execution_owner_id"] == fixture.owner.id
 
 
 @pytest.mark.asyncio

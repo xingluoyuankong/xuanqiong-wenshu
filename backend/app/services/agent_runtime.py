@@ -76,8 +76,8 @@ _VISIBLE_EVENT_KEYS: dict[str, set[str]] = {
     "plan_step_failed": {"step", "tool_name", "error_type", "phase"},
     "plan_step_pending": {"step", "tool_name", "phase"},
     "approval_required": {"approval_id", "tool_name", "risk_level", "actor_user_id", "execution_owner_id"},
-    "approval_granted": {"approval_id", "tool_name", "status"},
-    "approval_rejected": {"approval_id", "tool_name", "status"},
+    "approval_granted": {"approval_id", "tool_name", "status", "actor_user_id", "execution_owner_id"},
+    "approval_rejected": {"approval_id", "tool_name", "status", "actor_user_id", "execution_owner_id"},
     "tool_call_started": {"tool_name", "step", "phase", "action_id"},
     "tool_call_progress": {"tool_name", "step", "progress", "phase", "progress_message", "action_id", "result_ref"},
     "progress_update": {"tool_name", "step", "progress", "phase", "action_id", "result_ref", "progress_message"},
@@ -2288,6 +2288,8 @@ class AgentRuntimeService:
         approval_id_value = approval.id
         run_id_value = approval.run_id
         tool_name_value = approval.tool_name
+        approval_request_payload = dict(approval.request_json or {})
+        actor_user_id = approval_request_payload.get("actor_user_id")
         decision_status = "approved" if approved else "rejected"
         approval.status = decision_status
         approval.reason = (reason or "")[:2000] or None
@@ -2299,7 +2301,7 @@ class AgentRuntimeService:
             user_id=user_id,
             event_type="approval_granted" if approved else "approval_rejected",
             summary=f"工具 {tool_name_value} 已" + ("批准" if approved else "拒绝"),
-            data={"approval_id": approval_id_value, "tool_name": tool_name_value, "status": decision_status},
+            data={"approval_id": approval_id_value, "tool_name": tool_name_value, "status": decision_status, "actor_user_id": actor_user_id, "execution_owner_id": user_id},
         )
         await self.append_public_work_summary(
             run_id=run_id_value,
