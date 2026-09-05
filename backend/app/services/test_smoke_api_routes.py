@@ -47,3 +47,10 @@ def test_resource_identity_families_are_stable_and_actionable():
     assert smoke.substitute_path_params("/api/projects/{project_id}/chapters/{chapter_number}", context) == "/api/projects/fixture-project/chapters/7"
     assert ("GET", "/api/writer/novels/{project_id}/chapters/{chapter_number}/stream") in smoke.SKIPPED_STREAMING_ROUTES
     assert ("POST", "/api/updates/stream/create") in smoke.SKIPPED_MUTATING_ROUTES
+
+def test_capture_generation_task_id_binds_nested_runtime_id():
+    smoke = _load_smoke_routes_module()
+    context = smoke.SmokeResourceContext(project_id="fixture-project", chapter_number=1)
+    smoke.capture_generation_task_id(context, '{"generation_runtime":{"run_id":"task-123"}}')
+    assert context.task_id == "task-123"
+    assert smoke.substitute_path_params("/api/task-runtime/tasks/{task_id}", context) == "/api/task-runtime/tasks/task-123"

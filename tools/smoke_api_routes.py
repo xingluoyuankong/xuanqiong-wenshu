@@ -34,6 +34,9 @@ SKIPPED_MUTATING_ROUTES = {
 }
 SKIPPED_STREAMING_ROUTES = {
     ("GET", "/api/writer/novels/{project_id}/chapters/{chapter_number}/stream"),
+    ("GET", "/api/updates/stream/{task_id}"),
+    ("GET", "/api/task-runtime/tasks/{task_id}/stream"),
+    ("GET", "/api/agent/sessions/{session_id}/runs/{run_id}/stream"),
 }
 SKIPPED_EXPENSIVE_ROUTES = {
     ("GET", "/api/llm-config/health-check"),
@@ -65,6 +68,7 @@ class SmokeResourceContext:
     project_id: str
     chapter_number: int
     clue_id: int | None = None
+    task_id: str | None = None
     generated: bool = False
 
 
@@ -92,6 +96,8 @@ def has_unresolved_resource_identity(path: str, context: SmokeResourceContext | 
     available = {"project_id"}
     if context is not None and context.clue_id is not None:
         available.add("clue_id")
+    if context is not None and context.task_id:
+        available.add("task_id")
     for name in (match.group(1).lower() for match in PATH_PARAM_PATTERN.finditer(path)):
         if "chapter" in name and "number" in name:
             continue
@@ -108,6 +114,8 @@ def substitute_path_params(path: str, context: SmokeResourceContext | None = Non
             return context.project_id
         if name == "clue_id" and context is not None and context.clue_id is not None:
             return str(context.clue_id)
+        if name == "task_id" and context is not None and context.task_id:
+            return context.task_id
         if "chapter" in name and "number" in name:
             return str(context.chapter_number if context is not None else 1)
         return "test"
@@ -254,6 +262,24 @@ def create_smoke_project() -> tuple[SmokeResourceContext | None, str]:
     return SmokeResourceContext(project_id=project_id, chapter_number=1, clue_id=clue_id), ""
 
 
+def capture_generation_task_id(context: SmokeResourceContext, detail: str) -> None:
+    """Bind the chapter-generation TaskRuntime ID returned by the real API."""
+    try:
+        payload = json.loads(detail)
+    except (TypeError, ValueError):
+        return
+    runtime = payload.get("generation_runtime") if isinstance(payload, dict) else None
+    run_id = runtime.get("run_id") if isinstance(runtime, dict) else None
+    if not run_id and isinstance(payload, dict):
+        chapters = payload.get("chapters")
+        if isinstance(chapters, list) and chapters and isinstance(chapters[0], dict):
+            nested = chapters[0].get("generation_runtime")
+            if isinstance(nested, dict):
+                run_id = nested.get("run_id")
+    if run_id:
+        context.task_id = str(run_id)
+
+
 def cleanup_smoke_project(project_id: str) -> tuple[bool, str]:
     status, detail = request("DELETE", f"{BASE_URL}/api/novels", json_body=[project_id])
     if status in {200, 204, 404}:
@@ -280,7 +306,9 @@ def smoke_writer_route(
                 "target_word_count": 800,
                 "min_word_count": 500,
             },
+            max_chars=0,
         )
+        capture_generation_task_id(context, detail)
         # The generate route queues background work; a 2xx response does not
         # mean a selectable completed version exists yet. Keep evaluate/select
         # gated until a dedicated wait-for-terminal acceptance flow is used.
