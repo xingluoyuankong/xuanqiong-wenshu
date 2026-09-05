@@ -27,6 +27,8 @@ from ..models import (
     NovelProject,
     ProjectMember,
     ProjectMemberRole,
+    TaskRuntime,
+    TaskRuntimeEvent,
 )
 from ..models.memory_layer import CharacterState, TimelineEvent
 from ..services.vector_store_service import VectorStoreService
@@ -1911,6 +1913,20 @@ class NovelService:
     async def delete_projects(self, project_ids: List[str], user_id: int) -> None:
         for pid in project_ids:
             project = await self.ensure_project_owner(pid, user_id)
+            runtime_ids = list(
+                (
+                    await self.session.execute(
+                        select(TaskRuntime.task_id).where(TaskRuntime.project_id == pid)
+                    )
+                ).scalars()
+            )
+            if runtime_ids:
+                await self.session.execute(
+                    delete(TaskRuntimeEvent).where(TaskRuntimeEvent.task_id.in_(runtime_ids))
+                )
+                await self.session.execute(
+                    delete(TaskRuntime).where(TaskRuntime.task_id.in_(runtime_ids))
+                )
             await self.repo.delete(project)
             # 同步清理向量数据
             try:

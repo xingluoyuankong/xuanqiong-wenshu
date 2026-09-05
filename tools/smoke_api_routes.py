@@ -30,6 +30,7 @@ SKIPPED_MUTATING_ROUTES = {
     ("POST", "/api/projects/{project_id}/chapters/{chapter_number}/patch/apply"),
     ("POST", "/api/projects/{project_id}/chapters/{chapter_number}/patch/revert"),
     ("POST", "/api/optimizer/apply-optimization"),
+    ("POST", "/api/updates/stream/create"),
 }
 SKIPPED_STREAMING_ROUTES = {
     ("GET", "/api/writer/novels/{project_id}/chapters/{chapter_number}/stream"),

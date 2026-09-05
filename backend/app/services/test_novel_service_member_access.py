@@ -4,9 +4,10 @@ import ast
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import select
 from fastapi import HTTPException
 
-from app.models import NovelProject, ProjectMember, ProjectMemberRole, User
+from app.models import NovelProject, ProjectMember, ProjectMemberRole, TaskRuntime, TaskRuntimeEvent, User
 from app.schemas.novel import NovelSectionType
 from app.services.novel_service import NovelService
 
@@ -121,6 +122,27 @@ async def test_delete_projects_preserves_true_owner_only_compatibility(task_sess
         await service.delete_projects([project.id], editor.id)
     assert denied.value.status_code == 403
 
+    runtime = TaskRuntime(
+        task_id="delete-project-runtime-task",
+        owner_user_id=owner.id,
+        project_id=project.id,
+        task_type="chapter_generation",
+        status="cancelling",
+    )
+    task_session.add(runtime)
+    await task_session.flush()
+    task_session.add(
+        TaskRuntimeEvent(
+            task_id=runtime.task_id,
+            event_type="task_cancel_requested",
+            status="cancelling",
+            message="fixture",
+        )
+    )
+    await task_session.commit()
+
     await service.delete_projects([project.id], owner.id)
     service._vector_store.delete_by_project.assert_awaited_once_with(project.id)
     assert await service.repo.get_by_id(project.id) is None
+    assert await task_session.get(TaskRuntime, runtime.task_id) is None
+    assert (await task_session.execute(select(TaskRuntimeEvent).where(TaskRuntimeEvent.task_id == runtime.task_id))).scalars().all() == []

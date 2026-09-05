@@ -46,3 +46,4 @@ def test_resource_identity_families_are_stable_and_actionable():
     context = smoke.SmokeResourceContext(project_id="fixture-project", chapter_number=7)
     assert smoke.substitute_path_params("/api/projects/{project_id}/chapters/{chapter_number}", context) == "/api/projects/fixture-project/chapters/7"
     assert ("GET", "/api/writer/novels/{project_id}/chapters/{chapter_number}/stream") in smoke.SKIPPED_STREAMING_ROUTES
+    assert ("POST", "/api/updates/stream/create") in smoke.SKIPPED_MUTATING_ROUTES
