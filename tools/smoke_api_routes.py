@@ -74,6 +74,13 @@ def has_resource_identity_param(path: str) -> bool:
     return False
 
 
+def resource_identity_families(path: str) -> tuple[str, ...]:
+    """Return stable placeholder families for actionable skip aggregation."""
+    params = [match.group(1).lower() for match in PATH_PARAM_PATTERN.finditer(path)]
+    families = [name for name in params if name.endswith("_id") or name in {"id", "v1", "v2"}]
+    return tuple(dict.fromkeys(families))
+
+
 def substitute_path_params(path: str) -> str:
     def repl(match: re.Match[str]) -> str:
         name = match.group(1).lower()
@@ -397,10 +404,20 @@ def main() -> int:
     print(f"跳过：{len(skipped)}")
     print(f"失败：{len(failed)}")
     skip_counts = Counter(item.detail or "unknown" for item in results if item.status == 0)
+    identity_family_counts = Counter(
+        family
+        for item in results
+        if item.status == 0 and item.detail == "skipped-resource-identity-route"
+        for family in resource_identity_families(item.path)
+    )
     if skip_counts:
         print("跳过分类：")
         for reason, count in sorted(skip_counts.items()):
             print(f"  {reason}: {count}")
+    if identity_family_counts:
+        print("资源身份跳过分组：")
+        for family, count in sorted(identity_family_counts.items()):
+            print(f"  {family}: {count}")
 
     if failed:
         print("\n失败明细：")

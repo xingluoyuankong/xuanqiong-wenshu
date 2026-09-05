@@ -31,3 +31,10 @@ def test_openapi_smoke_anonymous_auth_has_defined_mode_and_clears_stale_headers(
     assert mode == "anonymous"
     assert smoke.AUTH_MODE == "anonymous"
     assert smoke.AUTH_HEADERS == {}
+
+
+def test_resource_identity_families_are_stable_and_actionable():
+    smoke = _load_smoke_routes_module()
+    assert smoke.resource_identity_families("/api/projects/{project_id}/tasks/{task_id}") == ("project_id", "task_id")
+    assert smoke.resource_identity_families("/api/chapters/{chapter_id}/versions/{v1}/vs/{v2}") == ("chapter_id", "v1", "v2")
+    assert smoke.resource_identity_families("/api/health") == ()
