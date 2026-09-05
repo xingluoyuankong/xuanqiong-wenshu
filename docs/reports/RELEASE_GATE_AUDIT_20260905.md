@@ -711,3 +711,21 @@ Agent command worker --once：PASS
 ```
 
 该套件已把当前主机可执行的成员权限、消息/Run 长历史、迁移恢复和 Worker 入口验收固化为单一命令。Docker Compose 实际容器编排和正式 MySQL TCP 仍需对应资源节点。
+
+## 当前 HEAD 复核附录（2026-09-05，全量门禁与 acceptance 接线后）
+
+```text
+HEAD: 9d21c64 test: add unified acceptance verification suite
+Backend full pytest: 1764 passed
+Frontend full Vitest: 81 files / 544 tests passed
+Frontend type-check: PASS
+Frontend build-only: 4918 modules transformed, PASS
+OpenAPI/LLM smoke: 261 checks / 53 passed / 208 skipped / 0 failed
+verify.ps1 acceptance: PASS / exit=0
+Writer/Agent/member/TaskRuntime targeted: 187 passed
+Migration/deployment/member targeted: 17 passed
+Smoke auth regression: 1 passed
+git diff --check: PASS
+```
+
+当前仍为 `active / NO-GO`：Docker Compose 实际编排、正式 MySQL migration/backup/restore/rollback 和完整真实资源 smoke 覆盖尚未获得对应资源节点证据。

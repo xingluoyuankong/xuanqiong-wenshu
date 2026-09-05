@@ -6015,3 +6015,21 @@ Agent command worker 一次轮询：PASS
 ```
 
 本套件要求 backend/frontend live stack 已就绪；它不把 Docker daemon 或正式 MySQL 的缺失伪装成通过。当前正式发布仍保持 `active / NO-GO`，真实 Docker Compose、正式 MySQL 和完整真实资源 smoke 仍是剩余门禁。
+
+## 2026-09-05 当前 HEAD 全量门禁复核（acceptance 接线后）
+
+```text
+HEAD：9d21c64 test: add unified acceptance verification suite
+后端全量：1764 passed in 800.96s (0:13:20)
+前端全量 Vitest：81 files / 544 tests passed in 92.69s
+前端 npm run type-check：通过
+前端 npm run build-only：通过，4918 modules transformed
+OpenAPI + LLM smoke：261 checks / 53 passed / 208 skipped / 0 failed
+verify.ps1 acceptance：exit=0
+匿名 smoke 认证回归：1 passed
+Writer/Agent/成员/TaskRuntime组合回归：187 passed
+迁移/部署/项目成员专项：17 passed
+git diff --check：通过
+```
+
+该节覆盖此前文档中的旧 `1763/536` 全量数字；后续发布判断以本节和之后新 HEAD 的证据为准。
