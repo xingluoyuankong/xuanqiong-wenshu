@@ -2,10 +2,11 @@ import { computed, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
-const { listSessionsMock, getSessionMock, listSessionMessagesPageMock } = vi.hoisted(() => ({
+const { listSessionsMock, getSessionMock, listSessionMessagesPageMock, listSessionRunsPageMock } = vi.hoisted(() => ({
   listSessionsMock: vi.fn(),
   getSessionMock: vi.fn(),
   listSessionMessagesPageMock: vi.fn(),
+  listSessionRunsPageMock: vi.fn(),
 }))
 
 vi.mock('@/api/agent', () => ({
@@ -13,6 +14,7 @@ vi.mock('@/api/agent', () => ({
     listSessions: listSessionsMock,
     getSession: getSessionMock,
     listSessionMessagesPage: listSessionMessagesPageMock,
+    listSessionRunsPage: listSessionRunsPageMock,
     createSession: vi.fn(),
     archiveSession: vi.fn(),
   },
@@ -45,6 +47,8 @@ describe('useAgentSessionLifecycle', () => {
     vi.clearAllMocks()
     listSessionMessagesPageMock.mockReset()
     listSessionMessagesPageMock.mockResolvedValue({ session_id: '', items: [], total: 0, limit: 60, next_cursor: null, has_more: false })
+    listSessionRunsPageMock.mockReset()
+    listSessionRunsPageMock.mockResolvedValue({ session_id: '', items: [], total: 0, limit: 50, next_before_created_at: null, next_before_id: null, has_more: false })
   })
 
   const createLifecycle = () => {
@@ -118,7 +122,7 @@ describe('useAgentSessionLifecycle', () => {
 
     await state.lifecycle.restoreSession()
 
-    expect(getSessionMock).toHaveBeenCalledWith(sessionItem.id, { includeMessages: false })
+    expect(getSessionMock).toHaveBeenCalledWith(sessionItem.id, { includeMessages: false, includeRuns: false })
     expect(listSessionMessagesPageMock).toHaveBeenCalledWith(sessionItem.id, { limit: 60 })
     expect(state.messages.value.map((item) => item.sequence)).toEqual([3, 4])
     expect(state.lifecycle.messageHistoryHasMore.value).toBe(true)
@@ -127,6 +131,57 @@ describe('useAgentSessionLifecycle', () => {
     expect(listSessionMessagesPageMock).toHaveBeenLastCalledWith(sessionItem.id, { limit: 60, beforeSequence: 3 })
     expect(state.messages.value.map((item) => item.sequence)).toEqual([1, 3, 4])
     expect(state.lifecycle.messageHistoryHasMore.value).toBe(false)
+  })
+
+  it('loads the newest run page and older run pages without reverting to the unbounded detail payload', async () => {
+    const state = createLifecycle()
+    const sessionItem = { id: 'run-paged-session', user_id: 1, project_id: 'project', title: 'run-paged', status: 'active', created_at: 'now', updated_at: 'now' }
+    const run = (id: string, createdAt: string) => ({ id, session_id: sessionItem.id, user_id: 1, project_id: 'project', status: 'succeeded', progress: 100, created_at: createdAt, updated_at: createdAt })
+    listSessionsMock.mockResolvedValue([sessionItem])
+    getSessionMock.mockResolvedValue({ ...sessionItem, messages: [], runs: [] })
+    listSessionMessagesPageMock.mockResolvedValue({ session_id: sessionItem.id, items: [], total: 0, limit: 60, next_cursor: null, has_more: false })
+    listSessionRunsPageMock
+      .mockResolvedValueOnce({ session_id: sessionItem.id, items: [run('run-2', '2026-09-05T00:00:02Z'), run('run-3', '2026-09-05T00:00:03Z')], total: 3, limit: 50, next_before_created_at: '2026-09-05T00:00:02Z', next_before_id: 'run-2', has_more: true })
+      .mockResolvedValueOnce({ session_id: sessionItem.id, items: [run('run-1', '2026-09-05T00:00:01Z')], total: 3, limit: 50, next_before_created_at: null, next_before_id: null, has_more: false })
+
+    await state.lifecycle.restoreSession()
+
+    expect(getSessionMock).toHaveBeenCalledWith(sessionItem.id, { includeMessages: false, includeRuns: false })
+    expect(listSessionRunsPageMock).toHaveBeenCalledWith(sessionItem.id, { limit: 50 })
+    expect(state.session.value?.runs.map((item: any) => item.id)).toEqual(['run-2', 'run-3'])
+    expect(state.lifecycle.runHistoryHasMore.value).toBe(true)
+    await state.lifecycle.loadOlderRuns()
+    expect(listSessionRunsPageMock).toHaveBeenLastCalledWith(sessionItem.id, { limit: 50, beforeCreatedAt: '2026-09-05T00:00:02Z', beforeId: 'run-2' })
+    expect(state.session.value?.runs.map((item: any) => item.id)).toEqual(['run-1', 'run-2', 'run-3'])
+    expect(state.lifecycle.runHistoryHasMore.value).toBe(false)
+  })
+
+  it('drops a stale initial run page after the project changes', async () => {
+    const state = createLifecycle()
+    const sessionItem = { id: 'stale-run-session', user_id: 1, project_id: 'project', title: 'stale-run', status: 'active', created_at: 'now', updated_at: 'now' }
+    const pendingRuns = deferred<any>()
+    listSessionsMock.mockResolvedValue([sessionItem])
+    getSessionMock.mockResolvedValue({ ...sessionItem, messages: [], runs: [] })
+    listSessionMessagesPageMock.mockResolvedValue({ session_id: sessionItem.id, items: [], total: 0, limit: 60, next_cursor: null, has_more: false })
+    listSessionRunsPageMock.mockReturnValueOnce(pendingRuns.promise)
+
+    const restoring = state.lifecycle.restoreSession()
+    state.selectedProjectId.value = 'other-project'
+    pendingRuns.resolve({
+      session_id: sessionItem.id,
+      items: [{ id: 'stale-run', session_id: sessionItem.id, user_id: 1, project_id: 'project', status: 'completed', progress: 100, created_at: '2026-09-05T00:00:01Z', updated_at: '2026-09-05T00:00:01Z' }],
+      total: 1,
+      limit: 50,
+      next_before_created_at: null,
+      next_before_id: null,
+      has_more: false,
+    })
+    await restoring
+
+    expect(state.session.value).toBeNull()
+    expect(state.lifecycle.runHistoryTotal.value).toBeNull()
+    expect(state.lifecycle.runHistoryHasMore.value).toBe(false)
+    expect(state.hydrateSelectedRun).not.toHaveBeenCalled()
   })
 
   it('falls back to the full session detail when the first message page fails', async () => {
@@ -143,7 +198,7 @@ describe('useAgentSessionLifecycle', () => {
 
     await state.lifecycle.restoreSession()
 
-    expect(getSessionMock).toHaveBeenNthCalledWith(1, sessionItem.id, { includeMessages: false })
+    expect(getSessionMock).toHaveBeenNthCalledWith(1, sessionItem.id, { includeMessages: false, includeRuns: false })
     expect(getSessionMock).toHaveBeenNthCalledWith(2, sessionItem.id)
     expect(state.messages.value.map((item) => item.content)).toEqual(['旧接口正文'])
     expect(state.lifecycle.messageHistoryHasMore.value).toBe(false)

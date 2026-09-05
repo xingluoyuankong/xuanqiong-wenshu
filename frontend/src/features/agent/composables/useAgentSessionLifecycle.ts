@@ -43,9 +43,20 @@ export function useAgentSessionLifecycle(options: AgentSessionLifecycleOptions) 
   const messageHistoryError = ref('')
   const messageHistoryCursor = ref<number | null>(null)
   const messageHistoryTotal = ref<number | null>(null)
+  const runHistoryHasMore = ref(false)
+  const runHistoryLoading = ref(false)
+  const runHistoryError = ref('')
+  const runHistoryCursor = ref<{ createdAt: string; id: string } | null>(null)
+  const runHistoryTotal = ref<number | null>(null)
 
   const isCurrent = (generation: number, projectId: string) =>
     lifecycleGeneration === generation && options.selectedProjectId.value === projectId
+
+  const sortRuns = (items: AgentRun[]) =>
+    [...items].sort((left, right) => {
+      const createdAtOrder = left.created_at.localeCompare(right.created_at)
+      return createdAtOrder || left.id.localeCompare(right.id)
+    })
 
   const clear = () => {
     options.session.value = null
@@ -57,6 +68,11 @@ export function useAgentSessionLifecycle(options: AgentSessionLifecycleOptions) 
     messageHistoryError.value = ''
     messageHistoryCursor.value = null
     messageHistoryTotal.value = null
+    runHistoryHasMore.value = false
+    runHistoryLoading.value = false
+    runHistoryError.value = ''
+    runHistoryCursor.value = null
+    runHistoryTotal.value = null
   }
 
   const invalidate = () => {
@@ -69,7 +85,7 @@ export function useAgentSessionLifecycle(options: AgentSessionLifecycleOptions) 
     messageHistoryCursor.value = null
     messageHistoryTotal.value = legacy.messages.length
     messageHistoryError.value = ''
-    return legacy
+    return { ...legacy, runs: sortRuns(legacy.runs) }
   }
 
   const hydrateSessionMessages = async (
@@ -109,6 +125,116 @@ export function useAgentSessionLifecycle(options: AgentSessionLifecycleOptions) 
       }
     } finally {
       if (isCurrent(generation, projectId)) messageHistoryLoading.value = false
+    }
+  }
+
+  const applyLegacyRunDetail = (legacy: AgentSessionDetail) => {
+    runHistoryHasMore.value = false
+    runHistoryCursor.value = null
+    runHistoryTotal.value = legacy.runs.length
+    runHistoryError.value = ''
+    return legacy
+  }
+
+  const hydrateSessionRuns = async (
+    detail: AgentSessionDetail,
+    generation: number,
+    projectId: string,
+    requestedRunId?: string,
+  ): Promise<AgentSessionDetail | null> => {
+    if (typeof AgentAPI.listSessionRunsPage !== 'function' || detail.runs.length > 0) {
+      return applyLegacyRunDetail(detail)
+    }
+    try {
+      runHistoryLoading.value = true
+      runHistoryError.value = ''
+      let page = await AgentAPI.listSessionRunsPage(detail.id, { limit: 50 })
+      if (!page || !Array.isArray(page.items)) throw new Error('运行历史分页响应格式无效')
+      let items = [...page.items]
+      const updatePageState = () => {
+        runHistoryCursor.value = page.next_before_created_at && page.next_before_id
+          ? { createdAt: page.next_before_created_at, id: page.next_before_id }
+          : null
+        runHistoryHasMore.value = Boolean(page.has_more && runHistoryCursor.value)
+        runHistoryTotal.value = page.total ?? items.length
+      }
+      if (!isCurrent(generation, projectId)) return null
+      updatePageState()
+      while (requestedRunId && !items.some((item) => item.id === requestedRunId) && runHistoryHasMore.value && runHistoryCursor.value) {
+        const cursor = runHistoryCursor.value
+        page = await AgentAPI.listSessionRunsPage(detail.id, {
+          limit: 50,
+          beforeCreatedAt: cursor.createdAt,
+          beforeId: cursor.id,
+        })
+        if (!page || !Array.isArray(page.items)) throw new Error('运行历史分页响应格式无效')
+        if (!isCurrent(generation, projectId)) return null
+        const nextCursor = page.next_before_created_at && page.next_before_id
+          ? { createdAt: page.next_before_created_at, id: page.next_before_id }
+          : null
+        if (nextCursor && nextCursor.createdAt === cursor.createdAt && nextCursor.id === cursor.id && !page.items.some((item) => item.id === requestedRunId)) {
+          throw new Error('运行历史分页游标未推进')
+        }
+        const byId = new Map(items.map((item) => [item.id, item]))
+        page.items.forEach((item) => byId.set(item.id, item))
+        items = [...byId.values()]
+        updatePageState()
+      }
+      if (!isCurrent(generation, projectId)) return null
+      return { ...detail, runs: sortRuns(items) }
+    } catch (error) {
+      if (!isCurrent(generation, projectId)) return null
+      try {
+        const legacy = await AgentAPI.getSession(detail.id)
+        if (!legacy || !Array.isArray(legacy.runs)) throw new Error('完整会话运行响应格式无效')
+        if (!isCurrent(generation, projectId)) return null
+        return applyLegacyRunDetail(legacy)
+      } catch (fallbackError) {
+        runHistoryError.value = fallbackError instanceof Error
+          ? fallbackError.message
+          : error instanceof Error
+            ? error.message
+            : '运行历史读取失败'
+        return null
+      }
+    } finally {
+      if (isCurrent(generation, projectId)) runHistoryLoading.value = false
+    }
+  }
+
+  const loadOlderRuns = async () => {
+    const projectId = options.selectedProjectId.value
+    const sessionId = options.selectedSessionId.value
+    const cursor = runHistoryCursor.value
+    if (typeof AgentAPI.listSessionRunsPage !== 'function' || !projectId || !sessionId || !cursor || !runHistoryHasMore.value || runHistoryLoading.value) return
+    const generation = lifecycleGeneration
+    runHistoryLoading.value = true
+    runHistoryError.value = ''
+    try {
+      const page = await AgentAPI.listSessionRunsPage(sessionId, {
+        limit: 50,
+        beforeCreatedAt: cursor.createdAt,
+        beforeId: cursor.id,
+      })
+      if (!isCurrent(generation, projectId) || options.selectedSessionId.value !== sessionId) return
+      const byId = new Map(options.runProjection.runs.value.map((item) => [item.id, item]))
+      page.items.forEach((item) => byId.set(item.id, item))
+      const merged = sortRuns([...byId.values()])
+      options.runProjection.replaceRuns(merged)
+      if (options.session.value && 'runs' in options.session.value) {
+        options.session.value = { ...options.session.value, runs: merged }
+      }
+      runHistoryCursor.value = page.next_before_created_at && page.next_before_id
+        ? { createdAt: page.next_before_created_at, id: page.next_before_id }
+        : null
+      runHistoryHasMore.value = Boolean(page.has_more && runHistoryCursor.value)
+      runHistoryTotal.value = page.total ?? runHistoryTotal.value
+    } catch (error) {
+      if (isCurrent(generation, projectId) && options.selectedSessionId.value === sessionId) {
+        runHistoryError.value = error instanceof Error ? error.message : '更早运行读取失败'
+      }
+    } finally {
+      if (isCurrent(generation, projectId) && options.selectedSessionId.value === sessionId) runHistoryLoading.value = false
     }
   }
 
@@ -159,10 +285,15 @@ export function useAgentSessionLifecycle(options: AgentSessionLifecycleOptions) 
     return resolved
   }
 
-  const getSessionDetail = (sessionId: string) =>
-    typeof AgentAPI.listSessionMessagesPage === 'function'
-      ? AgentAPI.getSession(sessionId, { includeMessages: false })
+  const getSessionDetail = (sessionId: string) => {
+    const optionsForDetail = {
+      ...(typeof AgentAPI.listSessionMessagesPage === 'function' ? { includeMessages: false } : {}),
+      ...(typeof AgentAPI.listSessionRunsPage === 'function' ? { includeRuns: false } : {}),
+    }
+    return Object.keys(optionsForDetail).length
+      ? AgentAPI.getSession(sessionId, optionsForDetail)
       : AgentAPI.getSession(sessionId)
+  }
 
   const restoreSession = async () => {
     const projectId = options.selectedProjectId.value
@@ -198,7 +329,9 @@ export function useAgentSessionLifecycle(options: AgentSessionLifecycleOptions) 
       if (!isCurrent(generation, projectId)) return
       const requestedRunId = options.routeIntent.value.runId
       const requestedArtifactId = options.routeIntent.value.artifactId
-      const hydratedDetail = await hydrateSessionMessages(detail, generation, projectId)
+      const hydratedMessages = await hydrateSessionMessages(detail, generation, projectId)
+      if (!hydratedMessages) return
+      const hydratedDetail = await hydrateSessionRuns(hydratedMessages, generation, projectId, requestedRunId)
       if (!hydratedDetail) return
       const resolved = await applyDetail(hydratedDetail, generation, projectId, requestedRunId, requestedArtifactId)
       if (!resolved || !isCurrent(generation, projectId)) return
@@ -222,7 +355,9 @@ export function useAgentSessionLifecycle(options: AgentSessionLifecycleOptions) 
     try {
       const detail = await getSessionDetail(sessionId)
       if (!isCurrent(generation, projectId) || options.selectedSessionId.value !== sessionId) return
-      const hydratedDetail = await hydrateSessionMessages(detail, generation, projectId)
+      const hydratedMessages = await hydrateSessionMessages(detail, generation, projectId)
+      if (!hydratedMessages) return
+      const hydratedDetail = await hydrateSessionRuns(hydratedMessages, generation, projectId)
       if (!hydratedDetail) return
       options.runProjection.reset()
       await applyDetail(hydratedDetail, generation, projectId)
@@ -274,6 +409,11 @@ export function useAgentSessionLifecycle(options: AgentSessionLifecycleOptions) 
     createNewSession,
     archiveCurrentSession,
     loadOlderMessages,
+    loadOlderRuns,
+    runHistoryHasMore,
+    runHistoryLoading,
+    runHistoryError,
+    runHistoryTotal,
     messageHistoryHasMore,
     messageHistoryLoading,
     messageHistoryError,

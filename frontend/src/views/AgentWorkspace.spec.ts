@@ -540,6 +540,9 @@ describe('AgentWorkspace', () => {
     expect(workspaceSource).toContain('v-if="event.actionId || event.phase || event.resultRef"')
     expect(workspaceSource).toContain('结果：{{ event.resultRef }}')
     expect(workspaceSource).toContain('scrollIntoView')
+    expect(workspaceSource).toContain('data-testid="agent-run-history-pagination"')
+    expect(workspaceSource).toContain('data-testid="agent-load-older-runs"')
+    expect(workspaceSource).toContain('@click="loadOlderRuns"')
   })
 
   it('点击日志动作或结果引用后定位当前 Run，并在切换 Run 时清理定位', async () => {

@@ -247,6 +247,19 @@
           <p class="muted" data-testid="agent-selected-run-id">
             {{ selectedRunId ? `当前：${selectedRunId.slice(0, 8)}` : '尚未选择运行' }}
           </p>
+          <div class="workspace-pagination" data-testid="agent-run-history-pagination">
+            <span v-if="runHistoryError" class="error">运行历史读取失败：{{ runHistoryError }}</span>
+            <span v-else class="muted">已载入 {{ runs.length }} / {{ runHistoryTotal ?? runs.length }} 次运行</span>
+            <XqButton
+              v-if="runHistoryHasMore"
+              variant="secondary"
+              size="sm"
+              data-testid="agent-load-older-runs"
+              :loading="runHistoryLoading"
+              :disabled="runHistoryLoading"
+              @click="loadOlderRuns"
+            >{{ runHistoryLoading ? '正在读取…' : '加载更早运行' }}</XqButton>
+          </div>
         </XqPanel>
 
         <XqPanel class="workspace-log-panel" title="运行日志" subtitle="实时事件摘要；独立滚动，不占用聊天阅读区。" data-testid="agent-log-panel">
@@ -1387,6 +1400,11 @@ const {
   createNewSession,
   archiveCurrentSession,
   loadOlderMessages,
+  loadOlderRuns,
+  runHistoryHasMore,
+  runHistoryLoading,
+  runHistoryError,
+  runHistoryTotal,
   messageHistoryHasMore,
   messageHistoryLoading,
   messageHistoryError,
