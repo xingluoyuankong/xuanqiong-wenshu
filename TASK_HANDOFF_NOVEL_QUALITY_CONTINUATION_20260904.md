@@ -5855,3 +5855,36 @@ skip 分类：mutating=6 / expensive=2 / resource-identity=198 / live-prerequisi
 ```
 
 当前最新提交：`1adea10 fix: report active smoke auth mode`。任务仍为 `active / NO-GO`，未闭合项仍是 Docker Engine、正式 MySQL 和完整真实资源部署证据。
+
+## 2026-09-05 OpenAPI smoke 认证门禁修复与复验
+
+### 当前发现
+
+在当前 HEAD `1c6f904` 上复跑 `verify.ps1 smoke` 时，基础 health、前端首页和代理 health 均通过，但 OpenAPI 路由检查在匿名认证分支触发 `NameError: name 'AUTH_MODE' is not defined`。同一分支随后还会访问未初始化的 `AUTH_HEADERS`，因此匿名 smoke 实际无法进入路由矩阵。
+
+### 修复范围
+
+- `tools/smoke_api_routes.py`
+  - 初始化 `AUTH_HEADERS` 和 `AUTH_MODE` 的匿名默认值；
+  - 每次 `configure_auth()` 先清理旧认证状态，避免连续调用复用过期 Token；
+  - 主流程使用认证配置函数返回的模式输出。
+- `backend/app/services/test_smoke_api_routes.py`
+  - 增加匿名认证默认值和旧 Header 清理回归测试。
+
+### 当前验证
+
+```text
+匿名认证回归：1 passed
+发布/迁移/项目成员专项：17 passed
+Writer/Agent/成员/TaskRuntime组合回归：187 passed
+smoke：261 checks / 53 passed / 208 skipped / 0 failed
+smoke exit：0
+smoke_api_routes.py py_compile：通过
+git diff --check：通过
+```
+
+### 门禁变化
+
+OpenAPI smoke 的认证配置阻断已关闭，当前 smoke 可以完整执行到路由矩阵、LLM 设置检查和汇总阶段。剩余跳过项仍主要来自资源身份、真实写入和高成本接口，不把跳过计入通过。
+
+正式发布仍保持 `active / NO-GO`，剩余证据边界为：真实 Docker Compose 编排、正式 MySQL migration/backup/restore/rollback、真实资源 smoke fixture 覆盖和最终发布审计重判。

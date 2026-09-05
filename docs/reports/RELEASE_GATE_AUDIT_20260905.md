@@ -616,3 +616,19 @@ Live generate/cancel: executed
 Live evaluate/select: gated until a completed candidate exists
 Conclusion: active / NO-GO
 ```
+
+## 当前 HEAD 复核附录（2026-09-05，OpenAPI smoke 认证门禁修复）
+
+```text
+修复前现象：verify.ps1 smoke 在 configure_auth() 的匿名分支触发 NameError: AUTH_MODE 未定义
+修复文件：tools/smoke_api_routes.py
+回归文件：backend/app/services/test_smoke_api_routes.py
+匿名认证回归：1 passed
+成员/Writer/Agent/TaskRuntime/迁移/部署组合：187 passed + 17 passed
+OpenAPI smoke：261 checks / 53 passed / 208 skipped / 0 failed
+LLM 设置 smoke：通过
+py_compile：通过
+git diff --check：通过
+```
+
+本轮修复只涉及 smoke 认证状态初始化和对应回归测试，没有修改成员权限、Writer/Agent 业务授权逻辑。当前发布结论仍为 `active / NO-GO`；真实 Docker Compose、正式 MySQL 迁移恢复回滚和真实资源 smoke 覆盖仍需部署资源证据。
