@@ -4610,3 +4610,52 @@ P1：Workspace 分页 page client 的正式消费（不带入未通过的半成�
 P1：Artifact 摘要与质量/血缘事实两阶段加载
 P2：更新 release gate 报告并完成 GO/NO-GO 重评
 ```
+
+## 2026-09-05 Artifact 两阶段加载收口
+
+### A. 实现与提交
+
+提交：
+
+```text
+13c701d perf: defer artifact quality facts
+```
+
+已完成：
+
+- Artifact 列表先读取分页元数据摘要，不再在 Run 切换/普通历史恢复时为全部候选并行拉取质量与谱系事实；
+- 每个 Artifact 增加显式“读取质量与谱系”动作，事实请求按单项触发；
+- 深链指定 Artifact 时只对指定项加载事实并恢复预览；
+- 质量阻断、diff、预览、接受候选等既有操作仍保留单项加载链；
+- 分页摘要载入后恢复当前 Run 已记忆的 Artifact 投影，避免切换/刷新后阻断与差异定位丢失；
+- 详情区分页支持加载更多候选，旧数组接口仍作为兼容 fallback。
+
+### B. 验证
+
+```text
+Artifact/Runtime/Workspace 定向：65 passed
+前端全量：81 files / 526 tests passed
+Frontend type-check：通过
+Frontend build-only：4918 modules transformed，成功
+```
+
+新增覆盖包括：
+
+- 普通摘要列表不触发每个 Artifact 的质量/谱系请求；
+- 单项显式读取质量与谱系事实；
+- 深链 Artifact 单项事实加载；
+- 相同时间戳候选的稳定排序；
+- 分页加载期间切换 Run 的过期响应隔离；
+- 已选阻断/diff/预览投影在摘要刷新后恢复。
+
+### C. 当前剩余重点
+
+```text
+P0：当前 HEAD 生产配置审查（DEBUG/default admin）与迁移恢复证据
+P1：完整会话 messages/runs API cursor 分页，解决 getSession 全量 payload
+P1：Artifact 页面错误重试、分页筛选状态和深链体验继续回归
+P1：成员角色在实际 Agent HTTP 执行入口的 owner/editor/viewer/admin 矩阵验收
+P2：更新 RELEASE_GATE_AUDIT_20260905.md 为当前 HEAD，重新评估 GO/NO-GO
+```
+
+当前总任务保持 `active`，继续按 P0/P1/P2 逐批推进。
