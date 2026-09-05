@@ -5347,3 +5347,93 @@ HEAD：508d53f test: add isolated migration backup restore matrix
 ```
 
 剩余工作收敛为：正式部署编排矩阵、默认会话详情 payload 策略、完整后端全量门禁与最终发布审计。
+
+## 2026-09-05 会话详情 payload 策略审查与合同收口
+
+### 审查范围
+
+本轮只审查会话详情 payload 合同，未修改 `backend/app/api/routers/agent.py`，也未触碰或清理运行工件。核对对象：
+
+- `GET /api/agent/sessions/{session_id}` 旧详情路由；
+- `include_messages` / `include_runs` 的默认值与独立组合；
+- `GET /api/agent/sessions/{session_id}/messages` 与 `/runs` 分页接口；
+- `frontend/src/features/agent/composables/useAgentSessionLifecycle.ts`；
+- `frontend/src/views/AgentWorkspace.vue` 的首开与终态刷新路径；
+- 前后端会话分页回归。
+
+### 当前真实合同
+
+| 请求 | `messages` | `runs` | 用途与证据 |
+|---|---:|---:|---|
+| 旧详情无参数 | 返回服务层默认最多 200 条 | 返回该会话全部 Run | 保持历史客户端行为 |
+| `include_messages=false` | `[]` | 默认仍返回全部 Run | 当前新前端详情元数据/Run 选择路径 |
+| `include_runs=false` | 默认最多 200 条 | `[]` | 独立开关合同 |
+| 两者均为 `false` | `[]` | `[]` | 紧凑详情 |
+| 消息分页 `limit=60` | 最新 60 条，带 `total/next_cursor/has_more` | 不涉及 | 长历史首屏 |
+| Run 分页 `limit=50` | 不涉及 | 最新页，带复合游标与 `total` | 后续 Run 列表懒加载 |
+
+路由当前明确为 `include_messages: Query(default=True)`、`include_runs: Query(default=True)`。消息旧读取调用 `list_messages_readable()`，其默认查询上限为 200；Run 详情使用独立 `select(AgentRun)...`，目前没有行数上限。
+
+### 本轮证据
+
+新增后端合同测试：
+
+- 无参数 HTTP 详情仍返回消息和 Run；
+- `include_messages` 与 `include_runs` 四种组合相互独立；
+- 201 条消息时旧详情返回历史上限 200 条，消息分页报告 `total=201` 并返回最新 60 条；
+- 101 条 Run 时旧详情当前返回 101 条，证明 Run 详情仍是无上限读取。
+
+验证结果：
+
+```text
+backend/app/api/routers/test_agent_session_pagination.py: 6 passed in 14.57s
+backend/app/api/routers/test_agent_session_pagination.py app/api/routers/test_agent_runtime_route.py: 33 passed in 30.46s
+frontend API/lifecycle/conversation/workspace: 4 files passed, 67 tests passed in 14.52s
+```
+
+### 前端新路径核对
+
+1. `useAgentSessionLifecycle` 首次恢复和切换会话时，若存在分页客户端，调用 `getSession(id, { includeMessages: false })`，随后请求 `listSessionMessagesPage(id, { limit: 60 })`。
+2. 分页接口失败或响应格式异常时，前端回退到无参数 `getSession(id)`，因此旧默认必须继续返回消息。
+3. `AgentWorkspace.refreshSessionMessages` 终态刷新同样使用 `includeMessages: false` 加消息分页；旧客户端/mock 则回退旧详情。
+4. 当前生命周期仍依赖详情中的 `runs` 进行 Run 投影和深链选择，尚未把 `listSessionRunsPage` 接入首开链路；所以当前新路径仍会读取全部 Run。
+
+### 决策
+
+**保留旧详情接口的默认 `include_messages=true` 与 `include_runs=true`，本轮不改 `agent.py`。**
+
+理由：
+
+- 改为 `false` 会让无参数旧客户端静默得到空数组，破坏既有响应语义；
+- 消息分页失败回退明确调用无参数详情，默认关闭会使回退路径丢失首屏历史；
+- 当前 Workspace 的 Run 投影仍消费详情中的 `runs`，仅把消息默认改成 `false` 尚不能形成完整的 metadata-first 合同；
+- 新分页接口已经提供低 payload 入口，前端已对消息显式采用该入口；
+- 旧消息读取已有 200 条服务层上限，但 Run 读取没有上限，风险应通过 Run 分页接入和调用方迁移解决，而不是先改变兼容默认。
+
+### 后续完整方案
+
+**阶段 A：保持兼容（已完成）**
+
+- 旧详情无参数默认值保持 `true/true`；
+- 显式开关继续独立生效；
+- 新消息首屏强制 `include_messages=false` + `messages?limit=60`；
+- 分页异常保留无参数详情回退；
+- 用本节合同测试防止默认和开关漂移。
+
+**阶段 B：完成前端 Run 分页迁移（下一项）**
+
+- 生命周期首开请求 `getSession(id, { includeMessages: false, includeRuns: false })`；
+- 再请求 `listSessionMessagesPage(limit=60)` 与 `listSessionRunsPage(limit=50)`；
+- 为 Run 列表增加旧页前插、游标、加载状态、失败重试和深链目标保障；
+- Run 分页失败时按“当前 Run 可恢复性”设计有界回退，不直接把无限详情作为常规首屏路径；
+- 增加 HTTP/前端合同测试，确认消息与 Run 的分页请求顺序、会话切换隔离和回退行为。
+
+**阶段 C：兼容窗口后的默认策略评估**
+
+- 统计无参数详情调用方和旧版本客户端迁移完成度；
+- 若所有正式调用方均显式声明 payload 需求，再考虑新增版本化 metadata-first 详情或调整默认；
+- 不直接在当前旧接口上翻转默认，除非同时具备调用方清单、迁移窗口、版本标识、回退合同和完整长历史验收证据。
+
+### 当前门禁影响
+
+会话详情策略审查已完成，策略项从“待决策”变为“保留兼容默认，继续推进 Run 分页迁移”。由于正式部署编排、完整全量门禁和其他发布证据仍未全部闭环，总任务继续保持 `active / NO-GO`。
