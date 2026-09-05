@@ -4659,3 +4659,47 @@ P2：更新 RELEASE_GATE_AUDIT_20260905.md 为当前 HEAD，重新评估 GO/NO-G
 ```
 
 当前总任务保持 `active`，继续按 P0/P1/P2 逐批推进。
+
+## 2026-09-05 P0 迁移与配置门禁复核
+
+### A. 当前 HEAD 结果
+
+```text
+HEAD：1ff1912
+分支：codex/bohrium-integration-20260831
+```
+
+专项：
+
+```text
+Alembic migration + project member migration + deployment contract + config security：19 passed in 53.97s
+backend pip check：No broken requirements found
+```
+
+迁移链当前已覆盖 fresh、重复升级、代表性版本路径、项目成员回填和部署契约；后续仍需补齐以当前 HEAD 归档的 restore/downgrade 原始证据。
+
+### B. P0 配置结论
+
+当前 `backend/.env` 仍为本地开发配置：
+
+```text
+ENVIRONMENT=development
+DEBUG=true
+ADMIN_DEFAULT_PASSWORD=ChangeMe123!
+DB_PROVIDER=sqlite
+```
+
+启动日志因此保留开发配置提示。该配置不在本批自动替换，避免覆盖本地凭据或改变运行环境；发布门禁继续要求正式部署注入独立的管理员密码、关闭 DEBUG，并重新生成当前 HEAD 的启动证据。
+
+### C. 下一批消息历史分页
+
+已登记独立审查任务，目标是新增向后兼容的 messages/runs page API：
+
+```text
+旧 GET /agent/sessions/{session_id} 默认保持 AgentSessionDetail 数组字段
+新增显式分页路径或参数，使用稳定 sequence/created_at + id 游标
+成员/projectless 边界复用现有 readable session
+前端在长会话场景按页取历史，避免仅做本地 DOM 窗口化
+```
+
+在消息 API 合同和 HTTP 回归通过前，不把 `getSession()` 全量 payload 标记为性能问题已解决。
