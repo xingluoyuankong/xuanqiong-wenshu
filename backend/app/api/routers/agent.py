@@ -270,12 +270,16 @@ async def list_agent_session_runs(
     current_user: UserInDB = Depends(get_current_user),
 ) -> AgentSessionRunPageRead:
     try:
+        # Direct unit callers do not pass FastAPI-resolved defaults, so normalize
+        # Query sentinel objects before they reach SQLAlchemy's DateTime binder.
+        effective_before_created_at = before_created_at if isinstance(before_created_at, datetime) else None
+        effective_before_id = before_id if isinstance(before_id, str) else None
         items, next_created_at, next_id, has_more, total = await AgentRuntimeService(session).list_runs_readable_page(
             session_id=session_id,
             user_id=current_user.id,
             limit=limit,
-            before_created_at=before_created_at,
-            before_id=before_id,
+            before_created_at=effective_before_created_at,
+            before_id=effective_before_id,
         )
         return AgentSessionRunPageRead(
             session_id=session_id,
