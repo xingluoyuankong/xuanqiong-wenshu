@@ -63,6 +63,7 @@ SKIP_REASON_LABELS = {
 class SmokeResourceContext:
     project_id: str
     chapter_number: int
+    clue_id: int | None = None
     generated: bool = False
 
 
@@ -85,13 +86,16 @@ def resource_identity_families(path: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(families))
 
 
-def has_unresolved_resource_identity(path: str) -> bool:
-    """Return whether a route needs an ID absent from the minimal smoke fixture."""
+def has_unresolved_resource_identity(path: str, context: SmokeResourceContext | None = None) -> bool:
+    """Return whether a route needs an ID absent from the current smoke fixture."""
+    available = {"project_id"}
+    if context is not None and context.clue_id is not None:
+        available.add("clue_id")
     for name in (match.group(1).lower() for match in PATH_PARAM_PATTERN.finditer(path)):
         if "chapter" in name and "number" in name:
             continue
         if name.endswith("_id") or name == "id":
-            if name != "project_id":
+            if name not in available:
                 return True
     return False
 
@@ -101,6 +105,8 @@ def substitute_path_params(path: str, context: SmokeResourceContext | None = Non
         name = match.group(1).lower()
         if name == "project_id" and context is not None:
             return context.project_id
+        if name == "clue_id" and context is not None and context.clue_id is not None:
+            return str(context.clue_id)
         if "chapter" in name and "number" in name:
             return str(context.chapter_number if context is not None else 1)
         return "test"
@@ -223,7 +229,28 @@ def create_smoke_project() -> tuple[SmokeResourceContext | None, str]:
         preview = blueprint_detail[:300] if blueprint_detail else ""
         return None, f"patch-blueprint-failed: status={blueprint_status} detail={preview}"
 
-    return SmokeResourceContext(project_id=project_id, chapter_number=1), ""
+    clue_status, clue_payload, _ = request_json(
+        "POST",
+        f"{BASE_URL}/api/projects/{project_id}/clues",
+        json_body={
+            "name": "OpenAPI smoke clue",
+            "clue_type": "plot_hook",
+            "description": "Temporary clue used by resource-identity smoke coverage.",
+            "importance": 3,
+            "planted_chapter": 1,
+            "clue_content": "smoke fixture",
+            "hint_level": 1,
+            "design_intent": "smoke coverage",
+        },
+    )
+    clue_id = None
+    if clue_status in {200, 201} and clue_payload and clue_payload.get("id") is not None:
+        try:
+            clue_id = int(clue_payload["id"])
+        except (TypeError, ValueError):
+            clue_id = None
+
+    return SmokeResourceContext(project_id=project_id, chapter_number=1, clue_id=clue_id), ""
 
 
 def cleanup_smoke_project(project_id: str) -> tuple[bool, str]:
@@ -378,7 +405,7 @@ def main() -> int:
                     resolvable_get = (
                         method_upper == "GET"
                         and smoke_context is not None
-                        and not has_unresolved_resource_identity(path)
+                        and not has_unresolved_resource_identity(path, smoke_context)
                     )
                     if not resolvable_get:
                         results.append(

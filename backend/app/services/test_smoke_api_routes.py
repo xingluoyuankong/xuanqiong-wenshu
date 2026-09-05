@@ -40,6 +40,9 @@ def test_resource_identity_families_are_stable_and_actionable():
     assert smoke.resource_identity_families("/api/health") == ()
     assert smoke.has_unresolved_resource_identity("/api/projects/{project_id}/overview") is False
     assert smoke.has_unresolved_resource_identity("/api/projects/{project_id}/runs/{run_id}") is True
+    assert smoke.has_unresolved_resource_identity("/api/projects/{project_id}/clues/{clue_id}") is True
+    clue_context = smoke.SmokeResourceContext(project_id="fixture-project", chapter_number=7, clue_id=9)
+    assert smoke.has_unresolved_resource_identity("/api/projects/{project_id}/clues/{clue_id}", clue_context) is False
     context = smoke.SmokeResourceContext(project_id="fixture-project", chapter_number=7)
     assert smoke.substitute_path_params("/api/projects/{project_id}/chapters/{chapter_number}", context) == "/api/projects/fixture-project/chapters/7"
     assert ("GET", "/api/writer/novels/{project_id}/chapters/{chapter_number}/stream") in smoke.SKIPPED_STREAMING_ROUTES
