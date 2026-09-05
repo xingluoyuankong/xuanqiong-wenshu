@@ -75,7 +75,7 @@ _VISIBLE_EVENT_KEYS: dict[str, set[str]] = {
     "plan_step_completed": {"step", "tool_name", "phase"},
     "plan_step_failed": {"step", "tool_name", "error_type", "phase"},
     "plan_step_pending": {"step", "tool_name", "phase"},
-    "approval_required": {"approval_id", "tool_name", "risk_level"},
+    "approval_required": {"approval_id", "tool_name", "risk_level", "actor_user_id", "execution_owner_id"},
     "approval_granted": {"approval_id", "tool_name", "status"},
     "approval_rejected": {"approval_id", "tool_name", "status"},
     "tool_call_started": {"tool_name", "step", "phase", "action_id"},
@@ -95,9 +95,9 @@ _VISIBLE_EVENT_KEYS: dict[str, set[str]] = {
     "run_cancelled": {"phase", "active_job_count", "cancelled_approval_count"},
     "approval_cancelled": {"approval_id", "tool_name", "status"},
     "cancellation_side_effect_failed": {"error_type", "phase"},
-    "run_command_requested": {"command_id", "command_type", "phase"},
-    "run_command_applied": {"command_id", "command_type", "phase", "status"},
-    "run_command_rejected": {"command_id", "command_type", "phase", "error_type"},
+    "run_command_requested": {"command_id", "command_type", "phase", "actor_user_id", "execution_owner_id"},
+    "run_command_applied": {"command_id", "command_type", "phase", "status", "actor_user_id", "execution_owner_id"},
+    "run_command_rejected": {"command_id", "command_type", "phase", "error_type", "actor_user_id", "execution_owner_id"},
     "assistant_queued": {"phase", "provider_called", "planner_provider_called", "planner_provider_fallback_reason"},
     "assistant_started": {"phase", "action_id", "result_ref", "response_provider_called", "response_provider_fallback_reason"},
     "assistant_delta": {"content", "phase", "action_id", "result_ref", "response_provider_called"},
@@ -2019,6 +2019,8 @@ class AgentRuntimeService:
                         "command_id": command.id,
                         "command_type": normalized_type,
                         "phase": phase_value,
+                        "actor_user_id": normalized_payload.get("actor_user_id"),
+                        "execution_owner_id": user_id,
                     },
                 )
                 await self.session.commit()
@@ -2072,6 +2074,8 @@ class AgentRuntimeService:
                             "command_type": command.command_type,
                             "phase": "run_control",
                             "error_type": command.error_type,
+                            "actor_user_id": (command.payload_json or {}).get("actor_user_id"),
+                            "execution_owner_id": user_id,
                         },
                     )
                 else:
@@ -2101,6 +2105,8 @@ class AgentRuntimeService:
                             "command_type": command.command_type,
                             "phase": run.current_phase or "run_control",
                             "status": command.status,
+                            "actor_user_id": (command.payload_json or {}).get("actor_user_id"),
+                            "execution_owner_id": user_id,
                         },
                     )
             except AgentRuntimeError as exc:
@@ -2124,6 +2130,8 @@ class AgentRuntimeService:
                         "command_type": command.command_type,
                         "phase": "run_control",
                         "error_type": command.error_type,
+                        "actor_user_id": (command.payload_json or {}).get("actor_user_id"),
+                        "execution_owner_id": user_id,
                     },
                 )
             try:

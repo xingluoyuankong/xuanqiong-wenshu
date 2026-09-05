@@ -3685,3 +3685,235 @@ optimizer、writing-skills、novels 主要项目访问边界
 5. 所有后续代码批次完成后重新替换 backend/frontend/smoke/HTTP 最终基线。
 
 总任务继续保持 `active`，不返回历史卡住会话。
+
+## 2026-09-04 接续回写：Agent Run 控制与 Artifact 接受审计补强
+
+### A. 生产改动
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\agent.py
+```
+
+成员控制与候选接受均完成 actor/execution owner 分离：
+
+- 项目 Run 的 pause/resume/cancel/commands 先验证项目成员写权限；
+- Editor/Admin 可以控制 Owner 创建的项目 Run；Viewer/非成员返回 403；
+- Runtime 状态机、lease、事件和后台执行仍使用持久化 `run.user_id`；
+- 命令 payload 固化 `actor_user_id`；
+- Artifact 接受的 `approval_required` 事件同时固化 `actor_user_id` 与 `execution_owner_id`；
+- projectless Run/Artifact 仍保持创建者私有隔离。
+
+### B. Agent Runtime readable 投影
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\services\agent_runtime.py
+```
+
+新增的成员可读投影保持独立：
+
+```text
+list_steps_readable()
+list_approvals_readable()
+list_artifacts_readable()
+```
+
+未扩大 Worker claim、lease、approval execution 的 creator-scoped 控制权。
+
+### C. 测试
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_member_controls.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_artifact_member_accept.py
+```
+
+覆盖：
+
+- Editor/Admin 控制 Owner Run；
+- Viewer/非成员写控制拒绝；
+- 命令保留原始 execution owner 与当前 actor；
+- Editor/Admin 接受 Owner 候选；
+- Artifact 接受事件记录 actor/execution owner；
+- Viewer/非成员候选接受拒绝。
+
+### D. 实测结果
+
+关键集合：
+
+```text
+Agent controls + Artifact accept + project HTTP：11 passed in 8.57s
+全部 Agent API 路由：126 passed in 123.25s
+```
+
+反向验证：
+
+```text
+Run 控制错误使用当前成员 ID：3 failed
+Artifact 接受错误使用当前成员 ID：2 failed
+```
+
+两次反向红灯均准确命中持久化 Runtime owner 约束，随后已恢复生产代码并复跑通过。
+
+### E. 当前门禁状态
+
+```text
+此前后端全量：1729 passed
+本批新增 Artifact 审计字段后：需再次重跑全量
+重启后 smoke：已通过
+重启后 Writer/TaskRuntime HTTP：已通过
+前端 type-check/Vitest/build：已通过
+```
+
+下一步为包含本批最新 `agent.py` 审计字段的后端全量回归。
+
+### Actor / Execution Owner 审计字段收口
+
+已补齐 Agent 事件公开字段与成员写入审计：
+
+```text
+backend/app/services/agent_runtime.py
+backend/app/api/routers/agent.py
+backend/app/api/routers/test_agent_member_controls.py
+backend/app/api/routers/test_agent_artifact_member_accept.py
+```
+
+当前不变量：
+
+- Run command requested/applied/rejected 事件保留 `actor_user_id` 与 `execution_owner_id`；
+- Artifact accept 的 `approval_required` 事件保留 `actor_user_id` 与 `execution_owner_id`；
+- 审批 `request_json` 与事件审计字段一致；
+- 公开事件仍受 `_VISIBLE_EVENT_KEYS` 白名单约束，不放开任意 Provider 或隐藏字段；
+- 控制执行、审批执行和运行状态变更继续使用原始 execution owner。
+
+本批定向验证：
+
+```text
+9 passed in 6.91s
+```
+
+全部 Agent 相关回归：
+
+```text
+493 passed in 431.80s (0:07:11)
+```
+
+## 2026-09-04 接续回写：Agent 批次最终后端基线
+
+### A. 最新后端全量
+
+在完成 Agent Run 控制成员化、Artifact 接受审计字段、Agent Runtime readable 投影以及既有测试合同对齐后，重新执行：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+最终结果：
+
+```text
+1729 passed in 724.56s
+```
+
+### B. 最新 Agent 路由证据
+
+```text
+全部 Agent API 路由：126 passed in 123.25s
+Agent controls + Artifact accept + project HTTP：11 passed
+TaskRuntime 成员路由：2 passed
+Agent Runtime 核心集合：51 passed
+Writer 成员读/流/写入/控制/HTTP：71 passed
+Writer worker identity：6 passed
+legacy outline fallback：4 passed
+```
+
+### C. 重启后运行时证据
+
+最新进程通过：
+
+```text
+start.ps1：backend/frontend/proxy READY
+verify.ps1 -Suite smoke：5 个阶段 PASS
+OpenAPI：259 项，55 通过、204 跳过、0 失败
+Writer/TaskRuntime 隔离 HTTP/JWT：4 passed
+```
+
+### D. 当前完整质量门禁基线
+
+```text
+Backend pytest：1729 passed
+Frontend type-check：通过
+Frontend Vitest：80 files / 496 tests passed
+Frontend build-only：4918 modules transformed，成功
+Smoke：通过
+```
+
+前端仍有非阻断依赖数据告警：
+
+```text
+baseline-browser-mapping data over two months old
+caniuse-lite data 11 months old
+```
+
+### E. 接续状态
+
+```text
+当前总任务：active
+当前主线：Agent/Writer 项目成员权限、运行恢复、审计和质量门闭环已形成稳定基线
+下一 P0/P1：真实 Provider 条件下 generate/cancel/resume 端到端链
+下一 P2：UI-006 长历史 cursor 分页、虚拟列表和移动端性能
+```
+
+### 2026-09-04 最新最终后端基线：Agent 审计字段补丁后
+
+在 `_VISIBLE_EVENT_KEYS`、Run command 事件和 Artifact accept 事件补齐 `actor_user_id` / `execution_owner_id` 后，重新执行完整后端门禁：
+
+```text
+1729 passed in 798.57s (0:13:18)
+```
+
+该结果替换此前 1706 项旧基线；Agent 全域聚合 493 项、真实 Agent HTTP/JWT 14 项和成员控制/Artifact accept 9 项均已先行通过。
+
+## 2026-09-04 最终回写：Agent 控制审计字段与当前质量门禁
+
+### A. Agent 控制与候选接受
+
+当前提交链已补齐：
+
+```text
+Agent Run pause/resume/cancel/command：项目成员写权限 + 原始 execution owner
+Agent Artifact accept：项目成员写权限 + 原始 execution owner
+approval_required / run_command_* 公开事件：actor_user_id + execution_owner_id
+projectless Run/Artifact：仍按创建者私有边界
+```
+
+真实隔离 HTTP/ASGI 与专项测试确认 Editor/Admin 可操作 Owner Run，Viewer/非成员被拒绝，且控制命令、审批请求、终态事件不发生执行归属漂移。
+
+### B. 当前最终实测门禁
+
+本批所有 Agent 控制审计字段变更纳入后重新执行：
+
+```text
+Backend pytest：1729 passed in 768.38s (0:12:48)
+Frontend type-check：通过
+Frontend Vitest：80 files / 510 tests passed in 79.20s
+Frontend build-only：4918 modules，13.19s，成功
+隔离 Writer HTTP/JWT：31 checks，SMOKE_PASSED
+Agent projection/control/artifact 专项：26 passed
+```
+
+此前完整后端失败的 2 条 Artifact 事件断言已由事件审计字段补齐修复；最终全量结果为 0 failures。前端保留既有 `baseline-browser-mapping`、`caniuse-lite` 和 Pinia 注入提示，均未影响门禁结果。
+
+### C. 当前提交与工作区
+
+```text
+93dcf15 test: verify shared agent controls and artifact attribution
+```
+
+接续文档、Agent readable projection、共享 Run 控制、Artifact 接受审计和成员测试均已纳入提交链。未跟踪的导入/上传二进制运行工件保留原状，不提交、不批量清理。
+
+### D. 下一阶段
+
+```text
+总任务：active
+当前阶段：项目成员权限闭环与 Agent 历史投影已完成，完整后端/前端门禁已通过
+下一阶段：真实重启后 TCP HTTP/SSE 对 Agent 历史投影与共享 Run 控制复验；随后进入 UI-005 工具注册策略统一、UI-006 长历史分页/窗口化性能和发布门禁
+```
