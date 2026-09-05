@@ -6439,3 +6439,19 @@ git diff --check：PASS
 ```
 
 该探针没有把 503 当成通过，也没有把 AgentRun/Artifact 资源伪造进 smoke；当前剩余门禁明确增加为“提供可用 Agent event ledger 后重新执行 AgentRun/Artifact/Provider 链路”。
+## 当前 HEAD AgentRun fixture 覆盖复核（c328788）
+
+```text
+HEAD：c3287885a4259e84e5d09f375bd2b5e5588faf8f
+HEAD 提交：fix: advance agent catalog generation for run smoke
+Agent catalog generation：1 -> 2
+Catalog/runtime 定向回归：45 passed
+Smoke 定向回归：3 passed
+OpenAPI smoke：261 checks / 135 passed / 126 skipped / 0 failed
+resource-identity：109
+streaming：4
+AgentRun probe：message=201；run detail=200；run events=200
+Probe cleanup：projects/runs/artifacts/sessions/tasks 前后计数一致
+```
+
+本轮修复旧 Catalog generation=1 与当前 digest 冲突导致的重复发行插入；新 generation=2 后 AgentRun 创建和事件账本写入恢复，真实 `run_id` 已接入 smoke context。Artifact 仍需在独立 Provider/Run 完成链路中生成。

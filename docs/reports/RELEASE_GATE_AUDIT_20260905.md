@@ -1018,3 +1018,20 @@ TaskRuntime 前后：83 -> 83
 ```
 
 当前发布结论继续为 `active / NO-GO`。该 503 被记录为真实环境缺口，不降级为通过；下一步需在事件账本可写后重跑 AgentRun、Provider 和 Artifact 质量/内容/lineage GET 验收。
+## 当前 HEAD AgentRun fixture 覆盖复核（c328788）
+
+```text
+HEAD：c3287885a4259e84e5d09f375bd2b5e5588faf8f
+HEAD 提交：fix: advance agent catalog generation for run smoke
+Catalog generation：2
+Catalog/runtime targeted：45 passed
+Smoke targeted：3 passed
+OpenAPI smoke：261 / 135 passed / 126 skipped / 0 failed
+resource-identity：109
+streaming-route：4
+AgentRun：message=201；detail=200；events=200
+Artifact：0，仍待 Provider/Artifact 生成链路
+当前发布结论：active / NO-GO
+```
+
+本轮解决 `agent_catalog_releases(catalog_id,generation)` 与旧 digest 冲突造成的 AgentRun 503；新 generation=2 后事件账本写入正常。探针清理后没有新增项目、Run、Artifact、Session 或 TaskRuntime 残留。
