@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import uuid
+from urllib.parse import urlencode
 import urllib.error
 import urllib.request
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -89,10 +92,11 @@ def request(
     headers = {
         "Accept": "application/json",
         "X-Smoke-Test": "openapi-route-smoke",
+        **AUTH_HEADERS,
     }
     data = None
-    if method in {"POST", "PUT", "PATCH"}:
-        payload = json.dumps(json_body or {}, ensure_ascii=False).encode("utf-8")
+    if method in {"POST", "PUT", "PATCH", "DELETE"}:
+        payload = json.dumps(json_body if json_body is not None else {}, ensure_ascii=False).encode("utf-8")
         data = payload
         headers["Content-Type"] = "application/json"
 
@@ -118,13 +122,53 @@ def request_json(method: str, url: str, *, json_body: dict[str, Any] | None = No
         return status, None, detail
 
 
+def configure_auth() -> tuple[bool, str]:
+    """Load a smoke Bearer token, or mint one from environment credentials.
+
+    Anonymous mode remains the default so the base smoke still exercises public
+    and authentication-contract responses. Credentials are read only from the
+    environment and never printed.
+    """
+    global AUTH_HEADERS, AUTH_MODE
+    token = os.getenv("XUANQIONG_WENSHU_SMOKE_TOKEN", "").strip()
+    username = os.getenv("XUANQIONG_WENSHU_SMOKE_USERNAME", "").strip()
+    password = os.getenv("XUANQIONG_WENSHU_SMOKE_PASSWORD", "")
+    if token:
+        AUTH_HEADERS = {"Authorization": f"Bearer {token}"}
+        AUTH_MODE = "bearer-token"
+        return True, AUTH_MODE
+    if not username and not password:
+        return True, AUTH_MODE
+    if not username or not password:
+        return False, "credentials-incomplete"
+    body = urlencode({"username": username, "password": password}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{BASE_URL}/api/auth/login",
+        method="POST",
+        headers={"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"},
+        data=body,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            payload = json.loads(resp.read().decode("utf-8", "ignore"))
+    except Exception as exc:
+        return False, f"login-failed: {exc}"
+    access_token = str(payload.get("access_token") or "")
+    if not access_token:
+        return False, "login-failed: missing access_token"
+    AUTH_HEADERS = {"Authorization": f"Bearer {access_token}"}
+    AUTH_MODE = "credentials"
+    return True, AUTH_MODE
+
+
 def create_smoke_project() -> tuple[SmokeResourceContext | None, str]:
+    marker = uuid.uuid4().hex[:12]
     status, payload, detail = request_json(
         "POST",
         f"{BASE_URL}/api/novels",
         json_body={
-            "title": f"OpenAPI Smoke {int(os.times().elapsed * 1000)}",
-            "initial_prompt": "用于最小真实资源写作台路由冒烟校验。",
+            "title": f"OpenAPI Smoke {marker}",
+            "initial_prompt": f"用于最小真实资源写作台路由冒烟校验。xq-smoke-fixture:{marker}",
         },
     )
     if status != 201 or not payload or not payload.get("id"):
@@ -154,8 +198,11 @@ def create_smoke_project() -> tuple[SmokeResourceContext | None, str]:
     return SmokeResourceContext(project_id=project_id, chapter_number=1), ""
 
 
-def cleanup_smoke_project(project_id: str) -> None:
-    request("DELETE", f"{BASE_URL}/api/novels", json_body=[project_id])
+def cleanup_smoke_project(project_id: str) -> tuple[bool, str]:
+    status, detail = request("DELETE", f"{BASE_URL}/api/novels", json_body=[project_id])
+    if status in {200, 204, 404}:
+        return True, ""
+    return False, f"cleanup project={project_id} status={status} detail={detail[:300]}"
 
 
 def smoke_writer_route(
@@ -199,6 +246,12 @@ def smoke_writer_route(
 
 
 def main() -> int:
+    auth_ok, auth_detail = configure_auth()
+    if not auth_ok:
+        print(f"[失败] smoke 认证配置无效：{auth_detail}")
+        return 1
+    print(f"[正常] smoke 认证模式：{AUTH_MODE}")
+    cleanup_errors: list[str] = []
     try:
         with urllib.request.urlopen(OPENAPI_URL, timeout=10) as resp:
             spec = json.loads(resp.read().decode("utf-8"))
@@ -306,9 +359,16 @@ def main() -> int:
                 )
     finally:
         if smoke_context is not None:
-            cleanup_smoke_project(smoke_context.project_id)
+            cleanup_ok, cleanup_detail = cleanup_smoke_project(smoke_context.project_id)
+            if not cleanup_ok:
+                cleanup_errors.append(cleanup_detail)
 
     failed = [item for item in results if not item.ok]
+    if cleanup_errors:
+        failed.extend(
+            CheckResult(method="CLEANUP", path="smoke-fixture", status=599, ok=False, detail=detail)
+            for detail in cleanup_errors
+        )
     skipped = [item for item in results if item.status == 0]
     passed = [item for item in results if item.ok and item.status != 0]
 
@@ -331,6 +391,11 @@ def main() -> int:
     print(f"通过：{len(passed)}")
     print(f"跳过：{len(skipped)}")
     print(f"失败：{len(failed)}")
+    skip_counts = Counter(item.detail or "unknown" for item in results if item.status == 0)
+    if skip_counts:
+        print("跳过分类：")
+        for reason, count in sorted(skip_counts.items()):
+            print(f"  {reason}: {count}")
 
     if failed:
         print("\n失败明细：")
