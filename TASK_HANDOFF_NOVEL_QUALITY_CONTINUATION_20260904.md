@@ -6033,3 +6033,38 @@ git diff --check：通过
 ```
 
 该节覆盖此前文档中的旧 `1763/536` 全量数字；后续发布判断以本节和之后新 HEAD 的证据为准。
+
+## 2026-09-05 新增 acceptance 门禁套件
+
+### 实现
+
+`verify.ps1` 新增 `-Suite acceptance`，将以下独立验收纳入一个可复现入口：
+
+```text
+真实 TCP/JWT 消息分页（180 条）
+真实 TCP/JWT 成员分页（125 条）
+真实 TCP/JWT Run 分页（125 个）
+隔离 SQLite 迁移备份恢复
+Agent worker --once
+Agent command worker --once
+```
+
+参数校验和 PowerShell AST 解析通过。
+
+### 当前实测
+
+```text
+verify.ps1 -Suite acceptance：通过
+6/6 验收步骤 PASS
+TCP message：180 / 3 pages / no duplicates
+TCP member：125 / 3 pages / shared outsider=403 / private outsider=404
+TCP Run：125 / limit=50 / 3 pages / no duplicates
+SQLite backup/restore：MIGRATION_BACKUP_RESTORE_MATRIX_PASSED / exit=0
+Agent worker：worked=False / exit=0
+Command worker：worked=False / exit=0
+```
+
+### 证据状态
+
+当前任务的本地服务—客户端—迁移—Worker 验收已由 `acceptance` 套件统一编排；Docker daemon 启动尝试仍未获得 Server 响应，正式 MySQL 资源仍未出现，因此最终发布继续保持 `active / NO-GO`。
+

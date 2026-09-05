@@ -729,3 +729,18 @@ git diff --check: PASS
 ```
 
 当前仍为 `active / NO-GO`：Docker Compose 实际编排、正式 MySQL migration/backup/restore/rollback 和完整真实资源 smoke 覆盖尚未获得对应资源节点证据。
+
+## 2026-09-05 Acceptance suite 最新复核
+
+```text
+verify.ps1 -Suite acceptance：PASS
+6/6 steps passed
+TCP message/member/Run pagination：PASS
+SQLite migration backup/restore：PASS
+Agent worker --once：PASS
+Agent command worker --once：PASS
+Docker daemon：仍无 Server 响应
+MySQL TCP：无监听
+Current conclusion：active / NO-GO
+```
+
