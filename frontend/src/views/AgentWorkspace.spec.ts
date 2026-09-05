@@ -1,5 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia } from 'pinia'
+import { useAuthStore } from '@/stores/auth'
 import AgentWorkspace from './AgentWorkspace.vue'
 import workspaceSource from './AgentWorkspace.vue?raw'
 
@@ -8,6 +10,11 @@ const {
   replaceMock,
   routeQuery,
   listToolsMock,
+  listToolHealthMock,
+  listTimelineMock,
+  listAuditMock,
+  listJobsMock,
+  listDeadLettersMock,
   listProjectEntitySummariesMock,
   createPlanMock,
   listSessionsMock,
@@ -39,6 +46,11 @@ const {
   replaceMock: vi.fn(),
   routeQuery: {} as Record<string, string>,
   listToolsMock: vi.fn(),
+  listToolHealthMock: vi.fn(),
+  listTimelineMock: vi.fn(),
+  listAuditMock: vi.fn(),
+  listJobsMock: vi.fn(),
+  listDeadLettersMock: vi.fn(),
   listProjectEntitySummariesMock: vi.fn(),
   createPlanMock: vi.fn(),
   listSessionsMock: vi.fn(),
@@ -90,6 +102,11 @@ vi.mock('@/api/agent', () => ({
     `agent-run-command:${runId}:${command}:state-${version}`,
   AgentAPI: {
     listTools: listToolsMock,
+    listToolHealth: listToolHealthMock,
+    listTimeline: listTimelineMock,
+    listAudit: listAuditMock,
+    listJobs: listJobsMock,
+    listDeadLetters: listDeadLettersMock,
     listProjectEntitySummaries: listProjectEntitySummariesMock,
     createPlan: createPlanMock,
     listSessions: listSessionsMock,
@@ -113,6 +130,16 @@ vi.mock('@/api/agent', () => ({
   },
 }))
 
+const expandDataDetails = async (wrapper: {
+  get: (selector: string) => { element: Element; trigger: (event: string) => Promise<unknown> }
+}) => {
+  const section = wrapper.get('[data-testid="agent-data-section"]')
+  ;(section.element as HTMLDetailsElement).open = true
+  await section.trigger('toggle')
+  await flushPromises()
+  await flushPromises()
+}
+
 describe('AgentWorkspace', () => {
   beforeEach(() => {
     pushMock.mockReset()
@@ -120,6 +147,16 @@ describe('AgentWorkspace', () => {
     Object.keys(routeQuery).forEach((key) => delete routeQuery[key])
     store.loadProjects.mockReset()
     store.loadProjects.mockResolvedValue(undefined)
+    listToolHealthMock.mockReset()
+    listToolHealthMock.mockResolvedValue({ registry_status: 'healthy', provider_count: 0, providers: [] })
+    listTimelineMock.mockReset()
+    listTimelineMock.mockResolvedValue([])
+    listAuditMock.mockReset()
+    listAuditMock.mockResolvedValue([])
+    listJobsMock.mockReset()
+    listJobsMock.mockResolvedValue([])
+    listDeadLettersMock.mockReset()
+    listDeadLettersMock.mockResolvedValue([])
     listProjectEntitySummariesMock.mockReset()
     listProjectEntitySummariesMock.mockResolvedValue({ project_id: 'p1', entities: [] })
     listSessionsMock.mockReset()
@@ -259,12 +296,99 @@ describe('AgentWorkspace', () => {
       events: [],
     })
   })
+  it('数据详情区首次折叠时不请求 Provider、治理、实体或成员详情', async () => {
+    Object.assign(routeQuery, { project_id: 'p1' })
+    const pinia = createPinia()
+    useAuthStore(pinia).setUser({ id: 1, username: 'admin', is_admin: true, must_change_password: false })
+    const wrapper = mount(AgentWorkspace, { global: { plugins: [pinia] } })
+    await flushPromises()
+    await flushPromises()
+
+    expect((wrapper.get('[data-testid="agent-data-section"]').element as HTMLDetailsElement).open).toBe(false)
+    expect(listToolHealthMock).not.toHaveBeenCalled()
+    expect(getProjectProviderUsageSummaryMock).not.toHaveBeenCalled()
+    expect(listTimelineMock).not.toHaveBeenCalled()
+    expect(listAuditMock).not.toHaveBeenCalled()
+    expect(listJobsMock).not.toHaveBeenCalled()
+    expect(listDeadLettersMock).not.toHaveBeenCalled()
+    expect(listProjectEntitySummariesMock).not.toHaveBeenCalled()
+    expect(listProjectMembersMock).not.toHaveBeenCalled()
+  })
+
+  it('首次展开加载详情数据，保留深链 Run，重复展开不重复请求已成功详情', async () => {
+    Object.assign(routeQuery, { project_id: 'p1', session_id: 's-lazy', run_id: 'run-lazy' })
+    const session = { id: 's-lazy', user_id: 1, project_id: 'p1', status: 'active', created_at: 'now', updated_at: 'now' }
+    const run = { id: 'run-lazy', session_id: session.id, user_id: 1, project_id: 'p1', status: 'completed', current_phase: 'completed', current_step: 1, progress: 100, created_at: 'now' }
+    listSessionsMock.mockResolvedValue([session])
+    getSessionMock.mockResolvedValue({ ...session, messages: [], runs: [run] })
+    listEventsMock.mockResolvedValue([])
+    listApprovalsMock.mockResolvedValue([])
+    listArtifactsMock.mockResolvedValue([])
+    listRunStepsMock.mockResolvedValue([])
+    getRunStateMock.mockResolvedValue({ correlation_id: 'lazy', progress: 100, phase: 'completed', current_step: 1, terminal_status: 'completed', capability_snapshot: { generation: 1, providers: [], tools: [] } })
+    const pinia = createPinia()
+    useAuthStore(pinia).setUser({ id: 1, username: 'admin', is_admin: true, must_change_password: false })
+    const wrapper = mount(AgentWorkspace, { global: { plugins: [pinia] } })
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="agent-selected-run-id"]').text()).toContain(run.id)
+    expect(getProviderUsageSummaryMock).not.toHaveBeenCalled()
+    await expandDataDetails(wrapper)
+
+    expect(listToolHealthMock).toHaveBeenCalledTimes(1)
+    expect(getProjectProviderUsageSummaryMock).toHaveBeenCalledWith('p1')
+    expect(getProviderUsageSummaryMock).toHaveBeenCalledWith(run.id)
+    expect(listTimelineMock).toHaveBeenCalledTimes(1)
+    expect(listAuditMock).toHaveBeenCalledTimes(1)
+    expect(listJobsMock).toHaveBeenCalledWith('p1')
+    expect(listDeadLettersMock).toHaveBeenCalledTimes(1)
+    expect(listProjectEntitySummariesMock).toHaveBeenCalledWith('p1')
+    expect(listProjectMembersMock).toHaveBeenCalledWith('p1')
+    expect(wrapper.get('[data-testid="agent-selected-run-id"]').text()).toContain(run.id)
+
+    const details = wrapper.get('[data-testid="agent-data-section"]')
+    ;(details.element as HTMLDetailsElement).open = false
+    await details.trigger('toggle')
+    ;(details.element as HTMLDetailsElement).open = true
+    await details.trigger('toggle')
+    await flushPromises()
+
+    expect(listToolHealthMock).toHaveBeenCalledTimes(1)
+    expect(getProjectProviderUsageSummaryMock).toHaveBeenCalledTimes(1)
+    expect(getProviderUsageSummaryMock).toHaveBeenCalledTimes(1)
+    expect(listTimelineMock).toHaveBeenCalledTimes(1)
+    expect(listProjectEntitySummariesMock).toHaveBeenCalledTimes(1)
+    expect(listProjectMembersMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('首次展开后的成员详情错误保留在面板，并可通过刷新恢复', async () => {
+    Object.assign(routeQuery, { project_id: 'p1' })
+    listProjectMembersMock.mockRejectedValueOnce(new Error('成员详情暂不可用')).mockResolvedValueOnce({
+      members: [{ id: 'owner-p1', project_id: 'p1', user_id: 1, role: 'owner', created_at: 'now', updated_at: 'now', deleted_at: null }],
+      count: 1,
+      access_role: 'owner',
+      can_manage: true,
+    })
+    const wrapper = mount(AgentWorkspace)
+    await flushPromises()
+    await expandDataDetails(wrapper)
+
+    const panel = wrapper.get('[data-testid="project-member-panel"]')
+    expect(panel.get('[data-testid="project-members-error"]').text()).toContain('成员详情暂不可用')
+    await panel.get('[data-testid="project-members-refresh"]').trigger('click')
+    await flushPromises()
+    expect(panel.find('[data-testid="project-members-error"]').exists()).toBe(false)
+    expect(panel.find('[data-member-user-id="1"]').exists()).toBe(true)
+  })
+
   it('在数据面板挂载项目成员管理，并由服务端访问投影决定是否可管理', async () => {
     Object.assign(routeQuery, { project_id: 'p1' })
     listSessionsMock.mockResolvedValue([])
 
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
+    await expandDataDetails(wrapper)
 
     expect(wrapper.find('[data-testid="agent-project-members-section"]').exists()).toBe(true)
     expect(listProjectMembersMock).toHaveBeenCalledWith('p1')
@@ -291,6 +415,7 @@ describe('AgentWorkspace', () => {
 
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
+    await expandDataDetails(wrapper)
 
     const panel = wrapper.get('[data-testid="project-member-panel"]')
     expect(panel.find('[data-testid="project-members-readonly"]').exists()).toBe(!canManage)
@@ -315,6 +440,7 @@ describe('AgentWorkspace', () => {
 
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
+    await expandDataDetails(wrapper)
     const panel = wrapper.get('[data-testid="project-member-panel"]')
 
     await panel.get('[data-testid="project-members-user-id"]').setValue('3')
@@ -354,6 +480,7 @@ describe('AgentWorkspace', () => {
 
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
+    await expandDataDetails(wrapper)
     const panel = wrapper.get('[data-testid="project-member-panel"]')
     expect(panel.get('[data-testid="project-members-error"]').text()).toContain(message)
 
@@ -397,6 +524,7 @@ describe('AgentWorkspace', () => {
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
     await flushPromises()
+    await expandDataDetails(wrapper)
 
     expect(getProviderUsageSummaryMock).toHaveBeenCalledWith(run.id)
     expect(getProjectProviderUsageSummaryMock).toHaveBeenCalledWith('p1')
@@ -1009,6 +1137,7 @@ describe('AgentWorkspace', () => {
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
     await flushPromises()
+    await expandDataDetails(wrapper)
     await wrapper.get('[data-testid="agent-content-chapter-1"]').trigger('click')
     await flushPromises()
     await wrapper.get('[data-testid="agent-project-entity-character-17"]').trigger('click')

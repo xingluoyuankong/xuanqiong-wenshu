@@ -120,55 +120,61 @@
           </div>
         </details>
 
-        <details class="workspace-section" data-testid="agent-data-section">
+        <details
+          class="workspace-section"
+          data-testid="agent-data-section"
+          @toggle="onDataSectionToggle"
+        >
           <summary>
             <span>数据与候选</span>
             <small>按需展开</small>
           </summary>
           <div class="workspace-section-body">
-            <AgentDataPanel
-              :project-id="selectedProjectId || null"
-              :project-provider-usage-summary="activeProjectProviderUsageSummary"
-              :project-provider-usage-summary-loading="projectProviderUsageSummaryLoading"
-              :project-provider-usage-summary-error="activeProjectProviderUsageSummaryError || ''"
-              :is-admin="isAdmin"
-              :provider-health="providerHealth"
-              :provider-health-loading="providerHealthLoading"
-              :provider-health-error="providerHealthError"
-              :active-run-id="activeRun?.id || null"
-              :provider-usage-summary="activeProviderUsageSummary"
-              :provider-usage-summary-loading="providerUsageSummaryLoading"
-              :provider-usage-summary-error="activeProviderUsageSummaryError || ''"
-              :timeline="timeline"
-              :timeline-loading="timelineLoading"
-              :timeline-event-type="timelineEventType"
-              :timeline-run-status="timelineRunStatus"
-              :jobs="jobs"
-              :jobs-loading="jobsLoading"
-              :dead-letters="deadLetters"
-              :dead-letters-loading="deadLettersLoading"
-              :audit-ledger="auditLedger"
-              :audit-loading="auditLoading"
-              :can-list-dead-letters="typeof AgentAPI.listDeadLetters === 'function'"
-              @update:timeline-event-type="timelineEventType = $event"
-              @update:timeline-run-status="timelineRunStatus = $event"
-              @cancel-job="cancelJobAction"
-              @replay-dead-letter="replayDeadLetterAction"
-            />
-            <AgentProjectDataWorkbench
-              :project-id="selectedProjectId"
-              :selected-entity-refs="manualEntityContextRefs"
-              @toggle-entity="toggleEntityContextRef"
-            />
-            <details class="workspace-section" data-testid="agent-project-members-section">
-              <summary>
-                <span>项目成员</span>
-                <small>共享与权限</small>
-              </summary>
-              <div class="workspace-section-body">
-                <ProjectMemberPanel :project-id="selectedProjectId || null" />
-              </div>
-            </details>
+            <template v-if="dataDetailsLoaded">
+              <AgentDataPanel
+                :project-id="selectedProjectId || null"
+                :project-provider-usage-summary="activeProjectProviderUsageSummary"
+                :project-provider-usage-summary-loading="projectProviderUsageSummaryLoading"
+                :project-provider-usage-summary-error="activeProjectProviderUsageSummaryError || ''"
+                :is-admin="isAdmin"
+                :provider-health="providerHealth"
+                :provider-health-loading="providerHealthLoading"
+                :provider-health-error="providerHealthError"
+                :active-run-id="activeRun?.id || null"
+                :provider-usage-summary="activeProviderUsageSummary"
+                :provider-usage-summary-loading="providerUsageSummaryLoading"
+                :provider-usage-summary-error="activeProviderUsageSummaryError || ''"
+                :timeline="timeline"
+                :timeline-loading="timelineLoading"
+                :timeline-event-type="timelineEventType"
+                :timeline-run-status="timelineRunStatus"
+                :jobs="jobs"
+                :jobs-loading="jobsLoading"
+                :dead-letters="deadLetters"
+                :dead-letters-loading="deadLettersLoading"
+                :audit-ledger="auditLedger"
+                :audit-loading="auditLoading"
+                :can-list-dead-letters="typeof AgentAPI.listDeadLetters === 'function'"
+                @update:timeline-event-type="timelineEventType = $event"
+                @update:timeline-run-status="timelineRunStatus = $event"
+                @cancel-job="cancelJobAction"
+                @replay-dead-letter="replayDeadLetterAction"
+              />
+              <AgentProjectDataWorkbench
+                :project-id="selectedProjectId"
+                :selected-entity-refs="manualEntityContextRefs"
+                @toggle-entity="toggleEntityContextRef"
+              />
+              <details class="workspace-section" data-testid="agent-project-members-section">
+                <summary>
+                  <span>项目成员</span>
+                  <small>共享与权限</small>
+                </summary>
+                <div class="workspace-section-body">
+                  <ProjectMemberPanel :project-id="selectedProjectId || null" />
+                </div>
+              </details>
+            </template>
           </div>
         </details>
       </div>
@@ -626,6 +632,12 @@ const isAdmin = computed(() => Boolean(authStore?.user?.is_admin))
 const providerHealth = ref<AgentToolHealth | null>(null)
 const providerHealthLoading = ref(false)
 const providerHealthError = ref('')
+type DataDetailsLoadState = 'idle' | 'loading' | 'loaded' | 'error'
+const dataDetailsLoaded = ref(false)
+const providerHealthLoadState = ref<DataDetailsLoadState>('idle')
+const projectProviderUsageLoadState = ref<DataDetailsLoadState>('idle')
+const governanceLoadState = ref<DataDetailsLoadState>('idle')
+const dataDetailsLoadPromise = ref<Promise<void> | null>(null)
 const selectedProject = computed(() => projects.value.find((p) => p.id === selectedProjectId.value))
 const activeContextRefs = computed(() =>
   buildAgentContextRefs({
@@ -879,7 +891,7 @@ const loadExecutionFacts = async (runId: string) => {
   }
 }
 const loadProviderUsageSummary = async (runId: string) => {
-  if (typeof AgentAPI.getProviderUsageSummary !== 'function') return
+  if (!dataDetailsLoaded.value || typeof AgentAPI.getProviderUsageSummary !== 'function') return
   providerUsageSummaryLoadingByRunId.value = {
     ...providerUsageSummaryLoadingByRunId.value,
     [runId]: true,
@@ -903,7 +915,8 @@ const loadProviderUsageSummary = async (runId: string) => {
   }
 }
 const loadProjectProviderUsageSummary = async (projectId = selectedProjectId.value) => {
-  if (!projectId || typeof AgentAPI.getProjectProviderUsageSummary !== 'function') return
+  if (!dataDetailsLoaded.value || !projectId || typeof AgentAPI.getProjectProviderUsageSummary !== 'function') return
+  projectProviderUsageLoadState.value = 'loading'
   projectProviderUsageSummaryLoadingByProjectId.value = {
     ...projectProviderUsageSummaryLoadingByProjectId.value,
     [projectId]: true,
@@ -914,10 +927,12 @@ const loadProjectProviderUsageSummary = async (projectId = selectedProjectId.val
       ...projectProviderUsageSummaryByProjectId.value,
       [projectId]: summary,
     }
+    projectProviderUsageLoadState.value = 'loaded'
     const nextErrors = { ...projectProviderUsageSummaryErrorByProjectId.value }
     delete nextErrors[projectId]
     projectProviderUsageSummaryErrorByProjectId.value = nextErrors
   } catch (error) {
+    projectProviderUsageLoadState.value = 'error'
     projectProviderUsageSummaryErrorByProjectId.value = {
       ...projectProviderUsageSummaryErrorByProjectId.value,
       [projectId]: error instanceof Error ? error.message : '项目 Provider 摘要暂时不可用',
@@ -938,7 +953,7 @@ const refreshSessionMessages = async () => {
     const selected = activeRun.value
     if (selected && typeof AgentAPI.listApprovals === 'function')
       runProjection.setRunApprovals(selected.id, await AgentAPI.listApprovals(selected.id))
-    if (selected) await Promise.all([loadRunSteps(selected.id), loadRunState(selected.id), loadExecutionFacts(selected.id), loadProviderUsageSummary(selected.id)])
+    if (selected) await Promise.all([loadRunSteps(selected.id), loadRunState(selected.id), loadExecutionFacts(selected.id), dataDetailsLoaded.value ? loadProviderUsageSummary(selected.id) : Promise.resolve()])
   } catch {
     /* terminal refresh is best effort */
   }
@@ -979,7 +994,7 @@ const selectRunAction = async (runId: string) => {
   if (!run) return
   artifactPreview.value = ''
   resetArtifactFacts({ preserveScopedState: true })
-  const loads: Promise<unknown>[] = [loadRunSteps(run.id), loadRunState(run.id), loadRunFacts(run.id), loadExecutionFacts(run.id), loadProviderUsageSummary(run.id)]
+  const loads: Promise<unknown>[] = [loadRunSteps(run.id), loadRunState(run.id), loadRunFacts(run.id), loadExecutionFacts(run.id), dataDetailsLoaded.value ? loadProviderUsageSummary(run.id) : Promise.resolve()]
   if (typeof AgentAPI.listApprovals === 'function') {
     loads.push(AgentAPI.listApprovals(run.id).then((items) => runProjection.setRunApprovals(run.id, items)))
   }
@@ -1054,12 +1069,18 @@ const loadTools = async () => {
   }
 }
 const loadProviderHealth = async () => {
-  if (!isAdmin.value || typeof AgentAPI.listToolHealth !== 'function') return
+  if (!isAdmin.value || typeof AgentAPI.listToolHealth !== 'function') {
+    providerHealthLoadState.value = 'loaded'
+    return
+  }
   providerHealthLoading.value = true
+  providerHealthLoadState.value = 'loading'
   providerHealthError.value = ''
   try {
     providerHealth.value = await AgentAPI.listToolHealth()
+    providerHealthLoadState.value = 'loaded'
   } catch (error) {
+    providerHealthLoadState.value = 'error'
     providerHealthError.value = error instanceof Error ? error.message : 'Provider 健康状态不可用'
   } finally {
     providerHealthLoading.value = false
@@ -1132,13 +1153,56 @@ const submitMessage = async () => {
       runId: result.run.id,
       artifactId: undefined,
     })
-    await loadTimeline()
+    if (dataDetailsLoaded.value) await loadTimeline()
   } catch (error) {
     add('消息发送失败', error instanceof Error ? error.message : '请求失败')
     goal.value = text
   } finally {
     sending.value = false
   }
+}
+const loadDataDetails = async () => {
+  if (!dataDetailsLoaded.value) return
+  if (dataDetailsLoadPromise.value) return dataDetailsLoadPromise.value
+
+  const tasks: Promise<unknown>[] = []
+  if (providerHealthLoadState.value === 'idle' || providerHealthLoadState.value === 'error')
+    tasks.push(loadProviderHealth())
+  if (selectedProjectId.value && (
+    projectProviderUsageLoadState.value === 'idle' ||
+    projectProviderUsageLoadState.value === 'error'
+  )) {
+    tasks.push(loadProjectProviderUsageSummary())
+  }
+  if (governanceLoadState.value === 'idle' || governanceLoadState.value === 'error') {
+    governanceLoadState.value = 'loading'
+    tasks.push(
+      reloadGovernanceData().then(
+        () => { governanceLoadState.value = 'loaded' },
+        () => { governanceLoadState.value = 'error' },
+      ),
+    )
+  }
+  if (activeRun.value && (
+    !providerUsageSummaryByRunId.value[activeRun.value.id] ||
+    providerUsageSummaryErrorByRunId.value[activeRun.value.id]
+  )) {
+    tasks.push(loadProviderUsageSummary(activeRun.value.id))
+  }
+
+  const promise = Promise.all(tasks).then(() => undefined)
+  dataDetailsLoadPromise.value = promise
+  try {
+    await promise
+  } finally {
+    if (dataDetailsLoadPromise.value === promise) dataDetailsLoadPromise.value = null
+  }
+}
+const onDataSectionToggle = (event: Event) => {
+  const section = event.currentTarget as HTMLDetailsElement | null
+  if (!section?.open) return
+  dataDetailsLoaded.value = true
+  void loadDataDetails()
 }
 const switchProject = () => {
   manualEntityContextRefs.value = []
@@ -1155,9 +1219,11 @@ const switchProject = () => {
     focus: undefined,
   })
   void loadContentTree({})
-  void loadProjectProviderUsageSummary()
+  if (dataDetailsLoaded.value) {
+    void loadProjectProviderUsageSummary()
+    void reloadGovernanceData()
+  }
   void restoreSession()
-  void reloadGovernanceData()
 }
 watch(selectedSessionId, (value, oldValue) => {
   // restoreSession sets the session selector before its durable detail is loaded.
@@ -1210,7 +1276,7 @@ const hydrateSessionRun = async (
       await previewArtifact(requestedArtifact)
     }
   }
-  await Promise.all([loadRunFacts(selected.id), loadExecutionFacts(selected.id), loadProviderUsageSummary(selected.id)])
+  await Promise.all([loadRunFacts(selected.id), loadExecutionFacts(selected.id), dataDetailsLoaded.value ? loadProviderUsageSummary(selected.id) : Promise.resolve()])
   await loadEventsAndStream(detail, selected)
   return { runId: selected.id, artifactId }
 }
@@ -1371,11 +1437,8 @@ onMounted(async () => {
     ? requestedProjectId || ''
     : store.projects[0]?.id || ''
   await loadTools()
-  await loadProviderHealth()
   await loadContentTree()
-  await loadProjectProviderUsageSummary()
   await restoreSession()
-  await reloadGovernanceData()
 })
 onBeforeUnmount(() => {
   invalidateSessionLifecycle()
