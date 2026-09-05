@@ -5538,3 +5538,155 @@ P1：验证生产 API + Agent Worker + Command Worker 完整编排，而不仅�
 P1：真实资源 smoke 跳过项覆盖；
 P2：发布审计重新归档当前 HEAD 并作最终 GO/NO-GO 判定。
 ```
+
+## 2026-09-05 Run 历史分页接入与最终前端复验
+
+### 当前提交
+
+```text
+HEAD：92a03cc perf: paginate agent run history in workspace
+```
+
+当前提交已包含：
+
+- `useAgentSessionLifecycle` 首开使用 `include_messages=false&include_runs=false`，分别消费消息页和 Run 页；
+- Run 历史按 `created_at + id` 复合游标向前翻页；
+- 深链 Run 不在首屏时自动跨页寻找目标；
+- Run 分页状态提供 total/loading/error/has_more，并接入 Workspace 运行选择器“加载更早运行”；
+- 旧客户端或分页异常回退完整会话详情；
+- Run 合并后保持稳定时间/id 顺序；
+- 项目切换和过期首屏分页响应由 lifecycle generation 丢弃；
+- Workspace 分页入口有专用测试标识，避免仅有状态而无用户可达入口。
+
+### 本批发现与修复
+
+审查中发现两处明确缺陷并已修复：
+
+1. Run 旧页合并后 `session.runs` 曾按 Map 插入顺序保留，导致运行选择器顺序与 projection 不一致；现在统一按 `created_at + id` 排序。
+2. Run 历史分页控件接入时曾产生重复 `data-testid`，Vitest 挂载未暴露该 SFC 编译错误；已删除重复属性，构建重新通过。
+
+同时补充了首屏 Run 页过期项目隔离回归和 Workspace 分页入口源码合同。
+
+### 当前权威验证
+
+```text
+前端 Run/消息/Workspace/API 定向：4 files / 69 tests passed
+前端全量 Vitest：81 files / 536 tests passed
+前端 npm run type-check：通过
+前端 npm run build-only：通过，4918 modules transformed
+git diff --check：通过
+后端全量 pytest：1761 passed in 961.27s (0:16:01)
+后端跨进程 Worker replay 单测复跑：1 passed in 56.95s
+迁移/项目成员/部署合同：16 passed
+Agent 消息/会话/成员读取组合：24 passed
+真实 TCP/JWT 长历史：180 messages / 3 pages / duplicate_count=0
+真实 TCP/JWT 成员矩阵：125 messages / Viewer=200 / outsider shared=403 / projectless=404
+隔离 SQLite backup/restore：MIGRATION_BACKUP_RESTORE_MATRIX_PASSED，恢复 hash 一致
+显式生产 API：health=200，security_warnings=0
+Agent worker --once：exit=0
+Agent command worker --once：exit=0
+Compose config default/maintenance/mysql profiles：解析通过
+```
+
+### 当前发布结论
+
+```text
+核心成员权限、Writer/Agent 执行身份、UI-005、UI-006 消息窗口化与消息/Run 历史分页：已完成并有当前 HEAD 验证。
+发布结论：active / NO-GO
+```
+
+当前 NO-GO 仅保留部署环境证据边界：
+
+- 本机 Docker Engine 不可用，只完成 Compose 静态配置展开，未完成真实容器编排存活/健康矩阵；
+- 正式 MySQL 迁移、备份恢复和回滚仍需 MySQL 部署资源；
+- `verify.ps1 smoke` 的 210 个真实资源跳过项仍需可回收 fixture 或正式资源验收；
+- Run 分页已接入前端，但兼容旧详情默认仍保留 `include_messages=true&include_runs=true`，待兼容窗口后再评估默认策略。
+
+### 下一执行计划
+
+```text
+P1：在可用 Docker Engine 或正式部署节点运行 compose migrate/app/agent-worker/agent-command-worker 全编排健康矩阵；
+P1：在正式 MySQL 资源运行备份、Alembic current/upgrade、恢复、回滚和健康检查；
+P1：为 smoke 跳过项建立可回收真实资源 fixture；
+P2：统计旧详情调用方，评估兼容窗口后的 metadata-first 默认版本策略；
+P2：完成最终发布审计并重新判定 GO/NO-GO。
+```
+
+## 2026-09-05 真实 TCP/JWT Run 历史分页验收
+
+在当前 8013 服务和配置数据库中创建临时 projectless 会话及 125 条已完成 Run，使用管理员真实 JWT 请求 `/api/agent/sessions/{id}/runs?limit=50`，连续使用 `before_created_at + before_id` 复合游标翻页，并在结束后清理全部 fixture。
+
+```text
+TCP_JWT_RUN_PAGINATION_PASSED
+run_count=125
+page_limit=50
+pages=3
+duplicate_count=0
+```
+
+验证了：
+
+- JWT 登录和真实 TCP API 路径；
+- 最新 Run 页按 `created_at + id` 升序返回；
+- 复合游标持续推进且不重复；
+- 三页合计覆盖全部 125 个 Run；
+- projectless 临时数据成功回收。
+
+该证据与前端 Run 分页定向 69 项、前端全量 536 项、后端全量 1761 项共同闭合 Run 历史分页的服务—客户端链路。正式容器编排和 MySQL 资源门禁仍保持未完成状态。
+
+## 2026-09-05 Run 分页迁移当前验收
+
+### 当前提交与验证
+
+```text
+当前 HEAD：92a03cc perf: paginate agent run history in workspace
+前端 Run/Session/Workspace 定向：68 tests passed
+前端全量 Vitest：81 files / 536 tests passed
+npm run type-check：通过
+npm run build-only：通过，4918 modules transformed
+后端全量 pytest：1761 passed
+真实 TCP projectless 消息分页：180 条 / 3 页 / 无重复无遗漏
+真实 TCP 多用户成员矩阵：125 条 / 3 页 / shared outsider=403 / private outsider=404
+隔离 SQLite 备份恢复：MIGRATION_BACKUP_RESTORE_MATRIX_PASSED
+生产 smoke：261 checks / 51 passed / 210 skipped / 0 failed
+Agent worker --once：exit=0
+Agent command worker --once：exit=0
+```
+
+### Run 分页改造
+
+当前会话首屏在分页客户端存在时使用：
+
+```text
+GET /sessions/{id}?include_messages=false&include_runs=false
+GET /sessions/{id}/messages?limit=60
+GET /sessions/{id}/runs?limit=50
+```
+
+已支持：
+
+- Run 首屏分页和 `created_at + id` 复合游标；
+- 深链 Run 不在首屏时继续向前翻页定位；
+- “加载更早运行”入口、loading/error/total 状态；
+- 分页失败或格式异常时旧详情回退；
+- 已加载 Run 合并后稳定按创建时间排序；
+- 旧详情默认 `true/true` 兼容合同保持不变。
+
+### 当前 NO-GO 只剩部署层证据
+
+代码、分页、权限、迁移文件恢复、前端构建和服务级 smoke 主线已经形成可重复证据。发布仍保持 `active / NO-GO`，剩余原因集中为：
+
+1. Docker Engine 当前不可用，尚未完成真实 Compose app/agent-worker/agent-command-worker 存活编排验收；
+2. 正式 MySQL TCP 迁移、备份恢复和回滚尚未在 MySQL 资源上执行；
+3. smoke 仍有 210 个依赖真实项目/章节资源的跳过项；
+4. 需要更新当前 HEAD 对应的最终发布审计报告并重新判定 GO/NO-GO。
+
+### 下一执行序列
+
+```text
+P1：确认 Docker/正式部署节点可用性；可用时运行 compose config、migrate、app、agent-worker、agent-command-worker 健康矩阵；
+P1：若 MySQL 资源可用，运行迁移、备份、恢复、current、健康与回滚矩阵；
+P1：为 smoke 建立最小可回收真实资源 fixture，降低 210 项跳过；
+P2：以当前 HEAD 生成最终发布审计快照；
+P2：所有证据闭环后再重判 GO/NO-GO。
+```
