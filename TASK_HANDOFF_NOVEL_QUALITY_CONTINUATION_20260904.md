@@ -4490,3 +4490,59 @@ P2：最终后端/前端全量门禁、smoke 证据归档，重新评估 GO/NO-G
 ```
 
 当前接续策略继续有效：只在本任务和当前工作区推进，不回历史卡死会话，不创建新的 Codex task；子智能体按独立范围并行审查，结果由主任务统一集成。
+
+## 2026-09-05 成员角色执行闸门与当前 HEAD 全量门禁复核
+
+### A. 成员角色闸门收口
+
+提交：
+
+```text
+5de763f feat: enforce member roles at agent execution
+```
+
+已完成：
+
+- `CapabilityResolutionRequest` 增加 `project_role`，并由 `AgentRuntimeService` 在 Run 能力解析前从项目访问投影读取当前角色；
+- `resolve_capabilities()` 保持函数式包装与对象式 Resolver 语义一致；
+- `RunBoundToolRegistry` 在执行期复核 Run 快照中的用户/项目边界；
+- 项目工具执行前统一读取当前成员角色，并按 manifest 的 `allowed_project_roles` 阻断角色降级后的执行；
+- projectless 工具继续绑定原始执行用户，其他用户复用同一 Run 时被阻断；
+- 非成员项目访问保留原有 HTTP 403/404 错误语义，输入 schema/审批身份错误仍保留 `ToolContractViolation` 语义；
+- `build_tool_manifest()` 支持自定义 `output_schema` 与 `idempotency_key`，不影响既有调用方。
+
+### B. 当前 HEAD 验证
+
+```text
+成员角色/Resolver/执行期/Tool Adapter：51 passed
+UI-005/Catalog/Resolver/Provider 组合：72 passed
+后端全量：1754 passed in 771.34s
+Frontend 全量（当前已提交前端基线）：81 files / 523 tests passed
+Frontend type-check：通过
+Frontend build-only：4918 modules transformed，成功
+```
+
+全量后端结果以当前 HEAD `5de763f` 及其父提交链为准；固定的浏览器数据包过期告警与测试环境 Pinia 注入提示仍存在，但没有失败。
+
+### C. 当前 Git 与发布状态
+
+```text
+当前 HEAD：5de763f
+当前分支：codex/bohrium-integration-20260831
+```
+
+业务代码和接续文档提交已形成可回滚链；工作区剩余未跟踪内容为运行产生的 `.bin` 导入/上传工件、`.vite/` 缓存和发布审计草稿，不纳入业务提交，不批量清理。
+
+此前 `docs/reports/RELEASE_GATE_AUDIT_20260905.md` 是基于更早 `599da4a` 工作区的审计快照，仍保留其 NO-GO 历史结论；待当前 HEAD 的真实服务、生产配置和迁移恢复证据替换后再重新评估。
+
+### D. 下一执行批次
+
+```text
+P0：重启当前 HEAD 的 backend/frontend，执行真实 health、OpenAPI、HTTP/JWT、SSE、成员隔离和共享 Run 控制验收
+P1：将 Workspace 详情区接入分页 page client；当前仅保留 page API 客户端与后端合同，未把未通过的半成品消费代码带入提交
+P1：Artifact 列表摘要与质量/血缘事实两阶段加载，保持深链和候选接受流程
+P2：fresh/upgrade/downgrade/备份恢复矩阵与默认生产配置审查
+P2：更新 release gate 报告为当前 HEAD，完成最终发布评估
+```
+
+当前总任务继续保持 `active`，按接续文档逐批推进。
