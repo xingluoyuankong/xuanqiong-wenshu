@@ -223,6 +223,38 @@ describe('AgentConversation', () => {
     expect(wrapper.find('[data-testid="agent-load-older-messages"]').exists()).toBe(false)
   })
 
+  it('外部分页失败后不会把实时追加误当成旧页前插，且可以重试', async () => {
+    const messages = Array.from({ length: 60 }, (_, index) => ({
+      ...message, id: `failure-${index + 61}`, sequence: index + 61, content: `当前页消息 ${index + 61}`,
+    }))
+    const wrapper = mount(AgentConversation, {
+      props: { messages, goal: '', hasMoreMessages: true, olderMessagesLoading: false },
+    })
+    const list = wrapper.get('[data-testid="agent-message-list"]')
+    const listElement = list.element as HTMLElement & { scrollTo?: (options: ScrollToOptions) => void }
+    Object.defineProperty(listElement, 'scrollHeight', { configurable: true, get: () => list.findAll('.message').length * 100 })
+    const scrollTo = vi.fn()
+    listElement.scrollTo = scrollTo
+
+    await wrapper.get('[data-testid="agent-load-older-messages"]').trigger('click')
+    expect(wrapper.emitted('load-older-messages')).toHaveLength(1)
+
+    await wrapper.setProps({ olderMessagesError: '更早消息读取失败' })
+    await wrapper.vm.$nextTick()
+    await wrapper.setProps({
+      messages: [...messages, { ...message, id: 'failure-live-121', sequence: 121, content: '实时追加消息' }],
+      olderMessagesError: '',
+    })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findAll('[data-testid="agent-message-list"] .message')).toHaveLength(60)
+    expect(wrapper.get('[data-testid="agent-message-list"] .message').text()).toContain('当前页消息 62')
+    expect(scrollTo).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-testid="agent-load-older-messages"]').trigger('click')
+    expect(wrapper.emitted('load-older-messages')).toHaveLength(2)
+  })
+
   it('同一会话刷新首条消息后保留已展开的窗口', async () => {
     const messages = Array.from({ length: 125 }, (_, index) => ({
       ...message,

@@ -215,7 +215,7 @@ const sessionLabel = computed(() => {
 const MESSAGE_WINDOW_SIZE = 60
 const messageWindowSize = ref(MESSAGE_WINDOW_SIZE)
 const loadingOlderMessages = ref(false)
-const pendingExternalAnchor = ref<{ list: HTMLElement; scrollHeight: number; scrollTop: number } | null>(null)
+const pendingExternalAnchor = ref<{ list: HTMLElement; scrollHeight: number; scrollTop: number; oldestSequence: number } | null>(null)
 const messagesList = ref<HTMLElement | null>(null)
 const externalMessagePaging = computed(() => props.hasMoreMessages !== undefined)
 const loadingMessageHistory = computed(() => loadingOlderMessages.value || Boolean(props.olderMessagesLoading))
@@ -227,6 +227,8 @@ watch(
   conversationKey,
   () => {
     messageWindowSize.value = MESSAGE_WINDOW_SIZE
+    loadingOlderMessages.value = false
+    pendingExternalAnchor.value = null
   },
 )
 
@@ -241,8 +243,22 @@ const hasOlderMessages = computed(() => externalMessagePaging.value
 
 watch(
   () => props.olderMessagesLoading,
-  (loading) => {
-    if (!loading) loadingOlderMessages.value = false
+  async (loading) => {
+    if (loading) return
+    // Let a successful prepend settle first. If no older row arrived, this was
+    // a failed/empty page and its anchor must not affect later live appends.
+    await nextTick()
+    if (!pendingExternalAnchor.value) return
+    pendingExternalAnchor.value = null
+    loadingOlderMessages.value = false
+  },
+)
+watch(
+  () => props.olderMessagesError,
+  (error) => {
+    if (!error) return
+    pendingExternalAnchor.value = null
+    loadingOlderMessages.value = false
   },
 )
 watch(
@@ -250,7 +266,15 @@ watch(
   async (length, previousLength) => {
     const anchor = pendingExternalAnchor.value
     if (!anchor || length <= previousLength) return
+
+    // A request can overlap with a live assistant append. Only a newly older
+    // first sequence is a prepend eligible for scroll compensation.
+    const oldestSequence = props.messages[0]?.sequence
+    if (oldestSequence === undefined || oldestSequence >= anchor.oldestSequence) return
+
     pendingExternalAnchor.value = null
+    loadingOlderMessages.value = false
+    messageWindowSize.value += length - previousLength
     await nextTick()
     const addedHeight = Math.max(0, anchor.list.scrollHeight - anchor.scrollHeight)
     const anchoredTop = anchor.scrollTop + addedHeight
@@ -267,12 +291,17 @@ const loadOlderMessages = async () => {
   loadingOlderMessages.value = true
   const previousScrollHeight = list.scrollHeight
   const previousScrollTop = list.scrollTop
-  messageWindowSize.value += MESSAGE_WINDOW_SIZE
   if (externalMessagePaging.value) {
-    pendingExternalAnchor.value = { list, scrollHeight: previousScrollHeight, scrollTop: previousScrollTop }
+    const oldestSequence = props.messages[0]?.sequence
+    if (oldestSequence === undefined) {
+      loadingOlderMessages.value = false
+      return
+    }
+    pendingExternalAnchor.value = { list, scrollHeight: previousScrollHeight, scrollTop: previousScrollTop, oldestSequence }
     emit('load-older-messages')
     return
   }
+  messageWindowSize.value += MESSAGE_WINDOW_SIZE
   try {
     await nextTick()
     const addedHeight = Math.max(0, list.scrollHeight - previousScrollHeight)
