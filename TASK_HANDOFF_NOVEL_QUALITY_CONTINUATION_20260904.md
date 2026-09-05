@@ -5437,3 +5437,104 @@ frontend API/lifecycle/conversation/workspace: 4 files passed, 67 tests passed i
 ### 当前门禁影响
 
 会话详情策略审查已完成，策略项从“待决策”变为“保留兼容默认，继续推进 Run 分页迁移”。由于正式部署编排、完整全量门禁和其他发布证据仍未全部闭环，总任务继续保持 `active / NO-GO`。
+
+## 2026-09-05 当前 HEAD 最终全量门禁与编排审查
+
+### 当前权威提交与工作树
+
+```text
+当前 HEAD：3cf7bdb test: lock session detail payload compatibility contract
+分支：codex/bohrium-integration-20260831
+tracked 未提交：无
+未跟踪：.vite、backend/storage/**/*.bin 等运行工件，仅保留不纳入提交
+```
+
+### 最终全量验证
+
+```text
+后端全量 pytest：1761 passed in 961.27s (0:16:01)
+前端全量 Vitest：81 files / 534 tests passed
+前端 npm run type-check：通过
+前端 npm run build-only：通过，4918 modules transformed
+迁移/项目成员/部署合同：16 passed
+Agent 消息/会话/成员读取组合：24 passed
+Agent Workspace/Runtime/Conversation 定向：4 files / 73 tests passed
+git diff --check：通过
+```
+
+后端全量首轮曾出现 1 个跨进程 Worker replay 启动时序失败（`BadStatusLine`，Reader 健康探测阶段）；该用例单独复跑 1 passed，随后后端全量复跑 1761 passed，当前以复跑结果为权威。
+
+### 已闭合的核心证据
+
+```text
+真实 TCP/JWT projectless 长历史：180 messages / limit=60 / 3 pages / no duplicates
+真实 TCP/JWT 多用户成员矩阵：125 messages / 3 pages / Viewer=200 / shared outsider=403 / projectless outsider=404
+隔离 SQLite backup/restore：fresh/repeat/downgrade/restore/re-upgrade、哨兵数据和 SHA-256 一致
+显式 production API 临时配置：health=200、security_warnings=0
+Agent worker --once：exit=0
+Agent command worker --once：exit=0
+Docker Compose config：default、maintenance、mysql profiles 均解析通过
+```
+
+### 当前发布边界
+
+- Docker Engine 当前不可用，尚未执行真实容器启动、容器健康检查、Worker/Command Worker 编排存活检查；只完成 Compose 静态展开和独立 Python Worker `--once` 启动验收。
+- 正式 MySQL TCP 迁移、MySQL 备份/恢复和真实部署数据库回滚仍需具备 MySQL 资源后执行。
+- Compose 静态展开提示 `LINUXDO_CLIENT_ID`、`LINUXDO_CLIENT_SECRET`、`LINUXDO_REDIRECT_URI`、`SMTP_PASSWORD` 未注入；这些是可选配置空值提示，正式部署需按功能开关显式设置。
+- `verify.ps1 smoke` 仍存在真实资源 ID 缺失导致的跳过项，不能单独代表完整资源业务验收。
+- 旧会话详情默认 `include_messages=true`、`include_runs=true` 已由合同测试锁定，前端新路径显式使用消息分页；Run 分页迁移仍是后续性能批次。
+
+### 当前结论
+
+```text
+核心成员权限、Writer/Agent 身份一致性、UI-005、UI-006、消息历史分页和兼容 payload 合同：已完成并有当前 HEAD 证据。
+发布结论：active / NO-GO
+NO-GO 原因：缺少 Docker Engine 实际编排验收、正式 MySQL 迁移/恢复证据及完整真实资源 smoke 覆盖。
+```
+
+### 下一执行计划
+
+```text
+P1：在可用 Docker Engine 或正式部署节点运行 compose up、migrate、app、agent-worker、agent-command-worker 全编排健康矩阵；
+P1：在正式 MySQL 资源运行备份、Alembic current/upgrade、恢复和服务健康矩阵；
+P1：为真实资源 smoke 建立可回收 fixture，减少当前 210 个跳过项；
+P2：继续推进前端 Run 分页迁移，完成 metadata-first 会话首屏；
+P2：最终发布审计并重新判定 GO/NO-GO。
+```
+
+## 2026-09-05 Run 历史分页迁移完成
+
+### 实现
+
+- `useAgentSessionLifecycle` 首屏详情现在在分页客户端存在时同时请求 `includeMessages=false` 与 `includeRuns=false`。
+- 首屏消息通过消息分页接口加载；首屏 Run 通过 `listSessionRunsPage(limit=50)` 加载。
+- 运行深链目标不在首屏时，按 `created_at + id` 复合游标继续向前读取，直到找到目标或页尾。
+- 提供 `loadOlderRuns`、`runHistoryHasMore`、`runHistoryLoading`、`runHistoryError`、`runHistoryTotal`，并接入 Workspace “加载更早运行”入口。
+- 分页接口缺失、返回格式异常或请求失败时保留旧详情回退路径；旧 `include_messages/include_runs` 默认合同未改变。
+- 合并旧 Run 页时按 `created_at` 稳定升序收口，避免后端分页页内倒序造成 UI 顺序跳变。
+
+### 验证
+
+```text
+Agent API / lifecycle / Workspace 定向：57 tests passed
+前端全量 Vitest：81 files / 536 tests passed
+npm run type-check：通过
+npm run build-only：通过，4918 modules transformed
+git diff --check：通过
+后端全量 pytest：1761 passed
+```
+
+### 当前提交
+
+```text
+92a03cc perf: paginate agent run history in workspace
+```
+
+### 当前剩余发布门禁
+
+```text
+P1：对当前最新提交重新运行真实 TCP projectless/member 分页、迁移备份恢复、production smoke；
+P1：验证生产 API + Agent Worker + Command Worker 完整编排，而不仅是 worker --once；
+P1：真实资源 smoke 跳过项覆盖；
+P2：发布审计重新归档当前 HEAD 并作最终 GO/NO-GO 判定。
+```
