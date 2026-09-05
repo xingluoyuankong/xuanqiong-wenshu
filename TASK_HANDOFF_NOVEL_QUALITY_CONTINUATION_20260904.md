@@ -6068,3 +6068,58 @@ Command worker：worked=False / exit=0
 
 当前任务的本地服务—客户端—迁移—Worker 验收已由 `acceptance` 套件统一编排；Docker daemon 启动尝试仍未获得 Server 响应，正式 MySQL 资源仍未出现，因此最终发布继续保持 `active / NO-GO`。
 
+## 2026-09-05 当前任务收口审查（acceptance 套件接入后）
+
+### 当前基线
+
+```text
+采集基线 HEAD：441fedf test: add acceptance suite orchestration
+分支：codex/bohrium-integration-20260831
+tracked 源码/测试未提交：无
+运行工件：.vite、logs、backend/storage/**/*.bin，继续排除在发布提交之外
+```
+
+### 已完成主线
+
+- 前端消息和 Run 历史分页已接入 Workspace，支持游标、深链跨页、错误回退、重复触发隔离和旧客户端兼容。
+- 后端消息/Run 分页、成员访问边界、projectless 私有边界、能力快照与执行期角色校验均有回归证据。
+- TCP/JWT 消息、成员、Run 三套长历史验收脚本均已形成并由 `verify.ps1 -Suite acceptance` 统一编排。
+- SQLite fresh/repeat/downgrade/backup/restore/re-upgrade 脚本已形成；Worker 与 Command Worker 一次轮询入口可在生产配置下正常退出。
+- OpenAPI smoke 已支持认证模式、UUID fixture、清理状态检查和跳过原因分类；生成未完成时不再误把 evaluate/select 的 400 当成候选验收通过。
+- 旧会话详情默认 `include_messages=true&include_runs=true` 兼容合同已锁定，Run 分页迁移后再评估版本化 metadata-first。
+
+### acceptance 最新实测
+
+```text
+verify.ps1 -Suite acceptance：exit=0
+TCP message：180 messages / 3 pages / no duplicates
+TCP member：125 messages / viewer=200 / shared outsider=403 / private outsider=404
+TCP Run：125 runs / limit=50 / 3 pages / no duplicates
+SQLite backup/restore：PASS
+Agent worker --once：exit=0
+Agent command worker --once：exit=0
+```
+
+### 当前发布判定
+
+```text
+任务：active
+发布：NO-GO
+```
+
+NO-GO 只保留真实环境证据边界：
+
+1. 本机 Docker daemon 未提供 Server 响应，无法取得真实 Compose app/migrate/agent-worker/agent-command-worker 健康矩阵；
+2. 本机无 MySQL TCP 资源，无法取得正式 migration、备份恢复和 rollback 证据；
+3. OpenAPI smoke 仍有 198 个资源身份、6 个显式变更、2 个高开销、2 个 live 前置跳过，完整真实资源业务覆盖仍需部署数据；
+4. 最终发布审计必须在最后一次代码/配置/文档提交后重新采集，避免 HEAD 与证据时间错位。
+
+### 后续唯一计划
+
+```text
+P1：Docker daemon 或正式部署节点可用后，运行完整 Compose 健康/存活矩阵；
+P1：MySQL 节点可用后，运行正式 migration、backup、restore、rollback 和健康验证；
+P1：建立可回收真实项目/章节/Artifact fixture，逐步减少 198 个资源身份跳过；
+P2：最终采集最后 HEAD、完整测试、acceptance、smoke、Docker/MySQL 探针并生成 GO/NO-GO 报告。
+```
+
