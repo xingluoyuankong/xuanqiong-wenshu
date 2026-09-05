@@ -5189,3 +5189,15 @@ duplicate_count=0
 - 生产配置服务复跑 `verify.ps1 smoke`：通过，261 checks，51 passed，210 skipped，0 failed。
 - 当前 smoke 的 210 个跳过项仍是缺少真实资源 ID 的既有规则，不代表完整资源 E2E。
 - 下一步继续处理：真实 TCP 多用户 token 成员边界、备份恢复证据、会话详情默认 payload 策略、最终全量门禁。
+
+## 2026-09-05 当前最新头与继续入口
+
+```text
+HEAD：ce2b664 fix: accept authenticated production llm smoke
+服务配置复验：production / DEBUG=false 进程级配置
+最新 smoke：261 checks / 51 passed / 210 skipped / 0 failed
+最新 TCP/JWT 长历史：180 messages / 3 pages / duplicate_count=0
+迁移专项：16 passed
+```
+
+当前任务仍为 `active / NO-GO`。已经关闭的缺口：前端消息分页提交、prepend/实时追加锚点、终态刷新完整消息 payload、真实 TCP/JWT 长历史分页、生产 smoke 的匿名认证分支。剩余发布门禁集中在：备份恢复可复现证据、真实 TCP 多用户成员边界、详情接口默认 payload 策略、跳过项覆盖和最终全量发布审计。
