@@ -744,3 +744,20 @@ MySQL TCP：无监听
 Current conclusion：active / NO-GO
 ```
 
+
+## 当前 HEAD 复核附录（2026-09-05，441fedf）
+
+```text
+HEAD: 441fedf test: add acceptance suite orchestration
+Tracked working tree: clean
+Backend full pytest: 1764 passed
+Frontend full Vitest: 81 files / 544 tests passed
+Frontend type-check: PASS
+Frontend build-only: 4918 modules transformed, PASS
+OpenAPI/LLM smoke: 261 total / 53 passed / 208 skipped / 0 failed
+verify.ps1 acceptance: 6/6 PASS
+Writer/Agent/member/TaskRuntime targeted: 187 passed
+Migration/deployment/member targeted: 17 passed
+```
+
+Current conclusion remains `active / NO-GO`; the remaining gates require Docker Compose runtime, formal MySQL resources, broader real-resource smoke, and final release adjudication.

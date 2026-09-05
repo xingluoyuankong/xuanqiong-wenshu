@@ -6123,3 +6123,20 @@ P1：建立可回收真实项目/章节/Artifact fixture，逐步减少 198 个�
 P2：最终采集最后 HEAD、完整测试、acceptance、smoke、Docker/MySQL 探针并生成 GO/NO-GO 报告。
 ```
 
+
+## 2026-09-05 当前 HEAD 最终口径同步（acceptance 后）
+
+```text
+HEAD：441fedf test: add acceptance suite orchestration
+当前 tracked 工作树：无未提交改动
+未跟踪内容：.vite、backend/storage/**/*.bin 运行工件
+后端全量：1764 passed
+前端全量：81 files / 544 tests passed
+前端 type-check/build-only：均通过，4918 modules transformed
+OpenAPI/LLM smoke：261 / 53 passed / 208 skipped / 0 failed
+verify.ps1 acceptance：6/6 PASS
+Writer/Agent/成员/TaskRuntime组合：187 passed
+迁移/部署/项目成员专项：17 passed
+```
+
+该 HEAD 只包含 acceptance 编排及审计同步，相应业务实现已由前述成员权限、Writer/Agent 身份和分页回归覆盖。当前发布仍为 `active / NO-GO`，仅剩 Docker Compose 实际编排、正式 MySQL 迁移恢复回滚、真实资源 smoke 覆盖和最终发布重判。
