@@ -30,7 +30,7 @@ from ...agent.tool_adapters import execute_read_tool
 from ...agent.schemas import (
     AgentApprovalDecisionRequest, AgentApprovalRead, AgentArtifactAcceptRequest, AgentExecutionFactRead, AgentProviderUsageSummaryRead, AgentProjectProviderUsageSummaryRead, AgentArtifactDiffRead, AgentArtifactRead, AgentArtifactVersionDiffRead, AgentEventRead, AgentMessageCreateRequest,
     AgentAuditRecordRead, AgentJobRead, AgentRewriteInstructionRead, AgentMessageRead, AgentPlan, AgentPlanRequest, AgentPlanStep, AgentQualityBlockerRead, AgentArtifactQualityRead, AgentArtifactLineageRead, AgentArtifactLineageEdgeRead, AgentArtifactLineageArtifactRead, AgentQualityFindingRead, AgentQualityGateRead, AgentQualityResultRead, AgentRunRead, AgentRunStepRead, AgentTimelineEventRead,
-    AgentSessionCreateRequest, AgentSessionDetail, AgentSessionRead, AgentToolCatalog, AgentToolHealthRead, AgentReasoningChunkRead, AgentReasoningPageRead,
+    AgentSessionCreateRequest, AgentSessionDetail, AgentSessionRead, AgentMessagePageRead, AgentSessionRunPageRead, AgentToolCatalog, AgentToolHealthRead, AgentReasoningChunkRead, AgentReasoningPageRead,
     AgentRunCommandRequest, AgentRunCommandRead, AgentRunCommandPageRead, AgentContextSnapshotRead, AgentPlanRevisionRead, AgentConversationSummaryRead, AgentProviderProvenanceRead, AgentProjectEntitySummariesRead,
     AgentRunStepPageRead, AgentArtifactPageRead,
 )
@@ -215,14 +215,77 @@ async def archive_agent_session(session_id: str, session: AsyncSession = Depends
 
 
 @router.get("/sessions/{session_id}", response_model=AgentSessionDetail)
-async def get_agent_session(session_id: str, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> AgentSessionDetail:
+async def get_agent_session(
+    session_id: str,
+    include_messages: bool = Query(default=True),
+    include_runs: bool = Query(default=True),
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> AgentSessionDetail:
     try:
         service = AgentRuntimeService(session)
         item = await service.get_session_readable(session_id, current_user.id)
-        messages = await service.list_messages_readable(session_id=session_id, user_id=current_user.id)
-        runs = list((await session.execute(select(AgentRun).where(AgentRun.session_id == session_id).order_by(AgentRun.created_at.asc()))).scalars().all())
+        messages = await service.list_messages_readable(session_id=session_id, user_id=current_user.id) if include_messages else []
+        runs = list((await session.execute(select(AgentRun).where(AgentRun.session_id == session_id).order_by(AgentRun.created_at.asc()))).scalars().all()) if include_runs else []
         payload = {"id": item.id, "user_id": item.user_id, "project_id": item.project_id, "title": item.title, "status": item.status, "created_at": item.created_at, "updated_at": item.updated_at, "messages": messages, "runs": runs}
         return AgentSessionDetail.model_validate(payload)
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
+        raise _error(exc) from exc
+
+
+@router.get("/sessions/{session_id}/messages", response_model=AgentMessagePageRead)
+async def list_agent_session_messages(
+    session_id: str,
+    limit: Annotated[int, Query(ge=1, le=200)] = 60,
+    before_sequence: Annotated[int | None, Query(ge=1)] = None,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> AgentMessagePageRead:
+    try:
+        items, next_cursor, has_more, total = await AgentRuntimeService(session).list_messages_readable_page(
+            session_id=session_id,
+            user_id=current_user.id,
+            limit=limit,
+            before_sequence=before_sequence,
+        )
+        return AgentMessagePageRead(
+            session_id=session_id,
+            items=[AgentMessageRead.model_validate(item) for item in items],
+            total=total,
+            limit=min(max(int(limit), 1), 200),
+            next_cursor=next_cursor,
+            has_more=has_more,
+        )
+    except (AgentRuntimeError, SQLAlchemyError) as exc:
+        raise _error(exc) from exc
+
+
+@router.get("/sessions/{session_id}/runs", response_model=AgentSessionRunPageRead)
+async def list_agent_session_runs(
+    session_id: str,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    before_created_at: datetime | None = Query(default=None),
+    before_id: str | None = Query(default=None, min_length=1, max_length=36),
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> AgentSessionRunPageRead:
+    try:
+        items, next_created_at, next_id, has_more, total = await AgentRuntimeService(session).list_runs_readable_page(
+            session_id=session_id,
+            user_id=current_user.id,
+            limit=limit,
+            before_created_at=before_created_at,
+            before_id=before_id,
+        )
+        return AgentSessionRunPageRead(
+            session_id=session_id,
+            items=[AgentRunRead.model_validate(item) for item in items],
+            total=total,
+            limit=min(max(int(limit), 1), 100),
+            next_before_created_at=next_created_at,
+            next_before_id=next_id,
+            has_more=has_more,
+        )
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 

@@ -327,6 +327,17 @@ class AgentMessageRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AgentMessagePageRead(BaseModel):
+    session_id: str
+    items: list[AgentMessageRead] = Field(default_factory=list)
+    total: int = Field(default=0, ge=0)
+    limit: int = Field(default=60, ge=1, le=200)
+    next_cursor: int | None = Field(default=None, ge=1)
+    has_more: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class AgentJobRead(BaseModel):
     id: str
     run_id: str
@@ -733,6 +744,18 @@ class AgentAuditRecordRead(BaseModel):
     accepted_version_id: int | None = None
     data_json: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
+
+
+class AgentSessionRunPageRead(BaseModel):
+    session_id: str
+    items: list[AgentRunRead] = Field(default_factory=list)
+    total: int = Field(default=0, ge=0)
+    limit: int = Field(default=50, ge=1, le=100)
+    next_before_created_at: datetime | None = None
+    next_before_id: str | None = None
+    has_more: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AgentSessionDetail(AgentSessionRead):

@@ -592,6 +592,64 @@ class AgentRuntimeService:
             .limit(min(max(limit, 1), 500)))
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def list_messages_readable_page(
+        self,
+        *,
+        session_id: str,
+        user_id: int,
+        limit: int = 60,
+        before_sequence: int | None = None,
+    ) -> tuple[list[AgentMessage], int | None, bool, int]:
+        """Return one newest-first history page, normalized to conversation order."""
+        await self._session_readable(session_id, user_id)
+        page_limit = min(max(int(limit), 1), 200)
+        total = int((await self.session.execute(
+            select(func.count()).select_from(AgentMessage).where(AgentMessage.session_id == session_id)
+        )).scalar_one() or 0)
+        stmt = select(AgentMessage).where(AgentMessage.session_id == session_id)
+        if before_sequence is not None:
+            stmt = stmt.where(AgentMessage.sequence < max(int(before_sequence), 1))
+        stmt = stmt.order_by(AgentMessage.sequence.desc()).limit(page_limit + 1)
+        rows = list((await self.session.execute(stmt)).scalars().all())
+        has_more = len(rows) > page_limit
+        items = list(reversed(rows[:page_limit]))
+        next_cursor = items[0].sequence if has_more and items else None
+        return items, next_cursor, has_more, total
+
+    async def list_runs_readable_page(
+        self,
+        *,
+        session_id: str,
+        user_id: int,
+        limit: int = 50,
+        before_created_at: datetime | None = None,
+        before_id: str | None = None,
+    ) -> tuple[list[AgentRun], datetime | None, str | None, bool, int]:
+        """Return the newest session Runs and page older rows by created_at + id."""
+        await self._session_readable(session_id, user_id)
+        page_limit = min(max(int(limit), 1), 100)
+        base = [AgentRun.session_id == session_id]
+        total = int((await self.session.execute(
+            select(func.count()).select_from(AgentRun).where(*base)
+        )).scalar_one() or 0)
+        if before_created_at is not None:
+            if before_id:
+                base.append(or_(
+                    AgentRun.created_at < before_created_at,
+                    and_(AgentRun.created_at == before_created_at, AgentRun.id < before_id),
+                ))
+            else:
+                base.append(AgentRun.created_at < before_created_at)
+        stmt = (select(AgentRun).where(*base)
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .limit(page_limit + 1))
+        rows = list((await self.session.execute(stmt)).scalars().all())
+        has_more = len(rows) > page_limit
+        items = list(reversed(rows[:page_limit]))
+        next_created_at = items[0].created_at if has_more and items else None
+        next_id = items[0].id if has_more and items else None
+        return items, next_created_at, next_id, has_more, total
+
     async def _build_novel_context_inputs(
         self,
         *,
