@@ -600,3 +600,19 @@ Docker daemon: unavailable
 MySQL TCP: unavailable
 Conclusion: active / NO-GO
 ```
+
+## 2026-09-05 Smoke lifecycle 最新附录
+
+```text
+HEAD before report commit: 1adea10
+Authenticated smoke: credentials
+Total: 261
+Passed: 53
+Skipped: 208
+Failed: 0
+Skipped by reason: mutating=6, expensive=2, resource-identity=198, live-prerequisite=2
+Fixture DELETE status: checked and passed
+Live generate/cancel: executed
+Live evaluate/select: gated until a completed candidate exists
+Conclusion: active / NO-GO
+```

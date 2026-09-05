@@ -5833,3 +5833,25 @@ skip 分类：mutating=6 / expensive=2 / resource-identity=198 / live-prerequisi
 新增只读盘点工具：`backend/scripts/audit_smoke_fixtures.py`。当前盘点到 21 个历史 OpenAPI Smoke fixture：20 个旧的 `OpenAPI Smoke 0` + 1 个此前清理失败遗留 UUID fixture；均不在本轮批量删除范围内。新 UUID fixture 的 DELETE 清理已验证；后续 orphan 回收应按 marker、owner、年龄和运行时状态做 dry-run 后再执行。
 
 当前新提交将包括 smoke lifecycle 修复；发布结论继续为 `active / NO-GO`，外部 Docker/MySQL 门禁不变。
+
+## 2026-09-05 最新 smoke 口径（live 后续动作修正后）
+
+`tools/smoke_api_routes.py` 已修正“生成接口返回 2xx 就等同于已有可选候选”的判断：后台生成仍在队列中时，evaluate/select 现在明确标记为 `skipped-live-resource-prerequisite`，避免无候选版本时产生误导性 400；generate/cancel 仍真实执行并验证状态码。
+
+最新认证 smoke：
+
+```text
+认证模式：credentials
+检查总数：261
+通过：53
+跳过：208
+失败：0
+跳过分类：
+  skipped-expensive-route: 2
+  skipped-live-resource-prerequisite: 2
+  skipped-mutating-route: 6
+  skipped-resource-identity-route: 198
+临时项目 DELETE 清理：通过
+```
+
+当前最新提交：`1adea10 fix: report active smoke auth mode`。任务仍为 `active / NO-GO`，未闭合项仍是 Docker Engine、正式 MySQL 和完整真实资源部署证据。
