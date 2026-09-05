@@ -6231,3 +6231,19 @@ fixture_count=21
 ```
 
 该结果将历史 18 条 JSONL 盘点提升为当前数据库 21 条只读清单；当前只生成 dry-run 证据，没有执行回收或删除。
+## 2026-09-06 当前 HEAD 最终权威复核（d26466f）
+
+```text
+HEAD：d26466f7bddf71a48512aa17a7ead283676df749
+HEAD 提交：audit: make smoke fixture dry-run deterministic
+当前分支：codex/bohrium-integration-20260831
+新增回归：2 passed（dry-run 决策 + smoke API 认证）
+fixture dry-run：SMOKE_FIXTURE_AUDIT_PASSED / 21 条 / candidate=21
+git diff --check：PASS
+tracked 工作树：clean（本附录提交前）
+未跟踪运行工件：.vite、logs、backend/storage/**/*.bin、smoke fixture JSON/JSONL；继续保留且不纳入发布提交
+```
+
+本次提交新增 `--as-of` 固定时间参数、owner/runtime/marker/age/dry-run decision 字段，并锁定“空任务集或含活动态任务必须 hold，全部终态任务才可列为 candidate”的回归。没有执行 fixture 回收或删除。
+
+当前发布判定继续为 `active / NO-GO`：Docker Engine runtime、正式 MySQL migration/backup/restore/rollback、完整真实资源 smoke 仍缺少实测资源证据。

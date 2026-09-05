@@ -794,3 +794,17 @@ runtime：21/21 关联 task 状态 stale
 ```
 
 回收前仍需基于 owner、marker、年龄、终态、关联事件和可恢复备份做二次确认；本次没有删除历史数据。
+## 2026-09-06 当前 HEAD 最终权威复核（d26466f）
+
+```text
+HEAD：d26466f7bddf71a48512aa17a7ead283676df749
+HEAD 提交：audit: make smoke fixture dry-run deterministic
+分支：codex/bohrium-integration-20260831
+定向回归：2 passed（fixture dry-run 决策、smoke API 认证）
+fixture dry-run：SMOKE_FIXTURE_AUDIT_PASSED / 21 条 / candidate=21
+固定时间：2026-09-06T00:00:00+08:00
+git diff --check：PASS
+当前发布结论：active / NO-GO
+```
+
+本次提交把 fixture 审计扩展为确定性只读 dry-run：输出 owner、runtime 明细、marker、年龄和决策统计，并对空任务集及活动任务采用 hold 规则；本次回收动作仍为 0。Docker Compose runtime、正式 MySQL 迁移恢复回滚和完整真实资源 smoke 仍待对应资源节点。
