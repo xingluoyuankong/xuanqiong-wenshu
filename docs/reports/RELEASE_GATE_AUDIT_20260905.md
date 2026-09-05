@@ -1003,3 +1003,18 @@ git diff --check：PASS
 ```
 
 后端全量测试已覆盖 AgentSession 项目删除级联清理；剩余发布缺口仍是 Docker runtime、正式 MySQL 矩阵和 AgentRun/Artifact 深层真实资源覆盖。
+## AgentRun/Artifact 深层 fixture 探针复核
+
+```text
+探针：临时 project + AgentSession + message + run/events + cancel + project delete
+message submit：503
+error_code：AGENT_EVENT_LEDGER_UNAVAILABLE
+AgentRun/Artifact 有效证据：未形成
+探针清理：完成
+AgentRun 前后：1 -> 1
+Artifact 前后：0 -> 0
+AgentSession 前后：44 -> 44
+TaskRuntime 前后：83 -> 83
+```
+
+当前发布结论继续为 `active / NO-GO`。该 503 被记录为真实环境缺口，不降级为通过；下一步需在事件账本可写后重跑 AgentRun、Provider 和 Artifact 质量/内容/lineage GET 验收。

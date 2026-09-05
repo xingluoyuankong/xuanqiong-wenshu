@@ -6423,3 +6423,19 @@ git diff --check：PASS
 ```
 
 本次全量后端门禁包含 AgentSession 项目删除级联清理回归；当前仍未获得 Docker Engine runtime、正式 MySQL 和 AgentRun/Artifact Provider 深层 fixture 的运行证据。
+## AgentRun/Artifact 深层 fixture 探针复核
+
+```text
+探针链路：创建临时项目 -> 创建 AgentSession -> POST session message -> 读取 run/events -> cancel -> 删除项目
+消息提交结果：503
+错误码：AGENT_EVENT_LEDGER_UNAVAILABLE
+含义：当前服务环境没有可用 Agent 事件账本写入资源，AgentRun/Artifact 深层链路尚未形成有效运行证据
+探针清理：已完成
+清理后项目计数：25（含历史项目）
+清理后 AgentRun：1（与探针前一致）
+清理后 Artifact：0（与探针前一致）
+清理后 AgentSession：44（与探针前一致）
+清理后 TaskRuntime：83（与探针前一致）
+```
+
+该探针没有把 503 当成通过，也没有把 AgentRun/Artifact 资源伪造进 smoke；当前剩余门禁明确增加为“提供可用 Agent event ledger 后重新执行 AgentRun/Artifact/Provider 链路”。
