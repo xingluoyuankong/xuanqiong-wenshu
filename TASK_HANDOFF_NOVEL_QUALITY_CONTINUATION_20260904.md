@@ -5811,3 +5811,25 @@ tracked 未提交：无
 ```
 
 剩余门禁：Docker Engine 实际 Compose 编排、正式 MySQL migration/backup/restore/rollback、完整真实资源覆盖和最终发布重判。
+
+## 2026-09-05 认证 smoke 生命周期复核
+
+对 `tools/smoke_api_routes.py` 再次收口：生成接口返回 2xx 仅表示后台任务已入队，不能误标为已得到可选候选版本；因此 evaluate/select 保持 `skipped-live-resource-prerequisite`，等待专门的终态等待验收，而不是将无候选时的 400 计作 live 成功。
+
+认证资源 smoke 当前结果：
+
+```text
+smoke auth mode=credentials
+writer generate=200
+writer cancel=200
+writer evaluate/select=skipped-live-resource-prerequisite
+总计=261
+通过=55
+跳过=206
+失败=0
+skip 分类：mutating=6 / expensive=2 / resource-identity=198 / live-prerequisite=2
+```
+
+新增只读盘点工具：`backend/scripts/audit_smoke_fixtures.py`。当前盘点到 21 个历史 OpenAPI Smoke fixture：20 个旧的 `OpenAPI Smoke 0` + 1 个此前清理失败遗留 UUID fixture；均不在本轮批量删除范围内。新 UUID fixture 的 DELETE 清理已验证；后续 orphan 回收应按 marker、owner、年龄和运行时状态做 dry-run 后再执行。
+
+当前新提交将包括 smoke lifecycle 修复；发布结论继续为 `active / NO-GO`，外部 Docker/MySQL 门禁不变。

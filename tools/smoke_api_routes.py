@@ -20,6 +20,8 @@ BASE_URL = (
 OPENAPI_URL = f"{BASE_URL}/openapi.json"
 HTTP_METHODS = ("get", "post", "put", "patch", "delete")
 ALLOWED_STATUSES = {200, 201, 202, 204, 400, 401, 403, 404, 405, 409, 410, 415, 422, 429, 503}
+AUTH_HEADERS: dict[str, str] = {}
+AUTH_MODE = "anonymous"
 PATH_PARAM_PATTERN = re.compile(r"\{([^}]+)\}")
 SKIPPED_MUTATING_ROUTES = {
     ("POST", "/api/llm-config/auto-switch"),
@@ -130,6 +132,8 @@ def configure_auth() -> tuple[bool, str]:
     environment and never printed.
     """
     global AUTH_HEADERS, AUTH_MODE
+    AUTH_HEADERS = {}
+    AUTH_MODE = "anonymous"
     token = os.getenv("XUANQIONG_WENSHU_SMOKE_TOKEN", "").strip()
     username = os.getenv("XUANQIONG_WENSHU_SMOKE_USERNAME", "").strip()
     password = os.getenv("XUANQIONG_WENSHU_SMOKE_PASSWORD", "")
