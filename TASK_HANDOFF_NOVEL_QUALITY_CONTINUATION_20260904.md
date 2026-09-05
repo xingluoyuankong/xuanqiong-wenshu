@@ -3917,3 +3917,56 @@ Agent projection/control/artifact 专项：26 passed
 当前阶段：项目成员权限闭环与 Agent 历史投影已完成，完整后端/前端门禁已通过
 下一阶段：真实重启后 TCP HTTP/SSE 对 Agent 历史投影与共享 Run 控制复验；随后进入 UI-005 工具注册策略统一、UI-006 长历史分页/窗口化性能和发布门禁
 ```
+## 2026-09-05 当前任务续接回写：Agent 控制审计最终收口
+
+### A. 最新修复
+
+提交：
+
+```text
+c14d8c6 fix: expose actor attribution on approval events
+```
+
+`approval_granted` / `approval_rejected` 事件的公开字段白名单已与 `approval_required`、`run_command_*` 对齐，持续保留：
+
+```text
+actor_user_id
+execution_owner_id
+```
+
+该字段用于审计操作者与持久化执行归属，不改变 projectless 私有边界，也不放宽审批执行权限。
+
+### B. 最新验证
+
+```text
+Agent Artifact accept：4 passed
+Agent controls + readable projection HTTP：23 passed
+Backend 全量（含最新 Agent 控制链）：1729 passed in 768.38s
+Frontend type-check：通过
+Frontend Vitest：80 files / 510 tests passed
+Frontend build-only：4918 modules，成功
+verify.ps1 smoke：259 检查 = 55 通过 / 204 合理跳过 / 0 失败
+```
+
+此前全量测试中由审计字段补齐前产生的 2 条红灯已消除；随后定向和全量均通过。
+
+### C. 当前工作区与未跟踪工件
+
+```text
+分支：codex/bohrium-integration-20260831
+HEAD：c14d8c6
+业务代码与测试变更：已提交
+```
+
+`backend/storage/novel_imports/9/*.bin`、`backend/storage/style_uploads/project-1/*.bin` 等运行产生的未跟踪二进制继续保留原状，不加入提交，不执行批量清理。
+
+### D. 下一批执行计划
+
+```text
+P0：重启当前 HEAD 对应的 backend/frontend，执行 Agent 历史投影与共享 Run 控制 TCP HTTP/SSE 复验
+P1：完成 UI-005 工具注册中心 schema/权限/编排策略统一审查
+P1：完善 UI-006 长历史 cursor、窗口化渲染、性能基准与移动端视口回归
+P2：发布前 fresh/upgrade/downgrade 迁移、依赖告警治理和正式质量报告
+```
+
+总任务继续保持 `active`，当前不返回历史卡死会话，也不创建新的 Codex task。
