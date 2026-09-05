@@ -1,8 +1,8 @@
 # 玄穹文枢发布门禁审计（2026-09-05）
 
-> **状态标记：本文原始审计快照及中间复核附录均已被文末 2026-09-05 当前 HEAD 权威复核覆盖。**
-> 原始章节和中间附录中的旧 HEAD、旧测试失败、旧文件统计和旧 smoke 数字只保留作历史证据；当前权威状态见文末“当前 HEAD 复核附录（d8dcfcd）”，并与 `TASK_HANDOFF_NOVEL_QUALITY_CONTINUATION_20260904.md` 文末权威复核保持一致。
-> 历史附录曾记录 `62d4d8c`、`beec949`、`08531cc`、`23f7b0b`、`dbab070`；当前最新 HEAD 为 `d8dcfcd`（完整值见文末权威附录）。当前发布结论：`active / NO-GO`。
+> **状态标记：本文原始审计快照及中间复核附录均已被文末 2026-09-06 当前 task 权威探针附录覆盖。**
+> 原始章节和中间附录中的旧 HEAD、旧测试失败、旧文件统计和旧 smoke 数字只保留作历史证据；当前权威状态见文末“2026-09-06 当前 task 接续探针附录”，并与 `TASK_HANDOFF_NOVEL_QUALITY_CONTINUATION_20260904.md` 文末权威复核保持一致。
+> 历史附录曾记录 `62d4d8c`、`beec949`、`08531cc`、`23f7b0b`、`dbab070`；历史快照曾记录 `d8dcfcd`；当前最新 HEAD 为 `04f2a6e`（完整值见文末 2026-09-06 附录）。当前发布结论：`active / NO-GO`。
 
 
 
@@ -660,7 +660,7 @@ HEAD：d8dcfcdd1ff521131d8721cf256b54fa21f3ae7c
 HEAD 提交：docs: record smoke gate closure and fixture audit
 验证采集时 tracked 源码/测试未提交文件：无
 本次文档同步产生的 tracked 修改：TASK_HANDOFF_NOVEL_QUALITY_CONTINUATION_20260904.md、docs/reports/RELEASE_GATE_AUDIT_20260905.md
-未跟踪内容：.vite、logs、backend/storage/**/*.bin 等运行工件，保留在发布包边界之外
+未跟踪内容：.vite、logs、backend/storage/**/*.bin、两份 smoke fixture dry-run 工件，保留在发布包边界之外
 
 后端全量 pytest：1763 passed in 899.01s (0:14:59)
 前端全量 Vitest：81 files / 536 tests passed in 84.59s
@@ -761,3 +761,36 @@ Migration/deployment/member targeted: 17 passed
 ```
 
 Current conclusion remains `active / NO-GO`; the remaining gates require Docker Compose runtime, formal MySQL resources, broader real-resource smoke, and final release adjudication.
+
+## 2026-09-06 当前 task 接续探针附录
+
+```text
+历史会话：全面优化重构玄穹文枢 / 01a02410-94af-7002-9585-3532293aa587
+当前 task：01a06d1c-19e0-75e0-a30e-9c3d0bae9867
+分支：codex/bohrium-integration-20260831
+HEAD：04f2a6eb8d7bfaecb4ec8e76d141c4e6e7a77317
+Docker Compose CLI：v5.1.3
+Compose config：PASS（注入 SECRET_KEY、ADMIN_DEFAULT_PASSWORD、MYSQL_ROOT_PASSWORD、MYSQL_PASSWORD）
+Compose service parse：app / agent-worker / agent-command-worker
+Docker server：未响应，dockerDesktopLinuxEngine named pipe 不存在
+com.docker.service：Stopped / Manual
+MySQL TCP：127.0.0.1:3306=false；127.0.0.1:3309=false
+本地 MySQL 脚本：默认 D:/download/MySQL/bin/mysqld.exe 不存在
+发布结论：active / NO-GO
+```
+
+本附录新增了静态 Compose 配置通过的证据，但未把缺失 Docker Engine、MySQL 实例和完整真实资源 smoke 误判为通过。`.audit-openapi-smoke-fixtures-20260905.jsonl` 为历史未跟踪只读盘点工件，包含 18 条记录；当前 SQLite 直读结果为 21 条，最新结果保存于 `.audit-openapi-smoke-fixtures-current-20260906.json`；两者均留在工作区且不进入发布提交。
+
+### 2026-09-06 历史 fixture 只读 dry-run 补充
+
+```text
+命令：backend\.venv\Scripts\python.exe backend/scripts/audit_smoke_fixtures.py --db backend/storage/xuanqiong_wenshu.db
+结果：SMOKE_FIXTURE_AUDIT_PASSED
+fixture_count：21
+标题：20 条 OpenAPI Smoke 0，1 条带 UUID 后缀
+runtime：21/21 关联 task 状态 stale
+资源关系：每条 1 chapter、1 outline、1 blueprint、1 runtime task、1 member、1 token budget
+回收动作：0；仅生成 .audit-openapi-smoke-fixtures-current-20260906.json dry-run 工件
+```
+
+回收前仍需基于 owner、marker、年龄、终态、关联事件和可恢复备份做二次确认；本次没有删除历史数据。

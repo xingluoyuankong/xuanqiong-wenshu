@@ -6140,3 +6140,94 @@ Writer/Agent/成员/TaskRuntime组合：187 passed
 ```
 
 该 HEAD 只包含 acceptance 编排及审计同步，相应业务实现已由前述成员权限、Writer/Agent 身份和分页回归覆盖。当前发布仍为 `active / NO-GO`，仅剩 Docker Compose 实际编排、正式 MySQL 迁移恢复回滚、真实资源 smoke 覆盖和最终发布重判。
+
+## 2026-09-06 当前任务接续复核（当前 task，覆盖之前所有快照）
+
+### 会话定位
+
+- 历史目标会话：`全面优化重构玄穹文枢`
+- 历史会话 ID：`01a02410-94af-7002-9585-3532293aa587`
+- 当前接续 task：`01a06d1c-19e0-75e0-a30e-9c3d0bae9867`
+- 当前工作区：`D:\小说写作\xuanqiong-wenshu`
+- 当前分支：`codex/bohrium-integration-20260831`
+- 本次接续原则：只在当前 task 和当前工作区推进；历史会话作为只读背景，不回写、不创建新的 Codex task。
+
+### 复核时间与当前 Git 状态
+
+```text
+复核时间：2026-09-06 00:07:12 +08:00
+分支：codex/bohrium-integration-20260831
+HEAD：04f2a6eb8d7bfaecb4ec8e76d141c4e6e7a77317
+HEAD 提交：docs: sync acceptance head evidence
+tracked 工作树：无未提交修改
+当前未提交文档修改：本文件、docs/reports/RELEASE_GATE_AUDIT_20260905.md；未跟踪运行工件：.vite、logs、backend/storage/**/*.bin、.audit-openapi-smoke-fixtures-20260905.jsonl、.audit-openapi-smoke-fixtures-current-20260906.json；均保留且不纳入发布提交
+```
+
+### 本轮新增实测证据
+
+```text
+Docker Compose CLI：v5.1.3
+Compose config（注入非生产 fixture 必需变量）：PASS
+Compose 服务解析：app、agent-command-worker、agent-worker
+Docker client：29.4.3
+Docker server：未响应；npipe dockerDesktopLinuxEngine 不存在
+com.docker.service：Stopped / Manual
+MySQL TCP 127.0.0.1:3306：未监听
+MySQL TCP 127.0.0.1:3309：未监听
+本地 MySQL 启动脚本：缺少默认 mysqld.exe（D:/download/MySQL/bin/mysqld.exe），未启动实例
+```
+
+复现命令：
+
+```powershell
+$env:SECRET_KEY='codex-fixture-secret-key-2026'
+$env:ADMIN_DEFAULT_PASSWORD='codex-fixture-admin-password-2026'
+$env:MYSQL_ROOT_PASSWORD='codex-fixture-root-password-2026'
+$env:MYSQL_PASSWORD='codex-fixture-mysql-password-2026'
+docker compose -f deploy\docker-compose.yml config --services
+docker version --format 'client={{.Client.Version}} server={{.Server.Version}}'
+Test-NetConnection 127.0.0.1 -Port 3306
+Test-NetConnection 127.0.0.1 -Port 3309
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\start_local_mysql.ps1
+```
+
+### 当前执行矩阵
+
+| 工作项 | 当前状态 | 证据 | 下一动作 |
+|---|---|---|---|
+| 历史会话定位与任务接续 | 已完成 | Codex task 列表命中标题、工作区和历史 ID | 当前 task 持续推进 |
+| 消息/Run 分页及成员边界 | 已闭合 | TCP/JWT 长历史验收、后端/前端回归 | 保持回归 |
+| SQLite 迁移备份恢复 | 已闭合 | `verify.ps1 -Suite acceptance` 6/6 | 保持回归 |
+| Docker Compose 静态配置 | 已闭合 | `docker compose config --services` PASS | Engine 可用后跑 runtime matrix |
+| Docker Compose runtime | 未闭合 | client 有响应，server/npipe 缺失 | 启动 Docker Desktop 或使用部署节点后执行 up/health/logs/stop |
+| 正式 MySQL 迁移/备份/恢复/回滚 | 未闭合 | 3306/3309 均无监听，mysqld 路径缺失 | 提供 MySQL 资源或安装实例后执行正式矩阵 |
+| 真实资源 smoke 覆盖 | 未闭合 | 261 checks / 53 passed / 208 skipped / 0 failed；resource-identity 仍跳过 | 用可回收 project/chapter/Artifact fixture 补齐 |
+| 历史 OpenAPI Smoke fixture 回收 | 盘点中 | 当前 SQLite 只读审计 21 条；18 条 JSONL 为历史快照 | 按 owner/marker/年龄/runtime dry-run，复核后再决定回收 |
+| 最终发布判定 | active / NO-GO | 三项运行时资源和完整 smoke 证据缺失 | 完成全部门禁后重新裁决 |
+
+### 后续优化顺序
+
+1. Docker Engine 资源出现后，运行 `deploy/docker-compose.yml` 的 `config`、profile、`migrate`、`app`、两个 worker 的启动、健康检查、日志和停止矩阵；保存命令输出与容器状态。
+2. MySQL 资源出现后，先使用隔离数据库执行 Alembic fresh/repeat/downgrade/backup/restore/re-upgrade，再执行 rollback 和健康验证；保存备份 hash、哨兵行和数据库版本。
+3. 将 smoke 的 resource-identity 路由拆成可回收 fixture 分组，逐组覆盖 project/chapter/Artifact；每组加入创建、访问、业务状态、清理状态断言，避免伪造 ID。
+4. 对当前 SQLite 的 21 条 OpenAPI Smoke 盘点结果做只读 dry-run（18 条 JSONL 仅作历史快照），严格按 owner、marker、年龄、终态和 runtime 关系生成候选清单；任何回收先单独确认引用，再保留可恢复备份。
+5. 每次代码或配置提交后重新执行后端/前端全量、acceptance、smoke、部署探针，并把新 HEAD 与新数字追加到本文件和发布审计；在全部强门禁闭合前维持 `active / NO-GO`。
+
+### 本轮判定
+
+本轮完成了会话接续、全面状态复核、计划更新和 Compose/MySQL 可复现探针；代码树保持干净，未跟踪运行工件保持原样。由于 Docker Engine、MySQL 实例和完整真实资源 smoke 仍未具备，发布判定继续为 `active / NO-GO`，任务保持 active。
+
+### 2026-09-06 fixture dry-run 复核补充
+
+使用仓库已有只读脚本 `backend/scripts/audit_smoke_fixtures.py --db backend/storage/xuanqiong_wenshu.db` 重新直读当前 SQLite，结果保存为未跟踪工件 `.audit-openapi-smoke-fixtures-current-20260906.json`：
+
+```text
+SMOKE_FIXTURE_AUDIT_PASSED
+fixture_count=21
+标题匹配 OpenAPI Smoke：21
+其中 20 条标题为 OpenAPI Smoke 0，1 条带 UUID 后缀
+21/21 关联 task 状态为 stale
+每条均关联 1 chapter、1 chapter_outline、1 novel_blueprint、1 task_runtime_task、1 project_member、1 token_budget
+```
+
+该结果将历史 18 条 JSONL 盘点提升为当前数据库 21 条只读清单；当前只生成 dry-run 证据，没有执行回收或删除。
