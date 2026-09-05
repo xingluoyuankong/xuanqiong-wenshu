@@ -5137,3 +5137,47 @@ P1：显式发布配置重启并复验启动警告与 smoke；
 P2：审查会话详情默认 include_messages/include_runs 策略，兼容性与长历史 payload 二选一后配套合同测试；
 P2：最终全量门禁与发布审计更新，保持 GO/NO-GO 可追溯。
 ```
+
+## 2026-09-05 显式生产配置复验结果
+
+### 服务启动
+
+通过进程级环境变量启动当前头服务，未修改 `backend/.env`：
+
+```text
+ENVIRONMENT=production
+DEBUG=false
+ADMIN_DEFAULT_PASSWORD=<独立临时发布夹具值>
+```
+
+启动结果：
+
+```text
+Backend ready=True
+Frontend ready=True
+Frontend proxy ready=True
+```
+
+当前运行日志目录：`logs/run-20260905-121940`。启动日志未出现 DEBUG 或默认管理员密码警告。
+
+### 认证 TCP 分页复验
+
+在生产认证语义下重新运行 `backend/scripts/agent_tcp_message_pagination_acceptance.py`：
+
+```text
+TCP_MESSAGE_PAGINATION_PASSED
+message_count=180
+page_limit=60
+pages=3
+first_sequence=1
+last_sequence=180
+duplicate_count=0
+```
+
+### smoke 结果与门禁发现
+
+`verify.ps1 smoke` 的基础 health、前端、代理和 OpenAPI 路由检查通过（261 checks，51 passed，210 skipped，0 failed）；LLM settings 子检查因生产环境强制认证，而现有 smoke 请求未附带 Bearer token，出现 `401`，导致整个 smoke 套件退出码为 1。
+
+该结果说明：生产认证语义已生效，但 `verify.ps1` 的 LLM settings smoke 尚未适配生产 Bearer 认证。下一步应给 smoke 检查增加可选的测试 JWT/登录凭据注入，或将“生产环境未认证请求返回 401”作为明确通过分支，同时保留 health 与 OpenAPI 合同检查。
+
+当前发布结论仍为 `NO-GO`，原因从“启动配置警告”收敛为“发布 smoke 认证适配、备份恢复证据、详情 payload 策略与完整门禁尚未闭环”。
