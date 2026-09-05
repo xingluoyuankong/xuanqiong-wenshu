@@ -31,7 +31,8 @@ from ...agent.schemas import (
     AgentApprovalDecisionRequest, AgentApprovalRead, AgentArtifactAcceptRequest, AgentExecutionFactRead, AgentProviderUsageSummaryRead, AgentProjectProviderUsageSummaryRead, AgentArtifactDiffRead, AgentArtifactRead, AgentArtifactVersionDiffRead, AgentEventRead, AgentMessageCreateRequest,
     AgentAuditRecordRead, AgentJobRead, AgentRewriteInstructionRead, AgentMessageRead, AgentPlan, AgentPlanRequest, AgentPlanStep, AgentQualityBlockerRead, AgentArtifactQualityRead, AgentArtifactLineageRead, AgentArtifactLineageEdgeRead, AgentArtifactLineageArtifactRead, AgentQualityFindingRead, AgentQualityGateRead, AgentQualityResultRead, AgentRunRead, AgentRunStepRead, AgentTimelineEventRead,
     AgentSessionCreateRequest, AgentSessionDetail, AgentSessionRead, AgentToolCatalog, AgentToolHealthRead, AgentReasoningChunkRead, AgentReasoningPageRead,
-    AgentRunCommandRequest, AgentRunCommandRead, AgentContextSnapshotRead, AgentPlanRevisionRead, AgentConversationSummaryRead, AgentProviderProvenanceRead, AgentProjectEntitySummariesRead,
+    AgentRunCommandRequest, AgentRunCommandRead, AgentRunCommandPageRead, AgentContextSnapshotRead, AgentPlanRevisionRead, AgentConversationSummaryRead, AgentProviderProvenanceRead, AgentProjectEntitySummariesRead,
+    AgentRunStepPageRead, AgentArtifactPageRead,
 )
 from ...core.config import settings
 from ...core.dependencies import get_current_admin, get_current_user
@@ -685,20 +686,39 @@ async def _apply_cancel_side_effects(run: AgentRun, *, session: AsyncSession, us
             pass
 
 
-@router.get("/runs/{run_id}/commands", response_model=list[AgentRunCommandRead])
+@router.get(
+    "/runs/{run_id}/commands",
+    response_model=list[AgentRunCommandRead] | AgentRunCommandPageRead,
+)
 async def list_agent_run_commands(
     run_id: str,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int | None, Query(ge=0, le=100000)] = None,
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
-) -> list[AgentRunCommandRead]:
+) -> list[AgentRunCommandRead] | AgentRunCommandPageRead:
     try:
-        commands = await AgentRuntimeService(session).list_run_commands_readable(
-            run_id=run_id,
-            user_id=current_user.id,
-            limit=limit,
+        runtime = AgentRuntimeService(session)
+        if offset is None:
+            commands = await runtime.list_run_commands_readable(
+                run_id=run_id,
+                user_id=current_user.id,
+                limit=limit,
+            )
+            return [AgentRunCommandRead.model_validate(item) for item in commands]
+        commands, total = await runtime.list_run_commands_readable_page(
+            run_id=run_id, user_id=current_user.id, limit=limit, offset=offset
         )
-        return [AgentRunCommandRead.model_validate(item) for item in commands]
+        page_limit = min(max(int(limit), 1), 200)
+        return AgentRunCommandPageRead(
+            run_id=run_id,
+            items=[AgentRunCommandRead.model_validate(item) for item in commands],
+            total=total,
+            limit=page_limit,
+            offset=offset,
+            has_more=offset + len(commands) < total,
+            next_offset=(offset + len(commands)) if offset + len(commands) < total else None,
+        )
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
@@ -1079,10 +1099,35 @@ async def list_agent_approvals(run_id: str, session: AsyncSession = Depends(get_
         raise _error(exc) from exc
 
 
-@router.get("/runs/{run_id}/steps", response_model=list[AgentRunStepRead])
-async def list_agent_run_steps(run_id: str, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> list[AgentRunStepRead]:
+@router.get(
+    "/runs/{run_id}/steps",
+    response_model=list[AgentRunStepRead] | AgentRunStepPageRead,
+)
+async def list_agent_run_steps(
+    run_id: str,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int | None, Query(ge=0, le=100000)] = None,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> list[AgentRunStepRead] | AgentRunStepPageRead:
     try:
-        return await AgentRuntimeService(session).list_steps_readable(run_id=run_id, user_id=current_user.id)
+        runtime = AgentRuntimeService(session)
+        if offset is None:
+            steps = await runtime.list_steps_readable(run_id=run_id, user_id=current_user.id)
+            return [AgentRunStepRead.model_validate(item) for item in steps]
+        steps, total = await runtime.list_steps_readable_page(
+            run_id=run_id, user_id=current_user.id, limit=limit, offset=offset
+        )
+        page_limit = min(max(int(limit), 1), 200)
+        return AgentRunStepPageRead(
+            run_id=run_id,
+            items=[AgentRunStepRead.model_validate(item) for item in steps],
+            total=total,
+            limit=page_limit,
+            offset=offset,
+            has_more=offset + len(steps) < total,
+            next_offset=(offset + len(steps)) if offset + len(steps) < total else None,
+        )
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
@@ -1257,10 +1302,35 @@ async def accept_agent_artifact(artifact_id: str, payload: AgentArtifactAcceptRe
         raise _error(exc) from exc
 
 
-@router.get("/runs/{run_id}/artifacts", response_model=list[AgentArtifactRead])
-async def list_agent_artifacts(run_id: str, session: AsyncSession = Depends(get_session), current_user: UserInDB = Depends(get_current_user)) -> list[AgentArtifactRead]:
+@router.get(
+    "/runs/{run_id}/artifacts",
+    response_model=list[AgentArtifactRead] | AgentArtifactPageRead,
+)
+async def list_agent_artifacts(
+    run_id: str,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int | None, Query(ge=0, le=100000)] = None,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> list[AgentArtifactRead] | AgentArtifactPageRead:
     try:
-        return await AgentRuntimeService(session).list_artifacts_readable(run_id=run_id, user_id=current_user.id)
+        runtime = AgentRuntimeService(session)
+        if offset is None:
+            artifacts = await runtime.list_artifacts_readable(run_id=run_id, user_id=current_user.id)
+            return [AgentArtifactRead.model_validate(item) for item in artifacts]
+        artifacts, total = await runtime.list_artifacts_readable_page(
+            run_id=run_id, user_id=current_user.id, limit=limit, offset=offset
+        )
+        page_limit = min(max(int(limit), 1), 200)
+        return AgentArtifactPageRead(
+            run_id=run_id,
+            items=[AgentArtifactRead.model_validate(item) for item in artifacts],
+            total=total,
+            limit=page_limit,
+            offset=offset,
+            has_more=offset + len(artifacts) < total,
+            next_offset=(offset + len(artifacts)) if offset + len(artifacts) < total else None,
+        )
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 

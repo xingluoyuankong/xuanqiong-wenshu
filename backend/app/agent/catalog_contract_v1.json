@@ -16,6 +16,12 @@
       "description": "生成章节候选，审批后写入 artifact，不直接覆盖正文。",
       "handler_identity": "app.agent.tool_adapters:execute_chapter_generate_candidate",
       "idempotency_key": "agent:chapter.generate",
+      "access_level": "write",
+      "allowed_project_roles": [
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "required",
       "input_schema": {
         "additionalProperties": false,
@@ -96,6 +102,13 @@
       "description": "读取项目章节与版本概览。",
       "handler_identity": "app.agent.tool_adapters:execute_chapter_inspect",
       "idempotency_key": "agent:chapter.inspect",
+      "access_level": "read",
+      "allowed_project_roles": [
+        "viewer",
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "safe_read",
       "input_schema": {
         "additionalProperties": false,
@@ -138,6 +151,12 @@
       "description": "生成章节改写候选，审批后写入 artifact，不直接覆盖正文。",
       "handler_identity": "app.agent.tool_adapters:execute_chapter_rewrite_candidate",
       "idempotency_key": "agent:chapter.rewrite",
+      "access_level": "write",
+      "allowed_project_roles": [
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "required",
       "input_schema": {
         "additionalProperties": false,
@@ -218,6 +237,12 @@
       "description": "接受已通过质量门的章节候选并创建新版本，旧版本保留。",
       "handler_identity": "app.agent.tool_adapters:execute_chapter_version_accept",
       "idempotency_key": "agent:chapter.version.accept",
+      "access_level": "write",
+      "allowed_project_roles": [
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "required",
       "input_schema": {
         "additionalProperties": false,
@@ -278,6 +303,13 @@
       "description": "比较同一章节两个版本，返回有界差异，不改变正文。",
       "handler_identity": "app.agent.tool_adapters:execute_chapter_version_diff",
       "idempotency_key": "agent:chapter.version.diff",
+      "access_level": "read",
+      "allowed_project_roles": [
+        "viewer",
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "safe_read",
       "input_schema": {
         "additionalProperties": false,
@@ -329,6 +361,13 @@
       "description": "读取章节版本的安全元数据，不返回正文。",
       "handler_identity": "app.agent.tool_adapters:execute_chapter_version_list",
       "idempotency_key": "agent:chapter.version.list",
+      "access_level": "read",
+      "allowed_project_roles": [
+        "viewer",
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "safe_read",
       "input_schema": {
         "additionalProperties": false,
@@ -369,6 +408,13 @@
       "description": "读取用户选中的人物、势力、伏笔、知识节点或研究工件摘要。",
       "handler_identity": "app.agent.tool_adapters:execute_entity_inspect",
       "idempotency_key": "agent:entity.inspect",
+      "access_level": "read",
+      "allowed_project_roles": [
+        "viewer",
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "safe_read",
       "input_schema": {
         "additionalProperties": false,
@@ -403,6 +449,13 @@
       "description": "读取项目伏笔与回收状态。",
       "handler_identity": "app.agent.tool_adapters:execute_foreshadowing_inspect",
       "idempotency_key": "agent:foreshadowing.inspect",
+      "access_level": "read",
+      "allowed_project_roles": [
+        "viewer",
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "safe_read",
       "input_schema": {
         "additionalProperties": false,
@@ -434,6 +487,13 @@
       "description": "读取项目知识图谱和关联信息。",
       "handler_identity": "app.agent.tool_adapters:execute_knowledge_inspect",
       "idempotency_key": "agent:knowledge.inspect",
+      "access_level": "read",
+      "allowed_project_roles": [
+        "viewer",
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "safe_read",
       "input_schema": {
         "additionalProperties": false,
@@ -460,6 +520,13 @@
       "description": "读取项目提纲与剧情结构。",
       "handler_identity": "app.agent.tool_adapters:execute_outline_inspect",
       "idempotency_key": "agent:outline.inspect",
+      "access_level": "read",
+      "allowed_project_roles": [
+        "viewer",
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "safe_read",
       "input_schema": {
         "additionalProperties": false,
@@ -486,6 +553,13 @@
       "description": "读取当前小说项目的结构化上下文。",
       "handler_identity": "app.agent.tool_adapters:execute_project_context",
       "idempotency_key": "agent:project.context",
+      "access_level": "read",
+      "allowed_project_roles": [
+        "viewer",
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "safe_read",
       "input_schema": {
         "additionalProperties": false,
@@ -512,6 +586,8 @@
       "description": "列出当前用户可访问的小说项目。",
       "handler_identity": "app.agent.tool_adapters:execute_project_list",
       "idempotency_key": "agent:project.list",
+      "access_level": "read",
+      "allowed_project_roles": [],
       "idempotency_policy": "safe_read",
       "input_schema": {
         "additionalProperties": false,
@@ -544,6 +620,13 @@
       "description": "读取作者选中的关系化质量发现摘要，不返回证据正文或候选正文。",
       "handler_identity": "app.agent.tool_adapters:execute_quality_finding_inspect",
       "idempotency_key": "agent:quality.finding.inspect",
+      "access_level": "read",
+      "allowed_project_roles": [
+        "viewer",
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "safe_read",
       "input_schema": {
         "additionalProperties": false,
@@ -578,6 +661,13 @@
       "description": "分析项目质量指标并返回建议。",
       "handler_identity": "app.agent.tool_adapters:execute_quality_inspect",
       "idempotency_key": "agent:quality.inspect",
+      "access_level": "read",
+      "allowed_project_roles": [
+        "viewer",
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "safe_read",
       "input_schema": {
         "additionalProperties": false,
@@ -615,6 +705,13 @@
       "description": "重新运行指定章节版本的结构质量门，不写入正文。",
       "handler_identity": "app.agent.tool_adapters:execute_quality_retest",
       "idempotency_key": "agent:quality.retest",
+      "access_level": "read",
+      "allowed_project_roles": [
+        "viewer",
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "safe_read",
       "input_schema": {
         "additionalProperties": false,
@@ -659,6 +756,13 @@
       "description": "读取候选 Artifact 的质量阻断改写建议，不返回候选正文、不执行改写。",
       "handler_identity": "app.agent.tool_adapters:execute_quality_rewrite_instructions",
       "idempotency_key": "agent:quality.rewrite_instructions",
+      "access_level": "read",
+      "allowed_project_roles": [
+        "viewer",
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "safe_read",
       "input_schema": {
         "additionalProperties": false,
@@ -701,6 +805,13 @@
       "description": "读取项目已归档研究摘要与状态，不启动联网研究。",
       "handler_identity": "app.agent.tool_adapters:execute_research_inspect",
       "idempotency_key": "agent:research.inspect",
+      "access_level": "read",
+      "allowed_project_roles": [
+        "viewer",
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "safe_read",
       "input_schema": {
         "additionalProperties": false,
@@ -738,6 +849,13 @@
       "description": "读取项目章节、字数和质量门汇总，不读取正文。",
       "handler_identity": "app.agent.tool_adapters:execute_statistics_project",
       "idempotency_key": "agent:statistics.project",
+      "access_level": "read",
+      "allowed_project_roles": [
+        "viewer",
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "safe_read",
       "input_schema": {
         "additionalProperties": false,
@@ -764,6 +882,13 @@
       "description": "读取当前项目可用和已应用的文风摘要，不提取或生成文风。",
       "handler_identity": "app.agent.tool_adapters:execute_style_inspect",
       "idempotency_key": "agent:style.inspect",
+      "access_level": "read",
+      "allowed_project_roles": [
+        "viewer",
+        "editor",
+        "owner",
+        "admin"
+      ],
       "idempotency_policy": "safe_read",
       "input_schema": {
         "additionalProperties": false,

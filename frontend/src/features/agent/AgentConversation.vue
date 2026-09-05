@@ -45,10 +45,25 @@
         :aria-label="`实时活动进度 ${Math.round(latestWorkTrace.progress)}%`"
       />
     </section>
-    <div v-if="messages.length" class="messages" data-testid="agent-message-list">
-      <article v-for="message in messages" :key="message.id" class="message" :class="`message-${message.role}`">
-        <b>{{ message.role === 'user' ? '你' : 'Agent' }}</b><p>{{ message.content }}</p>
-      </article>
+    <div v-if="messages.length" class="message-history" data-testid="agent-message-history">
+      <div v-if="hasOlderMessages" class="message-history__controls">
+        <XqButton
+          variant="secondary"
+          size="sm"
+          data-testid="agent-load-older-messages"
+          :loading="loadingOlderMessages"
+          :disabled="loadingOlderMessages"
+          :aria-busy="loadingOlderMessages"
+          @click="loadOlderMessages"
+        >
+          {{ loadingOlderMessages ? '正在加载更早消息…' : `加载更早消息（还剩 ${olderMessageCount} 条）` }}
+        </XqButton>
+      </div>
+      <div ref="messagesList" class="messages" data-testid="agent-message-list">
+        <article v-for="message in visibleMessages" :key="message.id" class="message" :class="`message-${message.role}`">
+          <b>{{ message.role === 'user' ? '你' : 'Agent' }}</b><p>{{ message.content }}</p>
+        </article>
+      </div>
     </div>
     <p v-else class="empty-chat" data-testid="agent-empty-chat">请选择项目并发送目标，Agent 的历史消息会显示在这里。</p>
     <AgentReasoningCard
@@ -94,7 +109,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { AgentContextRef, AgentMessage, AgentPublicWorkSummary as AgentPublicWorkSummaryType } from '@/api/agent'
 import type { SSEConnectionState } from '@/utils/sseStream'
 import type { AgentWorkTraceDelta } from './reducers/agentEventReducer'
@@ -189,6 +204,54 @@ const sessionLabel = computed(() => {
   return props.runtimeSupported ? '准备会话…' : '兼容计划预览模式'
 })
 
+const MESSAGE_WINDOW_SIZE = 60
+const messageWindowSize = ref(MESSAGE_WINDOW_SIZE)
+const loadingOlderMessages = ref(false)
+const messagesList = ref<HTMLElement | null>(null)
+
+// session_id stays stable when the same session is refreshed or older rows are prepended.
+// The first message id alone changes in both cases and would incorrectly collapse the window.
+const conversationKey = computed(() => props.messages[0]?.session_id || props.messages[0]?.id || null)
+watch(
+  conversationKey,
+  () => {
+    messageWindowSize.value = MESSAGE_WINDOW_SIZE
+  },
+)
+
+const visibleMessages = computed(() => {
+  const start = Math.max(0, props.messages.length - messageWindowSize.value)
+  return props.messages.slice(start)
+})
+const olderMessageCount = computed(() => Math.max(0, props.messages.length - visibleMessages.value.length))
+const hasOlderMessages = computed(() => olderMessageCount.value > 0)
+
+const loadOlderMessages = async () => {
+  if (loadingOlderMessages.value || !hasOlderMessages.value) return
+  const list = messagesList.value
+  if (!list) return
+
+  loadingOlderMessages.value = true
+  try {
+    const previousScrollHeight = list.scrollHeight
+    const previousScrollTop = list.scrollTop
+    messageWindowSize.value += MESSAGE_WINDOW_SIZE
+    await nextTick()
+
+    const addedHeight = Math.max(0, list.scrollHeight - previousScrollHeight)
+    if (addedHeight <= 0) return
+
+    const anchoredTop = previousScrollTop + addedHeight
+    if (typeof list.scrollTo === 'function') {
+      list.scrollTo({ top: anchoredTop, behavior: 'auto' })
+    } else {
+      list.scrollTop = anchoredTop
+    }
+  } finally {
+    loadingOlderMessages.value = false
+  }
+}
+
 const updateGoal = (event: Event) => {
   emit('update:goal', (event.target as HTMLTextAreaElement).value)
 }
@@ -218,7 +281,9 @@ const updateGoal = (event: Event) => {
   height: 0.45rem;
   accent-color: var(--xq-jade);
 }
-.messages { display: grid; gap: 0.7rem; max-height: 26rem; overflow: auto; margin-bottom: 1rem; }
+.message-history { margin-bottom: 1rem; }
+.message-history__controls { display: flex; justify-content: center; margin-bottom: 0.65rem; }
+.messages { display: grid; gap: 0.7rem; max-height: 26rem; overflow: auto; }
 .message { max-width: 88%; padding: 0.7rem 0.85rem; border-radius: 0.8rem; background: rgba(255, 255, 255, 0.1); }
 .message-streaming { border-left: 3px solid var(--xq-jade); opacity: 0.92; }
 .artifact-preview { max-height: 28rem; overflow: auto; white-space: pre-wrap; line-height: 1.65; margin: 0 0 0.65rem; font: inherit; }

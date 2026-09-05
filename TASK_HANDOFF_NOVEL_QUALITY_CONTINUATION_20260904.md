@@ -3970,3 +3970,462 @@ P2：发布前 fresh/upgrade/downgrade 迁移、依赖告警治理和正式质�
 ```
 
 总任务继续保持 `active`，当前不返回历史卡死会话，也不创建新的 Codex task。
+### 审批决定审计链收口
+
+继续补齐 Artifact accept 的审批生命周期：
+
+- `approval_required`、`approval_granted`、`approval_rejected` 事件允许并记录 `actor_user_id` 与 `execution_owner_id`；
+- 审批决定从 `AgentApproval.request_json` 继承原始操作者，不因后续使用 Owner execution identity 而丢失 actor；
+- Run command 请求/应用/拒绝事件保持同一审计字段合同。
+
+专项结果：
+
+```text
+Artifact accept + Agent member control：9 passed in 8.07s
+全部 Agent 相关测试：493 passed in 338.65s (0:05:38)
+```
+
+下一步重新执行真实服务 smoke，并在稳定后替换完整后端基线。
+
+## 2026-09-05 UI-006 消息历史窗口化收口
+
+### A. 本批实现
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.spec.ts
+```
+
+实现：
+
+- 长会话默认只渲染尾部 60 条消息，减少初始 DOM 和布局成本；
+- 通过“加载更早消息”按 60 条扩展窗口；
+- 扩展窗口后按新增内容高度恢复滚动锚点，避免用户阅读位置跳动；
+- 切换会话时按首条消息 ID 复位窗口，避免沿用上一会话已展开的窗口大小；
+- 同一会话追加新消息不触发窗口复位，保留尾部消息体验。
+
+### B. 验证
+
+```text
+AgentConversation 专项：8 passed
+Frontend type-check：通过
+Frontend Vitest：80 files / 512 tests passed in 79.23s
+Frontend build-only：4918 modules transformed，成功，9.52s
+```
+
+已有后端最新基线：
+
+```text
+1729 passed
+```
+
+真实 smoke：
+
+```text
+后端 health 200；前端首页 200；前端代理 health 200；OpenAPI 259 检查 0 失败；LLM settings smoke 通过。
+```
+
+### C. 下一批
+
+1. 继续为 Agent steps/commands/Artifacts 设计后端分页合同，保持旧列表响应兼容；
+2. 评估 Agent Workspace 详情区域是否需要按需加载和分页，而不是扩大消息窗口；
+3. 重新执行变更后的完整前端/后端基线，随后更新发布前 smoke 证据。
+
+## 2026-09-05 规划审查：分页、按需加载、性能、UI-005 运行时绑定与迁移门禁
+
+### A. 审查输入与当前结论
+
+本次仅审查并更新本接续文档，未编辑业务代码、测试代码或运行工件。审查输入：
+
+```text
+工作区：D:\小说写作\xuanqiong-wenshu
+分支：codex/bohrium-integration-20260831
+HEAD：599da4a docs: update continuation checkpoint
+```
+
+当前 `git status --short` 的业务相关状态：
+
+```text
+M  TASK_HANDOFF_NOVEL_QUALITY_CONTINUATION_20260904.md
+M  backend/app/agent/catalog_contract_v1.json
+M  backend/app/agent/registry.py
+M  backend/app/agent/schemas.py
+M  frontend/src/features/agent/AgentConversation.spec.ts
+M  frontend/src/features/agent/AgentConversation.vue
+?? backend/app/agent/test_registry_ui005_contract.py
+```
+
+另有 `backend/storage/novel_imports/9/*.bin`、`backend/storage/style_uploads/project-1/*.bin` 等运行产生的未跟踪工件，继续保留原状，不纳入本阶段规划性提交，也不执行批量清理。
+
+规划审查结论：
+
+1. **UI-006 已完成消息会话尾部窗口化的第一步**：`AgentConversation` 默认渲染尾部 60 条，并支持按 60 条加载更早消息及滚动锚点恢复；这解决了会话消息的初始 DOM 膨胀，但没有覆盖 reasoning、activity/timeline、steps、approvals、artifacts、tool result 等长列表。
+2. **UI-005 已有静态权限与契约基础**：manifest 已表达 `access_level`、`allowed_project_roles`、`idempotency_policy`、`context_bindings`，并已有 `backend/app/agent/test_registry_ui005_contract.py` 的模型级测试；当前工作树中该测试仍为未跟踪文件，尚未形成提交边界。
+3. **UI-005 运行时绑定仍需形成完整证据链**：当前 `RunBoundToolRegistry` 已按 Run capability snapshot 限制工具名并校验 handler identity，但快照中的 generation、provider/version、manifest 版本、schema/上下文绑定一致性、执行时项目角色复核，仍应通过明确字段和运行时专项逐项验收，不能仅凭静态 manifest 测试视为完成。
+4. **分页能力是分散存在而非统一合同**：activity/reasoning/events 使用 sequence cursor，timeline/audit 仍使用 offset，approvals/artifacts/steps 仍主要返回完整列表；前端 Workspace 仍会并行拉取多个完整详情集合。下一阶段应优先建立统一页面合同，再改 UI 消费方式。
+5. **迁移门禁尚未成为发布阻断条件**：当前已有 `020_agent_catalog_relational.py` 至 `029_project_members.py` 等迁移链，但还需要 fresh、upgrade、重复执行、数据回填、降级策略和应用启动兼容矩阵的可重复证据。
+
+### B. 下一阶段目标与不变约束
+
+阶段目标：把 Agent Workspace 从“打开 Run 即拉取多个完整集合”收敛为“摘要首屏 + 详情按需 + 稳定游标分页 + 固定 Run 能力快照”，并让数据库迁移和性能预算成为发布前硬门禁。
+
+不变约束：
+
+- Owner/Editor/Viewer/Admin 的项目成员读取合同继续保持；Viewer 只读，写入/审批/运行控制权限不因分页或缓存扩大。
+- projectless session、Run、Artifact、事件和工具调用继续保持创建者隔离，不因为共享项目分页查询而混入项目数据。
+- `project_id + session_id + run_id + chapter_id` 等已有绑定继续严格校验；分页游标不得成为跨项目或跨 Run 的可复用令牌。
+- 旧客户端列表响应和既有 SSE/事件游标语义保持兼容；新页面合同通过明确版本或显式 page 模式接入，避免静默改变旧响应类型。
+- 所有生产修复遵循“先红灯样本—最小实现—专项—相邻回归—全量门禁—反向验证”的顺序。
+
+### C. 分页与游标统一方案
+
+#### C.1 统一页面 DTO
+
+新增页面能力时优先复用统一 envelope；字段命名保持稳定：
+
+```json
+{
+  "items": [],
+  "next_cursor": "opaque-cursor-or-null",
+  "previous_cursor": "opaque-cursor-or-null",
+  "has_more": true,
+  "page_size": 50,
+  "snapshot": "stable-read-boundary"
+}
+```
+
+合同要求：
+
+- `items` 按服务端声明的唯一稳定顺序返回；游标只编码排序键、过滤条件摘要和资源边界，不接受客户端伪造任意主键跳转。
+- 动态事件流使用单调 `sequence`：`after_sequence` 只返回严格大于游标的事件；SSE 的 `Last-Event-ID` 与该语义保持一致。
+- steps、approvals、artifacts、execution facts、reasoning 等 Run 资源使用 keyset cursor；优先采用 `(created_at, id)` 或已有单调序列，禁止新功能继续扩大 offset 分页在高增长表上的使用。
+- timeline/audit 现有 offset 保留给旧客户端；新 Workspace 页面使用 cursor 版本，并在同一 `snapshot` 内翻页，避免插入新记录造成重复或跳过。
+- 默认 `page_size` 使用 50；上限按资源设为 100 或 200，事件/推理等高频资源沿用 500 的明确上限。服务端拒绝 0、负数、过大值和跨资源复用游标。
+- 不返回昂贵的 `total` 作为默认字段；如确有 UI 需求，单独提供异步统计或明确成本标记。
+
+#### C.2 兼容接入顺序
+
+1. 先在 service 层补 `Page` 返回对象和 cursor 编解码/边界校验，不立即改变现有 router 的旧列表 response model。
+2. 为 steps、approvals、artifacts 增加显式 page 路由或显式 `response=page` 合同；旧调用继续得到数组，新调用得到 envelope。
+3. 将 timeline/audit 从 offset 迁移到 cursor 查询，同时保留 offset 兼容分支并设置迁移观测日志；确认旧前端没有依赖任意 offset 跳页后再收紧。
+4. 对 reasoning/events/activity 统一 `after_sequence`、`before_sequence`、`limit` 的边界和排序，明确 `before_sequence` 的历史加载方向以及空页时的 cursor 行为。
+5. 每个 page response 必须带资源边界标识（至少 `run_id`，项目资源同时带 `project_id`）；游标解码后的边界不匹配时返回稳定错误码，不返回另一资源的数据。
+
+#### C.3 分页专项测试建议
+
+建议新增或扩展：
+
+```text
+backend/app/services/test_agent_runtime_pagination.py
+backend/app/api/routers/test_agent_projection_pagination.py
+backend/app/api/routers/test_agent_stream_pagination.py
+backend/app/api/routers/test_agent_member_access_pagination.py
+```
+
+最小用例：
+
+- 首页、末页、空页、单条页、超过上限 page size；
+- 同一 Run 连续翻页无重复、无遗漏，顺序稳定；
+- 新插入记录不破坏同一 snapshot 的翻页结果；
+- 游标损坏、过期、改写过滤条件、跨项目、跨 Run、projectless 互换均拒绝；
+- Viewer/Editor/Owner/Admin 读取同项目资源，非成员 403，读取不改变 lease/owner/execution identity；
+- 旧数组响应回归；新 envelope 与 OpenAPI/schema 序列化回归；
+- SSE 首次流、`Last-Event-ID`、`after_sequence` 和断线重连只消费后续事件。
+
+### D. 按需加载与 Workspace 数据流
+
+#### D.1 首屏只保留摘要
+
+Agent Workspace 首次打开只请求：
+
+- session/run 摘要、状态、错误摘要、能力快照摘要；
+- 最近一页 activity/event（默认 50，必要时 100）；
+- 最近一页 reasoning 或当前活跃流所需的增量；
+- 当前用户可执行动作的权限投影。
+
+以下数据改为选中面板或显式展开时请求：
+
+- steps：选择“步骤”面板后按页加载；
+- approvals：存在 approval_required 或用户打开审批面板时加载；
+- artifacts：首屏只加载元数据/状态/大小/版本，展开单个 Artifact 后再加载正文或 diff；
+- execution facts、tool result、上下文快照、计划修订：先显示摘要，详情按单项加载；
+- timeline/audit：默认最近页，筛选条件变化时重置 cursor，不复用旧筛选的游标。
+
+#### D.2 前端加载控制
+
+- 每个资源缓存键必须包含 `projectId/sessionId/runId/resource/filter/snapshot`，切换 Run 或项目立即丢弃旧请求结果。
+- 同一资源的相同页请求去重；新选择覆盖旧选择时取消或忽略过期请求，禁止旧响应回写当前 Run。
+- 面板展开采用懒加载，Artifact 正文、diff、tool result 等大字段不得随列表接口返回。
+- 滚动接近底部才预取下一页；“加载更早”只在用户主动点击或接近顶部时触发，避免首屏预取完整历史。
+- 断线 SSE 与历史补洞共用同一 cursor 投影；补洞没有连续推进时立即停止并展示可恢复错误，不进入无界重试。
+- 继续保留 projectless/写入路径的现有 UI 行为，按需加载只改变读取时机和数据量，不改变授权与写入动作。
+
+建议专项文件：
+
+```text
+frontend/src/views/AgentWorkspace.pagination.spec.ts
+frontend/src/features/agent/composables/useAgentWorkspaceRuntime.pagination.spec.ts
+frontend/src/features/agent/AgentReasoningCard.pagination.spec.ts
+frontend/src/features/agent/AgentRunCommandHistory.pagination.spec.ts
+frontend/src/features/agent/AgentRunInspector.pagination.spec.ts
+```
+
+### E. 性能优化与可量化预算
+
+#### E.1 渲染策略
+
+1. `AgentConversation` 的尾部 60 条窗口化作为基线，补齐长消息、空消息、切换 Run、连续追加和历史 prepend 的基准。
+2. `AgentReasoningCard` 使用 sequence cursor 加“加载更早”，并采用可见窗口或等价虚拟化；不能只依赖 `content-visibility` 后仍创建全量 DOM。
+3. activity/timeline、steps、commands、approvals、artifacts 使用分页列表；单项正文、diff、tool result 使用折叠详情和按需渲染。
+4. 对超长正文使用文本截断、复制全文单独请求或 Blob/下载通道；列表 DTO 禁止重复携带完整正文。
+5. 所有长列表组件增加稳定 `key`、加载占位、空态、错误重试、分页边界和键盘/移动端触摸回归。
+
+#### E.2 建议发布预算
+
+在现有机器和固定 fixture 上建立基线后，将以下作为默认阻断阈值；若真实测量需要调整，必须在文档中记录前后值和原因：
+
+- 首屏 Agent Workspace 不因隐藏面板发起详情请求；默认每个列表首批不超过 100 项。
+- 2000 条 reasoning/message fixture 下，初始实际 DOM 节点保持在可见窗口量级，不随总历史线性增长；点击加载历史只增加一个窗口页。
+- 单个列表请求默认 payload 不超过 256 KB；正文/diff/tool result 等大字段独立加载。
+- 同一 Run 首屏并行读取请求数量有上限，建议不超过 4 个；重复打开同一面板不得重复请求同一页。
+- 分页连续读取 10 页后，内存、渲染耗时和游标延迟不得随页数线性恶化；具体阈值以基线测量值的回归百分比记录。
+- 前端 type-check、Vitest、build-only 与后端专项/全量门禁保持全绿；性能回归测试不得通过减少断言或降低 fixture 规模制造通过。
+
+#### E.3 反向性能验证
+
+- 将窗口大小临时扩大为全量，性能专项应能明确暴露 DOM/耗时回归；恢复实现后重新通过。
+- 将分页服务临时改为重复/跳序/忽略 cursor，连续翻页专项必须红灯。
+- 将详情请求移回首屏或移除请求去重，Workspace 加载专项必须检测到额外请求。
+- 将 SSE cursor 错位或返回旧事件，流回放专项必须失败。
+
+### F. UI-005 运行时绑定收口方案
+
+#### F.1 Run 能力快照必须冻结的字段
+
+Run 创建时冻结一份可序列化、可审计的 capability snapshot，至少包括：
+
+```text
+catalog_generation
+manifest_version
+name
+provider_id
+provider_version
+handler_identity
+access_level
+allowed_project_roles
+risk_level
+idempotency_policy
+supports_stream
+context_bindings
+input_schema_digest
+output_schema_digest
+```
+
+snapshot 同时记录 `project_id`、`session_id`、`run_id`、创建用户和创建时的 resolved context 摘要。快照是执行事实，不随注册中心热更新而漂移；新 Run 才使用新 catalog。
+
+#### F.2 运行时顺序
+
+固定执行顺序：
+
+1. 载入 Run snapshot，并验证 snapshot 完整、版本可识别、边界与当前 Run 一致；
+2. 校验当前用户对项目资源的角色，以及工具 manifest 的 `access_level/allowed_project_roles`；projectless 仍走创建者私有路径；
+3. 用 Run 创建时的 ContextRef/ContextSnapshot 解析并应用 `context_bindings`，禁止从当前 UI 选中状态静默替换 Run 绑定；
+4. 校验 handler identity、provider/version、manifest/schema digest 与 snapshot 一致；
+5. 校验输入 schema、幂等键、审批/确认要求和 cancellation/stream 合同；
+6. 执行并记录 `actor_user_id`、`execution_owner_id`、snapshot generation、tool name、correlation/transaction id；
+7. 任一项不匹配即 fail closed，返回稳定错误码并写入审计事件，不降级到当前 registry 的同名工具。
+
+当前代码审查重点：`RunBoundToolRegistry.from_context()` 已读取 capability resolution/release tools 并限制 allowed names，也校验 handler identity；下一批必须验证并补齐 generation、provider/version、manifest/schema digest 和上下文边界是否真正参与执行时校验，避免只在数据快照中携带而未形成约束。
+
+#### F.3 UI-005 专项与验收矩阵
+
+现有静态测试继续保留：
+
+```text
+backend/app/agent/test_registry_ui005_contract.py
+```
+
+建议补充：
+
+```text
+backend/app/agent/test_registry_ui005_runtime_binding.py
+backend/app/api/routers/test_agent_runtime_capability_snapshot.py
+backend/app/services/test_agent_tool_execution_contract.py
+```
+
+最小矩阵：
+
+- 创建 Run 后修改全局 catalog：旧 Run 继续使用旧 snapshot，新 Run 使用新 generation；
+- 同名工具 handler identity/provider/version 变化时，旧 Run 明确拒绝；
+- manifest/schema/context binding 变化时拒绝漂移；
+- capability resolution 少工具、多工具、重复工具、未知工具、工具顺序变化均有确定结果；
+- Viewer 只能读取，Editor/Owner/Admin 才能执行对应写工具，非成员 403；
+- projectless Run 不能借用项目工具快照或项目成员权限；
+- cancellation、timeout、idempotency、approval_required 和 stream 工具保持既有合同；
+- 公开 catalog 与 Python registry、provider health、handler identity 的一致性可序列化并可审计。
+
+### G. 迁移与发布门禁
+
+#### G.1 数据库迁移门禁
+
+针对现有 `020_agent_catalog_relational.py` 至 `029_project_members.py` 及后续迁移，建立固定矩阵：
+
+1. **静态链检查**：单一 head、revision/down_revision 连续、无重复 revision、模型与迁移 schema 差异可解释。
+2. **Fresh**：空数据库从头升级到当前 head，启动应用、生成一个 projectless Run 和一个项目 Run，验证核心表、索引、唯一约束和成员权限。
+3. **Upgrade**：至少从 `019`、`024`、`029` 三个代表快照升级到当前 head；每个快照记录表计数、关键列 nullability、索引和数据回填前后计数。
+4. **重复执行**：同一迁移命令重复运行应保持幂等，不重复插入 catalog/provider、成员 owner 或默认数据。
+5. **运行兼容**：迁移中间状态不应让应用启动静默降级为错误权限；滚动发布期间旧代码/新 schema 与新代码/旧 schema 的兼容矩阵必须有明确结果。
+6. **Downgrade/回滚**：支持的降级逐个实测并验证数据损失边界；不支持安全降级的迁移必须显式标注 forward-only，发布包提供数据库备份、恢复演练和应用回滚顺序，不能把“down_revision 存在”当作可回滚证明。
+7. **失败注入**：在每个关键 DDL/backfill 步骤前后模拟中断，确认重跑结果、事务边界和错误恢复行为。
+
+建议证据与测试位置：
+
+```text
+backend/app/migrations/test_migration_gate.py
+backend/app/migrations/test_catalog_migration_compatibility.py
+backend/output/migration-gate-<date>.json
+```
+
+若项目当前没有独立 migration test package，则将测试放到现有 `backend/app/services` 或迁移工具目录，并在本文件记录实际路径，禁止只生成人工报告。
+
+#### G.2 Catalog/Schema/客户端门禁
+
+- `catalog_contract_v1.json`、Pydantic manifest、Python registry、provider health 和前端 `AgentToolCatalog` 类型必须通过同一 drift test；工具名、风险级别、权限角色、schema、stream、幂等策略任何不一致都阻断发布。
+- OpenAPI 快照检查新增 page envelope、错误码、SSE 参数和旧响应兼容；不接受只在单元测试中存在而 HTTP schema 未更新。
+- fresh/upgrade 数据库上各执行一次 UI-005 capability snapshot 创建与工具读取，证明迁移后运行时绑定可用。
+- 前端旧 fixture、旧数组响应、新分页 envelope、空页和错误码都要有兼容测试。
+
+#### G.3 发布阻断顺序
+
+```text
+Gate 0：git 状态、未提交成果、运行工件和回滚点登记
+Gate 1：UI-005 catalog/registry/schema drift + runtime binding 专项
+Gate 2：分页 service/router/member-access/SSE 专项
+Gate 3：前端按需加载、窗口化、移动端和请求去重专项
+Gate 4：迁移静态链 + fresh + upgrade + 重复执行 + 回滚/备份证据
+Gate 5：后端全量 pytest
+Gate 6：frontend type-check + test:run + build-only
+Gate 7：真实服务 health、OpenAPI、HTTP/JWT、SSE、projectless/项目隔离 smoke
+Gate 8：审计产物、性能预算、迁移证据和正式报告归档
+```
+
+任一 Gate 失败时，状态标为 `blocked` 或 `active-with-gap`，不得用跳过测试、删 fixture、放宽权限、改变旧响应断言或只更新报告来制造通过。
+
+### H. 分阶段执行顺序与退出条件
+
+#### P0：冻结合同与建立红灯
+
+- 归档当前 UI-005 工作树差异和未跟踪专项测试的边界；
+- 为 page envelope、cursor 边界、snapshot 字段和错误码先写失败测试；
+- 记录现有 Workspace 首屏请求数、响应大小、DOM 数量和 2000 条历史 fixture 基线。
+
+退出条件：合同测试在旧实现上按预期红灯，且基线数据有命令、时间、环境和结果记录。
+
+#### P1：UI-005 运行时绑定
+
+- 实现快照冻结、generation/provider/version/identity/schema/context 校验；
+- 接入 actor/execution owner 审计字段；
+- 完成 projectless、成员角色、审批、幂等、取消、超时、流式工具回归。
+
+退出条件：UI-005 runtime 专项全绿，旧 Run/新 Run 漂移测试和反向破坏测试均完成。
+
+#### P1：后端分页与按需 API
+
+- 先 service 后 router，steps/approvals/artifacts 优先；
+- 再收敛 activity/reasoning/timeline/audit 的 cursor 合同；
+- 保持旧列表响应，新增 page 版本并更新 OpenAPI；
+- 建立跨项目、跨 Run、projectless 和成员角色分页隔离测试。
+
+退出条件：连续 10 页无重复/遗漏，游标边界稳定，旧客户端回归全绿。
+
+#### P1：前端消费与性能
+
+- Agent Workspace 首屏摘要化；
+- 详情面板懒加载、请求去重、过期响应丢弃、Artifact 正文/diff 单项加载；
+- Reasoning、timeline/activity、steps/commands/approvals/artifacts 完成窗口化或分页渲染；
+- 加入移动端窄视口和键盘可用性回归。
+
+退出条件：请求数、payload、DOM 和加载耗时满足预算；故意恢复全量渲染时性能专项红灯。
+
+#### P2：迁移门禁与发布验收
+
+- 完成迁移链静态检查、fresh/upgrade/重复执行、备份恢复和 forward-only 标记；
+- 在迁移前后执行 UI-005 snapshot 与分页读取 smoke；
+- 更新正式质量报告、审计 JSON、回滚点和证据索引。
+
+退出条件：Gate 0—8 全部有可复跑命令和原始输出；未跟踪运行工件与业务提交边界清晰；总任务才可从 `active` 进入完成评估。
+
+### I. 本次规划审查回报
+
+本次实际修改文件仅为：
+
+```text
+D:\小说写作\xuanqiong-wenshu\TASK_HANDOFF_NOVEL_QUALITY_CONTINUATION_20260904.md
+```
+
+建议下一次执行严格从 **P0 合同红灯与性能基线** 开始，优先处理 UI-005 运行时快照校验和 steps/approvals/artifacts page envelope；在这两项完成前，不继续扩大 UI-006 的全量视觉层改造，也不把当前静态注册契约测试或已有消息窗口化结果标记为整批完成。
+
+## 2026-09-05 UI-006 审查与 Agent 历史集合分页契约
+
+### A. UI-006 独立审查收口
+
+文件：
+
+```text
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.vue
+D:\小说写作\xuanqiong-wenshu\frontend\src\features\agent\AgentConversation.spec.ts
+```
+
+修复并验证：
+
+- 用稳定的 `session_id` 识别会话，避免同一会话刷新或前置补历史消息时错误收缩已展开窗口；
+- 加载更早消息增加并发闸门、禁用态、加载态和 `aria-busy`，快速重复点击只扩展一个窗口；
+- 长历史默认渲染尾部 60 条，按 60 条扩展并保持滚动锚点；
+- 实际会话切换按不同 `session_id` 复位窗口。
+
+验证结果：
+
+```text
+AgentConversation 专项：10 passed
+Frontend type-check：通过
+Frontend Vitest：80 files / 514 tests passed
+Frontend build-only：4918 modules transformed，成功
+```
+
+### B. Agent steps/commands/artifacts 可选分页
+
+当前工作树补齐三类历史集合的兼容分页合同：
+
+- 不带 `offset` 继续返回原有数组响应；
+- 显式 `offset` 返回 `run_id/items/total/limit/offset/has_more/next_offset` 页对象；
+- 读取分页继续复用 `get_readable_run` 项目成员访问边界；
+- 通过 `created_at + id` 对 Artifact 做稳定排序，避免同一时间戳下顺序漂移。
+
+新增/涉及测试：
+
+```text
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_history_pagination.py
+D:\小说写作\xuanqiong-wenshu\backend\app\api\routers\test_agent_readable_projection_http.py
+```
+
+真实验证：
+
+```text
+分页/可读投影/时间线回归：35 passed
+注册契约、catalog release、relational、UI-005、capability：68 passed
+Agent runtime、tool adapter、成员访问：20 passed
+真实 JWT 分页成员/非成员隔离：1 passed
+```
+
+### C. 当前未完成队列
+
+```text
+P0：重启当前 HEAD 对应 backend/frontend，执行真实 TCP HTTP/SSE Agent 历史投影与共享 Run 控制复验
+P1：将跨会话 Agent timeline 从 offset 迁移为稳定游标或补齐等价的可消费分页合同
+P1：评估前端 Agent Workspace 详情区域按需消费 steps/commands/artifacts 页对象
+P2：重新执行后端全量门禁并更新发布前 smoke 证据
+```
+
+本批未创建 Codex task；现有未提交业务改动与运行工件继续保留。

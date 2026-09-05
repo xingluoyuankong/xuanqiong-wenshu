@@ -29,7 +29,7 @@ def validate_project_scope(
 
 
 def requires_confirmation(risk_level: AgentRiskLevel) -> bool:
-    return risk_level in {AgentRiskLevel.WRITE, AgentRiskLevel.DESTRUCTIVE}
+    return risk_level in {AgentRiskLevel.WRITE, AgentRiskLevel.DESTRUCTIVE, AgentRiskLevel.MANAGE}
 
 
 def enforce_tool_scope(tool: AgentToolDefinition, project_id: str | None) -> None:

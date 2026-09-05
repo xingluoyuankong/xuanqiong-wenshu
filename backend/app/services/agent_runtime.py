@@ -208,6 +208,7 @@ class AgentConflict(AgentRuntimeError):
     pass
 
 
+
 def _clean_data(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(k): _clean_data(v) for k, v in value.items() if str(k).lower() not in _FORBIDDEN_KEYS}
@@ -931,6 +932,25 @@ class AgentRuntimeService:
         run = await self.get_readable_run(run_id, user_id)
         stmt = select(AgentRunStep).where(AgentRunStep.run_id == run.id).order_by(AgentRunStep.step_order.asc())
         return list((await self.session.execute(stmt)).scalars().all())
+
+    async def list_steps_readable_page(
+        self, *, run_id: str, user_id: int, limit: int = 100, offset: int = 0
+    ) -> tuple[list[AgentRunStep], int]:
+        run = await self.get_readable_run(run_id, user_id)
+        page_limit = min(max(int(limit), 1), 200)
+        page_offset = max(int(offset), 0)
+        predicate = AgentRunStep.run_id == run.id
+        total = int((await self.session.execute(
+            select(func.count()).select_from(AgentRunStep).where(predicate)
+        )).scalar_one())
+        stmt = (
+            select(AgentRunStep)
+            .where(predicate)
+            .order_by(AgentRunStep.step_order.asc())
+            .offset(page_offset)
+            .limit(page_limit)
+        )
+        return list((await self.session.execute(stmt)).scalars().all()), total
 
     async def claim_step(self, *, step_id: str, user_id: int, lease_owner: str, lease_seconds: int = 120) -> AgentRunStep:
         owner = str(lease_owner or "").strip()[:128]
@@ -1952,6 +1972,25 @@ class AgentRuntimeService:
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def list_run_commands_readable_page(
+        self, *, run_id: str, user_id: int, limit: int = 100, offset: int = 0
+    ) -> tuple[list[AgentRunCommand], int]:
+        run = await self.get_readable_run(run_id, user_id)
+        page_limit = min(max(int(limit), 1), 200)
+        page_offset = max(int(offset), 0)
+        predicate = AgentRunCommand.run_id == run.id
+        total = int((await self.session.execute(
+            select(func.count()).select_from(AgentRunCommand).where(predicate)
+        )).scalar_one())
+        stmt = (
+            select(AgentRunCommand)
+            .where(predicate)
+            .order_by(AgentRunCommand.requested_at.asc(), AgentRunCommand.id.asc())
+            .offset(page_offset)
+            .limit(page_limit)
+        )
+        return list((await self.session.execute(stmt)).scalars().all()), total
+
     async def request_run_command(
         self,
         *,
@@ -2362,5 +2401,24 @@ class AgentRuntimeService:
 
     async def list_artifacts_readable(self, *, run_id: str, user_id: int) -> list[AgentArtifactRef]:
         run = await self.get_readable_run(run_id, user_id)
-        stmt = select(AgentArtifactRef).where(AgentArtifactRef.run_id == run.id).order_by(AgentArtifactRef.created_at.asc())
+        stmt = select(AgentArtifactRef).where(AgentArtifactRef.run_id == run.id).order_by(AgentArtifactRef.created_at.asc(), AgentArtifactRef.id.asc())
         return list((await self.session.execute(stmt)).scalars().all())
+
+    async def list_artifacts_readable_page(
+        self, *, run_id: str, user_id: int, limit: int = 100, offset: int = 0
+    ) -> tuple[list[AgentArtifactRef], int]:
+        run = await self.get_readable_run(run_id, user_id)
+        page_limit = min(max(int(limit), 1), 200)
+        page_offset = max(int(offset), 0)
+        predicate = AgentArtifactRef.run_id == run.id
+        total = int((await self.session.execute(
+            select(func.count()).select_from(AgentArtifactRef).where(predicate)
+        )).scalar_one())
+        stmt = (
+            select(AgentArtifactRef)
+            .where(predicate)
+            .order_by(AgentArtifactRef.created_at.asc(), AgentArtifactRef.id.asc())
+            .offset(page_offset)
+            .limit(page_limit)
+        )
+        return list((await self.session.execute(stmt)).scalars().all()), total

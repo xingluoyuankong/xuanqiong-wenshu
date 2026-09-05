@@ -8,7 +8,7 @@ from importlib import import_module
 from typing import Any, Awaitable, Callable
 
 from .policy import requires_confirmation
-from .schemas import AgentRiskLevel, ToolContextBinding, ToolManifest
+from .schemas import AgentRiskLevel, AgentToolAccess, ToolContextBinding, ToolManifest
 
 AgentToolHandler = Callable[..., Awaitable[dict[str, Any]]]
 AgentToolProvider = Callable[['AgentToolRegistry'], None]
@@ -73,6 +73,29 @@ def _validate_schema(value: Any, schema: dict[str, Any], path: str = "$", *, out
     }
     if expected in matches and not matches[expected]:
         raise ToolContractViolation(f"{path}: expected {expected}")
+    if "enum" in schema and value not in schema["enum"]:
+        raise ToolContractViolation(f"{path}: value is not one of the declared enum values")
+    if isinstance(value, str):
+        min_length = schema.get("minLength")
+        if min_length is not None and len(value) < min_length:
+            raise ToolContractViolation(f"{path}: minLength is {min_length}")
+        max_length = schema.get("maxLength")
+        if max_length is not None and len(value) > max_length:
+            raise ToolContractViolation(f"{path}: maxLength is {max_length}")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        minimum = schema.get("minimum")
+        if minimum is not None and value < minimum:
+            raise ToolContractViolation(f"{path}: minimum is {minimum}")
+        maximum = schema.get("maximum")
+        if maximum is not None and value > maximum:
+            raise ToolContractViolation(f"{path}: maximum is {maximum}")
+    if isinstance(value, list):
+        min_items = schema.get("minItems")
+        if min_items is not None and len(value) < min_items:
+            raise ToolContractViolation(f"{path}: minItems is {min_items}")
+        max_items = schema.get("maxItems")
+        if max_items is not None and len(value) > max_items:
+            raise ToolContractViolation(f"{path}: maxItems is {max_items}")
     if isinstance(value, dict):
         required = schema.get("required", [])
         missing = [name for name in required if name not in value]
@@ -88,7 +111,7 @@ def _validate_schema(value: Any, schema: dict[str, Any], path: str = "$", *, out
                 _validate_schema(value[name], child, f"{path}.{name}", output=output)
     if isinstance(value, list) and isinstance(schema.get("items"), dict):
         for index, item in enumerate(value[:100]):
-            _validate_schema(item, schema["items"], f"{path}[{index}]")
+            _validate_schema(item, schema["items"], f"{path}[{index}]", output=output)
 
 
 class AgentToolRegistry:
@@ -307,6 +330,10 @@ def build_tool_manifest(
     supports_stream: bool = False,
     input_schema: dict[str, Any] | None = None,
     timeout_seconds: int | None = None,
+    cancellation_policy: str = "cooperative",
+    idempotency_policy: str | None = None,
+    access_level: AgentToolAccess | None = None,
+    allowed_project_roles: tuple[str, ...] = (),
     context_bindings: tuple[ToolContextBinding, ...] = (),
 ) -> ToolManifest:
     return ToolManifest(
@@ -318,11 +345,13 @@ def build_tool_manifest(
         supports_stream=supports_stream,
         input_schema=input_schema or {"type": "object", "additionalProperties": False},
         output_schema={"type": "object"},
-        idempotency_key=f"agent:{name}",
+        idempotency_key=(f"agent:{name}" if (idempotency_policy or ("safe_read" if risk_level in {AgentRiskLevel.READ, AgentRiskLevel.SUGGEST} else "required")) != "not_applicable" else None),
         manifest_version="1.0",
-        timeout_seconds=timeout_seconds or (30 if risk_level in {AgentRiskLevel.READ, AgentRiskLevel.SUGGEST} else 120),
-        cancellation_policy="cooperative",
-        idempotency_policy="safe_read" if risk_level in {AgentRiskLevel.READ, AgentRiskLevel.SUGGEST} else "required",
+        timeout_seconds=(30 if risk_level in {AgentRiskLevel.READ, AgentRiskLevel.SUGGEST} else 120) if timeout_seconds is None else timeout_seconds,
+        cancellation_policy=cancellation_policy,
+        idempotency_policy=idempotency_policy or ("safe_read" if risk_level in {AgentRiskLevel.READ, AgentRiskLevel.SUGGEST} else "required"),
+        access_level=access_level,
+        allowed_project_roles=allowed_project_roles,
         audit_event_type="agent_tool_call",
         context_bindings=context_bindings,
     )
@@ -491,6 +520,8 @@ def get_default_tool_registry_snapshot() -> dict[str, Any]:
             {
                 "name": tool.name,
                 "risk_level": tool.risk_level.value,
+                "access_level": tool.access_level.value,
+                "allowed_project_roles": list(tool.allowed_project_roles),
                 "manifest_version": tool.manifest_version,
                 "supports_stream": tool.supports_stream,
                 "provider_id": item["provider_id"],

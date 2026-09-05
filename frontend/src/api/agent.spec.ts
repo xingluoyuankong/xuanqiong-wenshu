@@ -245,4 +245,14 @@ describe('AgentAPI timeline and artifact diff', () => {
     })
   })
 
+  it('请求 Agent Run 历史分页 envelope 并规范化 limit/offset', async () => {
+    await AgentAPI.listRunCommandsPage('run/page', { limit: 999, offset: -5 })
+    await AgentAPI.listRunStepsPage('run/page', { limit: 0, offset: 12 })
+    await AgentAPI.listArtifactsPage('run/page', { limit: 2, offset: 7 })
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe('/api/agent/runs/run%2Fpage/commands?limit=200&offset=0')
+    expect(String(fetchMock.mock.calls[1][0])).toBe('/api/agent/runs/run%2Fpage/steps?limit=1&offset=12')
+    expect(String(fetchMock.mock.calls[2][0])).toBe('/api/agent/runs/run%2Fpage/artifacts?limit=2&offset=7')
+  })
+
 })

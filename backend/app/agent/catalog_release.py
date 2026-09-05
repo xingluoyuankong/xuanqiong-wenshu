@@ -138,6 +138,8 @@ class ToolRelease:
     source: str
     capability_tags: tuple[str, ...] = ()
     handler_identity: str | None = None
+    access_level: str | None = None
+    allowed_project_roles: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -150,6 +152,40 @@ class ToolRelease:
         object.__setattr__(self, "capability_tags", _string_tuple(self.capability_tags, field_name=f"tools.{self.name}.capability_tags"))
         if self.timeout_seconds < 1:
             raise CatalogReleaseError(f"tool {self.name}: timeout_seconds must be positive")
+
+        expected_access = {
+            "read": "read",
+            "suggest": "read",
+            "write": "write",
+            "destructive": "manage",
+            "manage": "manage",
+        }.get(self.risk_level)
+        if expected_access is None:
+            raise CatalogReleaseError(f"tool {self.name}: unknown risk_level {self.risk_level!r}")
+        access_level = str(self.access_level or "").strip() or expected_access
+        if access_level != expected_access:
+            raise CatalogReleaseError(f"tool {self.name}: access_level does not match risk_level")
+        object.__setattr__(self, "access_level", access_level)
+
+        raw_roles = self.allowed_project_roles
+        if isinstance(raw_roles, str):
+            raise CatalogReleaseError(f"tool {self.name}: allowed_project_roles must be an array")
+        roles = tuple(str(role).strip() for role in raw_roles)
+        if len(set(roles)) != len(roles) or any(role == "" for role in roles):
+            raise CatalogReleaseError(f"tool {self.name}: allowed_project_roles must contain unique non-empty values")
+        if self.project_scoped:
+            expected_roles = {
+                "read": ("viewer", "editor", "owner", "admin"),
+                "write": ("editor", "owner", "admin"),
+                "manage": ("owner", "admin"),
+            }[access_level]
+            if not roles:
+                roles = expected_roles
+            elif roles != expected_roles:
+                raise CatalogReleaseError(f"tool {self.name}: allowed_project_roles does not match access_level")
+        elif roles:
+            raise CatalogReleaseError(f"tool {self.name}: projectless tools must not declare allowed_project_roles")
+        object.__setattr__(self, "allowed_project_roles", roles)
 
     @classmethod
     def from_contract(
@@ -196,6 +232,8 @@ class ToolRelease:
             source=str(metadata.get("source", contract.get("source", "legacy"))),
             capability_tags=tuple(capability_tags),
             handler_identity=contract.get("handler_identity"),
+            access_level=contract.get("access_level"),
+            allowed_project_roles=tuple(contract.get("allowed_project_roles", ())),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -208,6 +246,8 @@ class ToolRelease:
             "requires_confirmation": self.requires_confirmation,
             "project_scoped": self.project_scoped,
             "supports_stream": self.supports_stream,
+            "access_level": self.access_level,
+            "allowed_project_roles": list(self.allowed_project_roles),
             "idempotency_key": self.idempotency_key,
             "manifest_version": self.manifest_version,
             "timeout_seconds": self.timeout_seconds,

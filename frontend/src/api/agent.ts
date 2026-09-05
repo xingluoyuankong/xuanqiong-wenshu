@@ -358,6 +358,28 @@ export interface AgentArtifact {
   metadata_json: Record<string, unknown>
   created_at: string
 }
+export interface AgentRunPageMeta {
+  run_id: string
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
+  next_offset?: number | null
+}
+export interface AgentRunCommandPage extends AgentRunPageMeta {
+  items: AgentRunCommand[]
+}
+export interface AgentRunStepPage extends AgentRunPageMeta {
+  items: AgentRunStep[]
+}
+export interface AgentArtifactPage extends AgentRunPageMeta {
+  items: AgentArtifact[]
+}
+export interface AgentRunPageQuery {
+  limit?: number
+  offset?: number
+}
+
 export interface AgentContextSnapshotRef {
   ref_order: number
   ref_type: string
@@ -916,6 +938,13 @@ export const AgentAPI = {
     request<AgentRunCommand[]>(
       `/agent/runs/${encodeURIComponent(runId)}/commands?limit=${Math.max(1, Math.min(200, limit))}`,
     ),
+  listRunCommandsPage: (runId: string, input: AgentRunPageQuery = {}) => {
+    const limit = Math.max(1, Math.min(200, input.limit ?? 100))
+    const offset = Math.max(0, Math.min(100_000, input.offset ?? 0))
+    return request<AgentRunCommandPage>(
+      `/agent/runs/${encodeURIComponent(runId)}/commands?limit=${limit}&offset=${offset}`,
+    )
+  },
   submitRunCommand: (runId: string, input: AgentRunCommandRequest) => {
     const payload: AgentRunCommandRequest = {
       ...input,
@@ -947,6 +976,13 @@ export const AgentAPI = {
     request<AgentApproval[]>(`/agent/runs/${encodeURIComponent(runId)}/approvals`),
   listRunSteps: (runId: string) =>
     request<AgentRunStep[]>(`/agent/runs/${encodeURIComponent(runId)}/steps`),
+  listRunStepsPage: (runId: string, input: AgentRunPageQuery = {}) => {
+    const limit = Math.max(1, Math.min(200, input.limit ?? 100))
+    const offset = Math.max(0, Math.min(100_000, input.offset ?? 0))
+    return request<AgentRunStepPage>(
+      `/agent/runs/${encodeURIComponent(runId)}/steps?limit=${limit}&offset=${offset}`,
+    )
+  },
   listExecutionFacts: (runId: string, limit = 200) =>
     request<AgentExecutionFact[]>(`/agent/runs/${encodeURIComponent(runId)}/execution-facts?limit=${Math.max(1, Math.min(500, limit))}`),
   getProviderUsageSummary: (runId: string) =>
@@ -962,6 +998,13 @@ export const AgentAPI = {
   },
   listArtifacts: (runId: string) =>
     request<AgentArtifact[]>(`/agent/runs/${encodeURIComponent(runId)}/artifacts`),
+  listArtifactsPage: (runId: string, input: AgentRunPageQuery = {}) => {
+    const limit = Math.max(1, Math.min(200, input.limit ?? 100))
+    const offset = Math.max(0, Math.min(100_000, input.offset ?? 0))
+    return request<AgentArtifactPage>(
+      `/agent/runs/${encodeURIComponent(runId)}/artifacts?limit=${limit}&offset=${offset}`,
+    )
+  },
   executeApproval: (approvalId: string) =>
     request<AgentArtifact>(`/agent/approvals/${encodeURIComponent(approvalId)}/execute`, {
       method: 'POST',

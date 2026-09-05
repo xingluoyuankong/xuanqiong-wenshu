@@ -224,3 +224,33 @@ async def test_real_jwt_projectless_history_remains_creator_private(http_jwt):
     )
     assert owner_response.status_code == 200
     assert reader_response.status_code == 404
+
+@pytest.mark.asyncio
+async def test_real_jwt_paginated_history_keeps_member_scope_and_legacy_shape(http_jwt):
+    client, fixture, headers = http_jwt
+
+    for route_suffix in ("commands", "steps", "artifacts"):
+        member_response = await client.get(
+            f"/api/agent/runs/{fixture.run_id}/{route_suffix}?limit=1&offset=0",
+            headers=headers(fixture.editor),
+        )
+        assert member_response.status_code == 200, (route_suffix, member_response.text)
+        payload = member_response.json()
+        assert set(("run_id", "items", "total", "limit", "offset", "has_more", "next_offset")) <= set(payload)
+        assert payload["run_id"] == fixture.run_id
+        assert payload["limit"] == 1
+        assert payload["offset"] == 0
+        assert isinstance(payload["items"], list)
+
+        outsider_response = await client.get(
+            f"/api/agent/runs/{fixture.run_id}/{route_suffix}?limit=1&offset=0",
+            headers=headers(fixture.outsider),
+        )
+        assert outsider_response.status_code == 403, (route_suffix, outsider_response.text)
+
+    legacy_response = await client.get(
+        f"/api/agent/runs/{fixture.run_id}/steps",
+        headers=headers(fixture.editor),
+    )
+    assert legacy_response.status_code == 200
+    assert isinstance(legacy_response.json(), list)

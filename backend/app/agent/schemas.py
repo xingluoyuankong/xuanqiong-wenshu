@@ -16,6 +16,70 @@ class AgentRiskLevel(str, Enum):
     SUGGEST = "suggest"
     WRITE = "write"
     DESTRUCTIVE = "destructive"
+    MANAGE = "manage"
+
+
+class AgentToolAccess(str, Enum):
+    """Project permission represented by a registered tool manifest."""
+
+    READ = "read"
+    WRITE = "write"
+    MANAGE = "manage"
+
+
+_PROJECT_ROLES = ("viewer", "editor", "owner", "admin")
+
+
+def _validate_tool_permission_contract(model: Any, *, validate_execution_fields: bool = True) -> None:
+    expected_confirmation = model.risk_level in {
+        AgentRiskLevel.WRITE,
+        AgentRiskLevel.DESTRUCTIVE,
+        AgentRiskLevel.MANAGE,
+    }
+    if model.requires_confirmation != expected_confirmation:
+        raise ValueError("requires_confirmation does not match risk_level")
+
+    expected_access = {
+        AgentRiskLevel.READ: AgentToolAccess.READ,
+        AgentRiskLevel.SUGGEST: AgentToolAccess.READ,
+        AgentRiskLevel.WRITE: AgentToolAccess.WRITE,
+        AgentRiskLevel.DESTRUCTIVE: AgentToolAccess.MANAGE,
+        AgentRiskLevel.MANAGE: AgentToolAccess.MANAGE,
+    }[model.risk_level]
+    if model.access_level is None:
+        object.__setattr__(model, "access_level", expected_access)
+    elif model.access_level != expected_access:
+        raise ValueError("access_level does not match risk_level")
+
+    if validate_execution_fields:
+        if model.idempotency_policy == "required" and not str(model.idempotency_key or "").strip():
+            raise ValueError("required idempotency_policy requires idempotency_key")
+        if model.idempotency_policy == "not_applicable" and model.idempotency_key is not None:
+            raise ValueError("not_applicable idempotency_policy forbids idempotency_key")
+        if model.access_level in {AgentToolAccess.WRITE, AgentToolAccess.MANAGE} and model.idempotency_policy != "required":
+            raise ValueError("write/manage tools require idempotency_policy=required")
+        if model.access_level is AgentToolAccess.READ and model.idempotency_policy not in {"safe_read", "not_applicable"}:
+            raise ValueError("read tools require a read-compatible idempotency_policy")
+        if model.supports_stream and model.cancellation_policy != "cooperative":
+            raise ValueError("supports_stream tools require cooperative cancellation")
+
+    roles = tuple(model.allowed_project_roles)
+    if len(set(roles)) != len(roles):
+        raise ValueError("allowed_project_roles must be unique")
+    if any(role not in _PROJECT_ROLES for role in roles):
+        raise ValueError("allowed_project_roles contains an unknown role")
+    if model.project_scoped:
+        expected_roles = {
+            AgentToolAccess.READ: ("viewer", "editor", "owner", "admin"),
+            AgentToolAccess.WRITE: ("editor", "owner", "admin"),
+            AgentToolAccess.MANAGE: ("owner", "admin"),
+        }[model.access_level]
+        if not roles:
+            object.__setattr__(model, "allowed_project_roles", expected_roles)
+        elif roles != expected_roles:
+            raise ValueError("allowed_project_roles does not match access_level")
+    elif roles:
+        raise ValueError("projectless tools must not declare allowed_project_roles")
 
 
 class AgentToolDefinition(BaseModel):
@@ -28,6 +92,8 @@ class AgentToolDefinition(BaseModel):
     project_scoped: bool = True
     supports_stream: bool = False
     idempotency_key: str | None = Field(default=None, max_length=120)
+    access_level: AgentToolAccess | None = None
+    allowed_project_roles: tuple[Literal["viewer", "editor", "owner", "admin"], ...] = ()
 
     model_config = ConfigDict(frozen=True)
 
@@ -99,6 +165,11 @@ class ToolManifest(AgentToolDefinition):
     audit_event_type: str = Field(default="tool_execution", min_length=1, max_length=120)
     context_bindings: tuple[ToolContextBinding, ...] = ()
 
+    @model_validator(mode="after")
+    def validate_execution_contract(self) -> "ToolManifest":
+        _validate_tool_permission_contract(self)
+        return self
+
 
 class AgentToolCatalog(BaseModel):
     tools: list["AgentToolCatalogItem"]
@@ -113,6 +184,11 @@ class AgentToolCatalogItem(AgentToolDefinition):
     provider_id: str | None = Field(default=None, max_length=120)
     provider_version: str | None = Field(default=None, max_length=64)
     source: Literal["builtin", "configured", "legacy"]
+
+    @model_validator(mode="after")
+    def validate_catalog_contract(self) -> "AgentToolCatalogItem":
+        _validate_tool_permission_contract(self, validate_execution_fields=False)
+        return self
 
 
 class AgentToolProviderHealthRead(BaseModel):
@@ -394,6 +470,29 @@ class AgentRunStepRead(BaseModel):
     finished_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AgentRunPageMeta(BaseModel):
+    """Stable metadata shared by optional Run history pages."""
+
+    run_id: str
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1)
+    offset: int = Field(ge=0)
+    has_more: bool = False
+    next_offset: int | None = Field(default=None, ge=0)
+
+
+class AgentRunCommandPageRead(AgentRunPageMeta):
+    items: list[AgentRunCommandRead] = Field(default_factory=list)
+
+
+class AgentRunStepPageRead(AgentRunPageMeta):
+    items: list[AgentRunStepRead] = Field(default_factory=list)
+
+
+class AgentArtifactPageRead(AgentRunPageMeta):
+    items: list[AgentArtifactRead] = Field(default_factory=list)
 
 
 class AgentProviderUsageSummaryRead(BaseModel):
