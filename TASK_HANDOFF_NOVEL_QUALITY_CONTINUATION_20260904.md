@@ -4829,3 +4829,293 @@ P1：补前端 AgentAPI.listSessionMessagesPage 客户端和独立 API 回归
 P1：将 useAgentSessionLifecycle 改为可选分页历史消费，保留旧 getSession fallback
 P1：补前端 prepend、锚点、会话切换和 projectless/member HTTP 验收
 ```
+
+## 2026-09-05 当前全面审查权威状态（最终）
+
+> 本节是当前任务唯一可执行的状态入口。此前各节中的“下一步”“下一批”“下一动作”均保留为历史记录；若与本节冲突，以本节和当前工作区实测结果为准。
+
+### A. 当前 HEAD 与分支
+
+```text
+工作区：D:\小说写作\xuanqiong-wenshu
+分支：codex/bohrium-integration-20260831
+HEAD：9ca512f4aa633941f21c8ac6eab59cd5c0830ec9
+HEAD 提交：test: cover session run pagination compatibility
+相对 origin/codex/bohrium-integration-20260831：ahead 65
+审查日期：2026-09-05
+```
+
+当前 HEAD 已包含以下已落地能力：
+
+- Agent steps/commands/artifacts page envelope 与前端 Workspace 分页消费；
+- Agent Workspace 详情区首屏懒加载、按页读取、重复请求抑制、Run 切换隔离、空页收口和错误状态；
+- Run capability snapshot / provider / manifest 合同闸门；
+- 项目成员角色在 Agent 执行入口的读取和写入边界；
+- Artifact 质量/谱系事实两阶段加载；
+- Agent 消息历史分页后端合同与前端 `listSessionMessagesPage` 消费；
+- AgentConversation 尾部窗口化、加载更早消息和滚动锚点保持。
+
+### B. 当前未提交文件与运行工件
+
+当前 `git status --short --branch` 实测：
+
+```text
+已跟踪未提交文件：7 个
+未跟踪条目：108 个
+其中：.bin 运行工件 106 个，.vite 缓存 1 项，发布审查报告 1 项
+```
+
+已跟踪未提交文件：
+
+```text
+frontend/src/api/agent.spec.ts
+frontend/src/api/agent.ts
+frontend/src/features/agent/AgentConversation.spec.ts
+frontend/src/features/agent/AgentConversation.vue
+frontend/src/features/agent/composables/useAgentSessionLifecycle.spec.ts
+frontend/src/features/agent/composables/useAgentSessionLifecycle.ts
+frontend/src/views/AgentWorkspace.vue
+```
+
+未跟踪非二进制内容：
+
+```text
+.vite/vitest/results.json
+docs/reports/RELEASE_GATE_AUDIT_20260905.md
+```
+
+运行产生的二进制工件继续保留原状，不纳入本次文档审查改动：
+
+```text
+backend/storage/novel_imports/9/*.bin
+backend/storage/style_uploads/project-1/*.bin
+```
+
+本次只修改本接续文档；未修改代码、测试、数据库、配置、启动脚本或运行工件。
+
+### C. 当前前端未提交批次
+
+当前未提交前端批次是 Agent 消息历史分页链路，不是 steps/commands/artifacts 详情分页批次。具体包括：
+
+1. `AgentAPI.getSession(sessionId, { includeMessages: false })` 的兼容调用；
+2. `AgentAPI.listSessionMessagesPage` 客户端；
+3. `useAgentSessionLifecycle` 的最新消息页加载、向前翻页、旧 `getSession()` 回退、会话切换隔离；
+4. `AgentConversation` 的外部分页事件、尾部窗口化、prepend 后滚动锚点保持；
+5. `AgentWorkspace` 对加载更早消息事件和分页状态的消费。
+
+旧数组接口仍保留，兼容路径未移除。当前 steps/commands/artifacts 分页消费已经属于 HEAD，不应再写入“待接入”队列。
+
+### D. 当前实测验证
+
+本次在当前 HEAD/工作区执行的最小相关门禁：
+
+```text
+AgentWorkspace + useAgentWorkspaceRuntime：2 个测试文件 / 56 tests passed
+AgentAPI + useAgentSessionLifecycle + AgentConversation：3 个测试文件 / 34 tests passed
+npm run type-check：通过
+git diff --check：通过
+```
+
+两组测试均为当前命令实测结果：
+
+```text
+2 files passed
+Tests 56 passed
+
+3 files passed
+Tests 34 passed
+```
+
+固定非阻塞提示：
+
+- `baseline-browser-mapping` 数据包过旧；
+- `caniuse-lite` 数据包过旧；
+- AgentWorkspace 测试环境存在 Pinia injection warning。
+
+这些提示未造成本次相关门禁失败。`.vite/vitest/results.json` 中的旧失败结果属于缓存内容，不作为当前验证依据。
+
+### E. 当前完成度判断
+
+| 工作项 | 当前状态 | 依据 |
+|---|---|---|
+| 项目成员权限闭环 | 已完成 | 当前 HEAD 历史提交与既有后端/HTTP 回归记录 |
+| Agent Run 控制审计 | 已完成 | 当前 HEAD 历史提交与既有 Agent 控制回归记录 |
+| UI-005 注册中心与运行时能力快照 | 已完成 | 当前 HEAD 已包含相关提交，既有定向回归记录有效 |
+| UI-006 AgentConversation DOM 窗口化 | 已完成 | 当前前端测试 11 项通过，相关类型检查通过 |
+| steps/commands/artifacts page client | 已完成并进入 HEAD | `HEAD` 中存在 `loadRunDetailPage`、三个 page client 和“加载更多”入口；相关运行时/Workspace 测试 56 项通过 |
+| Agent 消息历史分页前端消费 | 已实现，未提交 | 7 个前端文件未提交；相关测试 34 项通过，仍需形成独立提交批次 |
+| 真实 TCP/JWT 长历史消息分页验收 | 未完成 | 当前只有单测和已有服务路由 smoke 证据 |
+| fresh/upgrade/repeat/downgrade/备份恢复矩阵 | 未完整归档 | 历史专项有通过记录，当前 HEAD 的完整发布证据仍需集中归档 |
+| 正式生产配置复验 | 未完成 | 仍需以显式发布配置复跑并确认 DEBUG/默认管理员配置告警消失 |
+
+### F. 当前 NO-GO 条件
+
+当前总任务保持 `active / NO-GO`，阻断条件如下：
+
+1. 工作区存在未提交前端源码与测试，当前不是可直接打包的干净发布树；
+2. Agent 消息分页前端批次尚未形成提交、审查和发布前完整门禁闭环；
+3. 真实 TCP/JWT 长历史消息分页页面验收尚未完成；
+4. fresh/upgrade/repeat/downgrade/备份恢复矩阵尚未以当前 HEAD 的统一证据包完整归档；
+5. 正式生产配置下的 DEBUG 与默认管理员配置门禁尚未完成复验；
+6. `verify.ps1 smoke` 仍存在大量因缺少真实资源 ID 的合理跳过项，不能单独代表完整资源验收；
+7. 未跟踪 `.vite` 与 storage 二进制工件仍需在发布打包边界之外单独处理。
+
+历史发布审查报告 `docs/reports/RELEASE_GATE_AUDIT_20260905.md` 基于更早的 `599da4a` 快照，仍作为历史证据保存；其中关于 UI-005 失败、旧 HEAD 和旧文件清单的内容不得当作当前状态。
+
+### G. 唯一后续执行计划
+
+按以下顺序执行，完成一项再进入下一项：
+
+```text
+P0：提交前端消息分页批次前的最终 diff 审查，确认只包含 7 个预期前端文件；
+P0：重新执行前端全量 type-check、Vitest、build-only，并记录当前 HEAD/提交后的数字；
+P1：启动当前 HEAD 对应服务，补真实 TCP/JWT 消息分页、成员共享读取和 projectless 隔离验收；
+P1：核对消息分页与 AgentConversation 窗口化的长历史 payload、prepend、会话切换和重复请求指标；
+P1：以当前 HEAD 重新归档 fresh/upgrade/repeat/downgrade/备份恢复证据；
+P1：使用显式生产配置重启并复验 DEBUG、默认管理员配置和基础 smoke；
+P2：排除运行工件后形成发布提交，执行最终后端/前端全量门禁；
+P2：更新发布门禁审计，重新评估 GO/NO-GO。
+```
+
+### H. 当前接续规则
+
+- 继续在当前任务和当前工作区推进；
+- 保留全部现有未提交源码、测试、文档和运行工件；
+- 后续代码变更必须配套回归测试、反向验证、差异检查和可定位证据；
+- 不把历史数字、缓存结果或旧发布报告数字冒充当前 HEAD 实测结果；
+- 当前唯一待推进主线是“消息历史分页前端批次 → 真实 HTTP/JWT 验收 → 发布门禁闭环”。
+
+## 2026-09-05 前端分页批次提交后续审查（当前任务继续）
+
+### 当前已完成
+
+- 已修复分页首屏失败、响应格式异常时的旧 `getSession()` 回退；旧 mock/兼容路径不会再因空分页响应丢失当前会话。
+- 已通过前端相关定向回归：3 个测试文件、34 tests passed；生命周期测试现为 5 tests passed。
+- 已通过前端全量回归：81 个测试文件、533 tests passed。
+- 已通过 `npm run type-check`。
+- 已通过 `npm run build-only`：4918 modules transformed。
+- 已通过 `git diff --check`。
+- 已形成提交：`5bc1612 feat: wire paged agent message history into workspace`。
+- 后端消息/会话分页与 runtime 组合回归由子智能体完成：合计 183 passed；另有消息/会话专项 33 passed；静态编译通过。
+
+### 当前验证后的真实状态
+
+```text
+HEAD：5bc1612
+前端消息分页批次：已提交
+工作区剩余 tracked 未提交：仅 TASK_HANDOFF_NOVEL_QUALITY_CONTINUATION_20260904.md
+运行工件：.vite 与 backend/storage/**/*.bin 继续保留，不纳入发布提交
+发布结论：仍为 NO-GO
+```
+
+### 新增审查发现
+
+1. 会话详情接口默认仍可能读取完整消息数组与 Run 数组；新分页端点尚未成为所有大历史访问的唯一入口，长历史响应体仍有增长风险。
+2. 真实 TCP/JWT 会话分页检查已验证登录、路由和现有会话分页返回 200，但现有 20 个会话消息总数均为 0，尚未形成数百条消息的长历史实证。
+3. 真实成员验收脚本仍使用 ASGITransport；需要独立 TCP 客户端连接 127.0.0.1:8013 完成成员共享读取、projectless 隔离、连续游标翻页和无重复/无遗漏证明。
+4. fresh/upgrade/repeat/downgrade 已有专项记录，但“备份 → 恢复 → hash/计数 → current → 服务健康 → 恢复后再次升级”证据包仍不完整。
+5. 当前 `backend/.env` 仍是开发配置，启动日志的 DEBUG 与默认管理员配置警告尚未通过显式发布配置复验。
+
+### 下一执行顺序（覆盖旧计划中的已完成项）
+
+```text
+P1：补真实 TCP/JWT 长历史消息分页验收脚本并运行，优先覆盖 180+ 消息、limit=60、before_sequence 连续翻页、无重复无遗漏；
+P1：补真实 TCP 成员共享读取与 projectless 创建者边界验收；
+P1：以当前 HEAD 重新归档迁移 fresh/upgrade/repeat/downgrade/备份恢复矩阵；
+P1：显式注入发布配置重启服务，确认 DEBUG/默认管理员配置告警消失，再跑 smoke；
+P2：补会话详情默认 payload 策略审查，决定保留兼容默认值还是改为元数据优先，并配套 HTTP/前端回归；
+P2：最终后端全量、前端全量、构建、smoke、证据包检查，更新发布审计并重判 GO/NO-GO。
+```
+
+### 当前继续规则
+
+- 本任务继续在当前 Codex task 和当前工作区执行，不回历史卡住会话，不创建新的 Codex task。
+- 子智能体只承担分支明确、可验收的并行子任务；主任务负责审查、整合、测试、提交和发布结论。
+- 子智能体若卡住，主任务立即催收、缩小任务、接手或关闭；不把未完成状态当作完成证据。
+- 运行工件只保留，不批量清理；提交时按明确路径选择，不使用全量暂存。
+
+## 2026-09-05 真实 TCP/JWT 长历史验收结果
+
+### 验收脚本
+
+新增：`backend/scripts/agent_tcp_message_pagination_acceptance.py`。脚本通过真实 TCP 连接 `http://127.0.0.1:8013` 完成 JWT 登录；通过当前服务配置数据库写入隔离 projectless fixture，再通过 TCP API 验证读取，结束后回收 fixture。密码只从环境变量读取，不写入输出。
+
+### 实测结果
+
+```text
+TCP_MESSAGE_PAGINATION_PASSED
+message_count=180
+page_limit=60
+pages=3
+first_sequence=1
+last_sequence=180
+duplicate_count=0
+compact_session_detail=200
+JWT profile=200
+```
+
+覆盖：
+
+- `/api/auth/login` JWT 登录；
+- `/api/novels/current-user` 身份确认；
+- `/api/agent/sessions` projectless 会话创建；
+- `/api/agent/sessions/{id}?include_messages=false&include_runs=false` 紧凑详情；
+- `/api/agent/sessions/{id}/messages?limit=60` 最新页；
+- 连续 `before_sequence` 翻页；
+- 180 条序列无重复、无遗漏；
+- fixture 成功回收。
+
+### 追加后端回归
+
+- `app/api/routers/test_agent_session_pagination.py`：4 passed；新增真实 JWT 语义的 ASGI 成员长历史回归也通过。
+- 迁移专项：`test_alembic_migrations.py`、`test_project_member_migration.py`、`test_deployment_contract.py`：16 passed。
+- 当前服务 smoke：261 checks，55 passed，206 skipped，0 failed。
+
+### 状态更新
+
+真实 TCP/JWT 长历史消息分页主缺口已关闭。成员共享读取与 projectless 隔离已有 HTTP/ASGI 合同回归，但仍可继续增加真实 TCP 多用户 token 验收；迁移备份恢复、显式发布配置复验、会话详情默认 payload 策略仍是发布门禁剩余项。
+
+## 2026-09-05 当前任务继续审查（提交与 smoke 后）
+
+### 已推进到的最新节点
+
+- 前端消息分页批次已提交：`5bc1612 feat: wire paged agent message history into workspace`。
+- 消息 prepend 锚点、实时追加与分页失败重试边界已补强并提交：`c1ba52c fix: stabilize paged message prepend anchor`。
+- 前端定向分页/会话/对话回归：17 tests passed。
+- 前端全量回归：81 files / 533 tests passed。
+- `npm run type-check`：通过。
+- `npm run build-only`：通过，4918 modules transformed。
+- 后端消息/会话分页与 runtime 组合回归：183 passed；消息/会话专项：33 passed；静态检查通过。
+- 当前服务 smoke：261 checks，55 passed，206 skipped，0 failed；Backend、Frontend、Proxy health 均通过。
+
+### 当前工作区与发布状态
+
+```text
+HEAD：c1ba52c
+tracked 未提交：TASK_HANDOFF_NOVEL_QUALITY_CONTINUATION_20260904.md
+未跟踪：.vite、backend/storage 下运行二进制、历史发布审计报告
+git diff --check：通过
+发布结论：NO-GO
+```
+
+### 当前审查结论
+
+消息历史分页前端主线已完成实现、回归、构建和提交；下一阶段不再重复开发同一批次，转入真实 TCP/JWT 长历史数据验收与发布证据闭环。后端审查另发现：会话详情默认仍会读取完整消息与 Run，长历史场景仍保留 payload 增长风险；该项列为 P2 设计审查，不阻塞当前分页批次提交，但阻塞最终发布结论。
+
+### 下一批唯一执行计划
+
+```text
+P1：完成独立 TCP/JWT 长历史验收脚本，验证 180+ 消息、limit=60 连续 before_sequence、无重复无遗漏、紧凑详情与成员边界；
+P1：运行并保存当前服务 TCP 验收证据，若现有真实服务没有可用长历史数据，则通过隔离数据入口生成可回收 fixture；
+P1：重新执行当前 HEAD 的迁移 fresh/upgrade/repeat/downgrade 与备份恢复矩阵，记录 Alembic current、计数/hash、恢复后健康检查；
+P1：使用显式发布配置重启，复验 DEBUG、默认管理员配置告警消失，并再次跑 smoke；
+P2：评估会话详情默认 payload 策略，必要时将默认读取改为元数据优先，配套后端/前端合同测试；
+P2：最终全量门禁、发布审计更新、GO/NO-GO 重判。
+```
+
+### 证据边界
+
+- `.vite/vitest/results.json` 旧缓存结果不作当前证据；
+- 未跟踪 storage 二进制和日志保留，不批量清理，不加入代码提交；
+- 历史发布报告中的旧 HEAD、旧失败项和旧文件统计不覆盖本节当前状态；
+- 当前任务继续在本会话与当前工作区推进，不回历史卡住任务，不创建新的 Codex task。

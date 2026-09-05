@@ -3,10 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi import HTTPException
 
 from app.api.routers import agent
+from app.core.security import create_access_token
+from app.db.session import get_session
+from app.main import app
 from app.agent.schemas import AgentMessagePageRead, AgentSessionRunPageRead
 from app.models import AgentMessage, AgentRun, NovelProject, ProjectMember, User
 from app.models.project_member import ProjectMemberRole
@@ -133,3 +137,86 @@ async def test_session_pages_keep_member_read_scope_and_projectless_privacy(task
             private.id, session=task_session, current_user=SimpleNamespace(id=outsider.id)
         )
     assert private_denied.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_session_message_page_http_uses_real_jwt_for_long_history_member_scope(task_session):
+    owner = await _user(task_session, 99406, "session-http-owner")
+    viewer = await _user(task_session, 99407, "session-http-viewer")
+    outsider = await _user(task_session, 99408, "session-http-outsider")
+    project = NovelProject(id="session-http-project", user_id=owner.id, title="HTTP session page")
+    task_session.add_all([
+        project,
+        ProjectMember(project_id=project.id, user_id=owner.id, role=ProjectMemberRole.owner.value),
+        ProjectMember(project_id=project.id, user_id=viewer.id, role=ProjectMemberRole.viewer.value),
+    ])
+    await task_session.commit()
+
+    runtime = AgentRuntimeService(task_session)
+    shared = await runtime.create_session(user_id=owner.id, project_id=project.id)
+    for index in range(1, 126):
+        await runtime.append_message(
+            session_id=shared.id,
+            user_id=owner.id,
+            role="assistant" if index % 2 == 0 else "user",
+            content=f"长历史消息 {index}",
+        )
+    private = await runtime.create_session(user_id=owner.id)
+    await runtime.append_message(session_id=private.id, user_id=owner.id, role="user", content="projectless 私有消息")
+
+    async def override_session():
+        yield task_session
+
+    app.dependency_overrides[get_session] = override_session
+    try:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=True)
+        async with httpx.AsyncClient(transport=transport, base_url="http://agent-session-http") as client:
+            viewer_headers = {"Authorization": f"Bearer {create_access_token(str(viewer.id))}"}
+            outsider_headers = {"Authorization": f"Bearer {create_access_token(str(outsider.id))}"}
+
+            newest = await client.get(
+                f"/api/agent/sessions/{shared.id}/messages?limit=60",
+                headers=viewer_headers,
+            )
+            assert newest.status_code == 200
+            newest_payload = newest.json()
+            assert [item["sequence"] for item in newest_payload["items"]] == list(range(66, 126))
+            assert newest_payload["total"] == 125
+            assert newest_payload["next_cursor"] == 66
+            assert newest_payload["has_more"] is True
+
+            older = await client.get(
+                f"/api/agent/sessions/{shared.id}/messages?limit=60&before_sequence=66",
+                headers=viewer_headers,
+            )
+            assert older.status_code == 200
+            older_payload = older.json()
+            assert [item["sequence"] for item in older_payload["items"]] == list(range(6, 66))
+            assert older_payload["has_more"] is True
+            assert older_payload["next_cursor"] == 6
+
+            oldest = await client.get(
+                f"/api/agent/sessions/{shared.id}/messages?limit=60&before_sequence=6",
+                headers=viewer_headers,
+            )
+            assert oldest.status_code == 200
+            oldest_payload = oldest.json()
+            assert [item["sequence"] for item in oldest_payload["items"]] == list(range(1, 6))
+            assert oldest_payload["has_more"] is False
+            assert oldest_payload["next_cursor"] is None
+
+            denied_shared = await client.get(
+                f"/api/agent/sessions/{shared.id}/messages?limit=60",
+                headers=outsider_headers,
+            )
+            assert denied_shared.status_code == 403
+            assert denied_shared.json()["detail"]["code"] == "HTTP_403"
+
+            denied_private = await client.get(
+                f"/api/agent/sessions/{private.id}/messages?limit=60",
+                headers=outsider_headers,
+            )
+            assert denied_private.status_code == 404
+            assert denied_private.json()["detail"]["code"] == "AGENT_NOT_FOUND"
+    finally:
+        app.dependency_overrides.pop(get_session, None)
