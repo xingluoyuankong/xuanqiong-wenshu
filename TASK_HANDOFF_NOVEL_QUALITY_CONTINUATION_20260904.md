@@ -6409,3 +6409,17 @@ OpenAPI smoke：261 / 119 passed / 142 skipped / 0 failed
 ```
 
 本轮确认 AgentSession 项目级清理不会影响消息/成员/Run 分页、迁移恢复或 worker 生命周期；Provider/AgentRun/Artifact 深层 fixture 继续单独排期。
+## 当前 HEAD 全量后端门禁复核（4e01c67）
+
+```text
+HEAD：4e01c67a75d3d2319fb57b3f6274b334e84b9e06
+后端全量 pytest：1767 passed in 675.48s (0:11:15)
+前端全量基线：81 files / 544 tests passed
+前端 type-check：PASS
+前端 build-only：PASS / 4918 modules transformed
+OpenAPI smoke：261 / 119 passed / 142 skipped / 0 failed
+verify.ps1 acceptance：6/6 PASS
+git diff --check：PASS
+```
+
+本次全量后端门禁包含 AgentSession 项目删除级联清理回归；当前仍未获得 Docker Engine runtime、正式 MySQL 和 AgentRun/Artifact Provider 深层 fixture 的运行证据。

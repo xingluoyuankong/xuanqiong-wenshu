@@ -988,3 +988,18 @@ generation_log：38 -> 38
 ```
 
 Agent session detail/messages/runs 的真实 GET 覆盖已加入 smoke；项目删除显式清理 AgentSession，前后数据库计数一致。
+## 当前 HEAD 全量后端门禁复核（4e01c67）
+
+```text
+HEAD：4e01c67a75d3d2319fb57b3f6274b334e84b9e06
+Backend full pytest：1767 passed in 675.48s
+Frontend full Vitest：81 files / 544 tests passed
+Frontend type-check：PASS
+Frontend build-only：PASS / 4918 modules transformed
+OpenAPI smoke：261 / 119 passed / 142 skipped / 0 failed
+verify.ps1 acceptance：6/6 PASS
+git diff --check：PASS
+当前发布结论：active / NO-GO
+```
+
+后端全量测试已覆盖 AgentSession 项目删除级联清理；剩余发布缺口仍是 Docker runtime、正式 MySQL 矩阵和 AgentRun/Artifact 深层真实资源覆盖。
