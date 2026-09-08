@@ -868,7 +868,7 @@ export class OptimizerAPI {
       source_type?: string
       extra?: Record<string, any>
     },
-  ): Promise<{ success: boolean; source: any }> {
+  ): Promise<{ success: boolean; source: StyleSource }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/sources`, {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -959,7 +959,7 @@ export class OptimizerAPI {
       source_type?: string
       extra?: Record<string, any>
     },
-  ): Promise<{ success: boolean; source: any }> {
+  ): Promise<{ success: boolean; source: StyleSource }> {
     let status = await OptimizerAPI.startStyleSourceUpload(projectId, payload)
 
     for (let attempt = 0; attempt < STYLE_SOURCE_UPLOAD_MAX_POLL_ATTEMPTS; attempt += 1) {
