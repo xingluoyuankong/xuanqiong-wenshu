@@ -79,12 +79,12 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'edit', payload: { field: string; title: string; value: any }): void
+  (e: 'edit', payload: { field: string; title: string; value: unknown }): void
 }>()
 
 const { pick } = useLocale()
 
-const emitEdit = (field: string, title: string, value: any) => {
+const emitEdit = (field: string, title: string, value: unknown) => {
   if (!props.editable) return
   emit('edit', { field, title, value })
 }
