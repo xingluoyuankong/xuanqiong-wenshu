@@ -534,9 +534,9 @@ async function handleFileImport(event: Event) {
       '旧稿导入后台任务等待超时，请稍后刷新项目列表查看结果。',
       'Timed out waiting for the draft import task. Refresh the project list later to check the result.',
     ))
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('导入失败:', error)
-    window.alert(error?.message || pick('导入失败，请重试', 'Import failed. Please try again.'))
+    window.alert((error as Error)?.message || pick('导入失败，请重试', 'Import failed. Please try again.'))
   } finally {
     isImporting.value = false
     importStatusMessage.value = ''
