@@ -368,6 +368,35 @@
 </template>
 
 <script setup lang="ts">
+
+interface ConversationItem {
+  role: 'user' | 'assistant' | string
+  metadata?: {
+    type?: string
+    [key: string]: unknown
+  }
+  [key: string]: unknown
+}
+
+interface UserInput {
+  id: string
+  value: string
+  selected_ids?: string[]
+}
+
+interface BlueprintGeneratedResponse {
+  blueprint?: Blueprint | null
+  ai_message?: string
+  [key: string]: unknown
+}
+
+interface BlueprintWithSummary {
+  one_sentence_summary?: string
+  full_synopsis?: string
+  summary?: string
+  [key: string]: unknown
+}
+
 import { computed, defineAsyncComponent, nextTick, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useNovelStore } from '@/stores/novel'
@@ -687,7 +716,7 @@ const createFallbackTextControl = (placeholder = pick(
   placeholder,
 })
 
-const isVisibleConversationItem = (item: any) => {
+const isVisibleConversationItem = (item: ConversationItem) => {
   return (item.role === 'user' || item.role === 'assistant') && item.metadata?.type !== 'blueprint_generation_job'
 }
 
@@ -776,7 +805,7 @@ const hasUsableBlueprint = (blueprint: Blueprint | null | undefined) => {
   if (!blueprint) return false
   const hasChapters = hasCompleteChapterOutline(blueprint)
   const hasTitle = typeof blueprint.title === 'string' && blueprint.title.trim().length > 0
-  const summary = (blueprint.one_sentence_summary || blueprint.full_synopsis || (blueprint as any).summary || '').trim()
+  const summary = (blueprint.one_sentence_summary || blueprint.full_synopsis || (blueprint as BlueprintWithSummary).summary || '').trim()
   return hasChapters && (hasTitle || summary.length > 0)
 }
 
@@ -934,7 +963,7 @@ const resumeLastConversation = async () => {
   await restoreConversation(projectId)
 }
 
-const handleUserInput = async (userInput: any) => {
+const handleUserInput = async (userInput: UserInput | null) => {
   const wasInitialLoading = isInitialLoading.value
   const previousMessages = [...chatMessages.value]
   const previousTurn = currentTurn.value
@@ -1002,9 +1031,9 @@ const handleUserInput = async (userInput: any) => {
   }
 }
 
-const handleBlueprintGenerated = (response: any) => {
-  completedBlueprint.value = response.blueprint
-  blueprintMessage.value = response.ai_message
+const handleBlueprintGenerated = (response: BlueprintGeneratedResponse) => {
+  completedBlueprint.value = response.blueprint ?? null
+  blueprintMessage.value = response.ai_message ?? ''
   pendingBlueprintForceStage.value = undefined
   showBlueprintConfirmation.value = false
   showBlueprint.value = true
