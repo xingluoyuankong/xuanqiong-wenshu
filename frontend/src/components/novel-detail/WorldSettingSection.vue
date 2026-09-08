@@ -167,7 +167,14 @@ import { computed } from 'vue'
 
 import { useLocale } from '@/composables/useLocale'
 
-interface ListItem {
+interface WorldSettingItem {
+      name?: string
+      description?: string
+      details?: string
+      [key: string]: unknown
+    }
+    
+    interface ListItem {
   title: string
   description: string
 }
@@ -183,14 +190,14 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'edit', payload: { field: string; title: string; value: any }): void
+  (e: 'edit', payload: { field: string; title: string; value: unknown }): void
 }>()
 
 const worldSetting = computed(() => props.data?.world_setting || {})
 
 const { pick } = useLocale()
 
-const formatStructuredValue = (value: any): string => {
+const formatStructuredValue = (value: unknown): string => {
   if (typeof value === 'string') return value.trim()
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   if (Array.isArray(value)) {
@@ -211,10 +218,10 @@ const formatStructuredValue = (value: any): string => {
   return ''
 }
 
-const normalizeList = (source: any): ListItem[] => {
+const normalizeList = (source: unknown): ListItem[] => {
   if (!source) return []
   if (Array.isArray(source)) {
-    return source.map((item: any) => {
+    return source.map((item: WorldSettingItem | string) => {
       if (typeof item === 'string') {
         // '：' 是后端数据里的分隔符，属于解析规则而非展示文案，不随语言变化
         const [title, ...rest] = item.split('：')
@@ -265,7 +272,7 @@ const rulesCount = computed(() => {
     .filter(Boolean).length
 })
 
-const emitEdit = (field: string, title: string, value: any) => {
+const emitEdit = (field: string, title: string, value: unknown) => {
   if (!props.editable) return
   emit('edit', { field, title, value })
 }
