@@ -87,7 +87,7 @@ interface Alternative {
   description: string
   evolution_type: string
   score: number
-  new_outline: any
+  new_outline: Record<string, unknown>
   changes: string
 }
 
