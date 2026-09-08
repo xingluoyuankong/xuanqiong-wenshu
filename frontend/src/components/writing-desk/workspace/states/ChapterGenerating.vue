@@ -451,7 +451,7 @@ const canRetry = computed(() => (props.allowedActions || []).includes('retry_gen
 const canTerminate = computed(() => {
   const runtimeRecord = runtime.value || null
   const chapterLike = {
-    generation_status: (props.status || stage.value || 'not_generated') as any,
+    generation_status: (props.status || stage.value || 'not_generated') as 'not_generated' | 'generating' | 'evaluating' | 'selecting' | 'failed' | 'evaluation_failed' | 'waiting_for_confirm',
     allowed_actions: props.allowedActions || runtimeRecord?.allowed_actions || [],
   }
   return canCancelGeneration(chapterLike, runtimeRecord)
