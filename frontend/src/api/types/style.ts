@@ -3,8 +3,24 @@
  * Extracted to replace 'any' types with proper interfaces
  */
 
+/** Style summary content */
+export interface StyleSummaryContent {
+  narrative?: string
+  rhythm?: string
+  vocabulary?: string
+  dialogue?: string
+  description?: string
+  tone?: string
+  pacing?: string
+  vocabulary_level?: string
+  sentence_structure?: string
+  themes?: string[]
+  techniques?: string[]
+}
+
 /** Style summary from extraction */
 export interface StyleSummary {
+  summary?: StyleSummaryContent
   tone?: string
   pacing?: string
   vocabulary_level?: string
@@ -19,6 +35,7 @@ export interface StyleSource {
   id: string
   name: string
   type: string
+  mode?: string
   content?: string
   created_at?: string
   updated_at?: string
@@ -29,6 +46,7 @@ export interface StyleProfile {
   id: string
   name: string
   description?: string
+  summary?: StyleSummaryContent
   settings: Record<string, unknown>
   created_at?: string
   updated_at?: string
@@ -52,14 +70,21 @@ export interface MemoryOperationResult {
   }
 }
 
+/** Outline alternative */
+export interface OutlineAlternative {
+  id: number
+  title: string
+  description: string
+  content?: string
+  evolution_type: string
+  score: number
+  new_outline: Record<string, unknown>
+  changes: string
+}
+
 /** Outline evolution result */
 export interface OutlineEvolutionResult {
-  alternatives: Array<{
-    id: string
-    title?: string
-    content?: string
-    score?: number
-  }>
+  alternatives: OutlineAlternative[]
   batch_id: string
   chapter_number: number
 }
@@ -77,23 +102,22 @@ export interface OutlineUpdateResult {
 
 /** Outline alternatives */
 export interface OutlineAlternatives {
-  alternatives: Array<{
-    id: string
-    title?: string
-    content?: string
-  }>
+  alternatives: OutlineAlternative[]
   chapter_number: number
   total: number
 }
 
+/** Outline history entry */
+export interface OutlineHistoryEntry {
+  id: string
+  version: number
+  created_at: string
+  content?: string
+}
+
 /** Outline history */
 export interface OutlineHistory {
-  history: Array<{
-    id: string
-    version: number
-    created_at: string
-    content?: string
-  }>
+  history: OutlineHistoryEntry[]
   total: number
 }
 

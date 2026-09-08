@@ -43,6 +43,19 @@ import type {
   ResearchArchiveCreate,
   QualityTrendResponse,
 } from '@/api/types/novel'
+import type {
+  StyleSummary,
+  StyleSource,
+  StyleProfile,
+  StyleLibrary,
+  MemoryOperationResult,
+  OutlineAlternative,
+  OutlineEvolutionResult,
+  OutlineUpdateResult,
+  OutlineAlternatives,
+  OutlineHistory,
+  PatchOperations
+} from '@/api/types/style'
 
 // ============================================================================
 // 错误处理
@@ -429,8 +442,8 @@ export class NovelAPI {
 
   static async converseConcept(
     projectId: string,
-    userInput: any,
-    conversationState: any = {},
+    userInput: Record<string, unknown>,
+    conversationState: Record<string, unknown> = {},
   ): Promise<ConverseResponse> {
     const formattedUserInput = userInput || { id: null, value: null }
     return request(`${NOVELS_BASE}/${projectId}/concept/converse`, {
@@ -749,7 +762,7 @@ export class OptimizerAPI {
       new_timeline_events?: Array<Record<string, any>>
       character_states?: Record<string, any>
     },
-  ): Promise<{ project_id: string; result: any }> {
+  ): Promise<{ project_id: string; result: Record<string, unknown> }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/memory/incremental`, {
       method: 'POST',
       body: JSON.stringify(update),
@@ -782,7 +795,7 @@ export class OptimizerAPI {
   static async compressMemory(
     projectId: string,
     preserveChapters: number = 5,
-  ): Promise<{ project_id: string; result: any }> {
+  ): Promise<{ project_id: string; result: Record<string, unknown> }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/memory/compress`, {
       method: 'POST',
       body: JSON.stringify({ preserve_chapters: preserveChapters }),
@@ -795,7 +808,7 @@ export class OptimizerAPI {
   static async rollbackMemory(
     projectId: string,
     targetVersion: number,
-  ): Promise<{ project_id: string; result: any }> {
+  ): Promise<{ project_id: string; result: Record<string, unknown> }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/memory/rollback`, {
       method: 'POST',
       body: JSON.stringify({ target_version: targetVersion }),
@@ -810,7 +823,7 @@ export class OptimizerAPI {
   static async extractStyle(
     projectId: string,
     chapterNumbers: number[],
-  ): Promise<{ success: boolean; message: string; style_summary: any }> {
+  ): Promise<{ success: boolean; message: string; style_summary: StyleSummary }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/extract`, {
       method: 'POST',
       body: JSON.stringify({ chapter_numbers: chapterNumbers }),
@@ -822,24 +835,24 @@ export class OptimizerAPI {
    */
   static async getProjectStyle(
     projectId: string,
-  ): Promise<{ has_style: boolean; summary: any; source?: any }> {
+  ): Promise<{ has_style: boolean; summary: StyleSummary; source?: StyleSource }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style`)
   }
 
   /**
    * 获取外部文风来源列表
    */
-  static async listStyleSources(projectId: string): Promise<{ sources: any[] }> {
+  static async listStyleSources(projectId: string): Promise<{ sources: StyleSource[] }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/sources`)
   }
 
   static async getStyleLibrary(
     projectId: string,
   ): Promise<{
-    sources: any[]
-    profiles: any[]
-    project_active_profile: any | null
-    global_active_profile: any | null
+    sources: StyleSource[]
+    profiles: StyleProfile[]
+    project_active_profile: StyleProfile | null
+    global_active_profile: StyleProfile | null
   }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/library`)
   }
@@ -877,7 +890,7 @@ export class OptimizerAPI {
   /**
    * 获取文风画像列表
    */
-  static async listStyleProfiles(projectId: string): Promise<{ profiles: any[] }> {
+  static async listStyleProfiles(projectId: string): Promise<{ profiles: StyleProfile[] }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/profiles`)
   }
 
@@ -887,7 +900,7 @@ export class OptimizerAPI {
   static async createStyleProfile(
     projectId: string,
     payload: { source_ids: string[]; name?: string; append_to_profile_id?: string },
-  ): Promise<{ success: boolean; profile: any }> {
+  ): Promise<{ success: boolean; profile: StyleProfile }> {
     let status = await OptimizerAPI.startStyleProfileGeneration(projectId, payload)
 
     for (let attempt = 0; attempt < STYLE_PROFILE_MAX_POLL_ATTEMPTS; attempt += 1) {
@@ -1026,7 +1039,7 @@ export class OptimizerAPI {
       summary?: Record<string, string>
       extra?: Record<string, any>
     },
-  ): Promise<{ success: boolean; profile: any }> {
+  ): Promise<{ success: boolean; profile: StyleProfile }> {
     return request(
       `${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/profiles/${profileId}`,
       {
@@ -1043,7 +1056,7 @@ export class OptimizerAPI {
     projectId: string,
   ): Promise<{
     has_active_style: boolean
-    profile: any | null
+    profile: StyleProfile | null
     scope: 'global' | 'project' | null
   }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/active`)
@@ -1056,7 +1069,7 @@ export class OptimizerAPI {
     projectId: string,
     profileId: string,
     scope: 'global' | 'project' = 'project',
-  ): Promise<{ success: boolean; profile: any; scope: 'global' | 'project' }> {
+  ): Promise<{ success: boolean; profile: StyleProfile; scope: 'global' | 'project' }> {
     return request(`${API_BASE_URL}${API_PREFIX}/projects/${projectId}/style/apply`, {
       method: 'POST',
       body: JSON.stringify({ profile_id: profileId, scope }),
@@ -1117,7 +1130,7 @@ export class OptimizerAPI {
     projectId: string,
     chapterNumber: number,
     numOptions: number = 3,
-  ): Promise<{ alternatives: any[]; batch_id: string; chapter_number: number }> {
+  ): Promise<{ alternatives: OutlineAlternative[]; batch_id: string; chapter_number: number }> {
     return request(`${NOVELS_BASE}/${projectId}/outline/evolve`, {
       method: 'POST',
       body: JSON.stringify({
@@ -1134,7 +1147,7 @@ export class OptimizerAPI {
     projectId: string,
     optionId: number,
     chapterNumber: number,
-  ): Promise<{ success: boolean; message: string; updated_outline: any }> {
+  ): Promise<{ success: boolean; message: string; updated_outline: Record<string, unknown> }> {
     return request(`${NOVELS_BASE}/${projectId}/outline/next`, {
       method: 'POST',
       body: JSON.stringify({
@@ -1151,7 +1164,7 @@ export class OptimizerAPI {
     projectId: string,
     chapterNumber: number,
     statusFilter?: string,
-  ): Promise<{ alternatives: any[]; chapter_number: number; total: number }> {
+  ): Promise<{ alternatives: OutlineAlternative[]; chapter_number: number; total: number }> {
     const params = new URLSearchParams({ chapter_number: String(chapterNumber) })
     if (statusFilter) params.append('status_filter', statusFilter)
     return request(`${NOVELS_BASE}/${projectId}/outline/alternatives?${params}`)
@@ -1164,7 +1177,7 @@ export class OptimizerAPI {
     projectId: string,
     chapterNumber?: number,
     limit: number = 20,
-  ): Promise<{ history: any[]; total: number }> {
+  ): Promise<{ history: Array<Record<string, unknown>>; total: number }> {
     const params = new URLSearchParams({ limit: String(limit) })
     if (chapterNumber !== undefined) params.append('chapter_number', String(chapterNumber))
     return request(`${NOVELS_BASE}/${projectId}/outline/history?${params}`)
@@ -1191,7 +1204,7 @@ export class OptimizerAPI {
       chapter_id: number
       original_text: string
       patched_text: string
-      patch_operations: any
+      patch_operations: PatchOperations
       from_version_id: number | null
       to_version_id: number | null
       description: string | null
