@@ -264,6 +264,7 @@
 </template>
 
 <script setup lang="ts">
+import type { StyleSummary } from '@/api/types/style'
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useNovelStore } from '@/stores/novel'
@@ -735,7 +736,7 @@ const componentProps = computed(() => {
   }
 })
 
-const handleSectionEdit = (payload: { field: string; title: string; value: any }) => {
+const handleSectionEdit = (payload: { field: string; title: string; value: unknown }) => {
   if (props.isAdmin) return
   modalField.value = payload.field
   modalTitle.value = payload.title
@@ -751,7 +752,7 @@ const resolveSectionKey = (field: string): SectionKey => {
   return 'overview'
 }
 
-const handleSave = async (data: { field: string; content: any }) => {
+const handleSave = async (data: { field: string; content: unknown }) => {
   if (props.isAdmin) return
   await ensureProjectLoaded()
   const project = novel.value
@@ -794,7 +795,7 @@ const startAddChapter = async () => {
   if (props.isAdmin) return
   await ensureProjectLoaded()
   const outline = sectionData.chapter_outline?.chapter_outline || novel.value?.blueprint?.chapter_outline || []
-  const nextNumber = outline.length > 0 ? Math.max(...outline.map((item: any) => item.chapter_number)) + 1 : 1
+  const nextNumber = outline.length > 0 ? Math.max(...outline.map((item: { chapter_number: number }) => item.chapter_number)) + 1 : 1
   newChapterTitle.value = pick(`新章节 ${nextNumber}`, `New chapter ${nextNumber}`)
   newChapterSummary.value = ''
   isAddChapterModalOpen.value = true
@@ -822,7 +823,7 @@ const openEvolveModal = async (payload: { projectId: string; chapterNumber: numb
   }
 }
 
-const handleSelectEvolveOption = async (option: any) => {
+const handleSelectEvolveOption = async (option: { id: number }) => {
   const project = novel.value
   if (!project || props.isAdmin) return
 
@@ -839,7 +840,7 @@ const handleSelectEvolveOption = async (option: any) => {
 }
 
 // 风格学习相关处理函数
-async function handleStyleExtracted(summary: any) {
+async function handleStyleExtracted(summary: StyleSummary | null) {
   console.log('风格已提取:', summary)
   await loadSection('overview', true)
   if (activeSection.value === 'creative_guidance' || activeSection.value === 'comprehensive_analysis') {
