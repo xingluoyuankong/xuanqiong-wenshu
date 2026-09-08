@@ -336,8 +336,8 @@ const fetchEmotionData = async (useAI = false) => {
         initChart()
       }
     })
-  } catch (err: any) {
-    error.value = err.message || pick('加载情感数据时发生错误', 'Something went wrong while loading the emotion data')
+  } catch (err: unknown) {
+    error.value = (err as Error).message || pick('加载情感数据时发生错误', 'Something went wrong while loading the emotion data')
     console.error('Failed to fetch emotion data:', err)
   } finally {
     isLoading.value = false
