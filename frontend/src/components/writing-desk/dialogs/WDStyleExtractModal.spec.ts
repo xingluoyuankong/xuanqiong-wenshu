@@ -37,9 +37,9 @@ import WDStyleExtractModal from './WDStyleExtractModal.vue'
 
 const defaultChaptersResponse = {
   chapters: [
-    { number: 1, title: '第一章', content: '甲'.repeat(800) },
-    { number: 2, title: '第二章', content: '乙'.repeat(900) },
-    { number: 3, title: '第三章', content: '丙'.repeat(1200) },
+    { chapter_number: 1, title: '第一章', content: '甲'.repeat(800) },
+    { chapter_number: 2, title: '第二章', content: '乙'.repeat(900) },
+    { chapter_number: 3, title: '第三章', content: '丙'.repeat(1200) },
   ],
 }
 
