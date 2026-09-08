@@ -233,7 +233,7 @@ const { pick } = useLocale()
 const maybeText = (value: unknown): string => typeof value === 'string' ? value.trim() : ''
 const normalizeList = (value: unknown): string[] => Array.isArray(value) ? value.map(item => maybeText(item)).filter(Boolean) : []
 
-const formatStructuredValue = (value: any): string => {
+const formatStructuredValue = (value: unknown): string => {
   if (typeof value === 'string') return value.trim()
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   if (Array.isArray(value)) {
