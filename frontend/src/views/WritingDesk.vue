@@ -631,7 +631,7 @@ const saveShortcutConfig = (config: ShortcutConfig) => {
     localStorage.setItem(shortcutConfigStorageKey, JSON.stringify(normalized))
     globalAlert.showSuccess(pick('快捷键显示配置已保存', 'Shortcut display config saved'), pick('保存成功', 'Saved'))
   } catch (err: unknown) {
-        if (err instanceof TypeError || (err as any)?.code === 'ECONNREFUSED') {
+        if (err instanceof TypeError || (err as { code?: string })?.code === 'ECONNREFUSED') {
           // Backend disconnected - show friendly message
           console.warn('[WritingDesk] Backend connection lost, will retry...')
           scheduleStatusPolling()  // Retry silently
@@ -2535,7 +2535,7 @@ const isChapterGenerationStatus = (status: string): status is Chapter['generatio
 
 const _ensureSSEConnected = () => {
   if (sseController.value || !props.id) return
-  const busyCh = project.value?.chapters?.find((ch: any) =>
+  const busyCh = project.value?.chapters?.find((ch: Chapter) =>
     isBusyTask(ch, resolveChapterRuntime(ch, project.value?.generation_runtime || null))
   )
   if (!busyCh?.chapter_number) return
