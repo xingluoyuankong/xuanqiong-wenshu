@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest'
 
 import AgentConversation from './AgentConversation.vue'
 import conversationSource from './AgentConversation.vue?raw'
+import { createAgentRunEventProjection, reduceAgentRunEvent } from './reducers/agentEventReducer'
+import { toSafeAgentEvent } from '@/utils/agentEventSafety'
 
 const message = {
   id: 'message-1',
@@ -22,6 +24,7 @@ describe('AgentConversation', () => {
         sessionTitle: '第三章质量审查',
         streamConnectionState: 'live',
         runtimeSupported: true,
+        runtimeReady: true,
         latestProgressMessage: '正在检查第三章质量',
         latestProgressActionId: 'tool:quality.inspect',
         latestProgressPhase: 'tool_execution',
@@ -326,4 +329,148 @@ describe('AgentConversation', () => {
     expect(wrapper.get('[data-testid="agent-message-list"] .message').text()).toContain('第二会话消息 66')
   })
 
+})
+
+it('把Run上下文身份传至真实推理卡片，切Run后回收旧展开状态', async () => {
+  const wrapper = mount(AgentConversation, { props: {
+    messages: [], reasoningContextKey: 'run-a', reasoningStatus: 'completed',
+    reasoningChunks: [{ sequence: 1, chunkIndex: 0, content: 'run-a-content' }],
+  } })
+  await wrapper.get('[data-testid="agent-reasoning-toggle"]').trigger('click')
+  expect(wrapper.get('[data-testid="agent-reasoning-body"]').text()).toContain('run-a-content')
+  await wrapper.setProps({ reasoningContextKey: 'run-b', reasoningChunks: [{ sequence: 1, chunkIndex: 0, content: 'run-b-content' }] })
+  expect(wrapper.get('[data-testid="agent-reasoning-body"]').findAll('pre')).toHaveLength(0)
+  await wrapper.get('[data-testid="agent-reasoning-toggle"]').trigger('click')
+  expect(wrapper.get('[data-testid="agent-reasoning-body"]').text()).toContain('run-b-content')
+  wrapper.unmount()
+})
+
+
+it('durable projection updates real chat from approval through candidate and read completion without a page-state override', async () => {
+  let projection = createAgentRunEventProjection()
+  const wrapper = mount(AgentConversation, { props: { messages: [] } })
+  const events = [
+    { sequence: 15, event_type: 'progress_update', summary: '尚未执行', data: { phase: 'awaiting_approval', action_id: 'approval:pending', progress: 60, progress_message: '等待审批，尚未执行' } },
+    { sequence: 20, event_type: 'write_execution_started', summary: '开始生成候选', data: {} },
+    { sequence: 21, event_type: 'public_work_summary', summary: '候选摘要', data: { current_action: '候选已生成，等待查看', phase: 'artifact' } },
+    { sequence: 23, event_type: 'artifact_created', summary: '候选已生成，等待作者接受', data: {} },
+    { sequence: 24, event_type: 'tool_call_completed', summary: '续跑读取统计已完成', data: { phase: 'tool_execution' } },
+  ]
+  try {
+    for (const item of events) {
+      projection = reduceAgentRunEvent(projection, toSafeAgentEvent({ ...item, id: `event-${item.sequence}`, run_id: 'run-chat' } as any)).projection
+      await wrapper.setProps({
+        latestProgressMessage: projection.latestProgressMessage,
+        latestProgressPhase: projection.latestProgressPhase,
+        latestProgressActionId: projection.latestProgressActionId,
+        latestProgress: projection.latestProgress,
+        latestWorkTrace: projection.latestWorkTrace,
+      })
+      const current = wrapper.get('[data-testid="agent-current-progress"]')
+      expect(current.text()).toContain(item.data.progress_message || item.data.current_action || item.summary)
+      if (item.sequence > 15) {
+        expect(current.text()).not.toContain('尚未执行')
+        expect(current.text()).not.toContain('awaiting_approval')
+        expect(current.text()).not.toContain('60%')
+        expect(wrapper.find('[data-testid="agent-progress-meter"]').exists()).toBe(false)
+      }
+    }
+    expect(projection.events).toHaveLength(5)
+  } finally { wrapper.unmount() }
+})
+
+
+describe('conversation surface and readable text contract', () => {
+  const rule = (selector: string) => {
+    const start = conversationSource.indexOf(`${selector} {`)
+    expect(start, `missing scoped rule ${selector}`).toBeGreaterThan(-1)
+    return conversationSource.slice(start, conversationSource.indexOf('}', start) + 1)
+  }
+
+  it('pairs the locally scoped chat surface and foreground, independent of ink ancestors', () => {
+    const wrapper = mount(AgentConversation, { props: { messages: [] } })
+    try { expect(wrapper.classes()).toContain('agent-conversation') } finally { wrapper.unmount() }
+    const surface = rule('.agent-conversation.xq-panel')
+    expect(surface).toContain('color: var(--xq-text-body);')
+    expect(surface).toContain('background: var(--xq-surface) !important;')
+    const nested = rule('.agent-conversation :deep(.xq-panel--paper)')
+    expect(nested).toContain('color: var(--xq-text-body);')
+    expect(nested).toContain('background: var(--xq-surface) !important;')
+  })
+
+  it('pairs summary definition text with a token surface and preserves candidate text', () => {
+    const summaryRule = rule('.agent-conversation :deep(.public-work-summary)')
+    expect(summaryRule).toContain('color: var(--xq-text-body);')
+    expect(summaryRule).toContain('background: var(--xq-warning-soft);')
+    const wrapper = mount(AgentConversation, { props: {
+      messages: [], artifactPreview: '雨停后，林舟走进废弃驿站。',
+      publicWorkSummary: { action_id: 'artifact:a', phase: 'artifact', current_action: '候选已生成',
+        completed_action: '正文已生成', next_action: '查看候选', expected_output: '作者接受', input_scope: [], revision: 0 },
+    } })
+    try {
+      expect(wrapper.get('pre.artifact-preview').text()).toBe('雨停后，林舟走进废弃驿站。')
+      expect(wrapper.findAll('.public-work-summary dd').map(node => node.text())).toEqual(['正文已生成', '查看候选', '作者接受'])
+    } finally { wrapper.unmount() }
+  })
+
+  it('uses readable token colors for session, subtitle, composer hints and input placeholder', () => {
+    for (const selector of ['.session-bar', '.session-bar small', '.composer small', '.empty-chat',
+      '.agent-conversation :deep(.xq-panel__subtitle)']) {
+      expect(rule(selector)).toContain('color: var(--xq-text-muted);')
+    }
+    expect(rule('.composer textarea')).toContain('color: var(--xq-text-body);')
+    expect(rule('.composer textarea')).toContain('background: var(--xq-surface);')
+    const placeholder = rule('.composer textarea::placeholder')
+    expect(placeholder).toContain('color: var(--xq-text-muted);')
+    expect(placeholder).toContain('opacity: 1;')
+    expect(rule('.agent-conversation :deep(.context-chip)')).toContain('color: var(--xq-text-body);')
+  })
+
+  it('aligns message rows to content without removing the scroll limit or preformatted paragraphs', () => {
+    const list = rule('.messages')
+    expect(list).toContain('align-content: start;')
+    expect(list).toContain('max-height: 26rem;')
+    expect(list).toContain('overflow: auto;')
+    expect(rule('.message p')).toContain('white-space: pre-wrap;')
+    expect(rule('.message-user')).toContain('background: var(--xq-info-soft);')
+    expect(rule('.message-user')).toContain('color: var(--xq-text-body);')
+  })
+})
+
+
+describe('conversation submit readiness', () => {
+  it('guards form submission during runtime initialization, then enables durable submission', async () => {
+    const wrapper = mount(AgentConversation, { props: { messages: [], goal: '保留草稿', runtimeSupported: true, runtimeReady: false } })
+    try {
+      const button = wrapper.get('[data-testid="agent-plan-submit"]')
+      expect(button.attributes('disabled')).toBeDefined()
+      expect(button.classes()).toContain('is-loading')
+      expect(wrapper.get('[data-testid="agent-runtime-not-ready"]').text()).toContain('会话')
+      await wrapper.get('form').trigger('submit')
+      expect(wrapper.emitted('submit')).toBeUndefined()
+      await wrapper.setProps({ runtimeReady: true })
+      expect(button.attributes('disabled')).toBeUndefined()
+      await wrapper.get('form').trigger('submit')
+      expect(wrapper.emitted('submit')).toHaveLength(1)
+      await wrapper.setProps({ sending: true })
+      await wrapper.get('form').trigger('submit')
+      expect(wrapper.emitted('submit')).toHaveLength(1)
+      await wrapper.setProps({ sending: false, sessionLoading: true })
+      await wrapper.get('form').trigger('submit')
+      expect(wrapper.emitted('submit')).toHaveLength(1)
+    } finally { wrapper.unmount() }
+  })
+
+  it('keeps truly unsupported runtime compatibility submit and guards duplicate planning', async () => {
+    const wrapper = mount(AgentConversation, { props: { messages: [], goal: '兼容规划', runtimeSupported: false, runtimeReady: false } })
+    try {
+      expect(wrapper.get('[data-testid="agent-plan-submit"]').attributes('disabled')).toBeUndefined()
+      expect(wrapper.text()).toContain('生成执行计划')
+      await wrapper.get('form').trigger('submit')
+      expect(wrapper.emitted('submit')).toHaveLength(1)
+      await wrapper.setProps({ planning: true })
+      await wrapper.get('form').trigger('submit')
+      expect(wrapper.emitted('submit')).toHaveLength(1)
+    } finally { wrapper.unmount() }
+  })
 })

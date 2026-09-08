@@ -7635,40 +7635,91 @@ class PipelineOrchestrator:
 
     @staticmethod
     def _detect_chapter_artifact_markers(text):
-        """Detect chapter artifact markers in content."""
+        """识别生成外壳残留；只把独立任务对象/任务链接视为结构残留。"""
         if not text:
-            return {"chapter_artifact_markers": False, "chapter_artifact_marker_count": 0, "chapter_artifact_marker_examples": []}
-        
-        import re
-        patterns = [
-            re.compile(r'^\s*#{1,6}\s*(?:场景|scene|扩写|修订|完整章节正文|本章正文|章节大纲|章节导演)\s*\d*\s*[|\uff5c:\uff1a\u3011]?\s*\S*', re.IGNORECASE | re.MULTILINE),
-            re.compile(r'^\s*(?:【|\*\*【)?\s*场景\s*\d+\s*(?:[|\uff5c:\uff1a\u3011]|$)', re.MULTILINE),
-            re.compile(r'^\s*(?:【|\*\*【)?\s*扩写部分\s*\d*\s*(?:[|\uff5c:\uff1a\u3011]|$)', re.MULTILINE),
-            re.compile(r'^\s*(?:修改说明|修订说明|以下是|本章正文|完整章节正文)\s*[:\uff1a]', re.MULTILINE),
-            re.compile(r'(?:写作指令|写作要求|质量方向|基础质量底线|首稿执行要求)\s*[:\uff1a]'),
-            re.compile(r'约\s*\d+\s*字'),
-        ]
-        
+            return {
+                "chapter_artifact_markers": False,
+                "chapter_artifact_marker_count": 0,
+                "chapter_artifact_marker_examples": [],
+            }
+
+        source = str(text)
         examples = []
-        for p in patterns:
-            for m in p.finditer(text):
-                example = m.group(0).strip()
-                if example and len(example) <= 100:
-                    examples.append(example)
-                    if len(examples) >= 5:
-                        break
-            if len(examples) >= 5:
-                break
-        
-        # Also check for structural bold headings
-        for m in re.finditer(r'\*\*(.+?)\*\*', text):
-            s = m.group(1)
-            if any(kw in s for kw in ['场景', '章节', '扩写', '修订']):
-                examples.append(m.group(0).strip())
+
+        def record(example: str) -> None:
+            value = str(example or "").strip()
+            if value and len(examples) < 5:
+                examples.append(value[:100])
+
+        patterns = (
+            re.compile(r"^\s*#{1,6}\s*(?:场景|scene|扩写|修订|完整章节正文|本章正文|章节大纲|章节导演)\s*\d*\s*[|｜:：】]?\s*\S*", re.IGNORECASE | re.MULTILINE),
+            re.compile(r"^\s*(?:【|\*\*【)?\s*场景\s*\d+\s*(?:[|｜:：】]|$)", re.MULTILINE),
+            re.compile(r"^\s*(?:【|\*\*【)?\s*扩写部分\s*\d*\s*(?:[|｜:：】]|$)", re.MULTILINE),
+            re.compile(r"^\s*(?:修改说明|修订说明|以下是|本章正文|完整章节正文)\s*[:：]", re.MULTILINE),
+            re.compile(r"(?:写作指令|写作要求|质量方向|基础质量底线|首稿执行要求)\s*[:：]"),
+            re.compile(r"约\s*\d+\s*字"),
+        )
+        for pattern in patterns:
+            for match in pattern.finditer(source):
+                record(match.group(0))
                 if len(examples) >= 5:
                     break
-        
-        return {"chapter_artifact_markers": len(examples) > 0, "chapter_artifact_marker_count": len(examples), "chapter_artifact_marker_examples": examples[:5]}
+            if len(examples) >= 5:
+                break
+
+        if len(examples) < 5:
+            for match in re.finditer(r"\*\*(.+?)\*\*", source):
+                heading = match.group(1).strip()
+                if any(keyword in heading for keyword in ("场景", "章节", "扩写", "修订")):
+                    record(match.group(0))
+                    if len(examples) >= 5:
+                        break
+
+        # main 已接线的任务对象只在独立对象边界识别。逐行起始的 JSON 可跨行，
+        # 解析成功且顶层含任务字段时才命中；这样正文中引用一段 JSON 不会被误判。
+        task_keys = {"pov", "chapter_purpose", "scene_list", "continuity_anchor", "dialogue_strategy"}
+        decoder = json.JSONDecoder()
+        consumed_until = -1
+        for match in re.finditer(r"^[ \t]*\{", source, re.MULTILINE):
+            if match.start() < consumed_until:
+                continue
+            try:
+                value, end_index = decoder.raw_decode(source, match.start() + len(match.group(0)) - 1)
+            except (ValueError, TypeError, RecursionError):
+                continue
+            consumed_until = end_index
+            if not isinstance(value, dict) or not (task_keys & set(value)):
+                continue
+            trailing = source[end_index:].split("\n", 1)[0].strip()
+            if trailing and not (trailing.startswith("```") and trailing[3:].strip() == ""):
+                continue
+            # 任务 JSON 的顶层字段类型是低成本的误报过滤，不限制字段内容。
+            valid_shape = any((
+                key == "scene_list" and isinstance(value.get(key), list)
+                or key in {"continuity_anchor", "dialogue_strategy"} and isinstance(value.get(key), dict)
+                or key in {"pov", "chapter_purpose"} and isinstance(value.get(key), str)
+                for key in task_keys if key in value
+            ))
+            if valid_shape:
+                record("任务JSON: " + ",".join(sorted(task_keys & set(value))))
+            if len(examples) >= 5:
+                break
+
+        link_labels = ("蓝图", "章节导演脚本", "写作任务", "上下文", "历史摘要", "长篇上下文")
+        link_pattern = re.compile(r"^\s*\[\s*(%s)\s*\]\([^\r\n]+\)\s*$" % "|".join(map(re.escape, link_labels)))
+        if len(examples) < 5:
+            for line in source.splitlines():
+                match = link_pattern.fullmatch(line)
+                if match:
+                    record("任务链接: " + match.group(1))
+                    if len(examples) >= 5:
+                        break
+
+        return {
+            "chapter_artifact_markers": bool(examples),
+            "chapter_artifact_marker_count": len(examples),
+            "chapter_artifact_marker_examples": examples,
+        }
 
     @staticmethod
     def _evaluate_reversal_quality(text: str) -> Dict[str, Any]:
@@ -7905,6 +7956,8 @@ class PipelineOrchestrator:
         event_density = cls._evaluate_event_density(text, word_count=word_count)
         repetition = cls._evaluate_repetition_risk(paragraphs, word_count=word_count)
         artifact_markers = cls._detect_chapter_artifact_markers(text)
+        # main 的 canonical scorer 对结构残留施加一次可审计的 -480 扣分。
+        artifact_penalty = 480 if artifact_markers.get("chapter_artifact_markers") else 0
         # 静态描写风险的四条 or（T-08）。阈值来自孤儿版 story_quality_scoring.py，
         # 但**第 2 条的 max_static_run 门槛保持 >= 3 而不是照抄孤儿版的 >= 2**：
         # T-09 收紧 STATIC_ACTION_MARKERS 后，真实语料（n=136，§11.2.1 分位表见
@@ -7965,6 +8018,7 @@ class PipelineOrchestrator:
         score -= 260 if static_description_risk else 0
         # 判罚必须大于重复段落自身能刷到的正分，否则复制粘贴仍然划算。
         score -= 420 if repetition.get("repetition_risk") else 0
+        score -= artifact_penalty
         # T-11：判罚 −240，不做 blocker。LLM 常用别名/称谓替代本名（「顾家小姐」代「顾棠」），
         # 字符串匹配会误判，所以只压候选排序、不拦章节，与连续性门的 warning 定位一致。
         # 真实语料校准（§11.2.1 批 7 表）：能解析出人物名的样本占 49.1%，其中全员缺席
@@ -7990,6 +8044,7 @@ class PipelineOrchestrator:
             + int(content_balance.get("content_balance_penalty") or 0)
             + (260 if static_description_risk else 0)
             + (420 if repetition.get("repetition_risk") else 0)
+            + artifact_penalty
             + (240 if focus_character_missing else 0)
             + (620 if word_count_below_min else 0)
             + (520 if word_count_far_above_target else 0)
@@ -8073,6 +8128,8 @@ class PipelineOrchestrator:
             "event_density_skip_reason": event_density.get("event_density_skip_reason"),
             "event_density_passed": event_density.get("event_density_passed"),
             "chapter_artifact_markers": artifact_markers.get("chapter_artifact_markers"),
+            "chapter_artifact_marker_count": artifact_markers.get("chapter_artifact_marker_count", 0),
+            "chapter_artifact_penalty": artifact_penalty,
             "chapter_artifact_marker_examples": artifact_markers.get("chapter_artifact_marker_examples", []),
             "long_chapter_density_passed": event_density.get("long_chapter_density_passed"),
             "state_change_interval_passed": event_density.get("state_change_interval_passed"),
@@ -8178,6 +8235,7 @@ class PipelineOrchestrator:
             "quality_metric_snapshot": quality_metric_snapshot,
             **repetition,
             **artifact_markers,
+            "chapter_artifact_penalty": artifact_penalty,
         }
 
     # ====== END _pipeline_story_scoring.py ======

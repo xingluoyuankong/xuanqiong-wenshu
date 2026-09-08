@@ -134,6 +134,12 @@ class AgentJobService:
             raise AgentJobConflict("lease_owner is required")
         now = _now()
         expires = now + timedelta(seconds=max(1, min(int(lease_seconds), 3600)))
+        generation_fence = (
+            True if lease_generation is None
+            else AgentJob.lease_generation == int(lease_generation)
+        )
+        # MySQL evaluates single-table UPDATE assignments left to right.
+        # Generate the lease fence before writing the new owner and expiry.
         result = await self.session.execute(
             update(AgentJob)
             .execution_options(synchronize_session=False)
@@ -141,7 +147,7 @@ class AgentJobService:
                 AgentJob.id == job_id,
                 AgentJob.user_id == user_id,
                 AgentJob.cancel_requested_at.is_(None),
-                or_(lease_generation is None, AgentJob.lease_generation == int(lease_generation or 0)),
+                generation_fence,
                 AgentJob.run_id.in_(
                     select(AgentRun.id).where(
                         _claimable_run_condition(),
@@ -156,19 +162,22 @@ class AgentJobService:
                 ),
                 AgentJob.available_at <= now,
             )
-            .values(
-                status="running",
-                lease_owner=owner,
-                lease_expires_at=expires,
-                lease_generation=case(
-                    (
-                        and_(AgentJob.lease_owner == owner, AgentJob.lease_expires_at > now),
-                        AgentJob.lease_generation,
+            .ordered_values(
+                (AgentJob.status, "running"),
+                (
+                    AgentJob.lease_generation,
+                    case(
+                        (
+                            and_(AgentJob.lease_owner == owner, AgentJob.lease_expires_at > now),
+                            AgentJob.lease_generation,
+                        ),
+                        else_=AgentJob.lease_generation + 1,
                     ),
-                    else_=AgentJob.lease_generation + 1,
                 ),
-                attempt_count=AgentJob.attempt_count + 1,
-                started_at=func.coalesce(AgentJob.started_at, now),
+                (AgentJob.lease_owner, owner),
+                (AgentJob.lease_expires_at, expires),
+                (AgentJob.attempt_count, AgentJob.attempt_count + 1),
+                (AgentJob.started_at, func.coalesce(AgentJob.started_at, now)),
             )
         )
         if result.rowcount != 1:
@@ -341,7 +350,7 @@ class AgentJobService:
         await self.session.commit()
         return await self._get(job_id, user_id)
 
-    async def fail(self, *, job_id: str, user_id: int, lease_owner: str, error_type: str, detail: str | None = None, retryable: bool | None = None, lease_generation: int | None = None) -> AgentJob:
+    async def fail(self, *, job_id: str, user_id: int, lease_owner: str, error_type: str, detail: str | None = None, retryable: bool | None = None, lease_generation: int | None = None, commit: bool = True) -> AgentJob:
         job = await self._get(job_id, user_id)
         owner = str(lease_owner or "")[:128]
         if job.status != "running" or job.lease_owner != owner:
@@ -377,7 +386,10 @@ class AgentJobService:
         )
         if changed.rowcount != 1:
             raise AgentJobConflict("job failure lost its lease or cancellation won")
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
+        else:
+            await self.session.flush()
         return await self._get(job_id, user_id)
 
     async def reconcile_completed_handoff_jobs(self) -> list[AgentJob]:
@@ -498,7 +510,7 @@ class AgentJobService:
         stmt = (
             select(AgentJob)
             .where(AgentJob.status == "dead_letter")
-            .order_by(AgentJob.finished_at.desc().nullslast(), AgentJob.created_at.desc())
+            .order_by(AgentJob.finished_at.is_(None).asc(), AgentJob.finished_at.desc(), AgentJob.created_at.desc())
             .limit(min(max(1, int(limit)), 200))
         )
         return list((await self.session.execute(stmt)).scalars().all())

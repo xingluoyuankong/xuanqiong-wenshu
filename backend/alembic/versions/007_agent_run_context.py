@@ -12,7 +12,7 @@ def _has_column(table: str, column: str) -> bool:
     return column in {item["name"] for item in inspect(op.get_bind()).get_columns(table)}
 def upgrade() -> None:
     if not _has_column("agent_runs", "context_json"):
-        op.add_column("agent_runs", sa.Column("context_json", sa.JSON(), nullable=False, server_default=sa.text("'{}'")))
+        op.add_column("agent_runs", sa.Column("context_json", sa.JSON(), nullable=False, server_default=sa.text("('{}')")))
 def downgrade() -> None:
     if _has_column("agent_runs", "context_json"):
         op.drop_column("agent_runs", "context_json")

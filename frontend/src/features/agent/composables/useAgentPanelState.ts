@@ -25,10 +25,17 @@ export interface AgentPanelStateApi {
   close: (side: AgentPanelSide) => void
   toggle: (side: AgentPanelSide, panelId: AgentPanelId) => void
   clear: () => void
+  normalizeForViewport: () => void
 }
 
 const DEFAULT_STORAGE_KEY = 'xuanqiong-wenshu:agent-panels'
 const SIDES: AgentPanelSide[] = ['left', 'right']
+export const MOBILE_PANEL_BREAKPOINT = 650
+
+const isNarrowViewport = (): boolean =>
+  typeof window !== 'undefined'
+  && Number(window.innerWidth) > 0
+  && Number(window.innerWidth) <= MOBILE_PANEL_BREAKPOINT
 
 const emptyState = (): AgentPanelState => ({ left: null, right: null })
 
@@ -43,10 +50,15 @@ const normalizeState = (
   initial: Partial<AgentPanelState> = {},
 ): AgentPanelState => {
   const candidate = value && typeof value === 'object' ? value as Record<string, unknown> : {}
-  return {
+  const normalized = {
     left: normalizePanel(candidate.left ?? initial.left),
     right: normalizePanel(candidate.right ?? initial.right),
   }
+  // A persisted desktop dual-open state must not create overlapping mobile
+  // drawers after a viewport change. Keep the left panel deterministically.
+  return isNarrowViewport() && normalized.left && normalized.right
+    ? { left: normalized.left, right: null }
+    : normalized
 }
 
 const readState = (
@@ -95,8 +107,16 @@ export function useAgentPanelState(options: UseAgentPanelStateOptions = {}): Age
     return panelId === undefined || panelId === null ? active !== null : active === panelId
   }
 
+  const normalizeForViewport = (): void => {
+    if (!isNarrowViewport() || !activePanels.value.left || !activePanels.value.right) return
+    activePanels.value.right = null
+  }
+
   const open = (side: AgentPanelSide, panelId: AgentPanelId): void => {
     if (!isPanelId(panelId)) return
+    if (isNarrowViewport()) {
+      activePanels.value[side === 'left' ? 'right' : 'left'] = null
+    }
     activePanels.value[side] = panelId
   }
 
@@ -124,6 +144,7 @@ export function useAgentPanelState(options: UseAgentPanelStateOptions = {}): Age
     close,
     toggle,
     clear,
+    normalizeForViewport,
   }
 }
 

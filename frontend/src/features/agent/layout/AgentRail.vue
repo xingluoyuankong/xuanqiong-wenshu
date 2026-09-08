@@ -203,8 +203,25 @@ const activate = (panel: AgentRailPanelDefinition): void => {
 .agent-rail__label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .agent-rail__badge { position: absolute; top: 0.05rem; right: 0.05rem; min-width: 1rem; padding: 0.05rem 0.2rem; box-sizing: border-box; border-radius: 999px; color: white; background: var(--xq-cinnabar, #dc2626); font-size: 0.62rem; font-weight: 800; line-height: 1.2; }
 @media (max-width: 650px) {
-  .agent-rail { --agent-rail-size: 100%; flex: 1 1 auto; flex-direction: row; justify-content: space-around; width: 100%; min-width: 0; padding: 0.3rem; border-radius: 0.75rem; }
+  /* Each half-screen rail scrolls independently; children must never paint
+     or receive hits in the opposite rail's partition. Keep the scrollbar. */
+  .agent-rail {
+    --agent-rail-size: 100%;
+    flex: 1 1 auto;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scroll-padding-inline: 0.35rem;
+    padding: 0.35rem;
+    border-radius: 0.75rem;
+  }
   .agent-rail--right { order: initial; }
-  .agent-rail__button { flex: 1 1 0; width: auto; min-height: 2.5rem; }
+  .agent-rail__button { flex: 0 0 2.75rem; width: 2.75rem; min-width: 44px; min-height: 44px; }
 }
 </style>

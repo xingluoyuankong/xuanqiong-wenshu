@@ -18,8 +18,9 @@ from uuid import uuid4
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models.agent import AgentRunCommand
+from ..models.agent import AgentRun, AgentRunCommand
 from ..services.agent_runtime import AgentRuntimeService
+from .command_ordering import command_order_by
 
 COMMAND_REQUESTED = "requested"
 COMMAND_APPLYING = "applying"
@@ -165,8 +166,7 @@ class AgentCommandRecovery:
                     _lease_expired_or_free(now),
                 )
                 .order_by(
-                    AgentRunCommand.requested_at.asc(),
-                    AgentRunCommand.id.asc(),
+                    *command_order_by(),
                 )
                 .limit(1)
             )
@@ -242,8 +242,7 @@ class AgentCommandRecovery:
                     )
                     .order_by(
                         AgentRunCommand.lease_expires_at.asc(),
-                        AgentRunCommand.requested_at.asc(),
-                        AgentRunCommand.id.asc(),
+                        *command_order_by(),
                     )
                     .limit(max(1, min(int(limit), 200)))
                 )
@@ -280,6 +279,37 @@ class AgentCommandRecovery:
                 )
             )
             if changed.rowcount != 1:
+                continue
+            run_exists = await self.session.scalar(
+                select(AgentRun.id).where(
+                    AgentRun.id == candidate.run_id,
+                    AgentRun.user_id == candidate.user_id,
+                )
+            )
+            if run_exists is None:
+                # Legacy databases may contain a command whose Run was removed
+                # before foreign-key enforcement or cascade cleanup completed.
+                # Keep the worker alive and make the orphan visible as a durable
+                # terminal failure instead of trying to append an event to a
+                # missing Run.
+                orphan_changed = await self.session.execute(
+                    update(AgentRunCommand)
+                    .where(
+                        AgentRunCommand.id == candidate.id,
+                        AgentRunCommand.status == COMMAND_REQUESTED,
+                    )
+                    .values(
+                        status=COMMAND_FAILED,
+                        finished_at=recovery_now,
+                        error_type="OrphanedRun",
+                        error_detail="command references a missing Agent Run",
+                    )
+                )
+                if orphan_changed.rowcount == 1:
+                    await self.session.commit()
+                    refreshed = await self.get(command_id=candidate.id)
+                    if refreshed is not None:
+                        recovered.append(refreshed)
                 continue
             runtime = AgentRuntimeService(self.session)
             await runtime._append_event_uncommitted(

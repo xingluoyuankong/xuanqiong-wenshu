@@ -1,0 +1,10 @@
+{
+  "mutation": "restore UUID tie-break",
+  "exit_code": 1,
+  "passed": 2,
+  "failed": 1,
+  "detected": true,
+  "before": "a39d9e7419de2bc93ed54a1ad28ca7427c180a7afe83fe7af1b069140dc79932",
+  "after": "a39d9e7419de2bc93ed54a1ad28ca7427c180a7afe83fe7af1b069140dc79932",
+  "source_unchanged": true
+}

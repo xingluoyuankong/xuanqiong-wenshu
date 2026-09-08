@@ -1,0 +1,46 @@
+import type { Page, Route } from '@playwright/test'
+type Handler = (route: Route) => unknown | Promise<unknown>
+const isSession = (pattern: string) => /\/api\/agent\/sessions\/[^/*?]+$/.test(pattern)
+const isPagedDetail = (pattern: string) => /\/api\/agent\/runs\/[^/?]+\/(steps|commands|artifacts)$/.test(pattern)
+const matcher = (pattern: string) => isSession(pattern) || isPagedDetail(pattern) ? `${pattern}{,?*}` : pattern
+/** Upgrade legacy scenario data to the API's explicit page envelope, not a production fallback. */
+export async function routeAgentFixture(page: Page, pattern: string, handler: Handler) {
+  const wrap = (route: Route, collection?: 'runs' | 'messages') => handler(new Proxy(route, {
+    get(target, property) {
+      if (property !== 'fulfill') {
+        const value = Reflect.get(target, property)
+        return typeof value === 'function' ? value.bind(target) : value
+      }
+      return async (options: Parameters<Route['fulfill']>[0]) => {
+        const url = new URL(route.request().url())
+        if (typeof options?.body === 'string' && url.searchParams.has('limit')) {
+          const payload = JSON.parse(options.body)
+          const all = collection ? payload[collection] : payload
+          if (!Array.isArray(all)) throw new Error(`Fixture collection missing: ${url.pathname}`)
+          const limit = Number(url.searchParams.get('limit')), offset = Number(url.searchParams.get('offset') || 0)
+          const before = Number(url.searchParams.get('before_sequence') || Infinity)
+          const filtered = collection === 'messages' ? all.filter(x => x.sequence < before) : all
+          const items = collection === 'messages' ? filtered.slice(-limit) : filtered.slice(offset, offset + limit)
+          const body = { items, total: all.length, limit, offset, has_more: offset + items.length < filtered.length,
+            next_offset: offset + items.length < filtered.length ? offset + items.length : null,
+            session_id: payload.id, next_before_sequence: collection === 'messages' ? items[0]?.sequence ?? null : null,
+            next_before_created_at: null, next_before_id: null }
+          return route.fulfill({ ...options, body: JSON.stringify(body) })
+        }
+        return route.fulfill(options)
+      }
+    },
+  }))
+  await page.route(matcher(pattern), route => wrap(route))
+  if (isSession(pattern)) {
+    await page.route(`${pattern}/runs?*`, route => wrap(route, 'runs'))
+    await page.route(`${pattern}/messages?*`, route => wrap(route, 'messages'))
+  }
+}
+export async function unrouteAgentFixture(page: Page, pattern: string) {
+  await page.unroute(matcher(pattern))
+  if (isSession(pattern)) {
+    await page.unroute(`${pattern}/runs?*`)
+    await page.unroute(`${pattern}/messages?*`)
+  }
+}

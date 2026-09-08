@@ -176,3 +176,26 @@ def test_019_upgrade_to_020_is_repeatable_on_legacy_shape(tmp_path: Path, monkey
         "agent_runs", "agent_run_steps", "agent_run_capability_snapshots", "agent_capability_definitions", "agent_provider_releases",
     }
     con.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replacement", [None, "forged-digest"])
+async def test_run_context_update_preserves_frozen_snapshot_digest(task_session, replacement):
+    user = User(username="digest-preservation", hashed_password="x", is_active=True)
+    task_session.add(user)
+    await task_session.flush()
+    runtime = AgentRuntimeService(task_session)
+    session = await runtime.create_session(user_id=user.id)
+    run = await runtime.create_run(session_id=session.id, user_id=user.id)
+    snapshot = (await task_session.execute(select(AgentRunCapabilitySnapshot).where(
+        AgentRunCapabilitySnapshot.run_id == run.id
+    ))).scalar_one()
+    assert run.context_json["relational_capability_snapshot_digest"] == snapshot.digest
+    update = {"goal": "continue after planner update"}
+    if replacement is not None:
+        update["relational_capability_snapshot_digest"] = replacement
+    await runtime.set_run_context(run_id=run.id, user_id=user.id, context=update)
+    await task_session.refresh(run)
+    assert run.context_json.get("relational_capability_snapshot_digest") == snapshot.digest
+    assert run.context_json["goal"] == update["goal"]
+    assert run.context_json["relational_capability_snapshot_id"] == snapshot.id

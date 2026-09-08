@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Optional
 from uuid import uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db.base import Base
@@ -35,7 +35,7 @@ class QualityResult(Base):
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="completed", server_default="completed", index=True)
     score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    metrics_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    metrics_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default=text("('{}')"))
     input_digest: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     result_digest: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -75,9 +75,9 @@ class QualityFinding(Base):
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="open", server_default="open", index=True)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    location_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
-    evidence_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
-    remediation_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    location_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default=text("('{}')"))
+    evidence_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default=text("('{}')"))
+    remediation_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default=text("('{}')"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -113,7 +113,7 @@ class QualityGate(Base):
     decision: Mapped[str] = mapped_column(String(24), nullable=False, default="blocked", server_default="blocked", index=True)
     blocker_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    policy_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    policy_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default=text("('{}')"))
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

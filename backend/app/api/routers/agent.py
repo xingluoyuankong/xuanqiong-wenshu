@@ -15,13 +15,15 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...agent.approval_context_contract import ApprovalContextContractError, validate_approval_context_contract
+from ...agent.approval_snapshot_integrity import ApprovalSnapshotIntegrityError, validate_approval_snapshot_integrity
 from ...agent.executor import UnknownAgentTool, build_agent_plan
-from ...agent.execution import launch_agent_execution, recover_agent_execution
+from ...agent.execution import ApprovalRunContractError, launch_agent_execution, recover_agent_execution, validate_approval_run_contract
 from ...agent.execution_facts import AgentExecutionFactNotFound, AgentExecutionFactService
 from ...agent.jobs import AgentJobError, AgentJobNotFound, AgentJobService
 from ...agent.orchestrator import AgentOrchestrator
 from ...agent.policy import ProjectScopeViolation
-from ...agent.registry import DEFAULT_TOOL_REGISTRY, get_default_tool_catalog, get_default_tool_provider_health
+from ...agent.registry import DEFAULT_TOOL_REGISTRY, ToolContractViolation, bind_run_tool_registry, get_default_tool_catalog, get_default_tool_provider_health
 from ...agent.runner import cancel_visible_response, get_cancel_event, is_visible_response_active, launch_visible_response, release_cancel_event, recover_visible_response
 from ...agent.state_projection import AgentStateProjectionService
 from ...agent.write_executor import accept_candidate_artifact, diff_artifact_with_chapter_version, diff_artifacts, execute_approved_write, list_artifact_quality_blockers, list_artifact_rewrite_instructions, read_artifact_content
@@ -37,19 +39,23 @@ from ...agent.schemas import (
 from ...core.config import settings
 from ...core.dependencies import get_current_admin, get_current_user
 from ...db.session import AsyncSessionLocal, get_session
-from ...models.agent import AgentArtifactRef, AgentRun, AgentSession
+from ...models.agent import AgentArtifactRef, AgentJob, AgentRun, AgentRunStep, AgentSession
+from ...models.agent_catalog import AgentCatalogRelease, AgentProviderRelease
 from ...schemas.user import UserInDB
 from ...services.llm_service import LLMService
 from ...services.agent_context_service import AgentContextService
 from ...services.agent_plan_service import AgentPlanService
 from ...services.agent_conversation_service import AgentConversationService
 from ...services.agent_quality_query_service import AgentQualityQueryService
+from ...services.agent_catalog_service import AgentCatalogService
+from ...services.agent_execution_service import AgentCapabilityExecutionConflict, AgentExecutionService
 from ...services.agent_entity_context_service import AgentEntityContextService
 from ...services.agent_runtime import (
     AgentConflict, AgentNotFound, AgentRuntimeError, AgentRuntimeService, AgentScopeViolation,
     clean_provider_attempt_snapshot,
 )
 from ...services.project_access_service import ProjectAccessService
+from .agent_job_projection import PublicAgentJobRead, TERMINAL_RUN_STATUSES, public_job, public_state_jobs, scoped_job_query
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 _STEP_WORKER_ID = f"api:{socket.gethostname()}:{os.getpid()}"[:128]
@@ -65,8 +71,15 @@ def _error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=422, detail={"code": "AGENT_CONTEXT_REF_INVALID", "message": str(exc)})
     if isinstance(exc, AgentNotFound):
         return HTTPException(status_code=404, detail={"code": "AGENT_NOT_FOUND", "message": str(exc)})
+    if isinstance(exc, ApprovalRunContractError):
+        return HTTPException(status_code=409, detail=exc.detail)
     if isinstance(exc, (AgentScopeViolation, ProjectScopeViolation)):
         return HTTPException(status_code=403, detail={"code": "AGENT_SCOPE_VIOLATION", "message": str(exc)})
+    if isinstance(exc, (ToolContractViolation, AgentCapabilityExecutionConflict)):
+        return HTTPException(status_code=409, detail={
+            "code": "AGENT_TOOL_CONTRACT_CONFLICT",
+            "message": "当前运行的能力契约与请求不一致，请创建新运行后重试。",
+        })
     if isinstance(exc, SQLAlchemyError):
         return HTTPException(
             status_code=503,
@@ -108,9 +121,70 @@ async def _resolve_writable_artifact(
 
 async def _execute_registered_approval(*, approval_id: str, session: AsyncSession, user_id: int):
     approval = await AgentRuntimeService(session).get_approval(approval_id=approval_id, user_id=user_id)
+    run = (await session.execute(select(AgentRun).where(AgentRun.id == approval.run_id))).scalar_one_or_none()
+    if run is None:
+        raise AgentNotFound("run not found")
+    step = None
+    if approval.step_id:
+        step = (await session.execute(select(AgentRunStep).where(AgentRunStep.id == approval.step_id))).scalar_one_or_none()
+        if step is None:
+            raise AgentNotFound("approval step not found")
+    facts = AgentExecutionService(session)
+    snapshot = await facts.get_run_snapshot(run.id)
+    capability = (
+        await facts.repository.get_capability_for_snapshot(
+            snapshot=snapshot,
+            capability_id=approval.tool_name,
+        )
+        if snapshot is not None
+        else None
+    )
+    catalog_release = None
+    if snapshot is not None:
+        catalog_release = (
+            await session.execute(
+                select(AgentCatalogRelease).where(
+                    AgentCatalogRelease.id == snapshot.catalog_release_id,
+                )
+            )
+        ).scalar_one_or_none()
+    provider_release = None
+    if capability is not None and capability.provider_release_id:
+        provider_release = (
+            await session.execute(
+                select(AgentProviderRelease).where(
+                    AgentProviderRelease.id == capability.provider_release_id,
+                    AgentProviderRelease.catalog_release_id == snapshot.catalog_release_id,
+                )
+            )
+        ).scalar_one_or_none()
+    await validate_approval_run_contract(
+        registry=DEFAULT_TOOL_REGISTRY,
+        session=session,
+        run=run,
+        approval=approval,
+        snapshot=snapshot,
+        capability=capability,
+        step=step,
+        provider_release=provider_release,
+        catalog_release=catalog_release,
+    )
+    if snapshot is not None:
+        try:
+            validate_approval_snapshot_integrity(run=run, snapshot=snapshot, catalog_release=catalog_release)
+        except ApprovalSnapshotIntegrityError as exc:
+            raise ApprovalRunContractError(str(exc), field=exc.field) from exc
     arguments = dict(approval.request_json or {})
     arguments["_approval_id"] = approval.id
-    result = await DEFAULT_TOOL_REGISTRY.execute(
+    registry = bind_run_tool_registry(DEFAULT_TOOL_REGISTRY, run.context_json)
+    try:
+        await validate_approval_context_contract(
+            session=session, run=run, approval=approval,
+            manifest=registry.get(approval.tool_name), require_snapshot=snapshot is not None,
+        )
+    except ApprovalContextContractError as exc:
+        raise ApprovalRunContractError(str(exc), field=exc.field) from exc
+    result = await registry.execute(
         approval.tool_name,
         session=session,
         user_id=user_id,
@@ -417,7 +491,7 @@ async def post_agent_message(session_id: str, payload: AgentMessageCreateRequest
             "provider_called": False,
             "planner_fallback_reason": None,
             "approvals": [],
-            "execution_job": AgentJobRead.model_validate(execution_job),
+            "execution_job": public_job(execution_job),
         }
     except (AgentRuntimeError, UnknownAgentTool, ProjectScopeViolation, ContextRefValidationError, SQLAlchemyError) as exc:
         if transaction_started:
@@ -470,21 +544,40 @@ async def list_agent_timeline(
         for event, resolved_session_id, resolved_project_id, resolved_run_status in rows
     ]
 
-@router.get('/jobs', response_model=list[AgentJobRead])
+@router.get('/jobs', response_model=list[PublicAgentJobRead])
 async def list_agent_jobs(
-    project_id: str | None = Query(default=None, min_length=1, max_length=120),
-    status: str | None = Query(default=None, min_length=1, max_length=24),
+    project_id: Annotated[str | None, Query(min_length=1, max_length=120)] = None,
+    status: Annotated[str | None, Query(min_length=1, max_length=24)] = None,
+    run_id: Annotated[str | None, Query(min_length=1, max_length=36)] = None,
+    kind: Annotated[str | None, Query(min_length=1, max_length=80)] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int | None, Query(ge=0, le=100000)] = None,
     session: AsyncSession = Depends(get_session),
     current_user: UserInDB = Depends(get_current_user),
-) -> list[AgentJobRead]:
+) -> list[PublicAgentJobRead]:
     try:
-        rows = await AgentJobService(session).list_jobs(user_id=current_user.id, project_id=project_id, status=status)
-        return [AgentJobRead.model_validate(item) for item in rows]
-    except (AgentJobError, SQLAlchemyError) as exc:
+        owner_id = current_user.id
+        if run_id is not None:
+            run = await AgentRuntimeService(session).get_readable_run(run_id, current_user.id)
+            if run.project_id:
+                await ProjectAccessService(session).require_project_read(run.project_id, current_user.id)
+            if project_id is not None and project_id != run.project_id:
+                raise AgentScopeViolation("run does not belong to project")
+            owner_id = run.user_id
+        query = scoped_job_query(user_id=owner_id, project_id=project_id, run_id=run_id, status=status, kind=kind)
+        if offset is None and run_id is None and kind is None:
+            # Preserve the old service entrypoint for legacy clients and its
+            # infrastructure-error contract; explicit paging uses a bounded SQL query.
+            legacy = await AgentJobService(session).list_jobs(user_id=owner_id, project_id=project_id, status=status, limit=limit)
+            query = query.where(AgentJob.id.in_([row.id for row in legacy]))
+        rows = list((await session.execute(query.order_by(AgentJob.created_at.desc(), AgentJob.id.desc())
+            .offset(offset or 0).limit(limit))).scalars())
+        return [public_job(item) for item in rows]
+    except (AgentRuntimeError, AgentJobError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
-@router.post('/jobs/{job_id}/cancel', response_model=AgentJobRead)
+@router.post('/jobs/{job_id}/cancel', response_model=PublicAgentJobRead)
 async def cancel_agent_job(
     job_id: str,
     session: AsyncSession = Depends(get_session),
@@ -492,12 +585,12 @@ async def cancel_agent_job(
 ) -> AgentJobRead:
     try:
         row = await AgentJobService(session).request_cancel(job_id=job_id, user_id=current_user.id)
-        return AgentJobRead.model_validate(row)
+        return public_job(row)
     except (AgentJobError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
-@router.get("/dead-letters", response_model=list[AgentJobRead])
+@router.get("/dead-letters", response_model=list[PublicAgentJobRead])
 async def list_agent_dead_letters(
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
     session: AsyncSession = Depends(get_session),
@@ -505,12 +598,12 @@ async def list_agent_dead_letters(
 ) -> list[AgentJobRead]:
     try:
         rows = await AgentJobService(session).list_dead_letters(limit=limit)
-        return [AgentJobRead.model_validate(item) for item in rows]
+        return [public_job(item) for item in rows]
     except (AgentJobError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
 
-@router.post("/dead-letters/{job_id}/replay", response_model=AgentJobRead)
+@router.post("/dead-letters/{job_id}/replay", response_model=PublicAgentJobRead)
 async def replay_agent_dead_letter(
     job_id: str,
     reason: str | None = Query(default=None, max_length=255),
@@ -523,7 +616,7 @@ async def replay_agent_dead_letter(
             operator_id=current_admin.id,
             reason=reason,
         )
-        return AgentJobRead.model_validate(row)
+        return public_job(row)
     except (AgentJobError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
@@ -650,7 +743,7 @@ async def stream_agent_events(session_id: str, run_id: str, request: Request, af
                 cursor = max(cursor, event.sequence)
                 payload = {"id": event.id, "run_id": event.run_id, "sequence": event.sequence, "event_type": event.event_type, "summary": event.summary, "data": event.data_json, "created_at": event.created_at.isoformat() if event.created_at else None}
                 yield f"id: {event.sequence}\nevent: {event.event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-            if run.status in {"completed", "failed", "cancelled"}:
+            if run.status in TERMINAL_RUN_STATUSES:
                 # A terminal run has no future events.  When a full page was
                 # returned, continue once more so a large durable history is
                 # not truncated; otherwise the final event has just been sent
@@ -1031,9 +1124,10 @@ async def get_agent_run_state(
 ) -> dict[str, object]:
     """Return the safe, read-only correlation state projection for one run."""
     try:
-        return await AgentStateProjectionService(session).get_run_state(
+        projection = await AgentStateProjectionService(session).get_run_state(
             run_id=run_id, user_id=current_user.id
         )
+        return await public_state_jobs(session, projection)
     except (AgentRuntimeError, SQLAlchemyError) as exc:
         raise _error(exc) from exc
 
@@ -1204,7 +1298,7 @@ async def execute_agent_approval(approval_id: str, session: AsyncSession = Depen
     try:
         artifact = await _execute_registered_approval(approval_id=approval_id, session=session, user_id=current_user.id)
         return AgentArtifactRead.model_validate(artifact)
-    except (AgentRuntimeError, SQLAlchemyError) as exc:
+    except (AgentRuntimeError, SQLAlchemyError, ToolContractViolation, AgentCapabilityExecutionConflict, ApprovalRunContractError) as exc:
         raise _error(exc) from exc
 
 
@@ -1334,6 +1428,11 @@ async def accept_agent_artifact(artifact_id: str, payload: AgentArtifactAcceptRe
             return AgentArtifactRead.model_validate(artifact)
         if metadata.get("status") != "candidate":
             raise AgentConflict("artifact is not an unaccepted chapter candidate")
+        capabilities = await AgentCatalogService(session).resolved_capability_names(artifact.run_id)
+        if capabilities is not None and "chapter.version.accept" not in capabilities:
+            # Do not rewrite a historical immutable resolution or leave an
+            # approved action queued when its capability was never reserved.
+            raise AgentConflict("Run snapshot has no chapter.version.accept capability; create a new Run")
         runtime = AgentRuntimeService(session)
         approval = await runtime.request_approval(
             run_id=artifact.run_id,
@@ -1365,7 +1464,7 @@ async def accept_agent_artifact(artifact_id: str, payload: AgentArtifactAcceptRe
             user_id=execution_owner_id,
         )
         return AgentArtifactRead.model_validate(accepted)
-    except (AgentRuntimeError, SQLAlchemyError) as exc:
+    except (AgentRuntimeError, SQLAlchemyError, ToolContractViolation, AgentCapabilityExecutionConflict) as exc:
         raise _error(exc) from exc
 
 

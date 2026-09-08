@@ -1,5 +1,5 @@
 <template>
-  <main class="agent-page xq-page-canvas" data-testid="agent-workspace">
+  <main ref="workspaceElement" class="agent-page xq-page-canvas" data-testid="agent-workspace">
     <section class="agent-hero xq-page-topbar xq-paper-grain">
       <div>
         <p class="agent-kicker">玄穹文枢 · PROJECT AGENT</p>
@@ -26,6 +26,7 @@
       <aside
         class="agent-side-panel agent-sidebar agent-side-panel--left"
         :class="{ 'agent-panel-open': activeLeftPanel }"
+        ref="leftPanelElement"
         data-testid="agent-left-panel"
         :data-panel-open="Boolean(activeLeftPanel)"
         :aria-hidden="!activeLeftPanel"
@@ -45,6 +46,7 @@
       <aside
         class="agent-side-panel agent-activity agent-side-panel--right"
         :class="{ 'agent-panel-open': activeRightPanel }"
+        ref="rightPanelElement"
         data-testid="agent-right-panel"
         :data-panel-open="Boolean(activeRightPanel)"
         :aria-hidden="!activeRightPanel"
@@ -72,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import AgentRail, { type AgentRailPanelDefinition } from './layout/AgentRail.vue'
 import { useAgentPanelState, type AgentPanelId, type AgentPanelSide } from './composables/useAgentPanelState'
 
@@ -113,8 +115,75 @@ const panelLabel = (panels: AgentRailPanelDefinition[], active: AgentPanelId | n
 const leftPanelTitle = computed(() => panelLabel(leftPanels, activeLeftPanel.value, '项目资源'))
 const rightPanelTitle = computed(() => panelLabel(rightPanels, activeRightPanel.value, '运行信息'))
 
-const togglePanel = (side: AgentPanelSide, panelId: AgentPanelId) => panelState.toggle(side, panelId)
-const closePanel = (side: AgentPanelSide) => panelState.close(side)
+const workspaceElement = ref<HTMLElement | null>(null)
+const leftPanelElement = ref<HTMLElement | null>(null)
+const rightPanelElement = ref<HTMLElement | null>(null)
+const panelElement = (side: AgentPanelSide) => side === 'left' ? leftPanelElement.value : rightPanelElement.value
+const currentPanel = (side: AgentPanelSide) => side === 'left' ? activeLeftPanel.value : activeRightPanel.value
+let focusRevision = 0
+
+// Scope trigger lookup to this shell, including panels restored from storage.
+const panelTrigger = (side: AgentPanelSide, panelId: AgentPanelId | null) => {
+  if (!panelId) return undefined
+  const testId = `agent-rail-panel-${side}-${panelId}`
+  return Array.from(workspaceElement.value?.querySelectorAll<HTMLButtonElement>('button[data-testid]') || [])
+    .find((button) => button.dataset.testid === testId)
+}
+
+const closePanel = async (side: AgentPanelSide) => {
+  const trigger = panelTrigger(side, currentPanel(side))
+  const revision = ++focusRevision
+  panelState.close(side)
+  await nextTick()
+  if (revision === focusRevision) trigger?.focus({ preventScroll: true })
+}
+
+const togglePanel = async (side: AgentPanelSide, panelId: AgentPanelId) => {
+  if (currentPanel(side) === panelId) return closePanel(side)
+  const revision = ++focusRevision
+  panelState.toggle(side, panelId)
+  await nextTick()
+  // CSS switches to non-modal fixed drawers at 960px; mutual exclusion remains
+  // owned by the existing 650px state rule. Never trap focus or inert the rails.
+  if (revision === focusRevision && window.innerWidth <= 960 && currentPanel(side) === panelId) {
+    panelElement(side)?.querySelector<HTMLButtonElement>('.agent-side-panel__close')?.focus({ preventScroll: true })
+  }
+}
+
+const onViewportChange = async () => {
+  const focused = document.activeElement
+  const closingSide = (['left', 'right'] as const).find((side) => panelElement(side)?.contains(focused))
+  const trigger = closingSide ? panelTrigger(closingSide, currentPanel(closingSide)) : undefined
+  panelState.normalizeForViewport()
+  // Only recover focus that would be hidden, leaving main/rail/surviving panel
+  // focus untouched. Capture before normalization: browsers may blur on display:none.
+  if (!closingSide || currentPanel(closingSide)) return
+  const revision = ++focusRevision
+  await nextTick()
+  if (revision === focusRevision && (document.activeElement === focused || document.activeElement === document.body)) {
+    trigger?.focus({ preventScroll: true })
+  }
+}
+const onEscape = (event: KeyboardEvent) => {
+  if (event.key !== 'Escape' || event.defaultPrevented) return
+  const focusedSide = (['left', 'right'] as const).find((side) =>
+    currentPanel(side) && panelElement(side)?.contains(document.activeElement),
+  )
+  if (focusedSide) void closePanel(focusedSide)
+  else if (activeRightPanel.value) void closePanel('right')
+  else if (activeLeftPanel.value) void closePanel('left')
+}
+
+onMounted(() => {
+  panelState.normalizeForViewport()
+  window.addEventListener('resize', onViewportChange)
+  window.addEventListener('keydown', onEscape)
+})
+onBeforeUnmount(() => {
+  focusRevision += 1
+  window.removeEventListener('resize', onViewportChange)
+  window.removeEventListener('keydown', onEscape)
+})
 
 const statusText = computed(() => {
   if (props.sessionStatus) return `会话已恢复 · ${props.sessionStatus}`
@@ -173,7 +242,7 @@ const statusText = computed(() => {
   .agent-status { min-width: 0; }
   .agent-layout, .agent-layout.has-left-panel, .agent-layout.has-right-panel, .agent-layout.has-left-panel.has-right-panel { display: flex; flex-direction: column; min-height: calc(100vh - 9rem); padding-bottom: calc(4.25rem + env(safe-area-inset-bottom)); }
   .agent-main { order: 1; min-height: calc(100vh - 11rem); }
-  .agent-sidebar-rail, .agent-activity-rail { position: fixed; top: auto; bottom: calc(0.55rem + env(safe-area-inset-bottom)); z-index: 5; }
+  .agent-sidebar-rail, .agent-activity-rail { position: fixed; top: auto; bottom: calc(0.55rem + env(safe-area-inset-bottom)); z-index: 5; box-sizing: border-box; overflow: hidden; border-radius: 0.75rem; }
   .agent-sidebar-rail { left: 0.55rem; width: calc(50% - 0.8rem); }
   .agent-activity-rail { right: 0.55rem; width: calc(50% - 0.8rem); }
   .agent-side-panel { top: 4.8rem; bottom: calc(4.1rem + env(safe-area-inset-bottom)); width: calc(100vw - 1.1rem); }

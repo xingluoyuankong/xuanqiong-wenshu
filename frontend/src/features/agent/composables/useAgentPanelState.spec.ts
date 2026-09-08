@@ -5,6 +5,7 @@ import { AGENT_PANEL_STORAGE_KEY, useAgentPanelState } from './useAgentPanelStat
 describe('useAgentPanelState', () => {
   beforeEach(() => {
     window.localStorage.clear()
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1024 })
   })
 
   it('starts closed on both sides and exposes independent side state', () => {
@@ -61,3 +62,25 @@ describe('useAgentPanelState', () => {
     expect(AGENT_PANEL_STORAGE_KEY).toBe('xuanqiong-wenshu:agent-panels')
   })
 })
+
+
+  it('在窄屏打开一侧会关闭另一侧，并归一化持久化双开状态', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 390 })
+    window.localStorage.setItem('agent-panel-mobile', JSON.stringify({ left: 'project', right: 'log' }))
+    const restored = useAgentPanelState({ storageKey: 'agent-panel-mobile' })
+    expect(restored.activePanels.value).toEqual({ left: 'project', right: null })
+    restored.open('right', 'quality')
+    expect(restored.activePanels.value).toEqual({ left: null, right: 'quality' })
+    restored.open('left', 'content')
+    expect(restored.activePanels.value).toEqual({ left: 'content', right: null })
+    await nextTick()
+    expect(window.localStorage.getItem('agent-panel-mobile')).toBe(JSON.stringify({ left: 'content', right: null }))
+  })
+
+  it('在桌面保留双侧同时打开能力', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1024 })
+    const state = useAgentPanelState({ storageKey: 'agent-panel-desktop' })
+    state.open('left', 'project')
+    state.open('right', 'log')
+    expect(state.activePanels.value).toEqual({ left: 'project', right: 'log' })
+  })

@@ -4,6 +4,8 @@ import { getAccessToken } from '@/stores/auth'
 export type SSEConnectionState = 'connecting' | 'live' | 'reconnecting' | 'disconnected' | 'terminal' | 'closed'
 
 export interface SSECallback {
+  /** Validate scope/identity before cursor acknowledgement, dispatch or terminal handling. */
+  acceptEvent?: (event: string, data: unknown, eventId: number | null) => boolean
   /** Return true for a terminal event; terminal events stop automatic reconnect. */
   isTerminalEvent?: (event: string, data: unknown) => boolean
   onConnectionState?: (state: SSEConnectionState, retryCount: number) => void
@@ -99,6 +101,10 @@ export function connectSSE(url: string, callbacks: SSECallback, maxRetries = 3, 
         },
       })
 
+      if (aborted) {
+        await response.body?.cancel()
+        return
+      }
       if (!response.ok) {
         scheduleReconnect(`SSE连接失败: HTTP ${response.status}`)
         return
@@ -126,6 +132,12 @@ export function connectSSE(url: string, callbacks: SSECallback, maxRetries = 3, 
         }
         try {
           const parsed = JSON.parse(dataBuffer)
+          if (callbacks.acceptEvent?.(eventType, parsed, pendingEventId) === false) {
+            eventType = ''
+            dataBuffer = ''
+            pendingEventId = null
+            return
+          }
           // stream_error 是 Agent SSE 的非持久化控制事件：后端不会为它
           // 写 SSE id，客户端也绝不能借它推进 durable replay cursor。
           if (eventType === 'stream_error') {
@@ -164,15 +176,16 @@ export function connectSSE(url: string, callbacks: SSECallback, maxRetries = 3, 
 
       while (!aborted) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done || aborted) break
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() ?? ''
         for (const rawLine of lines) {
+          if (aborted) break
           const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
           if (line.startsWith('id:')) {
             const parsedId = Number(line.slice(3).trim())
-            if (Number.isFinite(parsedId) && parsedId >= 0) pendingEventId = parsedId
+            if (Number.isSafeInteger(parsedId) && parsedId >= 0) pendingEventId = parsedId
           } else if (line.startsWith('event:')) {
             eventType = line.slice(6).trim()
           } else if (line.startsWith('data:')) {
@@ -190,7 +203,7 @@ export function connectSSE(url: string, callbacks: SSECallback, maxRetries = 3, 
           const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
           if (line.startsWith('id:')) {
             const parsedId = Number(line.slice(3).trim())
-            if (Number.isFinite(parsedId) && parsedId >= 0) pendingEventId = parsedId
+            if (Number.isSafeInteger(parsedId) && parsedId >= 0) pendingEventId = parsedId
           } else if (line.startsWith('event:')) {
             eventType = line.slice(6).trim()
           } else if (line.startsWith('data:')) {
@@ -206,6 +219,9 @@ export function connectSSE(url: string, callbacks: SSECallback, maxRetries = 3, 
     } catch (err: unknown) {
       if (!aborted) scheduleReconnect(err instanceof Error ? err.message : '未知SSE错误')
     } finally {
+      if (aborted && reader && typeof reader.cancel === 'function') {
+        try { await reader.cancel() } catch { /* The connection may already be closed. */ }
+      }
       if (activeController === controller) activeController = null
     }
   }

@@ -19,7 +19,7 @@ def _has_column(table: str, column: str) -> bool:
 
 def upgrade() -> None:
     if not _has_column("agent_approvals", "request_json"):
-        op.add_column("agent_approvals", sa.Column("request_json", sa.JSON(), nullable=False, server_default=sa.text("'{}'")))
+        op.add_column("agent_approvals", sa.Column("request_json", sa.JSON(), nullable=False, server_default=sa.text("('{}')")))
 
 
 def downgrade() -> None:

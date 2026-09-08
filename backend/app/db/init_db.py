@@ -18,6 +18,7 @@ from ..core.security import hash_password
 from ..models import Prompt, SystemConfig, User
 from .system_config_defaults import SYSTEM_CONFIG_DEFAULTS
 from .session import AsyncSessionLocal
+from .mysql_timezone import install_mysql_utc_policy
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +217,7 @@ async def _ensure_database_exists() -> None:
         admin_url.render_as_string(hide_password=False),
         isolation_level="AUTOCOMMIT",
     )
+    install_mysql_utc_policy(admin_engine)
     try:
         async with admin_engine.begin() as conn:
             await conn.execute(text(f"CREATE DATABASE IF NOT EXISTS `{database}`"))

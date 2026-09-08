@@ -41,6 +41,8 @@ export interface AgentWorkTraceDelta {
 }
 
 export interface AgentRunEventProjection {
+  runId?: string
+  latestProgressSequence: number
   events: AgentDisplayEvent[]
   seenEventKeys: string[]
   assistantDeltas: AssistantDelta[]
@@ -131,6 +133,8 @@ export const agentEventLabel = (type: string) =>
 
 export function createAgentRunEventProjection(): AgentRunEventProjection {
   return {
+    runId: undefined,
+    latestProgressSequence: -1,
     events: [],
     seenEventKeys: [],
     assistantDeltas: [],
@@ -168,6 +172,55 @@ const positiveInteger = (value: unknown): number | undefined => {
 const detailFor = (event: SafeAgentEvent): string => {
   const data = event.data
   return event.summary || String(data.message || data.progress_message || '收到运行事件')
+}
+
+// Only workflow facts compete for the current-status slot. Text/reasoning,
+// unknown events and replay bookkeeping must not erase a still-valid progress.
+const currentProgressPhases: Record<string, string> = {
+  run_started: 'queued',
+  planner_started: 'planning',
+  approval_required: 'awaiting_approval',
+  approval_granted: 'approval',
+  approval_rejected: 'approval_rejected',
+  write_execution_started: 'write_execution',
+  write_candidate_progress: 'write_execution',
+  write_execution_failed: 'failed',
+  artifact_created: 'candidate_ready',
+  artifact_accepted: 'artifact_accepted',
+  tool_call_started: 'tool_execution',
+  tool_call_progress: 'tool_execution',
+  tool_call_completed: 'tool_execution',
+  tool_call_failed: 'tool_execution',
+  tool_cancelled: 'tool_execution',
+  plan_step_started: 'tool_execution',
+  plan_step_completed: 'tool_execution',
+  plan_step_failed: 'tool_execution',
+  quality_check_completed: 'quality',
+  quality_check_blocked: 'quality',
+  quality_check_failed: 'quality',
+  run_paused: 'paused',
+  run_resumed: 'resumed',
+  run_completed: 'completed',
+  run_failed: 'failed',
+  run_cancelled: 'cancelled',
+}
+
+const currentProgressFor = (event: SafeAgentEvent) => {
+  const { data, event_type: type } = event
+  if (!Object.prototype.hasOwnProperty.call(currentProgressPhases, type) &&
+      !['progress_update', 'public_work_summary', 'work_trace_delta'].includes(type)) return undefined
+  const text = (value: unknown) => typeof value === 'string' && value.trim() ? value : undefined
+  return {
+    latestProgressSequence: event.sequence,
+    latestProgressMessage: text(data.progress_message) ||
+      (type === 'public_work_summary' ? text(data.current_action) : undefined) ||
+      text(data.message) || text(event.summary) || agentEventLabel(type),
+    latestProgressPhase: text(data.phase) || currentProgressPhases[type],
+    latestProgressActionId: text(data.action_id),
+    // A new semantic fact is atomic: never pair its message with an old phase,
+    // action or percentage. Missing metrics stay unknown (not zero or 100%).
+    latestProgress: type === 'run_completed' ? 100 : boundedProgress(data.progress ?? data.percent),
+  }
 }
 
 const advanceContiguousSequence = (
@@ -211,7 +264,8 @@ export function reduceAgentRunEvent(
   current: AgentRunEventProjection,
   event: SafeAgentEvent,
 ): AgentEventReduction {
-  if (!event.run_id || event.sequence < 0) {
+  if (!event.run_id || event.sequence < 0 ||
+      (current.runId !== undefined && current.runId !== event.run_id)) {
     return { projection: current, accepted: false, isLatest: false, runPatch: {} }
   }
 
@@ -220,6 +274,16 @@ export function reduceAgentRunEvent(
     return { projection: current, accepted: false, isLatest: false, runPatch: {} }
   }
 
+  const semanticProgress = currentProgressFor(event)
+  const progressPatch = semanticProgress && event.sequence > current.latestProgressSequence
+    ? semanticProgress
+    : {
+        latestProgressSequence: current.latestProgressSequence,
+        latestProgressMessage: current.latestProgressMessage,
+        latestProgressPhase: current.latestProgressPhase,
+        latestProgressActionId: current.latestProgressActionId,
+        latestProgress: current.latestProgress,
+      }
   const isLatest = event.sequence >= current.lastSequence
   const sequenceState = advanceContiguousSequence(
     current.lastContiguousSequence,
@@ -329,22 +393,8 @@ export function reduceAgentRunEvent(
       reasoningChunks,
       reasoningText,
       reasoningStatus,
-      latestProgressMessage:
-        isLatest && event.event_type === 'progress_update'
-          ? typeof data.progress_message === 'string' ? data.progress_message : ''
-          : current.latestProgressMessage,
-      latestProgressActionId:
-        isLatest && event.event_type === 'progress_update' && typeof data.action_id === 'string'
-          ? data.action_id
-          : isLatest && event.event_type === 'progress_update' ? undefined : current.latestProgressActionId,
-      latestProgressPhase:
-        isLatest && event.event_type === 'progress_update' && typeof data.phase === 'string'
-          ? data.phase
-          : isLatest && event.event_type === 'progress_update' ? undefined : current.latestProgressPhase,
-      latestProgress:
-        isLatest && event.event_type === 'progress_update'
-          ? boundedProgress(data.progress ?? data.percent)
-          : current.latestProgress,
+      runId: current.runId ?? event.run_id,
+      ...progressPatch,
       lastSequence: Math.max(current.lastSequence, event.sequence),
       lastContiguousSequence: sequenceState.lastContiguousSequence,
       pendingSequences: sequenceState.pendingSequences,

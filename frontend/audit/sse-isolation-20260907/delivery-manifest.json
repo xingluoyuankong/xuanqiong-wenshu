@@ -1,0 +1,685 @@
+{
+  "browser": [
+    {
+      "title": "real HTTP 60s stream reconnects with accepted cursor, deduplicates and cancels on terminal",
+      "status": "passed",
+      "duration_ms": 67382,
+      "attachments": [
+        "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\final-sse-artifacts\\agent-sse-isolation-real-H-6e461-tes-and-cancels-on-terminal-chromium\\test-finished-1.png",
+        "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\final-sse-artifacts\\agent-sse-isolation-real-H-6e461-tes-and-cancels-on-terminal-chromium\\trace.zip"
+      ],
+      "real-http-evidence": [
+        {
+          "key": "long",
+          "run": "run-a",
+          "count": 1,
+          "query_cursor": "0",
+          "header_cursor": null,
+          "started": 1788747839817,
+          "ended": 1788747841018,
+          "frames": 4
+        },
+        {
+          "key": "long",
+          "run": "run-a",
+          "count": 2,
+          "query_cursor": "2",
+          "header_cursor": "2",
+          "started": 1788747843035,
+          "ended": 1788747903549,
+          "frames": 63
+        }
+      ]
+    },
+    {
+      "title": "real browser Run restart and switch cancel old sockets and isolate active projection",
+      "status": "passed",
+      "duration_ms": 6150,
+      "attachments": [
+        "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\final-sse-artifacts\\agent-sse-isolation-real-b-8bb7f-d-isolate-active-projection-chromium\\test-finished-1.png",
+        "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\final-sse-artifacts\\agent-sse-isolation-real-b-8bb7f-d-isolate-active-projection-chromium\\trace.zip"
+      ],
+      "switch-http-evidence": [
+        {
+          "key": "switch-a",
+          "run": "run-a",
+          "count": 1,
+          "query_cursor": "0",
+          "header_cursor": null,
+          "started": 1788747907525,
+          "ended": 1788747907613,
+          "frames": 1
+        },
+        {
+          "key": "switch-a-restart",
+          "run": "run-a",
+          "count": 1,
+          "query_cursor": "0",
+          "header_cursor": null,
+          "started": 1788747907594,
+          "ended": 1788747907684,
+          "frames": 1
+        },
+        {
+          "key": "switch-b",
+          "run": "run-b",
+          "count": 1,
+          "query_cursor": "0",
+          "header_cursor": null,
+          "started": 1788747907664,
+          "ended": 1788747912670,
+          "frames": 2
+        }
+      ]
+    }
+  ],
+  "port": 29999,
+  "full_frontend_gate": {
+    "test_run": 0,
+    "build_only": 0,
+    "type_check": 0
+  },
+  "mutations": {
+    "results": [
+      {
+        "mode": "scope",
+        "exit_code": 1,
+        "failed": 6,
+        "passed": 12,
+        "detected": true
+      },
+      {
+        "mode": "dedupe",
+        "exit_code": 1,
+        "failed": 2,
+        "passed": 16,
+        "detected": true
+      },
+      {
+        "mode": "generation",
+        "exit_code": 1,
+        "failed": 1,
+        "passed": 17,
+        "detected": true
+      },
+      {
+        "mode": "transport",
+        "exit_code": 1,
+        "failed": 2,
+        "passed": 16,
+        "detected": true
+      },
+      {
+        "mode": "terminal",
+        "exit_code": 1,
+        "failed": 1,
+        "passed": 17,
+        "detected": true
+      },
+      {
+        "mode": "control",
+        "exit_code": 1,
+        "failed": 1,
+        "passed": 17,
+        "detected": true
+      }
+    ],
+    "before": {
+      "src/utils/sseStream.ts": "96824987f70bd3b28cd6538d58cc1e5077492f4253f5c52b7929c0345e27de96",
+      "src/features/agent/composables/useAgentRunStream.ts": "414ef42ab50d8ff8b84662053a52fac730a1141527aeb9db2e4ce9a29838c297"
+    },
+    "after": {
+      "src/utils/sseStream.ts": "96824987f70bd3b28cd6538d58cc1e5077492f4253f5c52b7929c0345e27de96",
+      "src/features/agent/composables/useAgentRunStream.ts": "414ef42ab50d8ff8b84662053a52fac730a1141527aeb9db2e4ce9a29838c297"
+    },
+    "source_hashes_unchanged": true,
+    "all_detected": true
+  },
+  "files": [
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\src\\utils\\sseStream.ts",
+      "size": 9257,
+      "sha256": "96824987f70bd3b28cd6538d58cc1e5077492f4253f5c52b7929c0345e27de96"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\src\\utils\\sseStream.spec.ts",
+      "size": 10895,
+      "sha256": "5d958e9ec6d89f97e0cf74422735462a05584710546291439b277cdca29a2c00"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\src\\features\\agent\\composables\\useAgentRunStream.ts",
+      "size": 7357,
+      "sha256": "414ef42ab50d8ff8b84662053a52fac730a1141527aeb9db2e4ce9a29838c297"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\src\\features\\agent\\composables\\useAgentRunStream.isolation.spec.ts",
+      "size": 6515,
+      "sha256": "dc213406c338a8e520eea14d4ac0b2770d4f9c392f3ea0d71fa7589a878bb376"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\src\\features\\agent\\composables\\useAgentRunStream.transport.spec.ts",
+      "size": 6735,
+      "sha256": "8b908b1a4c21a418d53ce3ea3ef7f1d6b781943bb6e3207380fcee3d0cd8da46"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\playwright.sse-audit.config.ts",
+      "size": 967,
+      "sha256": "67107be43b317deece8a122aab933cb523a11084210cbe354f999f852f2cf3da"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\agent-sse-isolation.spec.ts",
+      "size": 2732,
+      "sha256": "71972f91fc2cab05aea994f3892d1cb1d0a446ae766f85d7e988d6b229e6de75"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\scripts\\start-sse-audit-server.mjs",
+      "size": 2892,
+      "sha256": "8542bfa95558bcc068f0e6abc2450657988c2dca354d540790bbc6dc18edbfe2"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\fixtures\\sse-audit.html",
+      "size": 313,
+      "sha256": "6e4ad29ebcd21d8d572b77145c5b7f4e7cd1df0e6439a4444410ba2dec9d6dae"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\fixtures\\sse-audit.ts",
+      "size": 2435,
+      "sha256": "a52405ecf1b1fccd865ee76948d5cac8e7738043d672ee89376304fc9ead71eb"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\browser-results.json",
+      "size": 7621,
+      "sha256": "bb73ee47c5e92d248c8cc8d365c42ccfd0dc68aea6fef195f54e9085a0001899"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\browser-run-final.log",
+      "size": 911,
+      "sha256": "d7974b5d0afa8d86b617e7edefe214d44ef038ccd08ba2c3de46de45b5a60487"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\browser-run-fixed-port.log",
+      "size": 3927,
+      "sha256": "f515e91031a6e9bb161aa82745b5a4fab3edc780a9101c56071cd488a2eb7d17"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\browser-run-switch-fixed.log",
+      "size": 749,
+      "sha256": "6425e3013e88cee22a447e428a37cc7b5c981a1d336c7d61e29ee8730179d8a5"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\browser-run.log",
+      "size": 30157,
+      "sha256": "c15d32b750ef6894201a7e6a9aafca05788b54aae1021a976a89a9ad5362ac2c"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\build-only.log",
+      "size": 13688,
+      "sha256": "46aeaed8fdd2dcb825962d8b1d3bbc55ee451f584c182e236eaafe4ba4130e3e"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\final-source-recheck.json",
+      "size": 545,
+      "sha256": "bcba0f33d4975d50b078680a888406cb2139ec09113c0543a28009ec7682f3a6"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\final-sse-browser.log",
+      "size": 1186,
+      "sha256": "3e6bfa77f50e560d1484e4d8c4c72c296503260ca473551ef994b3b7d2e6fd20"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\final-sse-launch.json",
+      "size": 131,
+      "sha256": "27c0730380b2b79b5659a9f392f2028c8186c6aded9c64f275dc46ad25cf6305"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\final-sse-results.json",
+      "size": 7712,
+      "sha256": "70a8fd13b5e89bfe2510cc837597401e357d9ccdf3ba1b3cf3d03be0028c0dce"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\final-targeted.json",
+      "size": 12100,
+      "sha256": "82f51a2594d26b348e969480167609b948ef20ba674c346395a6cbda35b02387"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\final-targeted.log",
+      "size": 284,
+      "sha256": "aaf8733b97d61da118c61b00f52222621bbf234316ded37dc09759e67bb705f0"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\frontend-gates.json",
+      "size": 63,
+      "sha256": "38ae3456e88aeeb9d6a1bcedc7032d45d36fced344d8ebdd680e5455b201e28b"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\green-targeted.log",
+      "size": 636,
+      "sha256": "d68ab451f98d49ac12a7dce372e2bc8b46ef2c7a29ffb0847999becd3fc94318"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\green-transport.log",
+      "size": 726,
+      "sha256": "51d8a8f741bdaa31751b285e95e664a93ef7f72ed238b1b251cfe5d8e566d1af"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\mutation-attempt-terminal-survived.json",
+      "size": 1302,
+      "sha256": "cec50f229bb205ef8b662196ddf812b1c6ddf2cd95471de29f269cc9b4cb784e"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\mutation-baseline.json",
+      "size": 32675,
+      "sha256": "1f60abb4d62981ddc25fcead95aff8150451b7a430f3716ab8c23ba8c8c34081"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\mutation-baseline.log",
+      "size": 285,
+      "sha256": "7ff4466bcd0eb77c24d472298e4e477a413f0d569ab4b9190c47fbfbe779ac9c"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\mutation-control.json",
+      "size": 8658,
+      "sha256": "5f0054f9311618400d6bc6bbbadb7354aee3195b3a18141683019aae3645e15c"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\mutation-control.log",
+      "size": 284,
+      "sha256": "0415bce854e77c382bd41e1b532d45fc188ad7e8fcb7b14d492f042756abc4ae"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\mutation-dedupe.json",
+      "size": 10151,
+      "sha256": "6df9e4608d6bd796523072e47abff162b30d83a3acb786d6e1544c5bdc0d1377"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\mutation-dedupe.log",
+      "size": 283,
+      "sha256": "46b6190a24cf5bc03071f2914d55c0457edf710df7768e37609d223ce58111c2"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\mutation-generation.json",
+      "size": 9087,
+      "sha256": "401696058b540fd78d75a514d74b4e6138fc9e978d9c3588885e3babc36c8744"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\mutation-generation.log",
+      "size": 287,
+      "sha256": "b657928e4a75642fef130c24f000b6479f767b0ee3751d8e2bf31fff7c2c3492"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\mutation-results.json",
+      "size": 1300,
+      "sha256": "dfe15f5fce3dc4bdead1a0708dcba94b7de1ce90e26e95dc1d754d2ed59764e6"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\mutation-scope.json",
+      "size": 17278,
+      "sha256": "6eee33c3d6e441ce8fe14257f7039dd767ba1f32422e8666033577d3ea73059e"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\mutation-scope.log",
+      "size": 282,
+      "sha256": "2139fa3775dde19dabd042b5097059d88432321f6300fbb08cd51f277ec0f83b"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\mutation-terminal.json",
+      "size": 8731,
+      "sha256": "fcf3783a5ebe3952127251666466c91bbf13bd1a9f52695d2c41084c8c68cbe5"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\mutation-terminal.log",
+      "size": 285,
+      "sha256": "ba501dd97755875ca30f8bc2626d620ad087c050eda7a64fd2948916ffb35e4b"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\mutation-transport.json",
+      "size": 10242,
+      "sha256": "d52f6241707ef7d22d754ed5eb19f98fad8ed3fdce0650e1b25c07c4d9f87630"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\mutation-transport.log",
+      "size": 286,
+      "sha256": "a14d21be464844941b733cba30782b7f30e46042cb2b8f22810f5acbed6eeb6d"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\mutation.config.ts",
+      "size": 1715,
+      "sha256": "ef72635c81be38175224105f40e8f950c3c5ddc9d766f1aa5b980365bc60bd95"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\real-http-evidence-final.json",
+      "size": 382,
+      "sha256": "6d03af0c8a4947fdf9c6864dc53074b07965e807105ae5f66e20703a24d5a17b"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\red-business.log",
+      "size": 13475,
+      "sha256": "cfb85fcdc1d33662f83af469165f0c27ae6580111c42b959626649f7138b2788"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\red.log",
+      "size": 424,
+      "sha256": "a1f130a9f3fdb116a7520933289f3c6d0263d349428dd48be832854423829b76"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\REPORT.md",
+      "size": 8020,
+      "sha256": "a4da05ba48bb26e5a5dfef783567861631b18f610e20012f11814a58579702fb"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\routeAgentFixture.experimental.txt",
+      "size": 2763,
+      "sha256": "ed1679dd37c34897adee5094e401791a40073b7fcdfa217d658a4a6869471946"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\run-browser.mjs",
+      "size": 1082,
+      "sha256": "86c6e6e524002e291aeba373abcb8b451608d293aed506aab34f5d08a30ec3bc"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\run-mutations.mjs",
+      "size": 1708,
+      "sha256": "fb42174aedfd32b2c3ed94f67328db58c560a31399f0649cd13ea20a3c978d55"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\run_mutations.py",
+      "size": 286,
+      "sha256": "d88264a391f63fbbcc9486baae98aeeec9e7058c7f56de142a50c346d69a1a58"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\sseStream.before.txt",
+      "size": 8329,
+      "sha256": "bd2c15f360f4eb09475c6aac9afe019f777f50b46df84e21d6bb279a8f1fd343"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\switch-http-evidence-final.json",
+      "size": 592,
+      "sha256": "c87cc2ee877f95a09ba2dcde29b996ac1100eaf9bf11b77e7e4ddfaed571a2b8"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\test-run.log",
+      "size": 15007,
+      "sha256": "2a0ff78ae0195b4dd7edf1b5a3b350f34cbcfaacc2e72046666f5d03e9c364df"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\type-check.log",
+      "size": 67,
+      "sha256": "32a72444479762f2b458c0b2408cdeabcda2052048e5c45979d80e04509a7f80"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\useAgentRunStream.before.txt",
+      "size": 4838,
+      "sha256": "67d82d59d42343c6a8fa739ae902317944eedd7ac4ad6f577ce0935e8aafc136"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-browser.log",
+      "size": 25403,
+      "sha256": "0c795ecc579b7dbc7dc66bb488e9868aa8a16a1e10083406b261818d50187745"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-launch.json",
+      "size": 127,
+      "sha256": "da55594676edd3bcce08ba17e10228247a9e737218ba6955114d9df4ad317b3d"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-launch.json",
+      "size": 127,
+      "sha256": "66a4dfa511ef4d25a0190df16aaa294c9307097fb850b6e3f913352f526aacc6"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-results.json",
+      "size": 30136,
+      "sha256": "b1246ccf487bbcc36ca87d09e519cdb3ac13e8150cb399fc3cf38267bf3785d3"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination.log",
+      "size": 16491,
+      "sha256": "9fcac21355afe088a9d92daa00d7f5b2905488b36802dfc555ae8f2b8c27a83d"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-results.json",
+      "size": 41288,
+      "sha256": "d603125eefcdc4c85d63234b2c051d68507be3c5824ae9a3c00e7b991bb12dfc"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\browser-artifacts\\.last-run.json",
+      "size": 45,
+      "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\browser-artifacts\\agent-sse-isolation-real-b-8bb7f-d-isolate-active-projection-chromium\\test-finished-1.png",
+      "size": 19064,
+      "sha256": "e86d63fdf508c982800131dec092454d53d2baa1b99ce75d2f20ee72831a1cd3"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\browser-artifacts\\agent-sse-isolation-real-b-8bb7f-d-isolate-active-projection-chromium\\trace.zip",
+      "size": 146096,
+      "sha256": "fa9e3ab0bd03a4c563d4beee0571429abda9350ec0561c33871e1a71b2ac05fc"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\browser-artifacts\\agent-sse-isolation-real-H-6e461-tes-and-cancels-on-terminal-chromium\\test-finished-1.png",
+      "size": 31085,
+      "sha256": "1d18a203478c196c300689116edfd467eaae1a9d5d6a79d2f9b3c430cdf078e2"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\browser-artifacts\\agent-sse-isolation-real-H-6e461-tes-and-cancels-on-terminal-chromium\\trace.zip",
+      "size": 1873381,
+      "sha256": "8da1fb406366fcf585ed29b349354ea7b71c4253df68f7c8859fcc864b9328e6"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\final-sse-artifacts\\.last-run.json",
+      "size": 45,
+      "sha256": "91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\final-sse-artifacts\\agent-sse-isolation-real-b-8bb7f-d-isolate-active-projection-chromium\\test-finished-1.png",
+      "size": 19107,
+      "sha256": "b921b48ecb177fc2a95637300dafa84576e0fbf941d1836f772dd17a18170a6f"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\final-sse-artifacts\\agent-sse-isolation-real-b-8bb7f-d-isolate-active-projection-chromium\\trace.zip",
+      "size": 156724,
+      "sha256": "59e1a939087f17fdd80d6b60fef0394f7b3d54ac3882cb53148f1e2b5046a894"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\final-sse-artifacts\\agent-sse-isolation-real-H-6e461-tes-and-cancels-on-terminal-chromium\\test-finished-1.png",
+      "size": 31825,
+      "sha256": "dae717bf11715848ce4fe47634a5631e9222ecc04e738fe5a6dbd5a4aa82de2a"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\final-sse-artifacts\\agent-sse-isolation-real-H-6e461-tes-and-cancels-on-terminal-chromium\\trace.zip",
+      "size": 1858598,
+      "sha256": "e4ff00059ced8fc3bf5e82391c8b6d0c6008d320f0c9dfd6dcc33aba8acd4fa2"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\.last-run.json",
+      "size": 292,
+      "sha256": "97d92044ebe6eb36ef85c54ce2d2c535c6698a70fdd2b9ee446724e248aeffa1"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-创作工作-11f7e-过最小-ContextRef-进入-Chat-发送请求-chromium\\error-context.md",
+      "size": 13008,
+      "sha256": "2ee710aab3a3b5475816255c32fc1d8e2cdbe36b9dcc822a2807278417e92023"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-创作工作-11f7e-过最小-ContextRef-进入-Chat-发送请求-chromium\\test-failed-1.png",
+      "size": 88369,
+      "sha256": "d90f6cc2ec294f4275c1bbd25ce77c4125de890f683772dae0c3fb322e5cc000"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-创作工作-11f7e-过最小-ContextRef-进入-Chat-发送请求-chromium\\trace.zip",
+      "size": 1405174,
+      "sha256": "d88290a4589a2e3445a6622fc9268a3674e9a472d500916501ad7ef3cb418743"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-创作工作-b4bfe-并切换运行时，浏览器始终投影所选-Run-的状态和事件-chromium\\error-context.md",
+      "size": 14574,
+      "sha256": "b0fc5dbd430ffc17539af4b18b96507f75d468ef5be6277cd6267a39f25d0893"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-创作工作-b4bfe-并切换运行时，浏览器始终投影所选-Run-的状态和事件-chromium\\test-failed-1.png",
+      "size": 88468,
+      "sha256": "f6823a9ae00efc70544ed2c5825ce117396bb0ac0236c414f1b698993f3f651b"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-创作工作-b4bfe-并切换运行时，浏览器始终投影所选-Run-的状态和事件-chromium\\trace.zip",
+      "size": 1100393,
+      "sha256": "b7c4e587d781334a906d71ea6af93a49985d8cbb7f7d401ebe685417992f24aa"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-创作工作台浏览器冒烟-加载项目、工具注册表和持久化会话入口-chromium\\test-finished-1.png",
+      "size": 98381,
+      "sha256": "f1c9ea77b3f5739d54505637d58c7e3d184cf3f7cc734a88e694fb555246e2df"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-创作工作台浏览器冒烟-加载项目、工具注册表和持久化会话入口-chromium\\trace.zip",
+      "size": 1562951,
+      "sha256": "e86131844731eaefed5352e4b2c9a946f9665d484b0a5f7a07f5da5713174eb2"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-创作工作台浏览器冒烟-消息发送后展示真实运行摘要和助手消息-chromium\\error-context.md",
+      "size": 10807,
+      "sha256": "ae8fa3b79e37b0b3ca6c46120ac60d9177da4c9fdfdbdcc1ed1a875f3f20c05d"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-创作工作台浏览器冒烟-消息发送后展示真实运行摘要和助手消息-chromium\\test-failed-1.png",
+      "size": 99667,
+      "sha256": "6021fdeef2ae8351e64d66e9f704724ab52fd41eb72e085a1042347e16056053"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-创作工作台浏览器冒烟-消息发送后展示真实运行摘要和助手消息-chromium\\trace.zip",
+      "size": 1846052,
+      "sha256": "1b9ada53f098b3fe59878059eb2498e4228b7428fe83e9b3c00a26e326ed88c9"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-恢复与--1fda8--CARD-071-五视口布局测量与日志-聊天滚动隔离-chromium\\error-context.md",
+      "size": 13429,
+      "sha256": "e8d36839cb9b11f44ce0caf628b7ef44bd23cbc53d8b9e92d8dea1281f55cace"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-恢复与--1fda8--CARD-071-五视口布局测量与日志-聊天滚动隔离-chromium\\test-failed-1.png",
+      "size": 63297,
+      "sha256": "9b258e1efea9224b66461dc25d95f748a955f94b5cd17cf1bf6cecd5cf62195a"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-恢复与--1fda8--CARD-071-五视口布局测量与日志-聊天滚动隔离-chromium\\trace.zip",
+      "size": 455333,
+      "sha256": "3ea5387143f05aa854d43ea32dc9bf53a651700e525abb4bd057782d19d2d3e2"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-恢复与--eeb99-b-并重放，普通面板不泄露-Provider-私有字段-chromium\\error-context.md",
+      "size": 12412,
+      "sha256": "e7d955809cc21aa0fdd250b30c5e85c096fde8f99686eb0c6782d5f27b07a004"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-恢复与--eeb99-b-并重放，普通面板不泄露-Provider-私有字段-chromium\\test-failed-1.png",
+      "size": 97441,
+      "sha256": "b5d4973b2e89f6d40166ef5bc8323380677829c0aa66f412a96a503a3e289109"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-恢复与--eeb99-b-并重放，普通面板不泄露-Provider-私有字段-chromium\\trace.zip",
+      "size": 1860125,
+      "sha256": "f16a763c31d47cf695992e4571753961c78bc7b0065923fe7a34ec5a5da6ccc6"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-恢复与-DLQ-浏览器交互-恢复就绪运行显示恢复按钮并接收恢复后的可见事件-chromium\\test-finished-1.png",
+      "size": 99242,
+      "sha256": "7f60918715cd924c4d244ec6cec09cd3b40be682b6f2b21fbe399969d6c3655a"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-artifacts\\agent-workspace-Agent-恢复与-DLQ-浏览器交互-恢复就绪运行显示恢复按钮并接收恢复后的可见事件-chromium\\trace.zip",
+      "size": 1207554,
+      "sha256": "ebe803d8500057ea2d63a555c77e849101e49d5a00a9a6e7184bc8e54f11d26f"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\.last-run.json",
+      "size": 194,
+      "sha256": "06e712409f969c26a8b7e459fa90341d9bc45b6fadba9a3507e595d51d1bb046"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作-11f7e-过最小-ContextRef-进入-Chat-发送请求-chromium\\error-context.md",
+      "size": 15738,
+      "sha256": "02cf83bd2631a05019042c62ce72773f7934a1d9a29630443533465272370e13"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作-11f7e-过最小-ContextRef-进入-Chat-发送请求-chromium\\test-failed-1.png",
+      "size": 105167,
+      "sha256": "7289f45c918937267b6e93cd7ec1bf4bdc3c59e6f698a4f8c3a77a87deee6bfc"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作-11f7e-过最小-ContextRef-进入-Chat-发送请求-chromium\\trace.zip",
+      "size": 1542446,
+      "sha256": "70f21ea7ab75755e0f940bd4c221b51a3734c7e52009ce2e2f1911d6dc3873e9"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作-b4bfe-并切换运行时，浏览器始终投影所选-Run-的状态和事件-chromium\\test-finished-1.png",
+      "size": 114921,
+      "sha256": "422e9f44f9ba1b2ec7751c8c9694a3c490fdc278782f3be0b56f5ab8a26caf17"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作-b4bfe-并切换运行时，浏览器始终投影所选-Run-的状态和事件-chromium\\trace.zip",
+      "size": 1019815,
+      "sha256": "5706f33fd9cb993cac9d0dccfb7b78e42cb943e97e3a34953ac4e999130a7976"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作台浏览器冒烟-加载项目、工具注册表和持久化会话入口-chromium\\test-finished-1.png",
+      "size": 98087,
+      "sha256": "d0dc69e2f8003f0fcf5b11f387d8ff606d871a5d2cb4e7edbf84718dd2e8a470"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作台浏览器冒烟-加载项目、工具注册表和持久化会话入口-chromium\\trace.zip",
+      "size": 1184610,
+      "sha256": "9dea6bc78cee2229069f15f58d66a3c47d654c9303644680f31a91908e17cc35"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作台浏览器冒烟-消息发送后展示真实运行摘要和助手消息-chromium\\test-finished-1.png",
+      "size": 103729,
+      "sha256": "7b64c7cbe5090086148de6ba37ce2235c9db5ff789e29a8d1f5dfc873d620700"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作台浏览器冒烟-消息发送后展示真实运行摘要和助手消息-chromium\\trace.zip",
+      "size": 933560,
+      "sha256": "1eb28fb42975f6542224a6e4760b277828535b7f37c09e95c5e1e0dbee83d0dd"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-恢复与--1fda8--CARD-071-五视口布局测量与日志-聊天滚动隔离-chromium\\error-context.md",
+      "size": 13448,
+      "sha256": "b8ace01a361e9cb06cc162762931b3bffe392e7fe4b63ae62887aa878d6cadf7"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-恢复与--1fda8--CARD-071-五视口布局测量与日志-聊天滚动隔离-chromium\\test-failed-1.png",
+      "size": 63371,
+      "sha256": "3dcbb6c5917e84782bd59b147304875501953b33a88666219cae43435aa9c186"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-恢复与--1fda8--CARD-071-五视口布局测量与日志-聊天滚动隔离-chromium\\trace.zip",
+      "size": 449045,
+      "sha256": "4e7a97c5bfe77792f75d402761d279c6afbe9ede8fc702f0804e0d051713c8c3"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-恢复与--eeb99-b-并重放，普通面板不泄露-Provider-私有字段-chromium\\error-context.md",
+      "size": 15350,
+      "sha256": "5049601ba939acba4647ce611e0c1c8df2486ceaf6f5f32c1e3f7a203b185e7c"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-恢复与--eeb99-b-并重放，普通面板不泄露-Provider-私有字段-chromium\\test-failed-1.png",
+      "size": 82599,
+      "sha256": "3fefabfdd18332c01839a0716751fc1d36467e209438cb1d62c850f7f88167eb"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-恢复与--eeb99-b-并重放，普通面板不泄露-Provider-私有字段-chromium\\trace.zip",
+      "size": 1329297,
+      "sha256": "cd51db81d61f060e910ea263d025d9d713d92ae53f96023fead9f5e8071d9981"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-恢复与-DLQ-浏览器交互-恢复就绪运行显示恢复按钮并接收恢复后的可见事件-chromium\\test-finished-1.png",
+      "size": 105845,
+      "sha256": "a7fd68790deaf818d6a31d12af54851e33eb31758f7102858ba33349ee8d171b"
+    },
+    {
+      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-恢复与-DLQ-浏览器交互-恢复就绪运行显示恢复按钮并接收恢复后的可见事件-chromium\\trace.zip",
+      "size": 1273166,
+      "sha256": "ad649e37afb0c1ab9d5f78fd2e33f1a99f24422106bbc11726a42e1335d10e7f"
+    }
+  ]
+}

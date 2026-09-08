@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import json
 import socket
-from typing import Any
+from typing import Any, Mapping
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,13 +26,197 @@ from .context_refs import ContextRefValidationError, project_plan_arguments, res
 from .schemas import AgentContextRef
 from .jobs import AgentJobConflict, AgentJobService
 from .orchestrator import AgentOrchestrator
-from .registry import DEFAULT_TOOL_REGISTRY, ToolExecutionCancelled, bind_run_tool_registry
+from .registry import DEFAULT_TOOL_REGISTRY, ToolExecutionCancelled, _validate_schema, bind_run_tool_registry
 from .runner import get_cancel_event, launch_visible_response, release_cancel_event
 from .tool_adapters import execute_read_tool
+from .dependency_state import classify_dependencies
 from .tool_result_digest import build_tool_result_digests
+from .run_context_integrity import RunContextIntegrityError, read_verified_run_context
 
 
 _EXECUTION_TASKS: dict[str, asyncio.Task[None]] = {}
+
+
+class ApprovalRunContractError(AgentConflict):
+    code = "run_contract_mismatch"
+
+    def __init__(self, message: str, *, field: str):
+        super().__init__(message)
+        self.field = field
+        self.detail = {"code": self.code, "field": field, "message": message}
+
+def _approval_contract_mismatch(field: str, expected: Any, actual: Any) -> ApprovalRunContractError:
+    return ApprovalRunContractError(f"approval Run contract mismatch for {field}", field=field)
+
+async def validate_approval_run_contract(
+    *,
+    session=None,
+    registry,
+    run,
+    approval,
+    snapshot,
+    capability,
+    step,
+    provider_release=None,
+    catalog_release=None,
+):
+    """Validate structural relations; the API also applies context and content-integrity gates."""
+    context = run.context_json if isinstance(run.context_json, Mapping) else {}
+    if snapshot is None:
+        # These keys are emitted by AgentRuntimeService.create_run. Presence,
+        # even with a damaged null value, prevents a modern Run becoming legacy.
+        modern_markers = (
+            "catalog_release", "capability_resolution", "catalog_release_id",
+            "capability_resolution_id", "relational_catalog_release_id",
+            "relational_capability_snapshot_id", "relational_capability_snapshot_key",
+            "relational_capability_snapshot_digest", "relational_context_snapshot_id",
+            "relational_context_snapshot_key",
+        )
+        if any(marker in context for marker in modern_markers):
+            raise _approval_contract_mismatch("snapshot", "relational Run snapshot", None)
+        return None
+    if capability is None:
+        raise _approval_contract_mismatch("capability", "selected relational capability", None)
+    if catalog_release is None:
+        raise _approval_contract_mismatch("catalog_release_row", "relational catalog release", None)
+    checks = [
+        ("snapshot.run_id", snapshot.run_id, run.id),
+        ("snapshot.user_id", snapshot.user_id, run.user_id),
+        ("snapshot.project_id", snapshot.project_id, run.project_id),
+        ("approval.run_id", approval.run_id, run.id),
+        ("approval.correlation_id", approval.correlation_id, run.correlation_id),
+        ("approval.transaction_id", approval.transaction_id, run.transaction_id),
+        ("approval.user_id", approval.user_id, run.user_id),
+        ("approval.project_id", approval.project_id, run.project_id),
+        ("approval.step_id", approval.step_id, step.id if step else None),
+        ("approval.tool_name", approval.tool_name, capability.capability_id),
+    ]
+    if step is not None:
+        checks += [
+            ("step.run_id", step.run_id, run.id),
+            ("step.user_id", step.user_id, run.user_id),
+            ("step.tool_name", step.tool_name, approval.tool_name),
+        ]
+    for field, actual, expected in checks:
+        if actual != expected:
+            raise _approval_contract_mismatch(field, expected, actual)
+
+    release = context.get("catalog_release")
+    resolution = context.get("capability_resolution")
+    if not isinstance(release, Mapping):
+        raise _approval_contract_mismatch("catalog_release", "object", release)
+    if not isinstance(resolution, Mapping):
+        raise _approval_contract_mismatch("capability_resolution", "object", resolution)
+    required_context = {
+        "relational_capability_snapshot_id": snapshot.id,
+        "relational_capability_snapshot_key": snapshot.snapshot_id,
+        "relational_catalog_release_id": snapshot.catalog_release_id,
+    }
+    for field, expected in required_context.items():
+        actual = context.get(field)
+        if actual != expected:
+            raise _approval_contract_mismatch(field, expected, actual)
+    identity_checks = [
+        ("catalog_release.id", catalog_release.id, context.get("relational_catalog_release_id")),
+        ("catalog_release.release_id", catalog_release.release_id, release.get("release_id")),
+        ("catalog_release.schema_version", catalog_release.schema_version, release.get("schema_version")),
+        ("catalog_release.generation", catalog_release.generation, release.get("generation")),
+        ("catalog_release.digest", catalog_release.digest, release.get("digest")),
+        ("catalog_release.manifest_json", catalog_release.manifest_json, release),
+        ("snapshot.generation", snapshot.generation, catalog_release.generation),
+        ("snapshot.resolver_schema_version", snapshot.resolver_schema_version, resolution.get("resolver_schema_version")),
+        ("snapshot.release_digest", snapshot.release_digest, release.get("digest")),
+        ("snapshot.digest", snapshot.digest, context.get("relational_capability_snapshot_digest")),
+        ("resolution.release_id", resolution.get("release_id"), release.get("release_id")),
+        ("resolution.release_digest", resolution.get("release_digest"), release.get("digest")),
+        ("resolution.generation", resolution.get("generation"), release.get("generation")),
+        ("snapshot.resolver_snapshot_id", snapshot.resolved_scope_json.get("resolver_snapshot_id"), resolution.get("snapshot_id")),
+    ]
+    for field, actual, expected in identity_checks:
+        if actual is None or expected is None or actual != expected:
+            raise _approval_contract_mismatch(field, expected, actual)
+
+    tool = next(
+        (item for item in release.get("tools", [])
+         if isinstance(item, Mapping) and item.get("name") == capability.capability_id),
+        None,
+    )
+    if tool is None:
+        raise _approval_contract_mismatch("catalog.tool", capability.capability_id, None)
+    for field, actual, expected in [
+        ("handler_identity", capability.handler_identity, tool.get("handler_identity")),
+        ("schema", capability.input_schema_json, tool.get("input_schema")),
+        ("context_bindings", capability.context_bindings_json, tool.get("context_bindings")),
+    ]:
+        if actual != expected:
+            raise _approval_contract_mismatch(field, expected, actual)
+    expected_provider_id = tool.get("provider_id")
+    expected_provider_version = tool.get("provider_version")
+    if provider_release is None:
+        # Some built-in legacy handlers are intentionally provider-less. They
+        # remain valid only when the frozen tool also declares no Provider.
+        if expected_provider_id is not None or expected_provider_version is not None:
+            raise _approval_contract_mismatch(
+                "provider_release", "relational Provider release", None
+            )
+        if capability.provider_release_id is not None:
+            raise _approval_contract_mismatch(
+                "capability.provider_release_id", None, capability.provider_release_id
+            )
+    else:
+        provider = next(
+            (item for item in release.get("providers", [])
+             if isinstance(item, Mapping)
+             and item.get("provider_id") == provider_release.provider_id),
+            None,
+        )
+        if provider is None:
+            raise _approval_contract_mismatch("provider", provider_release.provider_id, None)
+        for field, actual, expected in [
+            ("provider_release.id", provider_release.id, capability.provider_release_id),
+            ("provider.catalog_release_id", provider_release.catalog_release_id, snapshot.catalog_release_id),
+            ("provider.provider_id", provider_release.provider_id, expected_provider_id),
+            ("provider.provider_version", provider_release.provider_version, expected_provider_version),
+            ("provider.manifest_provider_version", provider_release.provider_version, provider.get("provider_version")),
+            ("provider.status", provider_release.status, provider.get("status")),
+            ("provider.tools", provider_release.tools_json, provider.get("tools")),
+        ]:
+            if actual != expected:
+                raise _approval_contract_mismatch(field, expected, actual)
+    live_identity = registry.get_handler_identity(capability.capability_id)
+    if live_identity != capability.handler_identity:
+        raise _approval_contract_mismatch("runtime.handler_identity", capability.handler_identity, live_identity)
+    manifest = registry.get(capability.capability_id)
+    if manifest.input_schema != capability.input_schema_json:
+        raise _approval_contract_mismatch("runtime.schema", capability.input_schema_json, manifest.input_schema)
+    bindings = capability.context_bindings_json or []
+    raw_bound_context = context.get("context_bindings")
+    bound_context = raw_bound_context if isinstance(raw_bound_context, Mapping) else {}
+    for binding in bindings:
+        if not isinstance(binding, Mapping):
+            raise _approval_contract_mismatch("context_binding", binding, bound_context)
+        source = binding.get("source")
+        argument_name = binding.get("argument_name")
+        if not source or not argument_name:
+            raise _approval_contract_mismatch("context_binding", binding, bound_context)
+        # Match ResolvedAgentContext.project_arguments: an absent optional
+        # selection may be supplied explicitly; a present selection is immutable.
+        if source not in bound_context:
+            continue
+        if argument_name not in (approval.request_json or {}):
+            raise _approval_contract_mismatch(f"context_binding.{argument_name}", "approval argument", None)
+        if approval.request_json[argument_name] != bound_context[source]:
+            raise _approval_contract_mismatch(
+                f"context_binding.{argument_name}",
+                bound_context[source],
+                approval.request_json[argument_name],
+            )
+    payload = {**dict(approval.request_json or {}), "_approval_id": approval.id}
+    try:
+        _validate_schema(payload, manifest.input_schema)
+    except Exception as exc:
+        raise _approval_contract_mismatch("approval.input_schema", manifest.input_schema, payload) from exc
+    return snapshot
 
 
 def _runtime_settings() -> Settings:
@@ -123,24 +308,13 @@ def _plan_revision_json(
 
 
 async def _relational_context_snapshot(
-    *,
-    context_service: AgentContextService,
-    run: Any,
-    context: dict[str, Any],
+    *, context_service: AgentContextService, run: Any, context: dict[str, Any],
+    require_snapshot: bool = False,
 ) -> Any | None:
-    """Load and verify a new-Run ContextSnapshot without breaking legacy JSON recovery."""
-    snapshot_key = str(context.get("relational_context_snapshot_key") or "").strip()
-    if not snapshot_key:
-        return None
-    snapshot = await context_service.get_run_snapshot(run_id=run.id, snapshot_id=snapshot_key)
-    if snapshot is None or snapshot.session_id != run.session_id or snapshot.user_id != run.user_id:
-        return None
-    try:
-        await context_service.verify_snapshot(snapshot)
-    except AgentContextIntegrityError:
-        # The legacy executor deliberately retains its existing JSON-only
-        # recovery behavior when a pre-P1-A Run has no usable relational fact.
-        return None
+    """Modern context failures stop execution; only a true legacy Run has no fact."""
+    snapshot, _ = await read_verified_run_context(
+        context_service=context_service, run=run, require_snapshot=require_snapshot,
+    )
     return snapshot
 
 
@@ -225,6 +399,8 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
     if run.status in TERMINAL_RUN_STATUSES or run.cancel_requested_at is not None:
         return {"status": "cancelled_or_terminal"}
 
+    if not isinstance(run.context_json, Mapping):
+        raise RunContextIntegrityError("context_refs")
     context = _dict(run.context_json)
     run_registry = bind_run_tool_registry(DEFAULT_TOOL_REGISTRY, context)
     goal = str(context.get("goal") or "").strip()
@@ -276,12 +452,13 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
         context_facts = AgentContextService(session)
         plan_facts = AgentPlanService(session)
         run_session = await runtime.get_session(run.session_id, run.user_id)
+        relational_snapshot = await execution_facts.get_run_snapshot(run.id)
         relational_context_snapshot = await _relational_context_snapshot(
             context_service=context_facts,
             run=run,
             context=context,
+            require_snapshot=relational_snapshot is not None,
         )
-        relational_snapshot = await execution_facts.get_run_snapshot(run.id)
         resolver_fence_context = context
         if relational_snapshot is not None:
             resolver_fence_context = {
@@ -294,7 +471,7 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
             }
 
         try:
-            persisted_refs = [AgentContextRef.model_validate(item) for item in raw_refs]
+            persisted_refs = [AgentContextRef.model_validate(item, strict=True) for item in raw_refs]
         except Exception as exc:
             raise ContextRefValidationError("persisted Agent context references are invalid") from exc
         resolved_context = await resolve_agent_context_refs(
@@ -547,7 +724,6 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
         results: list[dict[str, Any]] = list(existing_results) if is_replan else []
         approvals = []
         failed_steps: list[dict[str, Any]] = []
-        completed_step_orders: set[int] = set()
         for relative_index, step in enumerate(plan.steps, start=1):
             index = replan_offset + relative_index
             current_dependencies = [replan_offset + int(value) for value in step.depends_on]
@@ -564,12 +740,36 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                     "goal": goal,
                     "context_refs": resolved_context.canonical_refs(),
                     "tool_arguments": step_arguments,
+                    "approval_source_job_id": job.id,
                 },
             )
             action_id = f"step:{checkpoint.id}"
             result_ref = action_id
-            missing_dependencies = [dependency for dependency in current_dependencies if dependency not in completed_step_orders]
-            if missing_dependencies:
+            dependency_states = {
+                item.step_order: item.status
+                for item in await runtime.list_steps(run_id=run.id, user_id=run.user_id)
+            }
+            dependency = classify_dependencies(current_dependencies, dependency_states)
+            if dependency.state == "waiting":
+                # A write awaiting approval has not failed. Keep the original
+                # checkpoint/arguments pending for durable continuation.
+                await runtime.append_event(
+                    run_id=run.id, user_id=run.user_id, event_type="plan_step_blocked",
+                    summary=f"{step.tool_name} 等待前置步骤完成",
+                    data={"tool_name": step.tool_name, "step": index,
+                          "reason": "dependency_waiting", "dependencies": list(dependency.unresolved)},
+                )
+                continue
+            if dependency.state == "cancelled":
+                await runtime.cancel_step(step_id=checkpoint.id, user_id=run.user_id)
+                await runtime.append_event(
+                    run_id=run.id, user_id=run.user_id, event_type="plan_step_cancelled",
+                    summary=f"{step.tool_name} 的前置步骤已取消",
+                    data={"tool_name": step.tool_name, "step": index,
+                          "reason": "dependency_cancelled", "dependencies": list(dependency.terminal)},
+                )
+                continue
+            if dependency.state == "failed":
                 await runtime.fail_step(
                     step_id=checkpoint.id,
                     user_id=run.user_id,
@@ -589,7 +789,6 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
             if isinstance(stored_arguments, dict):
                 step_arguments = dict(stored_arguments)
             if checkpoint.status == "completed":
-                completed_step_orders.add(index)
                 results.append({"tool_name": step.tool_name, "result": _dict(checkpoint.output_json)})
                 await runtime.append_event(
                     run_id=run.id,
@@ -700,7 +899,6 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
                         lease_generation=step_generation,
                         output=result_payload,
                     )
-                completed_step_orders.add(index)
                 await runtime.append_event(
                     run_id=run.id,
                     user_id=run.user_id,
@@ -1040,6 +1238,13 @@ async def execute_agent_execution_job(job: AgentJob, session: AsyncSession) -> d
             planner_fallback_reason=decision.fallback_reason,
         )
         if approvals:
+            # Written before the source ACK, after every frozen checkpoint has
+            # been created. Recovery requires this precise source generation.
+            next_context["approval_wait_handoff"] = {
+                "job_id": job.id, "lease_generation": int(job.lease_generation or 0),
+                "plan_revision_id": next_context.get("relational_plan_revision_id"),
+                "step_orders": [item.step_order for item in await runtime.list_steps(run_id=run.id, user_id=run.user_id)],
+            }
             await runtime.set_run_context(run_id=run.id, user_id=run.user_id, context=next_context)
             await runtime.publish_progress(
                 run_id=run.id,

@@ -17,7 +17,9 @@ const visibleCommands = computed(() =>
     .slice()
     .sort((left, right) => {
       const timeOrder = left.requested_at.localeCompare(right.requested_at)
-      return timeOrder || left.id.localeCompare(right.id)
+      // The API uses durable request-event sequence for timestamp ties.
+      // Keep its stable order; random UUIDs are not a chronology signal.
+      return timeOrder
     }),
 )
 

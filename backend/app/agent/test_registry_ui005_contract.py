@@ -6,7 +6,7 @@ import pytest
 
 from app.agent.catalog_release import ToolRelease
 from app.agent.policy import requires_confirmation
-from app.agent.registry import AgentToolRegistry, ToolContractViolation, build_tool_manifest, get_default_tool_registry_snapshot
+from app.agent.registry import DEFAULT_TOOL_REGISTRY, AgentToolRegistry, ToolContractViolation, build_tool_manifest, get_default_tool_registry_snapshot
 from app.agent.schemas import AgentRiskLevel, AgentToolAccess, AgentToolCatalogItem, ToolManifest
 
 
@@ -201,3 +201,10 @@ def test_catalog_release_preserves_ui005_metadata_and_derives_legacy_defaults():
     legacy = ToolRelease.from_contract(legacy_contract)
     assert legacy.access_level == "manage"
     assert legacy.allowed_project_roles == ("owner", "admin")
+
+
+def test_chapter_version_accept_manifest_allows_audit_actor_identity():
+    DEFAULT_TOOL_REGISTRY.validate_planned_input(
+        "chapter.version.accept",
+        {"_approval_id": "approval-1", "artifact_id": "artifact-1", "actor_user_id": 1},
+    )

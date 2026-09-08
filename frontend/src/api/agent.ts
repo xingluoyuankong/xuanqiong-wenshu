@@ -315,6 +315,21 @@ export interface AgentTimelineEvent extends AgentEvent {
   run_status: string
   tool_name?: string | null
 }
+export type AgentJobTerminalStatus = 'completed' | 'succeeded' | 'failed' | 'cancelled' | 'dead_letter'
+export type AgentJobRecoveryStatus = 'not_recorded' | 'continuation_completed' | 'failure_reconciled'
+
+/**
+ * Public Job result projection. The API deliberately exposes only these
+ * self-bound correlation/result flags; private payload and execution output
+ * fields are not part of this client model.
+ */
+export interface AgentJobResult {
+  visible_response_job_id?: string
+  continuation_completed?: boolean
+  pending_approval?: boolean
+  continuation_acknowledged?: boolean
+}
+
 export interface AgentJob {
   id: string
   run_id: string
@@ -325,7 +340,7 @@ export interface AgentJob {
   status: string
   idempotency_key: string
   payload_json: Record<string, unknown>
-  result_json: Record<string, unknown>
+  result_json: AgentJobResult
   error_type?: string | null
   error_detail?: string | null
   attempt_count: number
@@ -338,6 +353,21 @@ export interface AgentJob {
   cancel_reason?: string | null
   created_at: string
   started_at?: string | null
+  finished_at?: string | null
+  terminal_status?: AgentJobTerminalStatus | null
+  recovery_status?: AgentJobRecoveryStatus
+}
+
+export interface AgentRunJobProjection {
+  id: string
+  kind: string
+  status: string
+  attempt_count: number
+  max_attempts: number
+  error_type?: string | null
+  terminal_status?: AgentJobTerminalStatus | null
+  recovery_status?: AgentJobRecoveryStatus
+  result_json: AgentJobResult
   finished_at?: string | null
 }
 export interface AgentAuditRecord {
@@ -696,14 +726,7 @@ export interface AgentStateProjection {
     acceptance_approval_id?: string | null
   }>
   accepted_version_ids: number[]
-  jobs: Array<{
-    id: string
-    kind: string
-    status: string
-    attempt_count: number
-    max_attempts: number
-    error_type?: string | null
-  }>
+  jobs: AgentRunJobProjection[]
   commands?: AgentRunCommandSummary[]
   task_runtime_refs: Array<{
     task_id: string

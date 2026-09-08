@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Optional
 from uuid import uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, JSON, String, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, JSON, String, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db.base import Base
@@ -42,7 +42,7 @@ class ArtifactLineage(Base):
     operation: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
     input_digest: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     output_digest: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
-    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default=text("('{}')"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     run: Mapped[Any] = relationship("AgentRun", foreign_keys=[run_id])

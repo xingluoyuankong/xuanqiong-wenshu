@@ -1057,9 +1057,36 @@ test.describe('Agent 恢复与 DLQ 浏览器交互', () => {
       await expect(page.getByTestId('agent-workspace')).toBeVisible()
       await expect(page.getByTestId('agent-project-select')).toContainText('E2E 星河旧梦')
       await expect(page.getByTestId('agent-message-list')).toBeVisible()
+      if (viewport.width <= 650) {
+        // Persisted desktop dual-open state normalizes to a single left drawer.
+        // Close it first so this branch tests an actual user-triggered opening.
+        if (await page.getByTestId('agent-left-panel').getAttribute('data-panel-open') === 'true') {
+          await page.getByTestId('agent-side-panel-close-left').click()
+        }
+      }
       await openAgentPanel(page, 'left', 'project')
+      if (viewport.width <= 650) {
+        await expect(page.getByTestId('agent-side-panel-close-left')).toBeFocused()
+        await expect(page.getByTestId('agent-right-panel')).toBeHidden()
+        // A non-modal drawer leaves the opposite rail reachable without a trap.
+        await page.getByTestId('agent-rail-panel-right-log').focus()
+        await expect(page.getByTestId('agent-rail-panel-right-log')).toBeFocused()
+      }
       await openAgentPanel(page, 'right', 'log')
       await expect(page.getByTestId('agent-runtime-log-viewport')).toBeVisible()
+      if (viewport.width <= 650) {
+        await expect(page.getByTestId('agent-left-panel')).toBeHidden()
+        await expect(page.getByTestId('agent-side-panel-close-right')).toBeFocused()
+        await page.keyboard.press('Escape')
+        await expect(page.getByTestId('agent-right-panel')).toBeHidden()
+        await expect(page.getByTestId('agent-rail-panel-right-log')).toBeFocused()
+        await openAgentPanel(page, 'right', 'log')
+        await page.getByTestId('agent-side-panel-close-right').click()
+        await expect(page.getByTestId('agent-rail-panel-right-log')).toBeFocused()
+        await openAgentPanel(page, 'right', 'log')
+        await expect(page.locator('.agent-side-panel.agent-panel-open')).toHaveCount(1)
+        await expect(page.getByTestId('agent-runtime-log-viewport')).toBeVisible()
+      }
 
       const measurement = await page.evaluate(() => {
         const query = (selector: string) => document.querySelector(selector)
@@ -1146,7 +1173,13 @@ test.describe('Agent 恢复与 DLQ 浏览器交互', () => {
       const layoutColumns = String((measurement.layoutStyle as { gridTemplateColumns: string }).gridTemplateColumns)
         .trim()
         .split(/\s+/)
-      if (viewport.width <= 960) {
+      if (viewport.width <= 650) {
+        expect((measurement.sidebar as { width: number }).width).toBe(0)
+        expect((measurement.activity as { width: number }).width).toBeGreaterThan(0)
+        await expect(page.getByTestId('agent-left-panel')).toHaveAttribute('data-panel-open', 'false')
+        await expect(page.getByTestId('agent-right-panel')).toHaveAttribute('data-panel-open', 'true')
+        await expect(page.locator('.agent-side-panel.agent-panel-open')).toHaveCount(1)
+      } else if (viewport.width <= 960) {
         expect((measurement.sidebar as { width: number }).width).toBeGreaterThan(0)
         expect((measurement.activity as { width: number }).width).toBeGreaterThan(0)
       } else {

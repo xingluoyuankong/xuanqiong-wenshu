@@ -32,6 +32,7 @@ async def test_worker_cli_once_mode_exits_cleanly(tmp_path):
     import sys
     from sqlalchemy.ext.asyncio import create_async_engine
     from sqlalchemy.pool import NullPool
+    import app.models  # register every ORM table before creating the disposable schema
     from app.db.base import Base
 
     db_path = tmp_path / 'worker-cli.sqlite'

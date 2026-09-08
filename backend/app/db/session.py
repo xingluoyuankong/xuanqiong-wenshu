@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 
 from ..core.config import settings
+from .mysql_timezone import install_mysql_utc_policy
 
 # 根据不同数据库驱动调整连接池参数，确保在多数据库环境下表现稳定
 engine_kwargs = {"echo": settings.sqlalchemy_echo}
@@ -37,6 +38,7 @@ else:
     )
 
 engine = create_async_engine(settings.sqlalchemy_database_uri, **engine_kwargs)
+install_mysql_utc_policy(engine)
 
 # SQLite 启用 WAL + 直接PRAGMA设置，支持并发读写
 if settings.is_sqlite_backend:

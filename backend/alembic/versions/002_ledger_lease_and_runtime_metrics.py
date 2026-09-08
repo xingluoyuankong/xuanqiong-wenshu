@@ -118,11 +118,16 @@ def _marker_state() -> bool | None:
 
 
 def _record_marker(lease_preexisting: bool) -> None:
-    op.create_table(
-        _MIGRATION_MARKER,
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("lease_preexisting", sa.Integer(), nullable=False),
-    )
+    if _marker_state() is not None:
+        return
+    # MySQL commits CREATE TABLE even when a later revision stamp fails.
+    # An empty persisted marker must be reused, not recreated or deleted.
+    if not _has_table(_MIGRATION_MARKER):
+        op.create_table(
+            _MIGRATION_MARKER,
+            sa.Column("id", sa.Integer(), primary_key=True),
+            sa.Column("lease_preexisting", sa.Integer(), nullable=False),
+        )
     op.get_bind().execute(
         sa.text(f"INSERT INTO {_MIGRATION_MARKER} (id, lease_preexisting) VALUES (1, :value)"),
         {"value": int(lease_preexisting)},

@@ -10,14 +10,18 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from sqlalchemy import select
+from datetime import timedelta
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from .continuation import AgentContinuationService
+from .continuation_scan import ContinuationScanCursor
+from .continuation_worker import handle_agent_continuation_job
 from .execution import execute_agent_execution_job
 from .jobs import AgentJobService
 from .runner import _run_visible_response
 from ..services.agent_runtime import AgentRuntimeService
-from ..models.agent import AgentJob, AgentRun
+from ..models.agent import AgentJob, AgentRun, AgentRunStep
 
 AgentJobHandler = Callable[[AgentJob, AsyncSession], Awaitable[dict[str, Any]]]
 
@@ -110,6 +114,8 @@ class AgentWorker:
         self.session_factory = session_factory
         self.worker_id = owner
         self.handlers = dict(handlers)
+        self._activation_scan_cursor = ContinuationScanCursor()
+        self._failure_scan_cursor = ContinuationScanCursor()
         self.lease_seconds = max(1, min(int(lease_seconds), 3600))
         self.poll_interval = max(0.01, min(float(poll_interval), 60.0))
 
@@ -125,6 +131,17 @@ class AgentWorker:
                         lease_generation=lease_generation,
                         lease_seconds=self.lease_seconds,
                     )
+                    job=await session.get(AgentJob,job_id)
+                    if job is not None and job.kind=='agent_continuation':
+                        owner=f'continuation:{job_id}:{lease_generation}'[:128]
+                        expires=AgentRuntimeService._now()+timedelta(seconds=120)
+                        changed=await session.execute(update(AgentRun).where(AgentRun.id==job.run_id,AgentRun.user_id==user_id,
+                            AgentRun.lease_owner==owner,AgentRun.status=='running',AgentRun.cancel_requested_at.is_(None))
+                            .values(lease_expires_at=expires))
+                        if changed.rowcount==1:
+                            await session.execute(update(AgentRunStep).where(AgentRunStep.run_id==job.run_id,
+                                AgentRunStep.status=='running',AgentRunStep.lease_owner==owner).values(lease_expires_at=expires))
+                            await session.commit()
             except Exception:
                 return
 
@@ -135,28 +152,46 @@ class AgentWorker:
             service = AgentJobService(session)
             if await service.reconcile_completed_handoff_jobs():
                 return True
+            if "agent_continuation" in self.handlers:
+                from .continuation_failure_recovery import recover_failed_continuations
+                if await recover_failed_continuations(session, scan_cursor=self._failure_scan_cursor):
+                    return True
+                await AgentContinuationService(session).activate_ready(quarantine_invalid=True, scan_cursor=self._activation_scan_cursor)
             job = await service.claim_next_job(lease_owner=self.worker_id, lease_seconds=self.lease_seconds)
             if job is None:
                 return False
             job_generation = int(job.lease_generation or 0)
-            handler = self.handlers.get(job.kind)
+            job_id, job_user_id, job_kind = job.id, job.user_id, job.kind
+            handler = self.handlers.get(job_kind)
             if handler is None:
                 await service.fail(
-                    job_id=job.id,
-                    user_id=job.user_id,
+                    job_id=job_id,
+                    user_id=job_user_id,
                     lease_owner=self.worker_id,
                     lease_generation=job_generation,
                     error_type='UnknownJobKind',
-                    detail=f'no handler registered for {job.kind}',
+                    detail=f'no handler registered for {job_kind}',
                     retryable=False,
                 )
                 return True
-            heartbeat_task = asyncio.create_task(self._heartbeat(job.id, job.user_id, job_generation))
+            heartbeat_task = asyncio.create_task(self._heartbeat(job_id, job_user_id, job_generation))
             try:
                 result = await handler(job, session)
+                if job_kind == "agent_continuation" and result.get("continuation_failed"):
+                    persisted = await service.get_job(job_id=job_id, user_id=job_user_id)
+                    expected_status = result.get("continuation_job_status")
+                    if expected_status not in {"queued", "failed", "dead_letter"} or persisted.status != expected_status:
+                        raise RuntimeError("continuation failure returned without durable acknowledgement")
+                    return True
+                if job_kind == "agent_continuation" and (result.get("continuation_acknowledged") or result.get("continuation_deferred")):
+                    persisted = await service.get_job(job_id=job_id, user_id=job_user_id)
+                    expected_status = "succeeded" if result.get("continuation_acknowledged") else "queued"
+                    if persisted.status != expected_status:
+                        raise RuntimeError("continuation handler returned without durable acknowledgement")
+                    return True
                 await service.complete(
-                    job_id=job.id,
-                    user_id=job.user_id,
+                    job_id=job_id,
+                    user_id=job_user_id,
                     lease_owner=self.worker_id,
                     lease_generation=job_generation,
                     result=result,
@@ -164,8 +199,8 @@ class AgentWorker:
             except asyncio.CancelledError:
                 try:
                     await service.fail(
-                        job_id=job.id,
-                        user_id=job.user_id,
+                        job_id=job_id,
+                        user_id=job_user_id,
                         lease_owner=self.worker_id,
                         lease_generation=job_generation,
                         error_type='WorkerCancelled',
@@ -177,8 +212,8 @@ class AgentWorker:
                 raise
             except Exception as exc:
                 await service.fail(
-                    job_id=job.id,
-                    user_id=job.user_id,
+                    job_id=job_id,
+                    user_id=job_user_id,
                     lease_owner=self.worker_id,
                     lease_generation=job_generation,
                     error_type=type(exc).__name__,

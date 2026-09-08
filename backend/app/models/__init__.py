@@ -87,7 +87,12 @@ from .faction import Faction, FactionRelationship, FactionMember, FactionRelatio
 # 可恢复任务运行时模型（必须在 Base.metadata.create_all 前导入）
 from .task_runtime import TaskRuntime, TaskRuntimeEvent
 
+# Migration metadata must be complete without importing HTTP routers first.
+from .research import ProjectResearchConfig, ResearchArtifact
+
 __all__ = [
+    "ProjectResearchConfig",
+    "ResearchArtifact",
     # 基础模型
     "AdminSetting",
     "LLMConfig",

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.agent import AgentApproval, AgentArtifactRef, AgentJob, AgentRun, AgentRunCommand, AgentRunStep
 from ..models.task_runtime import TaskRuntime
+from .command_ordering import command_order_by
 from ..services.agent_runtime import AgentRuntimeService, allowed_commands_for_run, command_projection
 
 _TERMINAL = {"completed", "succeeded", "failed", "cancelled", "dead_letter"}
@@ -60,7 +61,7 @@ class AgentStateProjectionService:
                 AgentApproval.run_id == run.id,
                 AgentApproval.user_id == source_user_id,
                 AgentApproval.correlation_id == correlation_id,
-            ).order_by(AgentApproval.decision_at.asc().nullsfirst(), AgentApproval.id.asc())
+            ).order_by(AgentApproval.decision_at.is_(None).desc(), AgentApproval.decision_at.asc(), AgentApproval.id.asc())
         )).scalars().all())
         artifacts = list((await self.session.execute(
             select(AgentArtifactRef).where(
@@ -81,7 +82,7 @@ class AgentStateProjectionService:
                 AgentRunCommand.run_id == run.id,
                 AgentRunCommand.user_id == source_user_id,
                 AgentRunCommand.correlation_id == correlation_id,
-            ).order_by(AgentRunCommand.requested_at.asc(), AgentRunCommand.id.asc())
+            ).order_by(*command_order_by())
         )).scalars().all())
         tasks = list((await self.session.execute(
             select(TaskRuntime).where(

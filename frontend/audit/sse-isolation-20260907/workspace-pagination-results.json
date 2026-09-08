@@ -1,0 +1,516 @@
+{
+  "config": {
+    "argv": [
+      "D:\\download\\node\\node.exe",
+      "D:\\小说写作\\xuanqiong-wenshu\\frontend\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "-c",
+      "playwright.sse-audit.config.ts",
+      "e2e/agent-workspace.spec.ts"
+    ],
+    "configFile": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\playwright.sse-audit.config.ts",
+    "rootDir": "D:/小说写作/xuanqiong-wenshu/frontend/e2e",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "D:/小说写作/xuanqiong-wenshu/frontend/audit/sse-isolation-20260907/workspace-pagination-artifacts",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "D:/小说写作/xuanqiong-wenshu/frontend/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "agent-sse-isolation.spec.ts",
+          "agent-workspace.spec.ts"
+        ],
+        "timeout": 100000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "./audit/sse-isolation-20260907/workspace-pagination-results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.62.1",
+    "workers": 1,
+    "webServer": {
+      "command": "node e2e/scripts/start-sse-audit-server.mjs",
+      "url": "http://127.0.0.1:32253/e2e/fixtures/sse-audit.html",
+      "reuseExistingServer": false,
+      "timeout": 120000,
+      "env": {
+        "XQ_SSE_PORT": "32253"
+      }
+    }
+  },
+  "suites": [
+    {
+      "title": "agent-workspace.spec.ts",
+      "file": "agent-workspace.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Agent 创作工作台浏览器冒烟",
+          "file": "agent-workspace.spec.ts",
+          "line": 405,
+          "column": 6,
+          "specs": [
+            {
+              "title": "加载项目、工具注册表和持久化会话入口",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 100000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 4556,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-07T02:13:05.531Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作台浏览器冒烟-加载项目、工具注册表和持久化会话入口-chromium\\test-finished-1.png"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作台浏览器冒烟-加载项目、工具注册表和持久化会话入口-chromium\\trace.zip"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "5620cb976a6fc299e8ad-e473c75afb97010e6071",
+              "file": "agent-workspace.spec.ts",
+              "line": 406,
+              "column": 3
+            },
+            {
+              "title": "深链历史 Run 并切换运行时，浏览器始终投影所选 Run 的状态和事件",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 100000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3341,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-07T02:13:10.613Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作-b4bfe-并切换运行时，浏览器始终投影所选-Run-的状态和事件-chromium\\test-finished-1.png"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作-b4bfe-并切换运行时，浏览器始终投影所选-Run-的状态和事件-chromium\\trace.zip"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "5620cb976a6fc299e8ad-6634d41083486d3c5e09",
+              "file": "agent-workspace.spec.ts",
+              "line": 424,
+              "column": 3
+            },
+            {
+              "title": "Artifact 质量发现通过最小 ContextRef 进入 Chat 发送请求",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 100000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 7431,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('agent-quality-finding-quality-finding-e2e')\nExpected: \u001b[32m\"加入上下文\"\u001b[39m\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toHaveText\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('agent-quality-finding-quality-finding-e2e')\u001b[22m\n",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('agent-quality-finding-quality-finding-e2e')\nExpected: \u001b[32m\"加入上下文\"\u001b[39m\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toHaveText\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('agent-quality-finding-quality-finding-e2e')\u001b[22m\n\n    at D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\agent-workspace.spec.ts:629:81",
+                        "location": {
+                          "file": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\agent-workspace.spec.ts",
+                          "column": 81,
+                          "line": 629
+                        },
+                        "snippet": "  627 |     await page.goto(`/agent?project_id=${project.id}&session_id=${session.id}&run_id=${run.id}`)\n  628 |     await expandWorkspaceSection(page, 'agent-run-details-section')\n> 629 |     await expect(page.getByTestId('agent-quality-finding-quality-finding-e2e')).toHaveText('加入上下文')\n      |                                                                                 ^\n  630 |     await page.getByTestId('agent-quality-finding-quality-finding-e2e').click()\n  631 |     await expect(page.getByTestId('agent-quality-finding-quality-finding-e2e')).toHaveText('移除上下文')\n  632 |     await expect(page.getByTestId('agent-context-chip-quality-finding')).toContainText('质量发现：quality-')"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\agent-workspace.spec.ts",
+                            "column": 81,
+                            "line": 629
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoHaveText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('agent-quality-finding-quality-finding-e2e')\nExpected: \u001b[32m\"加入上下文\"\u001b[39m\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toHaveText\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('agent-quality-finding-quality-finding-e2e')\u001b[22m\n\n\n  627 |     await page.goto(`/agent?project_id=${project.id}&session_id=${session.id}&run_id=${run.id}`)\n  628 |     await expandWorkspaceSection(page, 'agent-run-details-section')\n> 629 |     await expect(page.getByTestId('agent-quality-finding-quality-finding-e2e')).toHaveText('加入上下文')\n      |                                                                                 ^\n  630 |     await page.getByTestId('agent-quality-finding-quality-finding-e2e').click()\n  631 |     await expect(page.getByTestId('agent-quality-finding-quality-finding-e2e')).toHaveText('移除上下文')\n  632 |     await expect(page.getByTestId('agent-context-chip-quality-finding')).toContainText('质量发现：quality-')\n    at D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\agent-workspace.spec.ts:629:81"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-07T02:13:14.156Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作-11f7e-过最小-ContextRef-进入-Chat-发送请求-chromium\\test-failed-1.png"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作-11f7e-过最小-ContextRef-进入-Chat-发送请求-chromium\\error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作-11f7e-过最小-ContextRef-进入-Chat-发送请求-chromium\\trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\agent-workspace.spec.ts",
+                        "column": 81,
+                        "line": 629
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "5620cb976a6fc299e8ad-6b78f5dd73bdbd287f44",
+              "file": "agent-workspace.spec.ts",
+              "line": 541,
+              "column": 3
+            },
+            {
+              "title": "消息发送后展示真实运行摘要和助手消息",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 100000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 1,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 2638,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-07T02:13:22.511Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作台浏览器冒烟-消息发送后展示真实运行摘要和助手消息-chromium\\test-finished-1.png"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-创作工作台浏览器冒烟-消息发送后展示真实运行摘要和助手消息-chromium\\trace.zip"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "5620cb976a6fc299e8ad-b79fe03db0fc5a1c2e5b",
+              "file": "agent-workspace.spec.ts",
+              "line": 651,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "title": "Agent 恢复与 DLQ 浏览器交互",
+          "file": "agent-workspace.spec.ts",
+          "line": 827,
+          "column": 6,
+          "specs": [
+            {
+              "title": "恢复就绪运行显示恢复按钮并接收恢复后的可见事件",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 100000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 1,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3046,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-07T02:13:25.606Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-恢复与-DLQ-浏览器交互-恢复就绪运行显示恢复按钮并接收恢复后的可见事件-chromium\\test-finished-1.png"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-恢复与-DLQ-浏览器交互-恢复就绪运行显示恢复按钮并接收恢复后的可见事件-chromium\\trace.zip"
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "5620cb976a6fc299e8ad-e9a0d081a359aa28fb91",
+              "file": "agent-workspace.spec.ts",
+              "line": 828,
+              "column": 3
+            },
+            {
+              "title": "管理员可查看死信 Job 并重放，普通面板不泄露 Provider 私有字段",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 100000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 1,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 8185,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('agent-dead-letter-panel')\nExpected substring: \u001b[32m\"ProviderTimeout\"\u001b[39m\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('agent-dead-letter-panel')\u001b[22m\n",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('agent-dead-letter-panel')\nExpected substring: \u001b[32m\"ProviderTimeout\"\u001b[39m\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('agent-dead-letter-panel')\u001b[22m\n\n    at D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\agent-workspace.spec.ts:1025:63",
+                        "location": {
+                          "file": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\agent-workspace.spec.ts",
+                          "column": 63,
+                          "line": 1025
+                        },
+                        "snippet": "  1023 |     await page.goto('/agent')\n  1024 |     await expandWorkspaceSection(page, 'agent-data-section')\n> 1025 |     await expect(page.getByTestId('agent-dead-letter-panel')).toContainText('ProviderTimeout')\n       |                                                               ^\n  1026 |     await expect(page.getByTestId('agent-dead-letter-panel')).toContainText(\n  1027 |       'temporary provider failure',\n  1028 |     )"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\agent-workspace.spec.ts",
+                            "column": 63,
+                            "line": 1025
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('agent-dead-letter-panel')\nExpected substring: \u001b[32m\"ProviderTimeout\"\u001b[39m\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('agent-dead-letter-panel')\u001b[22m\n\n\n  1023 |     await page.goto('/agent')\n  1024 |     await expandWorkspaceSection(page, 'agent-data-section')\n> 1025 |     await expect(page.getByTestId('agent-dead-letter-panel')).toContainText('ProviderTimeout')\n       |                                                               ^\n  1026 |     await expect(page.getByTestId('agent-dead-letter-panel')).toContainText(\n  1027 |       'temporary provider failure',\n  1028 |     )\n    at D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\agent-workspace.spec.ts:1025:63"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-07T02:13:28.818Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-恢复与--eeb99-b-并重放，普通面板不泄露-Provider-私有字段-chromium\\test-failed-1.png"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-恢复与--eeb99-b-并重放，普通面板不泄露-Provider-私有字段-chromium\\error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-恢复与--eeb99-b-并重放，普通面板不泄露-Provider-私有字段-chromium\\trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\agent-workspace.spec.ts",
+                        "column": 63,
+                        "line": 1025
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "5620cb976a6fc299e8ad-b100909249a00fc8169c",
+              "file": "agent-workspace.spec.ts",
+              "line": 954,
+              "column": 3
+            },
+            {
+              "title": "CARD-071 五视口布局测量与日志/聊天滚动隔离",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 100000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 2,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 7205,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('agent-message-list')\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('agent-message-list')\u001b[22m\n",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('agent-message-list')\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('agent-message-list')\u001b[22m\n\n    at D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\agent-workspace.spec.ts:1065:60",
+                        "location": {
+                          "file": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\agent-workspace.spec.ts",
+                          "column": 60,
+                          "line": 1065
+                        },
+                        "snippet": "  1063 |       await expect(page.getByTestId('agent-workspace')).toBeVisible()\n  1064 |       await expect(page.getByTestId('agent-project-select')).toContainText('E2E 星河旧梦')\n> 1065 |       await expect(page.getByTestId('agent-message-list')).toBeVisible()\n       |                                                            ^\n  1066 |       if (viewport.width <= 650) {\n  1067 |         // Persisted desktop dual-open state normalizes to a single left drawer.\n  1068 |         // Close it first so this branch tests an actual user-triggered opening."
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\agent-workspace.spec.ts",
+                            "column": 60,
+                            "line": 1065
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByTestId('agent-message-list')\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for getByTestId('agent-message-list')\u001b[22m\n\n\n  1063 |       await expect(page.getByTestId('agent-workspace')).toBeVisible()\n  1064 |       await expect(page.getByTestId('agent-project-select')).toContainText('E2E 星河旧梦')\n> 1065 |       await expect(page.getByTestId('agent-message-list')).toBeVisible()\n       |                                                            ^\n  1066 |       if (viewport.width <= 650) {\n  1067 |         // Persisted desktop dual-open state normalizes to a single left drawer.\n  1068 |         // Close it first so this branch tests an actual user-triggered opening.\n    at D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\agent-workspace.spec.ts:1065:60"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-09-07T02:13:37.811Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-恢复与--1fda8--CARD-071-五视口布局测量与日志-聊天滚动隔离-chromium\\test-failed-1.png"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-恢复与--1fda8--CARD-071-五视口布局测量与日志-聊天滚动隔离-chromium\\error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\workspace-pagination-artifacts\\agent-workspace-Agent-恢复与--1fda8--CARD-071-五视口布局测量与日志-聊天滚动隔离-chromium\\trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\e2e\\agent-workspace.spec.ts",
+                        "column": 60,
+                        "line": 1065
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "5620cb976a6fc299e8ad-1b66a5ac9457bfe40aa6",
+              "file": "agent-workspace.spec.ts",
+              "line": 1038,
+              "column": 3
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-09-07T02:13:03.771Z",
+    "duration": 42235.845,
+    "expected": 4,
+    "skipped": 0,
+    "unexpected": 3,
+    "flaky": 0
+  }
+}

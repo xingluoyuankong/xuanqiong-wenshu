@@ -16,7 +16,7 @@ def _config() -> Config:
     return Config(str(Path(__file__).parents[2] / "alembic.ini"))
 
 
-def _upgrade(monkeypatch: pytest.MonkeyPatch, db_path: Path, target: str = "head") -> None:
+def _upgrade(monkeypatch: pytest.MonkeyPatch, db_path: Path, target: str = REVISION) -> None:
     monkeypatch.setattr(settings, "database_url", f"sqlite+aiosqlite:///{db_path.as_posix()}")
     if target == "028_agent_reasoning_chunks" and db_path.exists():
         command.downgrade(_config(), target)

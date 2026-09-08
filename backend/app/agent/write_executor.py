@@ -282,24 +282,32 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
             except Exception:
                 pass
             raise AgentConflict("candidate quality evaluation unavailable") from quality_error
-        if claimed_step is not None:
-            await runtime.complete_step(
-                step_id=claimed_step.id,
-                user_id=execution_owner_id,
-                lease_generation=int(claimed_step.lease_generation or 0),
-                lease_owner=step_owner,
-                output={"artifact_id": artifact.id, "kind": artifact.kind},
-            )
-        if capability_execution is not None:
-            await execution_facts.complete_write_execution(
-                execution=capability_execution,
-                lease_generation=int(claimed_step.lease_generation or 0) if claimed_step is not None else 0,
-                output={"artifact_id": artifact.id, "kind": artifact.kind, "sha256": artifact.sha256},
-            )
-        await runtime.mark_approval_executed(approval_id=approval.id, user_id=execution_owner_id, status="executed")
+        from .continuation import AgentContinuationService
         candidate_phase = "candidate_ready" if quality_evaluation.passed else "quality_blocked"
         candidate_summary = "写入候选 artifact 已生成，等待用户接受" if quality_evaluation.passed else "写入候选 artifact 已生成，但质量门阻断接受"
-        await runtime.update_run(run_id=approval.run_id, user_id=execution_owner_id, status="paused", phase=candidate_phase, progress=90)
+        continuation = await AgentContinuationService(session).complete_write(
+            approval=approval, step=claimed_step, execution=capability_execution, artifact=artifact,
+            lease_owner=step_owner,
+            lease_generation=int(claimed_step.lease_generation or 0) if claimed_step is not None else 0,
+            candidate_phase=candidate_phase,
+        )
+        if continuation is None:
+            # Existing direct/legacy approvals have no frozen durable plan.
+            # Keep their established candidate-only path.
+            if claimed_step is not None:
+                await runtime.complete_step(
+                    step_id=claimed_step.id, user_id=execution_owner_id,
+                    lease_generation=int(claimed_step.lease_generation or 0), lease_owner=step_owner,
+                    output={"artifact_id": artifact.id, "kind": artifact.kind},
+                )
+            if capability_execution is not None:
+                await execution_facts.complete_write_execution(
+                    execution=capability_execution,
+                    lease_generation=int(claimed_step.lease_generation or 0) if claimed_step is not None else 0,
+                    output={"artifact_id": artifact.id, "kind": artifact.kind, "sha256": artifact.sha256},
+                )
+            await runtime.mark_approval_executed(approval_id=approval.id, user_id=execution_owner_id, status="executed")
+            await runtime.update_run(run_id=approval.run_id, user_id=execution_owner_id, status="paused", phase=candidate_phase, progress=90)
         await runtime.append_event(
             run_id=approval.run_id, user_id=execution_owner_id, event_type="artifact_created", summary=candidate_summary,
             data={
@@ -318,20 +326,39 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
         )
         raise
     except Exception as exc:
-        if capability_execution is not None:
-            try:
-                await execution_facts.fail_write_execution(
-                    execution=capability_execution,
-                    lease_generation=int(claimed_step.lease_generation or 0) if claimed_step is not None else 0,
-                    error=exc,
-                )
-            except AgentCapabilityExecutionConflict:
-                pass
+        # A failed transactional terminal commit restores persisted executing
+        # state; hydrate expired objects before projecting the failure outcome.
+        await session.refresh(approval)
         if claimed_step is not None:
-            try:
-                await runtime.fail_step(step_id=claimed_step.id, user_id=execution_owner_id, lease_owner=step_owner, lease_generation=int(claimed_step.lease_generation or 0), error_type=type(exc).__name__)
-            except AgentRuntimeError:
-                pass
+            await session.refresh(claimed_step)
+        if capability_execution is not None:
+            await session.refresh(capability_execution)
+        from .continuation import AgentContinuationService
+        try:
+            terminal_intent = await AgentContinuationService(session).fail_write(
+                approval=approval, step=claimed_step, execution=capability_execution, error=exc,
+                lease_owner=step_owner,
+                lease_generation=int(claimed_step.lease_generation or 0) if claimed_step is not None else 0,
+            )
+        except Exception as terminal_error:
+            # Transaction failure leaves the persisted executing/started state
+            # intact for explicit reconciliation, not a half-written outcome.
+            raise AgentConflict("candidate writer execution failed: terminal outcome persistence") from terminal_error
+        if terminal_intent is None:
+            if capability_execution is not None:
+                try:
+                    await execution_facts.fail_write_execution(
+                        execution=capability_execution,
+                        lease_generation=int(claimed_step.lease_generation or 0) if claimed_step is not None else 0,
+                        error=exc,
+                    )
+                except AgentCapabilityExecutionConflict:
+                    pass
+            if claimed_step is not None:
+                try:
+                    await runtime.fail_step(step_id=claimed_step.id, user_id=execution_owner_id, lease_owner=step_owner, lease_generation=int(claimed_step.lease_generation or 0), error_type=type(exc).__name__)
+                except AgentRuntimeError:
+                    pass
         fallback_reason = "empty_response" if isinstance(exc, AgentConflict) and "empty write candidate" in str(exc) else type(exc).__name__
         await runtime.update_run_provider_provenance(
             run_id=approval.run_id,
@@ -343,8 +370,9 @@ async def execute_approved_write(*, approval_id: str, user_id: int, session: Asy
                 "candidate_writer_provider_attempts": provider_attempts.snapshot(),
             },
         )
-        await runtime.mark_approval_executed(approval_id=approval.id, user_id=execution_owner_id, status="execution_failed")
-        await runtime.update_run(run_id=approval.run_id, user_id=execution_owner_id, status="failed", phase="write_candidate_error")
+        if terminal_intent is None:
+            await runtime.mark_approval_executed(approval_id=approval.id, user_id=execution_owner_id, status="execution_failed")
+            await runtime.update_run(run_id=approval.run_id, user_id=execution_owner_id, status="failed", phase="write_candidate_error")
         await runtime.append_event(
             run_id=approval.run_id, user_id=execution_owner_id, event_type="write_execution_failed", summary="写入候选生成失败",
             data={
@@ -858,11 +886,32 @@ async def list_artifact_rewrite_instructions(*, artifact_id: str, user_id: int, 
 async def read_artifact_content(*, artifact_id: str, user_id: int, session: AsyncSession) -> tuple[AgentArtifactRef, str]:
     artifact = await _readable_artifact(artifact_id=artifact_id, user_id=user_id, session=session)
     metadata = dict(artifact.metadata_json or {})
-    storage_key = str(metadata.get("storage_key") or "")
-    target = (_ARTIFACT_ROOT / storage_key).resolve()
-    if target.parent != _ARTIFACT_ROOT.resolve() or not target.is_file():
-        raise AgentNotFound("artifact content is unavailable")
-    content = target.read_text(encoding="utf-8")
+    if artifact.kind == "chapter_version":
+        # Accepted refs point to an immutable database version, not a candidate
+        # file. Resolve the version through the artifact's own project scope.
+        prefix = "chapter-version://"
+        raw_id = artifact.uri[len(prefix):] if artifact.uri.startswith(prefix) else ""
+        if not raw_id.isascii() or not raw_id.isdecimal() or int(raw_id) < 1:
+            raise AgentNotFound("artifact version is unavailable")
+        version_id = int(raw_id)
+        if metadata.get("version_id") != version_id:
+            raise AgentConflict("artifact version identity mismatch")
+        version = (await session.execute(
+            select(ChapterVersion).join(Chapter, Chapter.id == ChapterVersion.chapter_id).where(
+                ChapterVersion.id == version_id,
+                Chapter.project_id == artifact.project_id,
+                Chapter.chapter_number == metadata.get("chapter_number"),
+            )
+        )).scalar_one_or_none()
+        if version is None:
+            raise AgentNotFound("artifact version is unavailable")
+        content = str(version.content or "")
+    else:
+        storage_key = str(metadata.get("storage_key") or "")
+        target = (_ARTIFACT_ROOT / storage_key).resolve()
+        if target.parent != _ARTIFACT_ROOT.resolve() or not target.is_file():
+            raise AgentNotFound("artifact content is unavailable")
+        content = target.read_text(encoding="utf-8")
     if artifact.sha256 and hashlib.sha256(content.encode("utf-8")).hexdigest() != artifact.sha256:
         raise AgentConflict("artifact integrity check failed")
     return artifact, content

@@ -448,6 +448,8 @@ class RunBoundToolRegistry:
         arguments: dict[str, Any] | None = None,
         cancel_event: asyncio.Event | None = None,
     ) -> dict[str, Any]:
+        # Recheck the live release at dispatch, even for a previously bound wrapper.
+        self.assert_compatible()
         self._manifest(name)
         if self._execution_context_bound:
             if self._execution_user_id is not None and str(user_id) != str(self._execution_user_id):
@@ -536,7 +538,7 @@ from .provider_catalog import PROVIDER_MANIFESTS
 
 DEFAULT_TOOL_REGISTRY = AgentToolRegistry()
 DEFAULT_TOOL_PROVIDER_HEALTH: list[dict[str, Any]] = []
-_DEFAULT_TOOL_REGISTRY_GENERATION = 2
+_DEFAULT_TOOL_REGISTRY_GENERATION = 3
 _CONFIGURED_PROVIDER_SIGNATURE: tuple[bool, tuple[str, ...], int, str] | None = None
 
 
@@ -588,6 +590,7 @@ _version_accept_input_schema = {
     "properties": {
         "_approval_id": {"type": "string"},
         "artifact_id": {"type": "string", "minLength": 1, "maxLength": 36},
+        "actor_user_id": {"type": "integer", "minimum": 1},
         "note": {"type": "string", "maxLength": 2000},
     },
     "additionalProperties": False,

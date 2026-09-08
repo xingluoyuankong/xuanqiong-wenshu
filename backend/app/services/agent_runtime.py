@@ -15,6 +15,7 @@ from sqlalchemy.orm.attributes import flag_modified, set_committed_value
 
 from ..models.agent import AgentApproval, AgentArtifactRef, AgentEventRecord, AgentJob, AgentMessage, AgentRun, AgentRunCommand, AgentRunStep, AgentSession, AgentRunReasoningChunk
 from ..agent.schemas import AgentPublicWorkSummary
+from ..agent.command_ordering import command_order_by
 from ..agent.state_machine import (
     InvalidRunStatus,
     InvalidRunTransition,
@@ -74,6 +75,8 @@ _VISIBLE_EVENT_KEYS: dict[str, set[str]] = {
     "plan_step_started": {"step", "tool_name", "phase"},
     "plan_step_completed": {"step", "tool_name", "phase"},
     "plan_step_failed": {"step", "tool_name", "error_type", "phase"},
+    "plan_step_blocked": {"step", "tool_name", "reason", "dependencies", "phase"},
+    "plan_step_cancelled": {"step", "tool_name", "reason", "dependencies", "phase"},
     "plan_step_pending": {"step", "tool_name", "phase"},
     "approval_required": {"approval_id", "tool_name", "risk_level", "actor_user_id", "execution_owner_id"},
     "approval_granted": {"approval_id", "tool_name", "status", "actor_user_id", "execution_owner_id"},
@@ -337,7 +340,9 @@ class AgentRuntimeService:
 
     @staticmethod
     def _now() -> datetime:
-        return datetime.now(timezone.utc)
+        # Lifecycle columns persist at second precision on MySQL. Floor before
+        # binding so DATETIME(0) rounding cannot invert cross-row chronology.
+        return datetime.now(timezone.utc).replace(microsecond=0)
 
     @staticmethod
     def _normalize_datetime(value: Optional[datetime]) -> Optional[datetime]:
@@ -745,6 +750,17 @@ class AgentRuntimeService:
         registry_snapshot = get_default_tool_registry_snapshot()
         catalog_release = build_catalog_release(registry_snapshot)
         requested_capabilities = context_payload.get("requested_tools")
+        if isinstance(requested_capabilities, list) and requested_capabilities:
+            requested_capabilities = list(requested_capabilities)
+            # Creating a candidate reserves its explicit acceptance action in
+            # the same immutable Run snapshot. It is not a planned step and
+            # still requires a separate approval plus live project-write checks.
+            # Use the resolver's string/whitespace normalization; context JSON
+            # can include non-hashable values, which must not crash this prepass.
+            requested_names = {str(value).strip() for value in requested_capabilities}
+            if ({"chapter.generate", "chapter.rewrite"}.intersection(requested_names)
+                    and "chapter.version.accept" not in requested_names):
+                requested_capabilities.append("chapter.version.accept")
         project_role = None
         if project_id is not None:
             from .project_access_service import ProjectAccessService
@@ -811,6 +827,7 @@ class AgentRuntimeService:
         context_payload["relational_catalog_release_id"] = relational_snapshot.catalog_release_id
         context_payload["relational_capability_snapshot_id"] = relational_snapshot.id
         context_payload["relational_capability_snapshot_key"] = relational_snapshot.snapshot_id
+        context_payload["relational_capability_snapshot_digest"] = relational_snapshot.digest
         context_payload["relational_context_snapshot_id"] = initial_context.id
         context_payload["relational_context_snapshot_key"] = initial_context.snapshot_id
         novel_selection = context_payload.get("novel_context_selection") if isinstance(context_payload, dict) else None
@@ -905,6 +922,7 @@ class AgentRuntimeService:
             "relational_catalog_release_id",
             "relational_capability_snapshot_id",
             "relational_capability_snapshot_key",
+            "relational_capability_snapshot_digest",
         ):
             if key in existing_context:
                 context_payload[key] = existing_context[key]
@@ -1030,6 +1048,7 @@ class AgentRuntimeService:
             return step
         result = await self.session.execute(
             update(AgentRunStep)
+            .execution_options(synchronize_session=False)
             .where(
                 AgentRunStep.id == step_id,
                 AgentRunStep.user_id == user_id,
@@ -1055,7 +1074,9 @@ class AgentRuntimeService:
         if result.rowcount != 1:
             raise AgentConflict("step lease is held by another worker")
         await self.session.commit()
-        return await self._step(step_id, user_id)
+        refreshed = await self._step(step_id, user_id)
+        await self.session.refresh(refreshed)
+        return refreshed
 
     async def _step(self, step_id: str, user_id: int) -> AgentRunStep:
         step = (await self.session.execute(select(AgentRunStep).where(AgentRunStep.id == step_id, AgentRunStep.user_id == user_id))).scalar_one_or_none()
@@ -1066,7 +1087,7 @@ class AgentRuntimeService:
     async def start_step(self, *, step_id: str, user_id: int) -> AgentRunStep:
         return await self.claim_step(step_id=step_id, user_id=user_id, lease_owner=f"legacy:{user_id}")
 
-    async def complete_step(self, *, step_id: str, user_id: int, output: Optional[dict[str, Any]] = None, lease_owner: str | None = None, lease_generation: int | None = None) -> AgentRunStep:
+    async def complete_step(self, *, step_id: str, user_id: int, output: Optional[dict[str, Any]] = None, lease_owner: str | None = None, lease_generation: int | None = None, commit: bool = True) -> AgentRunStep:
         step = await self._step(step_id, user_id)
         if step.status == "completed":
             return step
@@ -1081,11 +1102,12 @@ class AgentRuntimeService:
         step.finished_at = self._now()
         step.lease_owner = None
         step.lease_expires_at = None
-        await self.session.commit()
-        await self.session.refresh(step)
+        if commit:
+            await self.session.commit()
+            await self.session.refresh(step)
         return step
 
-    async def fail_step(self, *, step_id: str, user_id: int, error_type: str, lease_owner: str | None = None, lease_generation: int | None = None) -> AgentRunStep:
+    async def fail_step(self, *, step_id: str, user_id: int, error_type: str, lease_owner: str | None = None, lease_generation: int | None = None, commit: bool = True) -> AgentRunStep:
         step = await self._step(step_id, user_id)
         if lease_owner and step.lease_owner != lease_owner:
             raise AgentConflict("step lease belongs to another worker")
@@ -1096,8 +1118,9 @@ class AgentRuntimeService:
         step.finished_at = self._now()
         step.lease_owner = None
         step.lease_expires_at = None
-        await self.session.commit()
-        await self.session.refresh(step)
+        if commit:
+            await self.session.commit()
+            await self.session.refresh(step)
         return step
 
     async def cancel_step(self, *, step_id: str, user_id: int, lease_owner: str | None = None, lease_generation: int | None = None) -> AgentRunStep:
@@ -1659,11 +1682,12 @@ class AgentRuntimeService:
         # read the same free row concurrently from both claiming it.
         result = await self.session.execute(
             update(AgentRun)
+            .execution_options(synchronize_session=False)
             .where(
                 AgentRun.id == run_id,
                 AgentRun.user_id == user_id,
                 AgentRun.cancel_requested_at.is_(None),
-                or_(lease_generation is None, AgentRun.lease_generation == int(lease_generation or 0)),
+                True if lease_generation is None else AgentRun.lease_generation == int(lease_generation),
                 or_(
                     AgentRun.status.in_(CLAIMABLE_RUN_STATUSES),
                     and_(AgentRun.status == "paused", AgentRun.current_phase == RECOVERY_READY_PHASE),
@@ -1675,22 +1699,26 @@ class AgentRuntimeService:
                     AgentRun.lease_owner == owner,
                 ),
             )
-            .values(
-                lease_owner=owner,
-                lease_expires_at=expires_at,
-                lease_generation=case(
+            # MySQL SET expressions read earlier assignments. Evaluate the
+            # generation against the old owner/expiry, then update the lease.
+            .ordered_values(
+                (AgentRun.lease_generation, case(
                     (
                         and_(AgentRun.lease_owner == owner, AgentRun.lease_expires_at > now),
                         AgentRun.lease_generation,
                     ),
                     else_=AgentRun.lease_generation + 1,
-                ),
+                )),
+                (AgentRun.lease_owner, owner),
+                (AgentRun.lease_expires_at, expires_at),
             )
         )
         if result.rowcount != 1:
             raise AgentConflict("run lease is held by another worker or run is terminal")
         await self.session.commit()
-        return await self._run(run_id, user_id)
+        run = await self._run(run_id, user_id)
+        await self.session.refresh(run)
+        return run
 
     async def release_run(self, *, run_id: str, user_id: int, lease_owner: str, lease_generation: int | None = None) -> AgentRun:
         run = await self._run(run_id, user_id)
@@ -2021,7 +2049,7 @@ class AgentRuntimeService:
         stmt = (
             select(AgentRunCommand)
             .where(AgentRunCommand.run_id == run_id, AgentRunCommand.user_id == user_id)
-            .order_by(AgentRunCommand.requested_at.asc(), AgentRunCommand.id.asc())
+            .order_by(*command_order_by())
             .limit(min(max(int(limit), 1), 200))
         )
         return list((await self.session.execute(stmt)).scalars().all())
@@ -2032,7 +2060,7 @@ class AgentRuntimeService:
         stmt = (
             select(AgentRunCommand)
             .where(AgentRunCommand.run_id == run.id)
-            .order_by(AgentRunCommand.requested_at.asc(), AgentRunCommand.id.asc())
+            .order_by(*command_order_by())
             .limit(min(max(int(limit), 1), 200))
         )
         return list((await self.session.execute(stmt)).scalars().all())
@@ -2050,7 +2078,7 @@ class AgentRuntimeService:
         stmt = (
             select(AgentRunCommand)
             .where(predicate)
-            .order_by(AgentRunCommand.requested_at.asc(), AgentRunCommand.id.asc())
+            .order_by(*command_order_by())
             .offset(page_offset)
             .limit(page_limit)
         )
@@ -2345,12 +2373,12 @@ class AgentRuntimeService:
 
     async def list_approvals(self, *, run_id: str, user_id: int) -> list[AgentApproval]:
         await self._run(run_id, user_id)
-        stmt = select(AgentApproval).where(AgentApproval.run_id == run_id, AgentApproval.user_id == user_id).order_by(AgentApproval.decision_at.asc().nullsfirst(), AgentApproval.id.asc())
+        stmt = select(AgentApproval).where(AgentApproval.run_id == run_id, AgentApproval.user_id == user_id).order_by(AgentApproval.decision_at.is_(None).desc(), AgentApproval.decision_at.asc(), AgentApproval.id.asc())
         return list((await self.session.execute(stmt)).scalars().all())
 
     async def list_approvals_readable(self, *, run_id: str, user_id: int) -> list[AgentApproval]:
         run = await self.get_readable_run(run_id, user_id)
-        stmt = select(AgentApproval).where(AgentApproval.run_id == run.id).order_by(AgentApproval.decision_at.asc().nullsfirst(), AgentApproval.id.asc())
+        stmt = select(AgentApproval).where(AgentApproval.run_id == run.id).order_by(AgentApproval.decision_at.is_(None).desc(), AgentApproval.decision_at.asc(), AgentApproval.id.asc())
         return list((await self.session.execute(stmt)).scalars().all())
 
     async def get_approval(self, *, approval_id: str, user_id: int) -> AgentApproval:
@@ -2359,15 +2387,16 @@ class AgentRuntimeService:
             raise AgentNotFound("approval not found")
         return approval
 
-    async def mark_approval_executed(self, *, approval_id: str, user_id: int, status: str = "executed") -> AgentApproval:
+    async def mark_approval_executed(self, *, approval_id: str, user_id: int, status: str = "executed", commit: bool = True) -> AgentApproval:
         approval = await self.get_approval(approval_id=approval_id, user_id=user_id)
         if approval.status != "executing":
             raise AgentConflict("approval must be claimed before execution can finish")
         if status not in {"executed", "execution_failed"}:
             raise AgentConflict("invalid approval execution terminal status")
         approval.status = status
-        await self.session.commit()
-        await self.session.refresh(approval)
+        if commit:
+            await self.session.commit()
+            await self.session.refresh(approval)
         return approval
 
     async def claim_approval_execution(self, *, approval_id: str, user_id: int) -> AgentApproval:
@@ -2398,7 +2427,14 @@ class AgentRuntimeService:
         approval.status = decision_status
         approval.reason = (reason or "")[:2000] or None
         approval.decision_at = self._now()
-        await self.session.commit()
+        try:
+            if not approved:
+                from ..agent.continuation import AgentContinuationService
+                await AgentContinuationService(self.session).record_rejected(approval=approval)
+            await self.session.commit()
+        except Exception:
+            await self.session.rollback()
+            raise
         await self.session.refresh(approval)
         await self.append_event(
             run_id=run_id_value,

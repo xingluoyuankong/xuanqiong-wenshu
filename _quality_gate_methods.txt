@@ -1,0 +1,691 @@
+
+============================================================
+Method: _select_quality_gate_critique_summary
+Lines: 401-425 (25 lines)
+============================================================
+ 401:     def _select_quality_gate_critique_summary(cls, review_summaries: Optional[Dict[str, Any]]) -> Tuple[Dict[str, Any], str]:
+ 402:         summaries = review_summaries or {}
+ 403:         baseline_summary = summaries.get("self_critique") or {}
+ 404:         post_consistency_summary = summaries.get("self_critique_after_consistency") or {}
+ 405:         if not post_consistency_summary:
+ 406:             return baseline_summary, "self_critique"
+ 407:         if not baseline_summary:
+ 408:             return post_consistency_summary, "self_critique_after_consistency"
+ 409: 
+ 410:         baseline_fingerprint = str(baseline_summary.get("content_fingerprint") or "").strip()
+ 411:         post_fingerprint = str(post_consistency_summary.get("content_fingerprint") or "").strip()
+ 412:         if baseline_fingerprint and baseline_fingerprint == post_fingerprint:
+ 413:             before = cls._summarize_self_critique_snapshot(baseline_summary)
+ 414:             after = cls._summarize_self_critique_snapshot(post_consistency_summary)
+ 415:             if after["critical"] > before["critical"]:
+ 416:                 return baseline_summary, "self_critique_same_content_more_stable"
+ 417:             if (
+ 418:                 after["critical"] == before["critical"]
+ 419:                 and after["major"] > before["major"]
+ 420:                 and after["score"] >= before["score"] - 5
+ 421:             ):
+ 422:                 return baseline_summary, "self_critique_same_content_more_stable"
+ 423: 
+ 424:         return post_consistency_summary, "self_critique_after_consistency"
+ 425: 
+
+============================================================
+Method: _evaluate_structural_quality_gate_for_content
+Lines: 427-501 (75 lines)
+============================================================
+ 427:     def _evaluate_structural_quality_gate_for_content(
+ 428:         cls,
+ 429:         *,
+ 430:         review_summaries: Optional[Dict[str, Any]],
+ 431:         content: str,
+ 432:         violations: Optional[List[Dict[str, Any]]],
+ 433:         chapter_mission: Optional[dict],
+ 434:         story_guard_key: str = "story_progression_guard",
+ 435:         target_word_count: int,
+ 436:         min_word_count: int,
+ 437:     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+ 438:         # 两个字数参数**故意没有默认值**（T-12 步骤 C）。原来的 3000/2000 是硬编码
+ 439:         # 兜底，而 `_resolve_config` 实际产出的是 target/min = 0.9 的任意档位
+ 440:         # （800/720 一路到 20000/18000）——默认值一旦存在，新调用点忘记传就会
+ 441:         # 静默按 3000/2000 判，真实语料上这会让 `below_min` 触发 24.1%。
+ 442:         # 现在忘记传是 TypeError，在测试里就炸，不会漏到生产。
+ 443:         summaries = dict(review_summaries or {})
+ 444:         story_guard = cls._score_story_quality_candidate(
+ 445:             content=content,
+ 446:             violations=list(violations or []),
+ 447:             chapter_mission=chapter_mission,
+ 448:             target_word_count=target_word_count,
+ 449:             min_word_count=min_word_count,
+ 450:         )
+ 451:         summaries[story_guard_key] = story_guard
+ 452:         gate_input = dict(summaries)
+ 453:         gate_input["story_progression_guard"] = story_guard
+ 454:         gate_input["chapter_mission"] = chapter_mission
+ 455:         return summaries, cls._build_structural_quality_gate(gate_input)
+ 456: 
+ 457:     QUALITY_ISSUE_LABELS = {
+ 458:         "static_description_risk": "静态描写过多",
+ 459:         "repeated_paragraph_flood": "整段重复灌水",
+ 460:         "insufficient_dialogue_pressure": "有效对白不足",
+ 461:         "chapter_progression_weak": "实质推进不足",
+ 462:         "scene_fulfillment_weak": "场景兑现不足",
+ 463:         "dialogue_does_not_change_state": "对白未改变局势",
+ 464:         "ending_pressure_missing": "章末递压不足",
+ 465:         "focus_character_missing": "焦点角色缺席",
+ 466:         "continuity_inherit_missing": "承接锚点缺失",
+ 467:         "continuity_inherit_late": "承接锚点过晚",
+ 468:         "critical_issues_remaining": "自检严重问题未消除",
+ 469:         "score_below_floor": "结构质量分过低",
+ 470:         "too_many_major_issues": "主要结构问题过多",
+ 471:         "critical_consistency_unresolved": "严重连续性冲突",
+ 472:         "major_consistency_unresolved": "连续性冲突未处理",
+ 473:         "dialogue_pressure_weak": "对白攻防不足",
+ 474:         "mission_progression_weak": "本章目标命中不足",
+ 475:         "word_count_far_below_target": "字数离目标过远",
+ 476:         "event_density_weak": "事件密度不足",
+ 477:         "state_change_interval_weak": "状态变化间隔过长",
+ 478:         "scene_structure_weak": "场景结构证据不足",
+ 479:         "long_chapter_event_density_weak": "长章事件密度不足",
+ 480:     }
+ 481: 
+ 482:     QUALITY_ISSUE_HINTS = {
+ 483:         "static_description_risk": "压缩独立景物/心理段，把篇幅改成动作回合、对话攻防和后果。",
+ 484:         "repeated_paragraph_flood": "删掉整段照抄的重复内容，用新的事件、对话或后果补足字数。",
+ 485:         "insufficient_dialogue_pressure": "补足至少两轮有效对白，让人物互相施压、拒绝、让步或反制。",
+ 486:         "chapter_progression_weak": "把本章目标、冲突、转折写成可见事件，而不是停留在铺陈。",
+ 487:         "scene_fulfillment_weak": "逐场兑现 scene_list 的目标、阻碍、反应、转折和钩子。",
+ 488:         "dialogue_does_not_change_state": "让对白造成主动权、信息量、关系、风险或下一步选择的变化。",
+ 489:         "ending_pressure_missing": "结尾必须交出危险、证据、期限、误会或代价，避免总结式平收。",
+ 490:         "focus_character_missing": "让本章焦点角色实际出场、说话、行动或被明确处理。",
+ 491:         "continuity_inherit_missing": "开场必须承接上一章锚点，不要让前文压力断裂。",
+ 492:         "continuity_inherit_late": "把上一章承接锚点前置到开场，避免后段才补承接。",
+ 493:         "critical_consistency_unresolved": "优先修复前后文事实冲突，再继续润色。",
+ 494:         "major_consistency_unresolved": "补齐承接关系和未闭环钩子，避免章节断裂。",
+ 495:         "word_count_far_below_target": "扩写只能补行动、对话、后果和短余波，不能用空泛描写凑字。",
+ 496:         "event_density_weak": "把篇幅写到事件链里：行动、阻碍、反击、发现、代价和关系变化必须持续出现。",
+ 497:         "state_change_interval_weak": "每个长段落窗口都要有可见变化，不能连续停在解释、回忆或氛围里。",
+ 498:         "scene_structure_weak": "按目标、阻碍、转折、结果/压力逐场补齐，避免只点到场景关键词。",
+ 499:         "long_chapter_event_density_weak": "长章需要更多有效场次和状态变化，不能把少量事件拉成一大章。",
+ 500:     }
+ 501: 
+
+============================================================
+Method: _build_quality_issue_summary
+Lines: 503-596 (94 lines)
+============================================================
+ 503:     def _build_quality_issue_summary(
+ 504:         cls,
+ 505:         *,
+ 506:         blockers: Optional[List[Dict[str, Any]]] = None,
+ 507:         story_guard: Optional[Dict[str, Any]] = None,
+ 508:         reason_codes: Optional[List[str]] = None,
+ 509:     ) -> Dict[str, Any]:
+ 510:         items: List[Dict[str, Any]] = []
+ 511:         seen = set()
+ 512: 
+ 513:         def add(code: str, source: str = "story_progression_guard", message: Optional[str] = None) -> None:
+ 514:             if not code or code in seen:
+ 515:                 return
+ 516:             seen.add(code)
+ 517:             items.append({
+ 518:                 "code": code,
+ 519:                 "label": cls.QUALITY_ISSUE_LABELS.get(code, code),
+ 520:                 "source": source,
+ 521:                 "hint": cls.QUALITY_ISSUE_HINTS.get(code, message or ""),
+ 522:                 "message": message or "",
+ 523:             })
+ 524: 
+ 525:         for blocker in blockers or []:
+ 526:             if isinstance(blocker, dict):
+ 527:                 add(str(blocker.get("code") or ""), str(blocker.get("source") or "quality_gate"), str(blocker.get("message") or ""))
+ 528:         for code in reason_codes or []:
+ 529:             add(str(code or ""))
+ 530: 
+ 531:         if blockers is None and reason_codes is None:
+ 532:             guard = story_guard or {}
+ 533:             rich_progression_evidence = (
+ 534:                 float(guard.get("scene_fulfillment_rate") or 0.0) >= 0.75
+ 535:                 and float(guard.get("scene_structure_rate") or 0.0) >= 0.7
+ 536:                 # T-13：`is not False` 而不是 `bool(get(..., True))`。语义是「只要不是
+ 537:                 # 明确失败就不算反对证据」——None（不适用）不再被当成正向证据白送，
+ 538:                 # 也不会被 bool() 压成 False 而误判为失败。
+ 539:                 and guard.get("dialogue_changes_state") is not False
+ 540:                 and guard.get("ending_pressure_passed", guard.get("ending_hook_detected", True)) is not False
+ 541:                 # T-14：同理，密度两态字段的 bool() 也要去掉。
+ 542:                 and guard.get("event_density_passed") is not False
+ 543:                 and guard.get("state_change_interval_passed") is not False
+ 544:             )
+ 545:             if guard.get("static_description_risk"):
+ 546:                 add("static_description_risk")
+ 547:             if guard.get("repetition_risk"):
+ 548:                 add("repeated_paragraph_flood")
+ 549:             if guard.get("expected_dialogue") and int(guard.get("dialogue_marker_count") or 0) < 4 and int(guard.get("word_count") or 0) >= 1500:
+ 550:                 add("insufficient_dialogue_pressure")
+ 551:             if (
+ 552:                 int(guard.get("word_count") or 0) >= 1500
+ 553:                 and int(guard.get("mission_hit_count") or 0) < 2
+ 554:                 and not rich_progression_evidence
+ 555:             ):
+ 556:                 add("chapter_progression_weak")
+ 557:             if int(guard.get("scene_count") or 0) > 0 and float(guard.get("scene_fulfillment_rate") or 1.0) < 0.75:
+ 558:                 add("scene_fulfillment_weak")
+ 559:             if int(guard.get("scene_count") or 0) > 0 and float(guard.get("scene_structure_rate") or 1.0) < 0.55:
+ 560:                 add("scene_structure_weak")
+ 561:             # T-13：与 blocker 侧同一判据（`is False`），否则 warning 摘要会比 blocker 更严，
+ 562:             # 出现「前端标红了但没拦章」的不一致。
+ 563:             if guard.get("expected_dialogue") and "dialogue_changes_state" in guard and guard.get("dialogue_changes_state") is False:
+ 564:                 add("dialogue_does_not_change_state")
+ 565:             if int(guard.get("word_count") or 0) >= 1200 and guard.get("ending_pressure_passed", guard.get("ending_hook_detected", True)) is False:
+ 566:                 add("ending_pressure_missing")
+ 567:             # T-11：只进 warning 摘要，不进 blockers（别名匹配不可靠，见判罚处注释）。
+ 568:             # 字数门槛已经在 focus_character_missing 里判过，这里不要再判一次。
+ 569:             if guard.get("focus_character_missing"):
+ 570:                 add("focus_character_missing")
+ 571:             if guard.get("continuity_inherit_missing"):
+ 572:                 add("continuity_inherit_missing")
+ 573:             if guard.get("continuity_inherit_late"):
+ 574:                 add("continuity_inherit_late")
+ 575:             if int(guard.get("word_count") or 0) >= 1800 and guard.get("event_density_passed") is False:
+ 576:                 add("event_density_weak")
+ 577:             if int(guard.get("word_count") or 0) >= 2500 and guard.get("state_change_interval_passed") is False:
+ 578:                 add("state_change_interval_weak")
+ 579:             if int(guard.get("word_count") or 0) >= 7000 and guard.get("long_chapter_density_passed") is False:
+ 580:                 add("long_chapter_event_density_weak")
+ 581: 
+ 582:         tone = "success"
+ 583:         if len(items) >= 2 or any(item["code"] in {"static_description_risk", "critical_consistency_unresolved"} for item in items):
+ 584:             tone = "danger"
+ 585:         elif items:
+ 586:             tone = "warning"
+ 587: 
+ 588:         return {
+ 589:             "passed": not items,
+ 590:             "tone": tone,
+ 591:             "count": len(items),
+ 592:             "codes": [item["code"] for item in items],
+ 593:             "labels": [item["label"] for item in items],
+ 594:             "items": items,
+ 595:         }
+ 596: 
+
+============================================================
+Method: _attach_quality_gate_status_to_guard
+Lines: 598-658 (61 lines)
+============================================================
+ 598:     def _attach_quality_gate_status_to_guard(
+ 599:         cls,
+ 600:         story_guard: Dict[str, Any],
+ 601:         structural_quality_gate: Dict[str, Any],
+ 602:     ) -> Dict[str, Any]:
+ 603:         guard = deepcopy(story_guard or {})
+ 604:         gate_passed = bool(structural_quality_gate.get("passed", True))
+ 605:         gate_summary = {
+ 606:             "passed": gate_passed,
+ 607:             "codes": list(structural_quality_gate.get("quality_issue_codes") or []),
+ 608:             "labels": list(structural_quality_gate.get("quality_issue_labels") or []),
+ 609:             "blocker_count": len(structural_quality_gate.get("blockers") or []),
+ 610:             "exemptions": list(structural_quality_gate.get("exemptions") or []),
+ 611:         }
+ 612:         guard["quality_gate_passed"] = gate_passed
+ 613:         guard["quality_gate_summary"] = gate_summary
+ 614:         guard["quality_gate_codes"] = gate_summary["codes"]
+ 615:         guard["quality_gate_labels"] = gate_summary["labels"]
+ 616: 
+ 617:         snapshot = dict(guard.get("quality_metric_snapshot") or {})
+ 618:         raw_summary = snapshot.get("quality_issue_summary") or guard.get("quality_issue_summary")
+ 619:         if gate_passed and isinstance(raw_summary, dict) and not raw_summary.get("passed", True):
+ 620:             warning_summary = deepcopy(raw_summary)
+ 621:             guard["quality_rule_warnings"] = warning_summary
+ 622:             snapshot["quality_rule_warnings"] = warning_summary
+ 623:             clean_summary = {
+ 624:                 "passed": True,
+ 625:                 "tone": "success",
+ 626:                 "count": 0,
+ 627:                 "codes": [],
+ 628:                 "labels": [],
+ 629:                 "items": [],
+ 630:             }
+ 631:             guard["quality_issue_summary"] = clean_summary
+ 632:             guard["quality_issue_codes"] = []
+ 633:             guard["quality_issue_labels"] = []
+ 634:             snapshot["quality_issue_summary"] = clean_summary
+ 635:             snapshot["quality_issue_codes"] = []
+ 636:             snapshot["quality_issue_labels"] = []
+ 637:         # Always materialize the compact snapshot, including for legacy or
+ 638:         # simplified guards that did not persist one previously. This is an
+ 639:         # observational compatibility repair; it does not change gate behavior.
+ 640:         snapshot["quality_gate_passed"] = gate_passed
+ 641:         snapshot["quality_gate_summary"] = gate_summary
+ 642:         # D-14/T-18: preserve the exact self-critique exemption decisions
+ 643:         # as an auditable metric; this is observational only and does not
+ 644:         # alter the existing threshold or gate outcome.
+ 645:         snapshot["critique_exemption_applied"] = list(structural_quality_gate.get("exemptions") or [])
+ 646:         # T-18: persist the redacted decision inputs alongside the exemption
+ 647:         # list. These fields are copied only for later trend/evidence reads;
+ 648:         # they do not affect the gate result or its thresholds.
+ 649:         for key in (
+ 650:             "self_critique_final_score",
+ 651:             "self_critique_critical_count",
+ 652:             "self_critique_major_count",
+ 653:             "selected_critique_source",
+ 654:         ):
+ 655:             snapshot[key] = structural_quality_gate.get(key)
+ 656:         guard["quality_metric_snapshot"] = snapshot
+ 657:         return guard
+ 658: 
+
+============================================================
+Method: _quality_gate_patch_suggestion
+Lines: 660-679 (20 lines)
+============================================================
+ 660:     def _quality_gate_patch_suggestion(issue: Dict[str, Any], chapter_mission: Optional[dict]) -> str:
+ 661:         code = str((issue or {}).get("code") or "")
+ 662:         mission = chapter_mission or {}
+ 663:         scenes = mission.get("scene_list") or []
+ 664:         scene_goal = str((scenes[0] or {}).get("goal") or "本章场景目标") if scenes else "本章场景目标"
+ 665:         dialogue = "、".join((mission.get("dialogue_strategy") or {}).get("purpose") or [])
+ 666:         focus = "、".join(mission.get("focus_characters") or mission.get("character_focus") or [])
+ 667:         inherit = "、".join((mission.get("continuity_anchor") or {}).get("inherit_from_previous") or [])
+ 668:         turn = str((scenes[-1] or {}).get("turn") or "局势反转") if scenes else "局势反转"
+ 669:         mapping = {
+ 670:             "scene_fulfillment_weak": f"围绕场景目标：{scene_goal}，补齐目标、阻碍、转折与后果。",
+ 671:             "scene_structure_weak": f"将场景目标：{scene_goal} 写成可见的行动链与结果。",
+ 672:             "dialogue_does_not_change_state": f"围绕对白职责：{dialogue or '施压与反制'}，让对话改变主动权、信息或风险。",
+ 673:             "focus_character_missing": f"让任务书指定的焦点人物在本章实际出场、行动、说话或被明确处理。（焦点人物：{focus or '本章焦点人物'}）",
+ 674:             "continuity_inherit_missing": f"在开场承接上一章锚点：{inherit or '上一章未闭环压力'}。",
+ 675:             "continuity_inherit_late": f"将承接锚点：{inherit or '上一章未闭环压力'} 前置到开场。",
+ 676:             "reversal_missing": f"兑现或改写本章转折：{turn}，让后段出现可见局势变化。",
+ 677:         }
+ 678:         return mapping.get(code, str((issue or {}).get("message") or "按质量门问题做局部修复。"))
+ 679: 
+
+============================================================
+Method: _build_quality_gate_patch_repair_issues
+Lines: 681-723 (43 lines)
+============================================================
+ 681:     def _build_quality_gate_patch_repair_issues(
+ 682:         cls, structural_quality_gate: Optional[Dict[str, Any]], chapter_mission: Optional[dict]
+ 683:     ) -> List[Dict[str, Any]]:
+ 684:         patchable_codes = {
+ 685:             "focus_character_missing",
+ 686:             "continuity_inherit_missing",
+ 687:             "continuity_inherit_late",
+ 688:             "scene_fulfillment_weak",
+ 689:             "scene_structure_weak",
+ 690:             "dialogue_does_not_change_state",
+ 691:             "reversal_missing",
+ 692:         }
+ 693:         if isinstance(structural_quality_gate, list):
+ 694:             patches = structural_quality_gate
+ 695:             allowed = patchable_codes
+ 696:         else:
+ 697:             patches = ((structural_quality_gate or {}).get("patch_suggestions") or [])
+ 698:             # quality_issue_codes 只承载 blocker 摘要；E-11 warning 只存在于
+ 699:             # patch_suggestions，不能用前者作为 warning patch 的白名单。
+ 700:             allowed = patchable_codes
+ 701:         issues: List[Dict[str, Any]] = []
+ 702:         seen: set = set()
+ 703:         for patch in patches:
+ 704:             if not isinstance(patch, dict):
+ 705:                 continue
+ 706:             code = str(patch.get("code") or "")
+ 707:             if not code or code not in allowed or code in seen:
+ 708:                 continue
+ 709:             seen.add(code)
+ 710:             suggestion = cls._quality_gate_patch_suggestion({"code": code, "message": patch.get("suggestion")}, chapter_mission)
+ 711:             if patch.get("suggestion") and str(patch.get("suggestion")) != suggestion:
+ 712:                 seen.discard(code)
+ 713:                 continue
+ 714:             issues.append({
+ 715:                 "dimension": "quality_gate_patch",
+ 716:                 "severity": "major",
+ 717:                 "location": "章节任务书",
+ 718:                 "problem": f"质量门任务书补丁[{code}]未落实。",
+ 719:                 "suggestion": suggestion,
+ 720:                 "example": "仅做局部结构补丁，禁止重写无关内容。",
+ 721:             })
+ 722:         return issues
+ 723: 
+
+============================================================
+Method: _build_structural_quality_gate
+Lines: 725-1059 (335 lines)
+============================================================
+ 725:     def _build_structural_quality_gate(cls, review_summaries: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+ 726:         summaries = review_summaries or {}
+ 727:         critique_summary, critique_source = cls._select_quality_gate_critique_summary(summaries)
+ 728:         consistency_summary = summaries.get("consistency_repair") or summaries.get("consistency") or {}
+ 729:         ai_review_summary = summaries.get("ai_review") if isinstance(summaries.get("ai_review"), dict) else {}
+ 730:         ai_review_text = " ".join(
+ 731:             str(ai_review_summary.get(key) or "")
+ 732:             for key in ("evaluation", "suggestions", "final_recommendation", "status")
+ 733:         )
+ 734:         ai_scene_supports_pass = any(
+ 735:             marker in ai_review_text
+ 736:             for marker in (
+ 737:                 "基本兑现",
+ 738:                 "结构兑现",
+ 739:                 "结构兑现度高",
+ 740:                 "兑现了导演脚本",
+ 741:                 "导演脚本兑现",
+ 742:                 "完成度较高",
+ 743:                 "推进清晰",
+ 744:                 "四场戏推进清晰",
+ 745:                 "结构清晰",
+ 746:                 "能直接上正稿",
+ 747:                 "可用",
+ 748:                 "结尾",
+ 749:                 "压给下一章",
+ 750:                 "递给下一章",
+ 751:             )
+ 752:         )
+ 753:         unresolved_consistency = cls._collect_unresolved_consistency_violations(consistency_summary)
+ 754:         critical_consistency = [item for item in unresolved_consistency if item.get("severity") == "critical"]
+ 755:         major_consistency = [item for item in unresolved_consistency if item.get("severity") == "major"]
+ 756: 
+ 757:         critique_score = critique_summary.get("final_score")
+ 758:         try:
+ 759:             critique_score = float(critique_score) if critique_score is not None else None
+ 760:         except (TypeError, ValueError):
+ 761:             critique_score = None
+ 762:         critique_critical = int(critique_summary.get("critical_count") or 0)
+ 763:         critique_major = int(critique_summary.get("major_count") or 0)
+ 764: 
+ 765:         blockers: List[Dict[str, Any]] = []
+ 766:         warnings: List[Dict[str, Any]] = []
+ 767:         exemptions: List[str] = []
+ 768:         chapter_mission = summaries.get("chapter_mission") if "chapter_mission" in summaries else None
+ 769: 
+ 770:         def add_warning(code: str, message: str) -> None:
+ 771:             issue = {"source": "story_progression_guard", "code": code, "severity": "warning", "message": message}
+ 772:             issue["patch_suggestion"] = cls._quality_gate_patch_suggestion(issue, chapter_mission)
+ 773:             warnings.append(issue)
+ 774:         if critique_critical > 1:
+ 775:             blockers.append({
+ 776:                 "source": "self_critique",
+ 777:                 "code": "critical_issues_remaining",
+ 778:                 "message": f"自检后仍残留 {critique_critical} 个 critical 问题，不能静默放行。",
+ 779:             })
+ 780:         if critique_score is not None and critique_score > 0 and critique_score < 42:
+ 781:             blockers.append({
+ 782:                 "source": "self_critique",
+ 783:                 "code": "score_below_floor",
+ 784:                 "message": f"自检最终分仅 {critique_score:.1f}，低于结构质量底线。",
+ 785:             })
+ 786:         if critique_major >= 12:
+ 787:             blockers.append({
+ 788:                 "source": "self_critique",
+ 789:                 "code": "too_many_major_issues",
+ 790:                 "message": f"自检后仍有 {critique_major} 个 unique major 问题，说明文本仍存在大面积结构缺陷。",
+ 791:             })
+ 792:         if critical_consistency:
+ 793:             blockers.append({
+ 794:                 "source": "consistency",
+ 795:                 "code": "critical_consistency_unresolved",
+ 796:                 "message": f"一致性校验仍残留 {len(critical_consistency)} 个 critical 冲突。",
+ 797:                 "examples": [item.get("description") for item in critical_consistency[:3]],
+ 798:             })
+ 799:         if len(major_consistency) >= 5:
+ 800:             blockers.append({
+ 801:                 "source": "consistency",
+ 802:                 "code": "major_consistency_unresolved",
+ 803:                 "message": f"一致性校验仍残留 {len(major_consistency)} 个 major 冲突。",
+ 804:                 "examples": [item.get("description") for item in major_consistency[:3]],
+ 805:             })
+ 806: 
+ 807:         story_guard = summaries.get("story_progression_guard") if isinstance(summaries.get("story_progression_guard"), dict) else {}
+ 808:         if story_guard:
+ 809:             story_word_count = int(story_guard.get("word_count") or 0)
+ 810:             story_dialogue_markers = int(story_guard.get("dialogue_marker_count") or 0)
+ 811:             story_mission_hits = int(story_guard.get("mission_hit_count") or 0)
+ 812:             scene_count = int(story_guard.get("scene_count") or 0)
+ 813:             scene_rate = float(story_guard.get("scene_fulfillment_rate") or 1.0)
+ 814:             scene_structure_rate = float(story_guard.get("scene_structure_rate") or 1.0)
+ 815:             rich_progression_evidence = (
+ 816:                 scene_count > 0
+ 817:                 and scene_rate >= 0.75
+ 818:                 and scene_structure_rate >= 0.7
+ 819:                 and story_dialogue_markers >= 8
+ 820:                 and not story_guard.get("static_description_risk")
+ 821:                 # T-13/T-14：这三个都是三态字段，一律用 `is not False`。
+ 822:                 and story_guard.get("dialogue_changes_state") is not False
+ 823:                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True)) is not False
+ 824:                 and story_guard.get("event_density_passed") is not False
+ 825:                 and story_guard.get("state_change_interval_passed") is not False
+ 826:             )
+ 827:             if story_guard.get("static_description_risk"):
+ 828:                 blockers.append({
+ 829:                     "source": "story_progression_guard",
+ 830:                     "code": "static_description_risk",
+ 831:                     "message": "章节主体缺少有效对话/动作承压，存在大段静态描写硬撑篇幅的风险。",
+ 832:                 })
+ 833:             if story_guard.get("chapter_artifact_markers"):
+ 834:                 blockers.append({
+ 835:                     "source": "story_progression_guard",
+ 836:                     "code": "chapter_artifact_markers",
+ 837:                     "message": "章节正文含有提纲/标记残留，不能作为成品章节放行。",
+ 838:                 })
+ 839:             # T-10：精确重复是字符串完全相同，判定 100% 可靠，可以直接做 blocker，
+ 840:             # 不需要 soft_pass 兜底——没有任何正当理由让整段照抄的正文过门。
+ 841:             if story_guard.get("repetition_risk"):
+ 842:                 blockers.append({
+ 843:                     "source": "story_progression_guard",
+ 844:                     "code": "repeated_paragraph_flood",
+ 845:                     "message": (
+ 846:                         "正文里存在整段照抄的重复内容"
+ 847:                         f"（最长重复段 {int(story_guard.get('longest_repeated_paragraph_chars') or 0)} 字，"
+ 848:                         f"同一段最多出现 {int(story_guard.get('max_repeated_paragraph_count') or 0)} 次），"
+ 849:                         "属于凑字数退化，不能放行。"
+ 850:                     ),
+ 851:                 })
+ 852:             if story_guard.get("expected_dialogue") and story_word_count >= 1500 and story_dialogue_markers < 4:
+ 853:                 blockers.append({
+ 854:                     "source": "story_progression_guard",
+ 855:                     "code": "insufficient_dialogue_pressure",
+ 856:                     "message": "导演脚本要求存在对话/攻防，但正文里的有效对白痕迹过少，局势博弈不足。",
+ 857:                 })
+ 858:             progression_soft_pass = (
+ 859:                 story_dialogue_markers >= 8
+ 860:                 and not story_guard.get("static_description_risk")
+ 861:                 # T-13：这一条**故意保持「必须是 True」**，与同批其它消费点的
+ 862:                 # `is not False` 不同。它的原写法默认值就是 False（要求正向证据），
+ 863:                 # 而它的作用是豁免 chapter_progression_weak —— 豁免必须有据，
+ 864:                 # 「不适用」不构成据。另外此处 None 实际不可达：None 只在
+ 865:                 # dialogue_marker_count <= 0 时产生，与上一行 `>= 8` 互斥。
+ 866:                 and story_guard.get("dialogue_changes_state") is True
+ 867:                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", False)) is not False
+ 868:                 and critique_critical <= 1
+ 869:                 and (critique_score is None or critique_score >= 70)
+ 870:                 and len(critical_consistency) == 0
+ 871:                 and len(major_consistency) < 2
+ 872:             )
+ 873:             if (
+ 874:                 story_word_count >= 1500
+ 875:                 and story_mission_hits < 2
+ 876:                 and not progression_soft_pass
+ 877:                 and not rich_progression_evidence
+ 878:                 and (chapter_mission is not None or story_guard.get("static_description_risk"))
+ 879:                 and ((critique_score is None or critique_score < 72) or story_guard.get("static_description_risk"))
+ 880:             ):
+ 881:                 blockers.append({
+ 882:                     "source": "story_progression_guard",
+ 883:                     "code": "chapter_progression_weak",
+ 884:                     "message": "正文对本章目标、冲突、转折的命中不足，容易读起来像铺陈多、实质推进少。",
+ 885:                 })
+ 886:             scene_soft_pass = (
+ 887:                 (
+ 888:                     story_mission_hits >= 3
+ 889:                     or (
+ 890:                         ai_scene_supports_pass
+ 891:                         and story_mission_hits >= 2
+ 892:                         and story_dialogue_markers >= 8
+ 893:                         and (critique_score is None or critique_score >= 70)
+ 894:                     )
+ 895:                 )
+ 896:                 and story_dialogue_markers >= 4
+ 897:                 and not story_guard.get("static_description_risk")
+ 898:                 # T-13：原默认值是 True（缺键即视为不反对），照此映射成 `is not False`。
+ 899:                 # 上一行 `>= 4` 已让 None 不可达，这里只是把语义写准。
+ 900:                 and story_guard.get("dialogue_changes_state") is not False
+ 901:                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True)) is not False
+ 902:                 and critique_critical <= 1
+ 903:                 and (critique_score is None or critique_score >= 60)
+ 904:                 and not critical_consistency
+ 905:             )
+ 906:             semantic_scene_soft_pass = (
+ 907:                 ai_scene_supports_pass
+ 908:                 and progression_soft_pass
+ 909:                 and story_dialogue_markers >= 10
+ 910:                 # T-14：密度三态。这里用 `is not False` 是安全的——None 只在
+ 911:                 # word_count < 800 时产生，而它豁免的 blocker 门槛都在 1200 字以上，
+ 912:                 # 两个区间不相交，所以「未评估也算不反对」不会放过任何该拦的样本。
+ 913:                 and story_guard.get("event_density_passed") is not False
+ 914:                 and story_guard.get("state_change_interval_passed") is not False
+ 915:                 and critique_critical <= 1
+ 916:                 and critique_major < 8
+ 917:                 and not critical_consistency
+ 918:                 and len(major_consistency) < 2
+ 919:             )
+ 920:             dense_scene_soft_pass = (
+ 921:                 scene_rate >= 0.75
+ 922:                 and story_dialogue_markers >= 8
+ 923:                 and not story_guard.get("static_description_risk")
+ 924:                 # T-13/T-14：三个三态字段统一 `is not False`（原默认值都是 True）。
+ 925:                 and story_guard.get("dialogue_changes_state") is not False
+ 926:                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True)) is not False
+ 927:                 and story_guard.get("event_density_passed") is not False
+ 928:                 and story_guard.get("state_change_interval_passed") is not False
+ 929:                 and critique_critical <= 1
+ 930:                 and (critique_score is None or critique_score >= 70)
+ 931:                 and not critical_consistency
+ 932:                 and len(major_consistency) < 2
+ 933:             )
+ 934:             scene_soft_pass = bool(scene_soft_pass or semantic_scene_soft_pass or dense_scene_soft_pass)
+ 935:             if (
+ 936:                 story_word_count >= 1200
+ 937:                 and scene_count > 0
+ 938:                 and "scene_fulfillment_rate" in story_guard
+ 939:                 and scene_rate < 0.5
+ 940:                 and not scene_soft_pass
+ 941:             ):
+ 942:                 add_warning("scene_fulfillment_weak", "正文对导演脚本场景目标、阻碍、转折或钩子兑现不足。")
+ 943:                 """removed legacy blocker"""
+ 944:             if (
+ 945:                 story_word_count >= 1800
+ 946:                 and scene_count > 0
+ 947:                 and "scene_structure_rate" in story_guard
+ 948:                 and scene_structure_rate < 0.45
+ 949:                 and not scene_soft_pass
+ 950:             ):
+ 951:                 add_warning("scene_structure_weak", "正文虽然可能点到了场景关键词，但缺少目标、阻碍、转折、结果/压力的结构证据。")
+ 952:                 """removed legacy blocker"""
+ 953:             # T-13：blocker 判据改成显式 `is False`。三态下 None 表示「不适用」，
+ 954:             # 绝不能进 blocker；而 expected_dialogue 为真时 `_evaluate_dialogue_changes_state`
+ 955:             # 只会返回 True/False（见那里的判定顺序注释），所以这道 blocker 的触发面不变。
+ 956:             if (
+ 957:                 story_guard.get("expected_dialogue")
+ 958:                 and "dialogue_changes_state" in story_guard
+ 959:                 and story_guard.get("dialogue_changes_state") is False
+ 960:             ):
+ 961:                 add_warning("dialogue_does_not_change_state", "正文虽然可能有对话痕迹，但缺少逼问、拒绝、让步、暴露、决断等局势变化，对话没有真正推动剧情。")
+ 962:             if (
+ 963:                 story_word_count >= 1200
+ 964:                 and ("ending_pressure_passed" in story_guard or "ending_hook_detected" in story_guard)
+ 965:                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected")) is False
+ 966:                 and (critique_score is None or critique_score < 75)
+ 967:             ):
+ 968:                 blockers.append({
+ 969:                     "source": "story_progression_guard",
+ 970:                     "code": "ending_pressure_missing",
+ 971:                     "message": "章节结尾没有把压力、危险、误会、证据或后果递给下一章，容易平收。",
+ 972:                 })
+ 973:             density_soft_pass = (
+ 974:                 story_dialogue_markers >= 8
+ 975:                 and story_mission_hits >= 3
+ 976:                 # T-13：原默认值 True，映射成 `is not False`。
+ 977:                 and story_guard.get("dialogue_changes_state") is not False
+ 978:                 and story_guard.get("ending_pressure_passed", story_guard.get("ending_hook_detected", True)) is not False
+ 979:                 and not story_guard.get("static_description_risk")
+ 980:             )
+ 981:             if (
+ 982:                 story_word_count >= 1800
+ 983:                 and story_guard.get("event_density_passed") is False
+ 984:                 and not density_soft_pass
+ 985:                 and (critique_score is None or critique_score < 70)
+ 986:             ):
+ 987:                 blockers.append({
+ 988:                     "source": "story_progression_guard",
+ 989:                     "code": "event_density_weak",
+ 990:                     "message": "正文篇幅没有稳定长在行动、对话、发现、代价和关系变化上，存在低事件密度风险。",
+ 991:                 })
+ 992:             if (
+ 993:                 story_word_count >= 2500
+ 994:                 and story_guard.get("state_change_interval_passed") is False
+ 995:                 and not density_soft_pass
+ 996:             ):
+ 997:                 blockers.append({
+ 998:                     "source": "story_progression_guard",
+ 999:                     "code": "state_change_interval_weak",
+1000:                     "message": "章节中存在过长区间没有可见状态变化，读感容易变成解释或氛围拉长。",
+1001:                 })
+1002:             if (
+1003:                 story_word_count >= 7000
+1004:                 and story_guard.get("long_chapter_density_passed") is False
+1005:                 and not density_soft_pass
+1006:             ):
+1007:                 blockers.append({
+1008:                     "source": "story_progression_guard",
+1009:                     "code": "long_chapter_event_density_weak",
+1010:                     "message": "长章目标下事件密度和状态变化窗口不足，不能把少量事件拉成长章静默放行。",
+1011:                 })
+1012: 
+1013:             if story_guard.get("focus_character_missing"):
+1014:                 add_warning("focus_character_missing", "任务书指定的焦点人物没有在正文中得到可验证的出场或处理。")
+1015:             if story_guard.get("continuity_inherit_missing"):
+1016:                 add_warning("continuity_inherit_missing", "上一章承接锚点没有在开场落地。")
+1017:             if story_guard.get("continuity_inherit_late"):
+1018:                 add_warning("continuity_inherit_late", "上一章承接锚点出现过晚，开场承接压力不足。")
+1019:             if story_guard.get("reversal_in_late_section") is False:
+1020:                 add_warning("reversal_missing", "本章任务书要求的后段转折尚未形成可验证证据。")
+1021: 
+1022:             if critique_score is not None and critique_score >= 75:
+1023:                 if story_guard.get("ending_pressure_passed") is False:
+1024:                     exemptions.append("ending_pressure_missing")
+1025:                 if story_guard.get("event_density_passed") is False:
+1026:                     exemptions.append("event_density_weak")
+1027: 
+1028:         quality_issue_summary = cls._build_quality_issue_summary(
+1029:             blockers=blockers,
+1030:             story_guard=story_guard,
+1031:         )
+1032: 
+1033:         return {
+1034:             "passed": not blockers,
+1035:             "blockers": blockers,
+1036:             "warnings": warnings,
+1037:             "patch_suggestions": [{"code": item["code"], "suggestion": item["patch_suggestion"]} for item in warnings],
+1038:             "exemptions": exemptions,
+1039:             "critique_exemption_applied": list(exemptions),
+1040:             "quality_issue_summary": quality_issue_summary,
+1041:             "quality_issue_labels": quality_issue_summary.get("labels", []),
+1042:             "quality_issue_codes": quality_issue_summary.get("codes", []),
+1043:             "selected_critique_source": critique_source,
+1044:             "self_critique_final_score": critique_score,
+1045:             "self_critique_critical_count": critique_critical,
+1046:             "self_critique_major_count": critique_major,
+1047:             "self_critique_raw_issue_count": critique_summary.get("raw_issue_count"),
+1048:             "self_critique_deduped_issue_count": critique_summary.get("deduped_issue_count"),
+1049:             "self_critique_merged_issue_count": critique_summary.get("merged_issue_count"),
+1050:             "baseline_self_critique_major_count": (summaries.get("self_critique") or {}).get("major_count"),
+1051:             "post_consistency_self_critique_major_count": (summaries.get("self_critique_after_consistency") or {}).get("major_count"),
+1052:             "consistency_unresolved_count": len(unresolved_consistency),
+1053:             "consistency_unresolved_critical_count": len(critical_consistency),
+1054:             "consistency_unresolved_major_count": len(major_consistency),
+1055:             "story_progression_guard": story_guard,
+1056:         }
+1057: 
+1058:     # ====== END _pipeline_quality_gate.py ======
+1059: 
+
+
+Total: 653 lines across 7 methods

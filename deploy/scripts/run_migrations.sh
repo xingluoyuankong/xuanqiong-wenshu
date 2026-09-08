@@ -30,7 +30,7 @@ DB_HOST="${MYSQL_HOST:-localhost}"
 DB_PORT="${MYSQL_PORT:-3306}"
 DB_USER="${MYSQL_USER:-xuanqiong_wenshu}"
 DB_PASSWORD="${MYSQL_PASSWORD:-}"
-DB_NAME="${MYSQL_DATABASE:-xuanqiong_wenshu}"
+DB_NAME="${MYSQL_DATABASE-xuanqiong_wenshu}"
 MYSQL_BIN="${MYSQL_BIN:-mysql}"
 MYSQLDUMP_BIN="${MYSQLDUMP_BIN:-mysqldump}"
 PYTHON_BIN="${PYTHON_BIN:-}"
@@ -39,6 +39,18 @@ if [[ -z "$DB_PASSWORD" ]]; then
   echo "ERROR: MYSQL_PASSWORD is required; no migration was executed." >&2
   exit 1
 fi
+
+# Match the Docker rollback database identity and keep names out of filesystem paths.
+# An unset name keeps the historical default; an explicitly empty name is invalid.
+if [[ ! "$DB_NAME" =~ ^[A-Za-z][A-Za-z0-9_]*$ ]] || (( ${#DB_NAME} > 64 )); then
+  echo "ERROR: invalid MYSQL_DATABASE; expected 1-64 ASCII letters/digits/underscores, starting with a letter." >&2
+  exit 1
+fi
+case "${DB_NAME,,}" in
+  mysql|sys|information_schema|performance_schema)
+    echo "ERROR: system MYSQL_DATABASE is not an application backup target." >&2
+    exit 1 ;;
+esac
 
 if [[ -z "$PYTHON_BIN" ]]; then
   if [[ -x "$BACKEND_DIR/.venv/bin/python" ]]; then
@@ -70,12 +82,26 @@ if [[ "$DRY_RUN" == true ]]; then
   exit 0
 fi
 
+# Native writer quiescence is the caller's responsibility. This section aligns
+# the backup format with deploy_docker.sh / rollback.sh; it does not stop services.
+require_command sha256sum
+require_command mktemp
+umask 077
 BACKUP_DIR="${BACKUP_DIR:-$REPO_ROOT/backups}"
-mkdir -p "$BACKUP_DIR"
-BACKUP_FILE="$BACKUP_DIR/${DB_NAME}_before_alembic_$(date +%Y%m%d_%H%M%S).sql"
+mkdir -p -- "$BACKUP_DIR"
+BACKUP_FILE="$(mktemp "$BACKUP_DIR/${DB_NAME}_before_alembic_XXXXXXXX.sql")"
 echo "Creating backup: $BACKUP_FILE"
-MYSQL_PWD="$DB_PASSWORD" "$MYSQLDUMP_BIN" --single-transaction --routines --events -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" "$DB_NAME" > "$BACKUP_FILE"
+MYSQL_PWD="$DB_PASSWORD" "$MYSQLDUMP_BIN" --single-transaction --routines --events --triggers --hex-blob \
+  -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" --add-drop-database --databases "$DB_NAME" > "$BACKUP_FILE"
 [[ -s "$BACKUP_FILE" ]] || { echo "ERROR: backup is empty; refusing migration." >&2; exit 1; }
+# pipefail preserves a failed hash command even when it printed a partial digest.
+# The provider sidecar is published last. A failed/partial package is retained
+# for inspection, never advertised as complete, and never followed by migration.
+BACKUP_HASH="$(sha256sum "$BACKUP_FILE" | awk '{print $1}')"
+[[ "$BACKUP_HASH" =~ ^[a-f0-9]{64}$ ]] || { echo "ERROR: invalid backup checksum; no migration was executed." >&2; exit 1; }
+printf '%s\n' "$BACKUP_HASH" > "$BACKUP_FILE.sha256"
+printf '%s\n' "$DB_NAME" > "$BACKUP_FILE.database"
+printf '%s\n' 'mysql' > "$BACKUP_FILE.provider"
 echo "Backup complete."
 
 if [[ "$APPLY_LEGACY_SQL" == true ]]; then

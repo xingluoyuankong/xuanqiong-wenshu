@@ -1,0 +1,13 @@
+import {spawnSync} from 'node:child_process';
+import {readFileSync,writeFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+const file='src/features/agent/AgentRunCommandHistory.vue';
+const hash=()=>createHash('sha256').update(readFileSync(file)).digest('hex');
+const before=hash();
+const r=spawnSync(process.execPath,['node_modules/vitest/vitest.mjs','run','--config','audit/stage13-command-order/mutation.config.ts','src/features/agent/AgentRunCommandHistory.spec.ts','--reporter=json','--outputFile=audit/stage13-command-order/negative.json'],{encoding:'utf8',windowsHide:true});
+writeFileSync('audit/stage13-command-order/negative.log',r.stdout+r.stderr);
+const report=JSON.parse(readFileSync('audit/stage13-command-order/negative.json','utf8'));
+const after=hash();
+const result={mutation:'restore UUID tie-break',exit_code:r.status,passed:report.numPassedTests,failed:report.numFailedTests,detected:r.status!==0&&report.numFailedTests>0,before,after,source_unchanged:before===after};
+writeFileSync('audit/stage13-command-order/result.json',JSON.stringify(result,null,2));console.log(result);
+if(!result.detected||!result.source_unchanged)process.exitCode=1;

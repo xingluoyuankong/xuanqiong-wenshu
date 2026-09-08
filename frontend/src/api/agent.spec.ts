@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { AgentAPI, buildAgentRunCommandIdempotencyKey } from './agent'
+import { AgentAPI, buildAgentRunCommandIdempotencyKey, type AgentJob } from './agent'
 
 const fetchMock = vi.fn()
 
@@ -29,6 +29,86 @@ describe('AgentAPI timeline and artifact diff', () => {
     expect(String(url)).toBe('/api/agent/tools')
     expect(result.generation).toBe(4)
     expect(result.tools[0]).toMatchObject({ provider_id: 'project-read', provider_version: '1.0.0', source: 'builtin' })
+  })
+
+  it('只读死信 GET 保留失败对账投影，不发起重放', async () => {
+    const publicJob = {
+      id: 'dead-read', kind: 'agent_continuation', status: 'dead_letter',
+      terminal_status: 'dead_letter', recovery_status: 'failure_reconciled', result_json: {},
+      error_type: 'RuntimeError', error_detail: null,
+    }
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => [publicJob] })
+    expect(await AgentAPI.listDeadLetters()).toEqual([publicJob])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0][0])).toBe('/api/agent/dead-letters?limit=100')
+    expect(fetchMock.mock.calls[0][1].method || 'GET').toBe('GET')
+  })
+
+  it('Run state 的嵌套 Job 保留 false 与后续审批标记，不覆盖 Run 终态', async () => {
+    const publicJob = {
+      id: 'nested-continuation', kind: 'agent_continuation', status: 'succeeded',
+      attempt_count: 1, max_attempts: 3, terminal_status: 'succeeded', recovery_status: 'not_recorded',
+      result_json: { continuation_completed: false, pending_approval: true, continuation_acknowledged: false },
+      finished_at: '2026-09-07T00:00:02Z',
+    }
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({
+      status: 'awaiting_approval', terminal_status: null, jobs: [publicJob],
+    }) })
+    const state = await AgentAPI.getRunState('run/nested')
+    expect(state.jobs[0]).toEqual(publicJob)
+    expect(state.jobs[0].result_json.continuation_completed).toBe(false)
+    expect(state.jobs[0].recovery_status).toBe('not_recorded')
+    expect(state.terminal_status).toBeNull()
+    expect(state.status).toBe('awaiting_approval')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0][0])).toBe('/api/agent/runs/run%2Fnested/state')
+    expect(fetchMock.mock.calls[0][1].method || 'GET').toBe('GET')
+  })
+
+  it('读取公共 Job 投影的终态、恢复状态和安全 result_json 白名单', async () => {
+    const publicJob: AgentJob = {
+      id: 'continuation-1',
+      run_id: 'run-1',
+      correlation_id: 'correlation-1',
+      user_id: 1,
+      project_id: 'project-1',
+      kind: 'agent_continuation',
+      status: 'succeeded',
+      idempotency_key: '',
+      payload_json: {},
+      result_json: {
+        continuation_completed: true,
+        continuation_acknowledged: true,
+      },
+      error_type: null,
+      error_detail: null,
+      attempt_count: 1,
+      max_attempts: 3,
+      available_at: '2026-09-07T00:00:00Z',
+      lease_owner: null,
+      lease_expires_at: null,
+      lease_generation: 0,
+      cancel_requested_at: null,
+      cancel_reason: null,
+      created_at: '2026-09-07T00:00:00Z',
+      started_at: '2026-09-07T00:00:01Z',
+      finished_at: '2026-09-07T00:00:02Z',
+      terminal_status: 'succeeded',
+      recovery_status: 'continuation_completed',
+    }
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => [publicJob] })
+
+    const result = await AgentAPI.listJobs('project-1', 'succeeded')
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe('/api/agent/jobs?project_id=project-1&status=succeeded')
+    expect(result[0]).toMatchObject({
+      terminal_status: 'succeeded',
+      recovery_status: 'continuation_completed',
+      result_json: {
+        continuation_completed: true,
+        continuation_acknowledged: true,
+      },
+    })
   })
 
   it('请求项目级 Provider 摘要并编码项目、时间窗口和有界 limit', async () => {

@@ -102,6 +102,11 @@
           <strong>{{ job.kind }} · {{ jobStatusLabel(job.status) }}</strong>
           <span>状态码 {{ job.status }} · attempt {{ job.attempt_count }}/{{ job.max_attempts }} · {{ job.id.slice(0, 8) }}</span>
           <small v-if="job.error_type">{{ job.error_type }}</small>
+          <small v-if="job.terminal_status">终态：{{ jobStatusLabel(job.terminal_status) }}</small>
+          <small v-if="job.recovery_status && job.recovery_status !== 'not_recorded'">
+            恢复：{{ jobRecoveryStatusLabel(job.recovery_status) }}
+          </small>
+          <small v-if="jobResultSummary(job)">结果：{{ jobResultSummary(job) }}</small>
           <XqButton
             v-if="canCancelJob(job)"
             variant="secondary"
@@ -124,7 +129,12 @@
         <li v-for="job in deadLetters.slice(0, 12)" :key="job.id">
           <strong>{{ job.kind }} · {{ job.error_type || '需人工复核' }}</strong>
           <span>attempt {{ job.attempt_count }}/{{ job.max_attempts }} · {{ job.id.slice(0, 8) }}</span>
-          <small>{{ job.error_detail || '无错误摘要' }}</small>
+          <small v-if="job.terminal_status">终态：{{ jobStatusLabel(job.terminal_status) }}</small>
+          <small v-if="job.recovery_status && job.recovery_status !== 'not_recorded'">
+            恢复：{{ jobRecoveryStatusLabel(job.recovery_status) }}
+          </small>
+          <small v-if="jobResultSummary(job)">结果：{{ jobResultSummary(job) }}</small>
+          <small v-else>无公开结果摘要</small>
           <XqButton variant="secondary" size="sm" @click="emit('replay-dead-letter', job)">重新排队</XqButton>
         </li>
         <li v-if="!deadLetters.length" class="muted">暂无死信 Job。</li>
@@ -151,7 +161,7 @@
 </template>
 
 <script setup lang="ts">
-import type { AgentAuditRecord, AgentJob, AgentProjectProviderUsageSummary, AgentProviderUsageSummary, AgentTimelineEvent, AgentToolHealth } from '@/api/agent'
+import type { AgentAuditRecord, AgentJob, AgentJobRecoveryStatus, AgentProjectProviderUsageSummary, AgentProviderUsageSummary, AgentTimelineEvent, AgentToolHealth } from '@/api/agent'
 import { agentEventLabel as eventLabel } from '@/features/agent/reducers/agentEventReducer'
 import { XqButton, XqPanel } from '@/shared/ui'
 
@@ -213,12 +223,31 @@ const jobStatusLabel = (status: string) => ({
   queued: '等待 Worker',
   running: '执行中',
   succeeded: '已完成',
+  completed: '已完成',
   failed: '执行失败',
   dead_letter: '死信待处理',
   cancel_requested: '取消中',
   cancelled: '已取消',
 }[status] || status)
-const canCancelJob = (job: AgentJob) => !['succeeded', 'failed', 'cancelled', 'dead_letter'].includes(job.status)
+const jobRecoveryStatusLabel = (status: AgentJobRecoveryStatus) => ({
+  continuation_completed: '续跑已完成',
+  failure_reconciled: '失败已对账',
+  not_recorded: '未记录',
+}[status] || status)
+const jobResultSummary = (job: AgentJob) => {
+  const result = job.result_json || {}
+  const labels: string[] = []
+  if (job.kind === 'visible_response' && result.visible_response_job_id === job.id) labels.push('可见响应已关联')
+  // Only successful continuation Jobs expose these flags. A completed Job may
+  // still hand off to another approval; these flags never complete its Run.
+  if (job.kind === 'agent_continuation' && ['succeeded', 'completed'].includes(job.status)) {
+    if (typeof result.continuation_completed === 'boolean') labels.push(`续跑完成标记：${result.continuation_completed ? '是' : '否'}`)
+    if (typeof result.pending_approval === 'boolean') labels.push(`等待审批标记：${result.pending_approval ? '是' : '否'}`)
+    if (typeof result.continuation_acknowledged === 'boolean') labels.push(`续跑确认标记：${result.continuation_acknowledged ? '是' : '否'}`)
+  }
+  return labels.join(' · ')
+}
+const canCancelJob = (job: AgentJob) => !['succeeded', 'completed', 'failed', 'cancelled', 'dead_letter'].includes(job.status)
 </script>
 
 <style scoped>

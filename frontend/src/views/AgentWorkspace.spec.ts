@@ -4,8 +4,10 @@ import { createPinia } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
 import AgentWorkspace from './AgentWorkspace.vue'
 import workspaceSource from './AgentWorkspace.vue?raw'
+import AgentConversation from '@/features/agent/AgentConversation.vue'
 
 const {
+  runtimeCapabilities,
   pushMock,
   replaceMock,
   routeQuery,
@@ -42,6 +44,7 @@ const {
   removeProjectMemberMock,
   store,
 } = vi.hoisted(() => ({
+  runtimeCapabilities: { supported: true },
   pushMock: vi.fn(),
   replaceMock: vi.fn(),
   routeQuery: {} as Record<string, string>,
@@ -123,7 +126,7 @@ vi.mock('@/api/agent', () => ({
     getRunState: getRunStateMock,
     getArtifactContent: getArtifactContentMock,
     getArtifactQuality: getArtifactQualityMock,
-    createSession: createSessionMock,
+    get createSession() { return runtimeCapabilities.supported ? createSessionMock : undefined },
     sendMessage: sendMessageMock,
     submitRunCommand: submitRunCommandMock,
     sessionStreamUrl: vi.fn(),
@@ -142,6 +145,8 @@ const expandDataDetails = async (wrapper: {
 
 describe('AgentWorkspace', () => {
   beforeEach(() => {
+    runtimeCapabilities.supported = true
+    createPlanMock.mockClear()
     pushMock.mockReset()
     replaceMock.mockReset()
     Object.keys(routeQuery).forEach((key) => delete routeQuery[key])
@@ -329,6 +334,14 @@ describe('AgentWorkspace', () => {
     }
     listArtifactsMock.mockResolvedValue([artifact])
     listRunStepsMock.mockResolvedValue([])
+    listJobsMock.mockResolvedValue([{
+      id: 'continuation-1', run_id: run.id, user_id: 1, project_id: 'p1', kind: 'agent_continuation',
+      status: 'succeeded', idempotency_key: '', payload_json: {},
+      result_json: { continuation_completed: true, continuation_acknowledged: true },
+      error_type: null, error_detail: null, attempt_count: 1, max_attempts: 3,
+      available_at: 'now', created_at: 'now', terminal_status: 'succeeded',
+      recovery_status: 'continuation_completed', finished_at: 'now',
+    }])
     getRunStateMock.mockResolvedValue({ correlation_id: 'lazy', progress: 100, phase: 'completed', current_step: 1, terminal_status: 'completed', capability_snapshot: { generation: 1, providers: [], tools: [] } })
     const pinia = createPinia()
     useAuthStore(pinia).setUser({ id: 1, username: 'admin', is_admin: true, must_change_password: false })
@@ -353,6 +366,8 @@ describe('AgentWorkspace', () => {
     expect(wrapper.get('[data-testid="agent-selected-run-id"]').text()).toContain(run.id)
 
     const details = wrapper.get('[data-testid="agent-data-section"]')
+    expect(details.text()).toContain('恢复：续跑已完成')
+    expect(details.text()).toContain('结果：续跑完成标记：是 · 续跑确认标记：是')
     ;(details.element as HTMLDetailsElement).open = false
     await details.trigger('toggle')
     ;(details.element as HTMLDetailsElement).open = true
@@ -545,7 +560,7 @@ describe('AgentWorkspace', () => {
     expect(workspaceSource).toContain('@click="loadOlderRuns"')
   })
 
-  it('点击日志动作或结果引用后定位当前 Run，并在切换 Run 时清理定位', async () => {
+  it.each([false, true])('点击日志定位后切换 Run 完成刷新（审批返回空值=%s）', async (emptyApprovals) => {
     const scrollIntoViewMock = vi.fn()
     Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoViewMock })
     Object.assign(routeQuery, { project_id: 'p1', session_id: 's-locate', run_id: 'run-locate-old' })
@@ -586,11 +601,15 @@ describe('AgentWorkspace', () => {
     expect(wrapper.get('[data-testid="agent-selected-location"]').text()).toContain('execution:run-locate-old')
     expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: 'nearest' })
 
+    if (emptyApprovals) listApprovalsMock.mockReturnValueOnce(undefined)
     await wrapper.get('[data-testid="agent-run-selector"]').setValue('run-locate-new')
     await flushPromises()
     await flushPromises()
     expect(wrapper.get('[data-testid="agent-selected-location"]').text()).toContain('尚未定位')
     expect(wrapper.find('.step-list__item--selected').exists()).toBe(false)
+    expect(listApprovalsMock).toHaveBeenCalledWith('run-locate-new')
+    expect(replaceMock).toHaveBeenCalledWith(expect.objectContaining({ query: expect.objectContaining({ run_id: 'run-locate-new' }) }))
+    wrapper.unmount()
   })
 
   it('将导航、聊天和运行日志分隔为可折叠的独立区域', async () => {
@@ -646,7 +665,100 @@ describe('AgentWorkspace', () => {
       query: { project_id: 'p1', chapter: '1', version_id: '11', focus: 'version' },
     })
   })
+  it('delayed project and session initialization keeps draft, disables submit and never falls back to plan', async () => {
+    const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
+    const projects = deferred<void>()
+    const toolsReady = deferred<unknown>()
+    const sessionsReady = deferred<unknown[]>()
+    const sessionReady = deferred<unknown>()
+    store.loadProjects.mockReturnValueOnce(projects.promise)
+    listToolsMock.mockReturnValueOnce(toolsReady.promise)
+    listSessionsMock.mockReturnValueOnce(sessionsReady.promise)
+    createSessionMock.mockReturnValueOnce(sessionReady.promise)
+    const currentSession = { id: 'ready-session', project_id: 'p1', user_id: 1, status: 'active', created_at: 'now', updated_at: 'now' }
+    const sendingResult = deferred<unknown>()
+    sendMessageMock.mockReturnValueOnce(sendingResult.promise)
+    const wrapper = mount(AgentWorkspace)
+    const input = wrapper.get('[data-testid="agent-message-input"]')
+    await input.setValue('保留作者输入')
+    const assertBlocked = async () => {
+      expect(wrapper.get('[data-testid="agent-plan-submit"]').attributes('disabled')).toBeDefined()
+      await wrapper.get('form.composer').trigger('submit')
+      // Direct component emission bypasses native disabled controls: parent guard must agree.
+      wrapper.getComponent(AgentConversation).vm.$emit('submit')
+      await flushPromises()
+      expect(createPlanMock).not.toHaveBeenCalled()
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect((input.element as HTMLTextAreaElement).value).toBe('保留作者输入')
+    }
+    try {
+      await assertBlocked() // before selectedProject/sessionLoading exist
+      projects.resolve()
+      await flushPromises()
+      await assertBlocked() // project selected but tools/content tree still pending
+      toolsReady.resolve({ tools: [] })
+      await flushPromises()
+      await assertBlocked() // listSessions pending
+      sessionsReady.resolve([])
+      await flushPromises()
+      await assertBlocked() // createSession pending
+      sessionReady.resolve(currentSession)
+      await flushPromises()
+      await flushPromises()
+      expect(wrapper.get('[data-testid="agent-plan-submit"]').attributes('disabled')).toBeUndefined()
+      await wrapper.get('form.composer').trigger('submit')
+      expect(sendMessageMock).toHaveBeenCalledTimes(1)
+      expect(sendMessageMock).toHaveBeenCalledWith(currentSession.id, expect.objectContaining({ content: '保留作者输入' }))
+      expect(createPlanMock).not.toHaveBeenCalled()
+      await input.setValue('发送中新增草稿')
+      wrapper.getComponent(AgentConversation).vm.$emit('submit')
+      await wrapper.get('form.composer').trigger('submit')
+      expect(sendMessageMock).toHaveBeenCalledTimes(1)
+      expect((input.element as HTMLTextAreaElement).value).toBe('发送中新增草稿')
+    } finally {
+      wrapper.unmount()
+      projects.resolve(); toolsReady.resolve({ tools: [] }); sessionsReady.resolve([]); sessionReady.resolve(currentSession)
+    }
+  })
+
+  it('a restored session belonging to another project remains unready', async () => {
+    const foreign = { id: 'foreign-session', project_id: 'p2', user_id: 1, status: 'active', created_at: 'now', updated_at: 'now' }
+    listSessionsMock.mockResolvedValueOnce([foreign])
+    getSessionMock.mockResolvedValueOnce({ ...foreign, messages: [], runs: [] })
+    const wrapper = mount(AgentWorkspace)
+    try {
+      await flushPromises(); await flushPromises()
+      const input = wrapper.get('[data-testid="agent-message-input"]')
+      await input.setValue('当前项目草稿')
+      wrapper.getComponent(AgentConversation).vm.$emit('submit')
+      await wrapper.get('form.composer').trigger('submit')
+      expect(wrapper.get('[data-testid="agent-plan-submit"]').attributes('disabled')).toBeDefined()
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect(createPlanMock).not.toHaveBeenCalled()
+      expect((input.element as HTMLTextAreaElement).value).toBe('当前项目草稿')
+    } finally { wrapper.unmount() }
+  })
+
+  it('runtime session initialization failure preserves the draft and does not silently generate a plan', async () => {
+    listSessionsMock.mockRejectedValueOnce(new Error('会话服务暂不可用'))
+    const wrapper = mount(AgentWorkspace)
+    try {
+      await flushPromises()
+      const input = wrapper.get('[data-testid="agent-message-input"]')
+      await input.setValue('重试前保留')
+      wrapper.getComponent(AgentConversation).vm.$emit('submit')
+      await wrapper.get('form.composer').trigger('submit')
+      await flushPromises()
+      expect(createPlanMock).not.toHaveBeenCalled()
+      expect(sendMessageMock).not.toHaveBeenCalled()
+      expect((input.element as HTMLTextAreaElement).value).toBe('重试前保留')
+      expect(wrapper.get('[data-testid="agent-plan-submit"]').attributes('disabled')).toBeDefined()
+      expect(wrapper.text()).toContain('会话服务暂不可用')
+    } finally { wrapper.unmount() }
+  })
+
   it('提交目标后展示 provider-free 计划', async () => {
+    runtimeCapabilities.supported = false
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
     await wrapper.get('[data-testid="agent-message-input"]').setValue('检查质量')
@@ -659,6 +771,7 @@ describe('AgentWorkspace', () => {
     )
   })
   it('展示 Provider 参与规划，而不把它误报为本地计划', async () => {
+    runtimeCapabilities.supported = false
     createPlanMock.mockResolvedValueOnce({
       goal: '检查质量',
       mode: 'explore',
@@ -1498,5 +1611,23 @@ describe('AgentWorkspace', () => {
     await section.get('summary').trigger('click')
     expect((section.element as HTMLDetailsElement).open).toBe(true)
     expect(section.text()).toContain('运行详情')
+  })
+})
+
+
+describe('workspace conversation scroll layout contract', () => {
+  const rules = () => [...workspaceSource.matchAll(/\.workspace-chat-column :deep\(\.messages\)\s*\{([^}]+)\}/g)].map(match => match[1]!)
+  it('does not force empty space above the desktop composer while retaining bounded scrolling', () => {
+    const blocks = rules()
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0]).toContain('min-height: 0;')
+    expect(blocks[0]).toContain('max-height: min(70vh, 58rem);')
+    expect(blocks[0]).toContain('scrollbar-gutter: stable;')
+  })
+  it('keeps mobile scrolling bounded without a fixed minimum message height', () => {
+    expect(rules()[1]).toContain('min-height: 0;')
+    expect(rules()[1]).toContain('max-height: 55vh;')
+    expect(workspaceSource).toContain('@media (max-width: 650px)')
+    expect(workspaceSource).toContain('.workspace-activity-stack { grid-template-columns: 1fr; }')
   })
 })

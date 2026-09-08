@@ -1,0 +1,15 @@
+{
+  "entries": [
+    {
+      "path": "src/utils/sseStream.ts",
+      "expected": "96824987f70bd3b28cd6538d58cc1e5077492f4253f5c52b7929c0345e27de96",
+      "actual": "96824987f70bd3b28cd6538d58cc1e5077492f4253f5c52b7929c0345e27de96"
+    },
+    {
+      "path": "src/features/agent/composables/useAgentRunStream.ts",
+      "expected": "414ef42ab50d8ff8b84662053a52fac730a1141527aeb9db2e4ce9a29838c297",
+      "actual": "414ef42ab50d8ff8b84662053a52fac730a1141527aeb9db2e4ce9a29838c297"
+    }
+  ],
+  "source_matches_tested_mutation_baseline": true
+}

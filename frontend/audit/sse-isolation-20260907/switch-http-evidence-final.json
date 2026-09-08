@@ -1,0 +1,32 @@
+[
+  {
+    "key": "switch-a",
+    "run": "run-a",
+    "count": 1,
+    "query_cursor": "0",
+    "header_cursor": null,
+    "started": 1788747907525,
+    "ended": 1788747907613,
+    "frames": 1
+  },
+  {
+    "key": "switch-a-restart",
+    "run": "run-a",
+    "count": 1,
+    "query_cursor": "0",
+    "header_cursor": null,
+    "started": 1788747907594,
+    "ended": 1788747907684,
+    "frames": 1
+  },
+  {
+    "key": "switch-b",
+    "run": "run-b",
+    "count": 1,
+    "query_cursor": "0",
+    "header_cursor": null,
+    "started": 1788747907664,
+    "ended": 1788747912670,
+    "frames": 2
+  }
+]

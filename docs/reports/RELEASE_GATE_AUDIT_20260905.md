@@ -1,3 +1,7 @@
+> **阶段七最新工程门禁**：后端2358通过（1020.08s），481源码/测试文件结束指纹一致；worker现代快照不再降级，等待审批依赖保留pending，267项组合及13/2/2/2反向检出。前端本批未改，沿用601/type-check/build16.89s。F02持久化审批续跑的事务生产者、专用job、原计划复用、ACK屏障和并发恢复仍未完成；完整API工作台E2E、7项文学质量缺口、Docker/MySQL实机仍待完成。发布NO-GO、目标active，当前状态文件顶部为权威入口。
+
+> **当前接续入口（2026-09-07）**：请先阅读 `D:\小说写作\xuanqiong-wenshu\docs\reports\CURRENT_EXECUTION_STATUS_20260906.md`。本文件下方所有“最新/权威”字样均属于历史时点；当前门禁、原超时阈值恢复、未完成项及执行计划以该滚动状态表为准。旧证据保留，不代表当前全量通过。
+
 # 玄穹文枢发布门禁审计（2026-09-05）
 
 > **状态标记：本文原始审计快照及中间复核附录均已被文末 2026-09-06 当前 task 权威探针附录覆盖。**
@@ -1035,3 +1039,300 @@ Artifact：0，仍待 Provider/Artifact 生成链路
 ```
 
 本轮解决 `agent_catalog_releases(catalog_id,generation)` 与旧 digest 冲突造成的 AgentRun 503；新 generation=2 后事件账本写入正常。探针清理后没有新增项目、Run、Artifact、Session 或 TaskRuntime 残留。
+## 本轮权威发布审计快照（追加记录，保留全部历史证据）
+
+> 本节针对当前接续批次重新整理证据状态。此前报告中的历史结论、历史 HEAD、历史测试数字和历史探针结果均保留；本节只新增当前判定依据，不回写旧记录。
+
+### 1. 当前版本与证据状态
+
+```text
+审计对象分支：codex/bohrium-integration-20260831
+当前 HEAD：dc3788e812d02fdd5112ed9b74dc1da2ac7da7eb
+HEAD 提交：docs: record agent run smoke coverage
+AgentRun 修复提交：c3287885a4259e84e5d09f375bd2b5e5588faf8f
+编辑前 tracked 工作树：clean；当前 tracked 改动仅为本轮两份指定文档
+既有未跟踪运行工件：138 项，保留原状
+本轮文档范围：仅本接续文档与本发布审计文档
+```
+
+### 2. 通过、历史基线与阻塞矩阵
+
+| 检查项 | 结果 | 证据状态 | 发布含义 |
+|---|---:|---|---|
+| Catalog generation 冲突修复 | PASS | 当前 `c328788` | AgentRun 创建阻塞已解除 |
+| AgentRun message/detail/events | 201/200/200 | 当前 | 基础 Run 读写链已形成证据 |
+| AgentRun 定向回归 | 45 passed | 当前 | Catalog/runtime 修复有回归覆盖 |
+| OpenAPI smoke | 261 / 135 / 126 / 0 | 当前 | 无失败，但 109 项资源身份和 4 项流式路由仍未覆盖 |
+| fixture 审计 | PASSED | 当前 | 21 个 fixture 的 dry-run 通过；未执行回收动作 |
+| 后端全量 pytest | 1767 passed | 历史 | 结果早于 `c328788`，当前发布批次仍需重跑 |
+| 前端门禁 | 544 tests、type-check、build 通过 | 历史 | 当前发布批次仍需复核 |
+| acceptance | 6/6 PASS | 历史 | 当前发布批次仍需重跑 |
+| AgentRun cancel | 503 记录仍未闭合 | 当前缺口 | 运行生命周期无法判定为完整通过 |
+| Provider/Artifact | 未形成真实完整链路；Artifact=0 | 当前缺口 | Artifact 资源族无法判定为通过 |
+| Docker Server | 未响应 | 当前缺口 | Compose 运行矩阵缺失 |
+| MySQL 3306/3309 | 均未监听 | 当前缺口 | 正式数据库矩阵缺失 |
+
+### 3. 当前 NO-GO 判定
+
+```text
+任务状态：active
+发布状态：NO-GO
+判定依据：P0 门禁尚未全部闭合
+```
+
+本次 `c328788` 已实质关闭一个 AgentRun 创建阻塞，但它只证明事件账本写入恢复，不代表 cancel、Provider、worker、terminal Run、Artifact、Docker Compose 和正式 MySQL 全部通过。当前保持 `active / NO-GO`，不把跳过项、历史基线或静态配置结果折算为发布通过。
+
+### 4. 剩余门禁与执行优先级
+
+1. **P0-1：AgentRun cancel**。独立复现 503，捕获服务层底层异常，修复取消副作用，补充 HTTP 与服务层回归，并验证状态、事件、幂等和项目清理。
+2. **P0-2：Provider/Worker/terminal Run**。取得真实 provider response、worker 消费和终态 Run 证据，保存请求、事件、状态转换与清理前后计数。
+3. **P0-3：Artifact 资源族**。从真实 Run 生成 Artifact，接入 smoke context，覆盖 content、quality、lineage、quality-blockers、rewrite-instructions 及相关 diff 路由。
+4. **P0-4：Docker Compose runtime**。Docker Server 可用后，执行 migrate、app、agent-worker、agent-command-worker 的启动、健康、日志、停止和重启矩阵。
+5. **P0-5：正式 MySQL**。实例可用后执行 migration、backup、restore、rollback、re-upgrade，并记录 SHA256/sentinel/版本和失败回滚结果。
+6. **P1：最终回归与裁决**。在当前 HEAD 或最新修复 HEAD 上重跑后端全量、前端三项门禁、acceptance、smoke、fixture 审计，再形成最终 GO/NO-GO。
+
+### 5. 本轮验证记录
+
+```text
+Git branch：codex/bohrium-integration-20260831
+Git HEAD：dc3788e812d02fdd5112ed9b74dc1da2ac7da7eb
+git diff --check：PASS
+本轮文档之外的 tracked 文件改动：0；当前 diff 仅含本接续文档与本发布审计文档
+既有未跟踪工件：138 项，未清理
+
+Smoke fixture audit：SMOKE_FIXTURE_AUDIT_PASSED
+fixture_count：21
+decision_counts：candidate=20；hold-marked-fixture=1
+min_age_seconds：3600
+
+OpenAPI smoke：261 checks / 135 passed / 126 skipped / 0 failed
+resource-identity：109
+streaming-route：4
+AgentRun：message=201；detail=200；events=200
+Agent catalog generation：2
+Artifact：0
+
+Docker client：29.4.3
+Docker server：连接失败，dockerDesktopLinuxEngine named pipe 不存在
+com.docker.service：Stopped / Manual
+MySQL TCP：127.0.0.1:3306=False；127.0.0.1:3309=False
+```
+
+### 6. 审计结论与下一次更新要求
+
+本轮审计没有改变历史证据，只把 `dc3788e`、`c328788`、当前 smoke fixture 审计和 Docker/MySQL 探针提升为当前接续批次的权威状态。下一次更新必须至少包含：cancel 的底层异常与修复回归、Provider/terminal Run 结果、真实 Artifact 数量与资源族结果、当前 HEAD 全量测试、Docker runtime 矩阵、正式 MySQL 矩阵，以及基于全部 P0 证据的最终 GO/NO-GO 重判。在这些结果出现前，发布状态保持 `active / NO-GO`。
+## 当前 task 验证增量（2026-09-05）
+
+### 已闭合的本轮门禁
+
+1. **AgentRun 取消服务与 ASGI 合同**
+   - `test_agent_cancellation_convergence.py`：`2 passed`。
+   - 新增 `test_cancel_agent_run_http_contract_returns_terminal_run`：`1 passed in 108.16s`。
+   - 返回 `200`，Run 最终状态 `cancelled`，阶段 `cancelled`。
+   - 历史 503 的 Catalog generation 冲突已由 `c328788` 修复；取消副作用未发现新的底层异常。
+
+2. **Provider/Artifact 生命周期 fixture**
+   - 新增 `backend/app/agent/test_agent_artifact_lifecycle_smoke.py`。
+   - 最终回归：`1 passed in 75.98s`。
+   - 已验证 fixture Provider、候选正文文件、Artifact 引用、SHA256、质量结果与门、content/quality/blockers/rewrite/lineage 查询、候选接受、章节版本 Artifact、accepted lineage 和 `completed/accepted` Run。
+   - 该 fixture 使用隔离数据库与临时文件根目录，Artifact ID 由 service 生成，不污染现有运行数据库。
+
+3. **组合定向与前端快速门禁**
+   - Catalog/runtime/jobs/cancel 组合定向回归：`12 passed`。
+   - 前端 type-check 进程退出码：`0`。
+   - `git diff --check`：PASS。
+
+### 仍未闭合的发布证据
+
+- 独立 TCP 服务进程上的 AgentRun message/detail/events/cancel 端到端响应。
+- 真实 Agent Worker/Command Worker 消费、Provider response、terminal Run 和生产服务 Artifact HTTP 资源。
+- Artifact fixture 接入 `tools/smoke_api_routes.py` 后的外部 HTTP 资源身份覆盖。
+- Docker Server/Compose runtime；现状与静态配置见 `docs/reports/DOCKER_MYSQL_RELEASE_GATE_AUDIT_20260905.md`。
+- 正式 MySQL migration/backup/restore/rollback/re-upgrade。
+- 当前 HEAD 后端全量、前端 Vitest/type-check/build-only、acceptance 的最终批次复核。
+
+### 当前发布判定
+
+取消服务层与 Artifact 隔离生命周期回归已通过，但运行时、容器、MySQL 及最终批次证据尚未全部齐备，当前结论保持：`active / NO-GO`。
+
+### 后续执行顺序
+
+1. 复测独立 TCP AgentRun cancel；
+2. 闭合 Worker/Provider/terminal Run；
+3. 接入生产服务 Artifact HTTP fixture；
+4. 重跑当前 HEAD 全量门禁；
+5. 执行 Docker/MySQL 矩阵；
+6. 重新生成发布审计并重判 GO/NO-GO。
+
+## 当前 task 权威复核（2026-09-06）
+
+### 本轮已完成
+
+- AgentRun cancel 服务层与 ASGI HTTP 合同：`3 passed`，HTTP 返回 `200/cancelled/cancelled`。
+- Artifact provider/quality/lineage/acceptance 隔离生命周期：`1 passed`。
+- Command Worker 孤儿 Run 恢复：`1 passed`，孤儿命令收敛为 `failed/OrphanedRun`，worker 保持可运行。
+- 两个 CLI worker once 回归与两个独立 ASGI worker replay 回归：逐项 `4 passed`。
+- `verify.ps1 -Suite acceptance`：`6/6 PASS`。
+- 前端 `type-check`：PASS；`build-only`：PASS，4918 modules transformed。
+- AgentWorkspace focused：30 tests passed；六个视图存在性 focused：全部通过，AdminView 使用 120 秒冷启动窗口。
+- `git diff --check`：PASS。
+
+### 全量门禁的真实分层
+
+```text
+后端全量修复前：1765 passed / 4 failures
+四个失败项修复后逐项：4 passed
+前端全量修复前：535 passed / 9 timeout failures
+AgentWorkspace 修复后 focused：30 passed
+前端视图存在性 focused：6 passed
+```
+
+这组数字不折算成“当前全量已通过”；当前修复后完整批次仍需在资源空闲窗口执行。
+
+### 当前阻塞
+
+- Docker Server：named pipe 不存在，`com.docker.service` 未运行；Compose runtime 无真实证据。
+- MySQL：3306/3309 无监听；正式迁移恢复回滚矩阵无实例证据。
+- 生产 HTTP Artifact fixture 尚未接入 OpenAPI smoke，隔离 service fixture 已通过。
+- 当前修复后后端/前端完整批次仍待重跑。
+
+### 发布判定
+
+当前继续为 `active / NO-GO`：关键业务回归和 acceptance 已推进，但容器、正式 MySQL、生产 HTTP Artifact 资源族及修复后完整批次尚未全部闭合。
+
+## 当前 task 最新验证结果（2026-09-06）
+
+- `verify.ps1 -Suite acceptance`：`6/6 PASS`。
+- TCP message/member/Run pagination、SQLite migration backup/restore、Agent worker once、Agent command worker once 全部通过。
+- acceptance 首次复测暴露历史孤儿 `AgentRunCommand` 崩溃；`command_recovery.py` 已加入 `OrphanedRun` 终态收敛，修复回归通过，Command Worker 二次 acceptance 正常退出。
+- 修复前后端全量快照：`1765 passed / 4 failures`；四个失败项逐项复测 `4 passed`。
+- 关键后端组合回归 `5 passed`；Artifact lifecycle `1 passed`；Cancel service/HTTP `3 passed`。
+- 前端 type-check PASS；build-only PASS，4918 modules transformed；AgentWorkspace focused `30 passed`；视图存在性 focused `6 passed`。
+- `git diff --check` PASS。
+
+### 当前剩余门禁
+
+1. 修复后后端完整 pytest 批次；
+2. 修复后前端完整 Vitest 批次；
+3. 生产 HTTP Artifact 生成链接入 OpenAPI smoke；
+4. Docker Server/Compose runtime；
+5. 正式 MySQL migration/backup/restore/rollback/re-upgrade；
+6. 全部证据完成后的最终 GO/NO-GO 重判。
+
+发布结论继续为 `active / NO-GO`；不把逐项回归、历史全量快照或静态配置结果折算成当前全量发布通过。
+
+## OpenAPI smoke 稳定复测（2026-09-06）
+
+正式栈启动高峰期间首次 smoke 的 `/api/novels/import/status` 出现单次 15 秒超时；热身后重新执行已通过：
+
+```text
+OpenAPI smoke：261 checks / 135 passed / 126 skipped / 0 failed
+resource-identity：109
+streaming-route：4
+```
+
+当前结论：接口稳定复测通过；资源身份、流式和昂贵路由仍按真实前置条件分层，不把跳过项折算为通过。
+
+## Deployment 脚本顺序修复（2026-09-06）
+
+- `deploy/scripts/deploy_docker.sh` 已调整为 Compose 内迁移顺序：MySQL 健康 → migrate 容器 → app/两个 Worker。
+- `RUN_MIGRATIONS` 提供显式开关。
+- `deploy/scripts/rollback.sh` 已统一到 `docker compose`，并固定读取项目根目录下的 `deploy/.env`。
+- Bash 语法检查：两个脚本均 PASS。
+- Compose maintenance/mysql profiles 静态 config：PASS。
+- `test_deployment_contract.py`：`8 passed`。
+
+真实 Docker runtime 仍待 Docker Server 恢复，当前发布结论继续为 `active / NO-GO`。
+
+## 独立测试门禁审查（2026-09-06，当前 task）
+
+### 审查范围
+
+本轮只审查测试门禁、失败分层和进程冷启动稳定性；未修改业务逻辑，保留全部未跟踪数据库、日志、上传文件、运行工件及既有工作树改动。
+
+### 当前权威证据
+
+- 后端收集：`1770 tests collected in 167.60s`，收集成功。
+- 修复后的 worker/ASGI 定向批次：`8 passed in 838.13s`。
+- 定向批次慢测：
+  - `test_worker_cli_once_mode_exits_cleanly`：`110.82s`；
+  - `test_command_worker_cli_once_exits_cleanly_on_empty_database`：`96.79s`；
+  - `test_worker_b_replays_events_written_via_worker_a_http_to_shared_sqlite`：`269.40s`；
+  - `test_independent_worker_once_completes_execution_then_visible_response_via_http`：`295.87s`。
+- 历史修复前后端全量：`1765 passed / 4 failed`；四个失败均为 CLI 子进程超时或 ASGI worker 健康启动窗口超时，失败发生在进程/启动层，没有形成业务断言失败。
+- 当前定向批次在本机高资源争用状态下仍为 `8/8 PASS`，因此四个修复项的行为回归证据成立；完整全量仍需单独串行执行。
+
+### 超时判断
+
+1. **CLI 子进程：由 120 秒提升到 180 秒。** 现有实测最大值为 `110.82s`，120 秒只剩约 9 秒余量，属于脆弱门槛。180 秒约为当前最大实测的 1.6 倍，仍保留明确的失败上限，不改变被测程序行为。
+2. **AdminView 动态导入：由 120000ms 提升到 180000ms。** 既有冷启动观测约 119 秒，120 秒余量约 1 秒；180 秒用于覆盖首次 Vite transform 和 Windows 文件句柄争用。该调整只位于独立 spec 的测试等待窗口。
+3. **ASGI worker 启动：保留 180 秒。** 本轮 ASGI 测试完整调用耗时 `269.40s/295.87s`，其中含双进程启动、HTTP 写入、SSE 回放和清理，不应直接等同于健康启动耗时；当前 180 秒健康检查门槛已在 `8/8` 批次中通过，暂无扩大该启动门槛的直接证据。
+4. **资源争用记录：** 当前机器存在长时间运行的外部 Python 扫描进程（PID `21672`，启动于 `2026-09-05 14:52:59`），以及正在运行的应用/前端进程。它是本轮耗时解释变量，未被本轮测试修改或终止；最终全量门禁应在机器资源空闲窗口执行，并避免后端/前端全量并行。
+
+### 本轮实际改动
+
+仅测试稳定性改动：
+
+```text
+backend/app/agent/test_worker_cli.py
+  subprocess.run(timeout=120) -> timeout=180
+
+backend/app/agent/test_command_worker_cli.py
+  subprocess.run(timeout=120) -> timeout=180
+
+frontend/src/views/AdminView.spec.ts
+  test timeout 120000ms -> 180000ms
+```
+
+既有 `app.models` 显式注册、Command Worker 孤儿命令回归、ASGI 启动窗口和 AgentWorkspace Promise 归一化改动保持不变；本轮没有触碰生产业务实现。
+
+### 最小最终批次
+
+机器资源不足时先执行以下快速层，形成可重放证据：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m py_compile `
+  app/agent/test_worker_cli.py `
+  app/agent/test_command_worker_cli.py `
+  app/agent/test_asgi_worker_event_replay.py
+cd ..
+git diff --check
+```
+
+资源空闲后按串行顺序执行，不并发：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q `
+  app/agent/test_worker_cli.py `
+  app/agent/test_command_worker_cli.py `
+  app/agent/test_asgi_worker_event_replay.py `
+  --durations=20 --tb=short
+
+cd ..\frontend
+npm run test:run -- src/views/AdminView.spec.ts src/views/AgentWorkspace.spec.ts
+npm run type-check
+npm run build-only
+```
+
+最后才执行两项完整门禁：
+
+```powershell
+cd D:\小说写作\xuanqiong-wenshu\backend
+.\.venv\Scripts\python.exe -m pytest -q --durations=20
+
+cd ..\frontend
+npm run test:run
+```
+
+判定规则：定向层、后端全量、前端全量必须全部在当前修改后的工作树通过；若失败，按 `import/transform`、子进程启动、应用断言、资源争用四类分别记录，单次超时不直接判定为业务回归，也不以扩大阈值替代失败定位。
+
+### 当前结论
+
+```text
+测试稳定性审查：PASS（当前定向 8/8）
+后端全量最终门禁：待当前工作树重跑
+前端全量最终门禁：待当前工作树重跑
+发布判定：active / NO-GO
+```

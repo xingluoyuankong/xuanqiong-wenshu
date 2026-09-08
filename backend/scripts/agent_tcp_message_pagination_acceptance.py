@@ -75,93 +75,113 @@ async def run(base_url: str, username: str, password: str, count: int, limit: in
     if count < 1 or limit < 1 or limit > 200:
         raise AcceptanceFailure("count must be >= 1 and limit must be in 1..200")
     session_id: str | None = None
-    async with httpx.AsyncClient(base_url=base_url, timeout=30.0, follow_redirects=True) as client:
-        login = await client.post("/api/auth/login", data={"username": username, "password": password})
-        token_payload = _expect(login, 200, "jwt_login")
-        token = str(token_payload.get("access_token") or "")
-        if not token:
-            raise AcceptanceFailure("phase=jwt_login missing access_token")
-        headers = {"Authorization": f"Bearer {token}"}
+    primary_error: BaseException | None = None
+    try:
+        async with httpx.AsyncClient(base_url=base_url, timeout=30.0, follow_redirects=True) as client:
+            login = await client.post("/api/auth/login", data={"username": username, "password": password})
+            token_payload = _expect(login, 200, "jwt_login")
+            token = str(token_payload.get("access_token") or "")
+            if not token:
+                raise AcceptanceFailure("phase=jwt_login missing access_token")
+            headers = {"Authorization": f"Bearer {token}"}
 
-        profile = _expect(await client.get("/api/novels/current-user", headers=headers), 200, "jwt_profile")
-        user_id = int(profile["id"])
-        created = _expect(
-            await client.post(
-                "/api/agent/sessions",
-                headers=headers,
-                json={"title": "TCP pagination acceptance fixture"},
-            ),
-            201,
-            "create_projectless_session",
-        )
-        session_id = str(created["id"])
-        await _seed_messages(session_id, user_id, count)
+            profile = _expect(await client.get("/api/novels/current-user", headers=headers), 200, "jwt_profile")
+            user_id = int(profile["id"])
+            created = _expect(
+                await client.post(
+                    "/api/agent/sessions",
+                    headers=headers,
+                    json={"title": "TCP pagination acceptance fixture"},
+                ),
+                201,
+                "create_projectless_session",
+            )
+            created_id = created.get("id")
+            if not isinstance(created_id, str) or not created_id.strip():
+                raise AcceptanceFailure("phase=create_projectless_session missing valid session id")
+            session_id = created_id
+            await _seed_messages(session_id, user_id, count)
 
-        detail = _expect(
-            await client.get(
-                f"/api/agent/sessions/{session_id}",
-                params={"include_messages": "false", "include_runs": "false"},
-                headers=headers,
-            ),
-            200,
-            "compact_session_detail",
-        )
-        if detail.get("messages") != [] or detail.get("runs") != []:
-            raise AcceptanceFailure("phase=compact_session_detail expected empty arrays")
-
-        collected: list[int] = []
-        cursor: int | None = None
-        pages = 0
-        while True:
-            params: dict[str, Any] = {"limit": limit}
-            if cursor is not None:
-                params["before_sequence"] = cursor
-            page = _expect(
-                await client.get(f"/api/agent/sessions/{session_id}/messages", params=params, headers=headers),
+            detail = _expect(
+                await client.get(
+                    f"/api/agent/sessions/{session_id}",
+                    params={"include_messages": "false", "include_runs": "false"},
+                    headers=headers,
+                ),
                 200,
-                f"message_page_{pages + 1}",
+                "compact_session_detail",
             )
-            items = page.get("items")
-            if not isinstance(items, list):
-                raise AcceptanceFailure(f"phase=message_page_{pages + 1} items is not a list")
-            sequences = [int(item["sequence"]) for item in items]
-            if sequences != sorted(sequences):
-                raise AcceptanceFailure(f"phase=message_page_{pages + 1} page is not ascending: {sequences}")
-            if cursor is not None and any(sequence >= cursor for sequence in sequences):
-                raise AcceptanceFailure(f"phase=message_page_{pages + 1} cursor was not exclusive")
-            collected.extend(sequences)
-            pages += 1
-            next_cursor = page.get("next_cursor")
-            has_more = bool(page.get("has_more"))
-            if has_more != bool(next_cursor):
-                raise AcceptanceFailure(f"phase=message_page_{pages} inconsistent has_more/next_cursor")
-            if not has_more:
-                break
-            if next_cursor is None:
-                raise AcceptanceFailure(f"phase=message_page_{pages} missing next_cursor")
-            cursor = int(next_cursor)
-            if pages > (count // limit) + 3:
-                raise AcceptanceFailure("pagination did not converge")
+            if detail.get("messages") != [] or detail.get("runs") != []:
+                raise AcceptanceFailure("phase=compact_session_detail expected empty arrays")
 
-        expected = list(range(1, count + 1))
-        ordered = sorted(collected)
-        if ordered != expected or len(collected) != len(set(collected)):
-            raise AcceptanceFailure(
-                f"sequence mismatch expected_count={len(expected)} got_count={len(collected)} "
-                f"first={ordered[:5]} last={ordered[-5:]} duplicates={len(collected) - len(set(collected))}"
-            )
-        return {
-            "status": "TCP_MESSAGE_PAGINATION_PASSED",
-            "base_url": base_url,
-            "session_id": session_id,
-            "user_id": user_id,
-            "message_count": count,
-            "page_limit": limit,
-            "pages": pages,
-            "first_sequence": ordered[0],
-            "last_sequence": ordered[-1],
-            "duplicate_count": len(collected) - len(set(collected)),
-        }
+            collected: list[int] = []
+            cursor: int | None = None
+            pages = 0
+            while True:
+                params: dict[str, Any] = {"limit": limit}
+                if cursor is not None:
+                    params["before_sequence"] = cursor
+                page = _expect(
+                    await client.get(f"/api/agent/sessions/{session_id}/messages", params=params, headers=headers),
+                    200,
+                    f"message_page_{pages + 1}",
+                )
+                items = page.get("items")
+                if not isinstance(items, list):
+                    raise AcceptanceFailure(f"phase=message_page_{pages + 1} items is not a list")
+                sequences = [int(item["sequence"]) for item in items]
+                if sequences != sorted(sequences):
+                    raise AcceptanceFailure(f"phase=message_page_{pages + 1} page is not ascending: {sequences}")
+                if cursor is not None and any(sequence >= cursor for sequence in sequences):
+                    raise AcceptanceFailure(f"phase=message_page_{pages + 1} cursor was not exclusive")
+                collected.extend(sequences)
+                pages += 1
+                next_cursor = page.get("next_cursor")
+                has_more = bool(page.get("has_more"))
+                if has_more != bool(next_cursor):
+                    raise AcceptanceFailure(f"phase=message_page_{pages} inconsistent has_more/next_cursor")
+                if not has_more:
+                    break
+                if next_cursor is None:
+                    raise AcceptanceFailure(f"phase=message_page_{pages} missing next_cursor")
+                cursor = int(next_cursor)
+                if pages > (count // limit) + 3:
+                    raise AcceptanceFailure("pagination did not converge")
+
+            expected = list(range(1, count + 1))
+            ordered = sorted(collected)
+            if ordered != expected or len(collected) != len(set(collected)):
+                raise AcceptanceFailure(
+                    f"sequence mismatch expected_count={len(expected)} got_count={len(collected)} "
+                    f"first={ordered[:5]} last={ordered[-5:]} duplicates={len(collected) - len(set(collected))}"
+                )
+            return {
+                "status": "TCP_MESSAGE_PAGINATION_PASSED",
+                "base_url": base_url,
+                "session_id": session_id,
+                "user_id": user_id,
+                "message_count": count,
+                "page_limit": limit,
+                "pages": pages,
+                "first_sequence": ordered[0],
+                "last_sequence": ordered[-1],
+                "duplicate_count": len(collected) - len(set(collected)),
+            }
+    except BaseException as exc:
+        primary_error = exc
+        raise
+    finally:
+        # Ownership is established only by the successful create response.
+        # Never discover a cleanup target by title or another shared attribute.
+        if session_id is not None:
+            try:
+                await _delete_fixture(session_id)
+            except Exception as cleanup_error:
+                if primary_error is None:
+                    raise
+                primary_error.add_note(
+                    f"fixture cleanup failed session_id={session_id}: {cleanup_error}"
+                )
 
 
 async def main() -> int:
@@ -174,30 +194,16 @@ async def main() -> int:
     args = parser.parse_args()
     if not args.username or not args.password:
         raise AcceptanceFailure("ADMIN_DEFAULT_USERNAME and ADMIN_DEFAULT_PASSWORD are required")
-    session_id: str | None = None
     try:
         result = await run(args.base_url.rstrip("/"), args.username, args.password, args.count, args.limit)
-        session_id = result["session_id"]
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0
     except Exception as exc:
-        print(json.dumps({"status": "TCP_MESSAGE_PAGINATION_FAILED", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        error: dict[str, Any] = {"status": "TCP_MESSAGE_PAGINATION_FAILED", "error": str(exc)}
+        if notes := getattr(exc, "__notes__", None):
+            error["notes"] = notes
+        print(json.dumps(error, ensure_ascii=False), file=sys.stderr)
         return 1
-    finally:
-        if session_id:
-            await _delete_fixture(session_id)
-        else:
-            # A failure can happen after the HTTP create and before run() returns.
-            # Reclaim any partial fixture by its unique title without printing the
-            # configured password or unrelated session data.
-            async with AsyncSessionLocal() as db:
-                row = await db.scalar(
-                    select(AgentSession).where(AgentSession.title == "TCP pagination acceptance fixture").order_by(AgentSession.created_at.desc())
-                )
-                if row is not None:
-                    await db.execute(delete(AgentMessage).where(AgentMessage.session_id == row.id))
-                    await db.execute(delete(AgentSession).where(AgentSession.id == row.id))
-                    await db.commit()
 
 
 if __name__ == "__main__":

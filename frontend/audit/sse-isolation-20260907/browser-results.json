@@ -1,0 +1,195 @@
+{
+  "config": {
+    "argv": [
+      "D:\\download\\node\\node.exe",
+      "D:\\小说写作\\xuanqiong-wenshu\\frontend\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "-c",
+      "playwright.sse-audit.config.ts"
+    ],
+    "configFile": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\playwright.sse-audit.config.ts",
+    "rootDir": "D:/小说写作/xuanqiong-wenshu/frontend/e2e",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "D:/小说写作/xuanqiong-wenshu/frontend/audit/sse-isolation-20260907/browser-artifacts",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "D:/小说写作/xuanqiong-wenshu/frontend/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "agent-sse-isolation.spec.ts"
+        ],
+        "timeout": 100000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "./audit/sse-isolation-20260907/browser-results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.62.1",
+    "workers": 1,
+    "webServer": {
+      "command": "node e2e/scripts/start-sse-audit-server.mjs",
+      "url": "http://127.0.0.1:43355/e2e/fixtures/sse-audit.html",
+      "reuseExistingServer": false,
+      "timeout": 120000,
+      "env": {
+        "XQ_SSE_PORT": "43355"
+      }
+    }
+  },
+  "suites": [
+    {
+      "title": "agent-sse-isolation.spec.ts",
+      "file": "agent-sse-isolation.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "real HTTP 60s stream reconnects with accepted cursor, deduplicates and cancels on terminal",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 100000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 67389,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-07T01:51:28.440Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "real-http-evidence",
+                      "contentType": "application/json",
+                      "body": "WwogIHsKICAgICJrZXkiOiAibG9uZyIsCiAgICAicnVuIjogInJ1bi1hIiwKICAgICJjb3VudCI6IDEsCiAgICAicXVlcnlfY3Vyc29yIjogIjAiLAogICAgImhlYWRlcl9jdXJzb3IiOiBudWxsLAogICAgInN0YXJ0ZWQiOiAxNzg4NzQ1ODg5MDM5LAogICAgImVuZGVkIjogMTc4ODc0NTg5MDIzOSwKICAgICJmcmFtZXMiOiA0CiAgfSwKICB7CiAgICAia2V5IjogImxvbmciLAogICAgInJ1biI6ICJydW4tYSIsCiAgICAiY291bnQiOiAyLAogICAgInF1ZXJ5X2N1cnNvciI6ICIyIiwKICAgICJoZWFkZXJfY3Vyc29yIjogIjIiLAogICAgInN0YXJ0ZWQiOiAxNzg4NzQ1ODkyMjQ3LAogICAgImVuZGVkIjogMTc4ODc0NTk1Mjc2MywKICAgICJmcmFtZXMiOiA2MwogIH0KXQ=="
+                    },
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\browser-artifacts\\agent-sse-isolation-real-H-6e461-tes-and-cancels-on-terminal-chromium\\test-finished-1.png"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\browser-artifacts\\agent-sse-isolation-real-H-6e461-tes-and-cancels-on-terminal-chromium\\trace.zip"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "b79c5cffc8b90125bdbf-f5ec2c6c06df60396c94",
+          "file": "agent-sse-isolation.spec.ts",
+          "line": 2,
+          "column": 1
+        },
+        {
+          "title": "real browser Run restart and switch cancel old sockets and isolate active projection",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 100000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6182,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-09-07T01:52:36.324Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "switch-http-evidence",
+                      "contentType": "application/json",
+                      "body": "WwogIHsKICAgICJrZXkiOiAic3dpdGNoLWEiLAogICAgInJ1biI6ICJydW4tYSIsCiAgICAiY291bnQiOiAxLAogICAgInF1ZXJ5X2N1cnNvciI6ICIwIiwKICAgICJoZWFkZXJfY3Vyc29yIjogbnVsbCwKICAgICJzdGFydGVkIjogMTc4ODc0NTk1NjY3MiwKICAgICJlbmRlZCI6IDE3ODg3NDU5NTY3NjksCiAgICAiZnJhbWVzIjogMQogIH0sCiAgewogICAgImtleSI6ICJzd2l0Y2gtYS1yZXN0YXJ0IiwKICAgICJydW4iOiAicnVuLWEiLAogICAgImNvdW50IjogMSwKICAgICJxdWVyeV9jdXJzb3IiOiAiMCIsCiAgICAiaGVhZGVyX2N1cnNvciI6IG51bGwsCiAgICAic3RhcnRlZCI6IDE3ODg3NDU5NTY3NDYsCiAgICAiZW5kZWQiOiAxNzg4NzQ1OTU2ODI1LAogICAgImZyYW1lcyI6IDEKICB9LAogIHsKICAgICJrZXkiOiAic3dpdGNoLWIiLAogICAgInJ1biI6ICJydW4tYiIsCiAgICAiY291bnQiOiAxLAogICAgInF1ZXJ5X2N1cnNvciI6ICIwIiwKICAgICJoZWFkZXJfY3Vyc29yIjogbnVsbCwKICAgICJzdGFydGVkIjogMTc4ODc0NTk1NjgyMiwKICAgICJlbmRlZCI6IDE3ODg3NDU5NjE4MzIsCiAgICAiZnJhbWVzIjogMgogIH0KXQ=="
+                    },
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\browser-artifacts\\agent-sse-isolation-real-b-8bb7f-d-isolate-active-projection-chromium\\test-finished-1.png"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\sse-isolation-20260907\\browser-artifacts\\agent-sse-isolation-real-b-8bb7f-d-isolate-active-projection-chromium\\trace.zip"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "b79c5cffc8b90125bdbf-cb19ac024af16706c238",
+          "file": "agent-sse-isolation.spec.ts",
+          "line": 21,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-09-07T01:51:26.946Z",
+    "duration": 76228.11,
+    "expected": 2,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

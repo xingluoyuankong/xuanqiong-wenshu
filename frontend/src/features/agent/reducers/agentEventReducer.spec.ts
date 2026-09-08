@@ -249,3 +249,112 @@ describe('agentEventReducer', () => {
   })
 
 })
+
+describe('durable current progress semantics', () => {
+  const apply = (events: ReturnType<typeof event>[]) => events.reduce(
+    (projection, item) => reduceAgentRunEvent(projection, item).projection,
+    createAgentRunEventProjection(),
+  )
+  const waiting = event({ sequence: 15, data: {
+    phase: 'awaiting_approval', action_id: 'approval:pending', progress: 60,
+    progress_message: '等待审批，尚未执行',
+  } })
+  const started = event({ sequence: 20, event_type: 'write_execution_started',
+    summary: '开始生成 chapter.generate 候选', data: { tool_name: 'chapter.generate' } })
+  const summary = event({ sequence: 21, event_type: 'public_work_summary',
+    summary: '候选摘要', data: { phase: 'artifact', action_id: 'artifact:a',
+      current_action: '已创建候选 Artifact，等待作者查看。' } })
+  const artifact = event({ sequence: 23, event_type: 'artifact_created',
+    summary: '写入候选 artifact 已生成，等待用户接受', data: { artifact_id: 'a' } })
+  const read = event({ sequence: 24, event_type: 'tool_call_completed',
+    summary: '续跑读取项目统计已完成', data: { phase: 'tool_execution', action_id: 'tool:statistics.project' } })
+
+  it('awaiting approval → write start → public summary → artifact → read completion replaces stale status and preserves history', () => {
+    let projection = apply([waiting])
+    expect(projection.latestProgress).toBe(60)
+    for (const [item, message, phase] of [
+      [started, started.summary, 'write_execution'],
+      [summary, summary.data.current_action, 'artifact'],
+      [artifact, artifact.summary, 'candidate_ready'],
+      [read, read.summary, 'tool_execution'],
+    ] as const) {
+      projection = reduceAgentRunEvent(projection, item).projection
+      expect(projection.latestProgressMessage).toBe(message)
+      expect(projection.latestProgressPhase).toBe(phase)
+      expect(projection.latestProgress).toBeUndefined()
+      expect(projection.latestProgressActionId).not.toBe('approval:pending')
+    }
+    expect(projection.events.map((item: { sequence: number }) => item.sequence)).toEqual([15, 20, 21, 23, 24])
+    expect(projection.events[0]).toMatchObject({ detail: '正在处理', phase: 'awaiting_approval', progress: 60 })
+  })
+
+  it('uses semantic sequence, not arrival order or the unrelated assistant high-water mark', () => {
+    const unrelated = event({ sequence: 30, event_type: 'assistant_delta', data: { content: '正文' } })
+    const expected = apply([waiting, started, summary, artifact, read, unrelated])
+    for (const events of [
+      [unrelated, read, artifact, summary, started, waiting],
+      [waiting, unrelated, artifact, started, read, summary],
+      [artifact, unrelated, waiting, read, summary, started],
+    ]) {
+      const actual = apply(events)
+      expect(actual.latestProgressMessage).toBe(read.summary)
+      expect(actual.latestProgressPhase).toBe(expected.latestProgressPhase)
+      expect(actual.latestProgress).toBe(expected.latestProgress)
+      expect(actual.events).toEqual(expected.events)
+      expect(actual.lastSequence).toBe(30)
+    }
+  })
+
+  it('retains valid progress across non-semantic events, including unrelated phase/action metadata', () => {
+    const projection = apply([waiting,
+      event({ sequence: 16, event_type: 'assistant_delta', data: { content: '正文', phase: 'assistant_response', action_id: 'response:stream' } }),
+      event({ sequence: 17, event_type: 'assistant_reasoning_chunk', data: { content: '推理' } }),
+      event({ sequence: 18, event_type: 'unknown', summary: '未知事件' }),
+    ])
+    expect(projection).toMatchObject({ latestProgressMessage: '等待审批，尚未执行',
+      latestProgressPhase: 'awaiting_approval', latestProgressActionId: 'approval:pending', latestProgress: 60 })
+  })
+
+  it('accepts newer valid progress after artifact and rejects delayed older lifecycle/progress events', () => {
+    const latest = event({ sequence: 26, data: { phase: 'quality', progress: 92, progress_message: '检查候选质量' } })
+    const projection = apply([artifact, latest, waiting, started, summary, read])
+    expect(projection).toMatchObject({ latestProgressMessage: '检查候选质量', latestProgress: 92, latestProgressPhase: 'quality' })
+    expect(projection.events).toHaveLength(6)
+  })
+
+  it('isolates Run identity even when a foreign Run has a higher or identical sequence', () => {
+    const original = apply([artifact])
+    for (const sequence of [1, 23, 1000]) {
+      const foreign = reduceAgentRunEvent(original, event({ run_id: 'run-other', sequence, data: { progress: 1, progress_message: '另一个运行' } }))
+      expect(foreign.accepted).toBe(false)
+      expect(foreign.runPatch).toEqual({})
+      expect(foreign.projection).toBe(original)
+    }
+    const other = apply([event({ run_id: 'run-other', sequence: 1, data: { progress: 5, progress_message: '新运行' } })])
+    expect(other.latestProgressMessage).toBe('新运行')
+    expect(other.latestProgress).toBe(5)
+  })
+
+  it('orders work trace and progress in the same semantic stream without losing trace history', () => {
+    const trace = event({ sequence: 22, event_type: 'work_trace_delta', data: {
+      message: '候选写入中', phase: 'write_execution', progress: 80, action_id: 'write:1',
+    } })
+    const current = apply([waiting, trace])
+    expect(current.latestProgressMessage).toBe('候选写入中')
+    expect(current.latestProgress).toBe(80)
+    const completed = reduceAgentRunEvent(current, artifact).projection
+    expect(completed.latestProgressMessage).toBe(artifact.summary)
+    expect(completed.latestWorkTrace?.message).toBe('候选写入中')
+    expect(completed.workTraceDeltas).toHaveLength(1)
+  })
+
+  it('terminal completion replaces old progress and failure/cancellation do not retain a stale percentage', () => {
+    expect(apply([waiting, event({ sequence: 25, event_type: 'run_completed', summary: '运行已完成', data: {} })]))
+      .toMatchObject({ latestProgressMessage: '运行已完成', latestProgressPhase: 'completed', latestProgress: 100 })
+    for (const event_type of ['run_failed', 'run_cancelled']) {
+      const projection = apply([waiting, event({ sequence: 25, event_type, summary: '运行已结束', data: {} })])
+      expect(projection.latestProgressMessage).toBe('运行已结束')
+      expect(projection.latestProgress).toBeUndefined()
+    }
+  })
+})

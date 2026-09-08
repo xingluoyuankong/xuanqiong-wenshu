@@ -55,6 +55,30 @@ export function useAgentRunStream() {
     options.onConnectionState?.('connecting')
     const terminalEvents = DEFAULT_TERMINAL_EVENTS
     let terminalSeen = false
+    // A run-scoped URL supplies ownership only for legacy objects that OMIT run_id.
+    // Explicit null/empty/non-string owners remain invalid, not legacy defaults.
+    const normalizeEvent = (payload: unknown, eventType?: string): AgentEvent | null => {
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
+      const record = payload as Record<string, unknown>
+      if ('run_id' in record && record.run_id !== options.runId) return null
+      if (!Number.isSafeInteger(record.sequence) || (record.sequence as number) <= 0) return null
+      if (typeof record.event_type !== 'string' || !record.event_type) return null
+      if (eventType !== undefined && record.event_type !== eventType) return null
+      return { ...record, run_id: options.runId } as unknown as AgentEvent
+    }
+    const requestedCursor = Number(options.initialAfterSequence)
+    const initialCursor = Number.isSafeInteger(requestedCursor) && requestedCursor >= 0 ? requestedCursor : 0
+    // Compact contiguous prefix; retain only out-of-order identities above it.
+    let contiguous = initialCursor
+    const pending = new Set<number>()
+    const wasSeen = (sequence: number) => sequence <= contiguous || pending.has(sequence)
+    const deliver = (event: AgentEvent, source: 'history' | 'live') => {
+      if (wasSeen(event.sequence)) return false
+      options.onEvent(event, source)
+      pending.add(event.sequence)
+      while (pending.delete(contiguous + 1)) contiguous += 1
+      return true
+    }
     const isCurrent = () =>
       generation === runGeneration &&
       activeRunId.value === options.runId &&
@@ -62,18 +86,17 @@ export function useAgentRunStream() {
 
     try {
       const history = (await options.loadHistory())
-        .slice()
+        .map(event => normalizeEvent(event))
+        .filter((event): event is AgentEvent => event !== null)
         .sort((left, right) => left.sequence - right.sequence)
       if (!isCurrent()) return
 
       for (const event of history) {
-        options.onEvent(event, 'history')
+        if (!isCurrent()) return
+        deliver(event, 'history')
       }
+      if (!isCurrent()) return
       const historyCursor = history.reduce((max, event) => Math.max(max, event.sequence), 0)
-      const requestedCursor = Number(options.initialAfterSequence)
-      const initialCursor = Number.isSafeInteger(requestedCursor) && requestedCursor >= 0
-        ? requestedCursor
-        : 0
       const cursor = Math.max(initialCursor, historyCursor)
       const historyTerminal = history.find((event) => terminalEvents.has(event.event_type))
       if (historyTerminal || DEFAULT_TERMINAL_RUN_STATUSES.has(String(options.initialStatus || ''))) {
@@ -86,24 +109,37 @@ export function useAgentRunStream() {
       const nextController = connectSSE(
         options.streamUrl(cursor),
         {
-          isTerminalEvent: (eventType) => terminalEvents.has(eventType),
+          acceptEvent: (eventType, payload, eventId) => {
+            if (!isCurrent() || terminalSeen) return false
+            if (eventType === 'stream_error') {
+              if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false
+              const record = payload as Record<string, unknown>
+              return !('run_id' in record) || record.run_id === options.runId
+            }
+            const event = normalizeEvent(payload, eventType)
+            return event !== null && !wasSeen(event.sequence) && (eventId === null || eventId === event.sequence)
+          },
+          isTerminalEvent: (eventType, payload) =>
+            isCurrent() && normalizeEvent(payload, eventType) !== null && terminalEvents.has(eventType),
           onConnectionState: (state) => {
             if (!isCurrent() || terminalSeen) return
             connectionState.value = state
             options.onConnectionState?.(state)
           },
           onRawEvent: (eventType, payload) => {
+            if (!isCurrent() || terminalSeen) return
+            const event = normalizeEvent(payload, eventType)
+            if (!event || !deliver(event, 'live')) return
             if (!isCurrent()) return
-            options.onEvent(payload as AgentEvent, 'live')
             if (terminalEvents.has(eventType)) {
               terminalSeen = true
               connectionState.value = 'terminal'
               options.onConnectionState?.('terminal')
-              options.onTerminal?.(eventType, payload)
+              options.onTerminal?.(eventType, event)
             }
           },
           onStreamError: (data) => {
-            if (isCurrent()) options.onStreamError?.(data)
+            if (isCurrent() && !terminalSeen && (!('run_id' in data) || data.run_id === options.runId)) options.onStreamError?.(data)
           },
           onError: (message) => {
             if (isCurrent()) options.onError?.(message)

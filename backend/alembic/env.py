@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import settings
 from app.db.base import Base
+from app.db.migration_version import ensure_mysql_version_table
+from app.db.mysql_timezone import install_mysql_utc_policy
 
 # 导入模型，保证 autogenerate 与目标元数据包含所有已注册模型。
 import app.models  # noqa: F401,E402
@@ -54,6 +56,7 @@ def do_run_migrations(connection) -> None:
     )
 
     with context.begin_transaction():
+        ensure_mysql_version_table(connection)
         context.run_migrations()
 
 
@@ -66,6 +69,7 @@ async def run_async_migrations() -> None:
         poolclass=pool.NullPool,
     )
 
+    install_mysql_utc_policy(connectable)
     try:
         async with connectable.connect() as connection:
             await connection.run_sync(do_run_migrations)

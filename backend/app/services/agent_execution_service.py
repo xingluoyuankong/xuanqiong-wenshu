@@ -61,6 +61,7 @@ class AgentExecutionService:
                 raise AgentCapabilityExecutionConflict("execution idempotency key conflicts with a different capability")
             if existing.status in {"started", "completed"}:
                 return existing
+            existing.started_at = datetime.now(timezone.utc).replace(microsecond=0)
             existing.status = "started"
             existing.attempt += 1
             existing.error_type = None
@@ -84,6 +85,8 @@ class AgentExecutionService:
             input_digest=_digest(dict(arguments)),
             lease_generation=lease_generation,
         )
+        # Use the application UTC clock for both ends of the lifecycle.
+        execution.started_at = datetime.now(timezone.utc).replace(microsecond=0)
         await self.session.commit()
         await self.session.refresh(execution)
         return execution
@@ -141,9 +144,10 @@ class AgentExecutionService:
         execution: AgentCapabilityExecution,
         lease_generation: int,
         output: dict[str, Any],
+        commit: bool = True,
     ) -> AgentCapabilityExecution:
         return await self.complete_read_execution(
-            execution=execution, lease_generation=lease_generation, output=output
+            execution=execution, lease_generation=lease_generation, output=output, commit=commit
         )
 
     async def fail_write_execution(
@@ -152,9 +156,10 @@ class AgentExecutionService:
         execution: AgentCapabilityExecution,
         lease_generation: int,
         error: Exception,
+        commit: bool = True,
     ) -> AgentCapabilityExecution:
         return await self.fail_read_execution(
-            execution=execution, lease_generation=lease_generation, error=error
+            execution=execution, lease_generation=lease_generation, error=error, commit=commit
         )
 
     async def complete_read_execution(
@@ -163,6 +168,7 @@ class AgentExecutionService:
         execution: AgentCapabilityExecution,
         lease_generation: int,
         output: dict[str, Any],
+        commit: bool = True,
     ) -> AgentCapabilityExecution:
         if execution.lease_generation != lease_generation:
             raise AgentCapabilityExecutionConflict("execution lease generation is stale")
@@ -174,10 +180,11 @@ class AgentExecutionService:
         execution.status = "completed"
         execution.output_json = dict(output)
         execution.output_digest = _digest(dict(output))
-        execution.finished_at = now
+        execution.finished_at = now.replace(microsecond=0)
         execution.duration_ms = max(0, int((now - execution.started_at.replace(tzinfo=timezone.utc) if execution.started_at.tzinfo is None else now - execution.started_at).total_seconds() * 1000))
-        await self.session.commit()
-        await self.session.refresh(execution)
+        if commit:
+            await self.session.commit()
+            await self.session.refresh(execution)
         return execution
 
     async def fail_read_execution(
@@ -186,6 +193,7 @@ class AgentExecutionService:
         execution: AgentCapabilityExecution,
         lease_generation: int,
         error: Exception,
+        commit: bool = True,
     ) -> AgentCapabilityExecution:
         if execution.lease_generation != lease_generation:
             raise AgentCapabilityExecutionConflict("execution lease generation is stale")
@@ -195,8 +203,9 @@ class AgentExecutionService:
         execution.status = "failed"
         execution.error_type = type(error).__name__
         execution.error_detail = str(error)[:1000]
-        execution.finished_at = now
+        execution.finished_at = now.replace(microsecond=0)
         execution.duration_ms = max(0, int((now - execution.started_at.replace(tzinfo=timezone.utc) if execution.started_at.tzinfo is None else now - execution.started_at).total_seconds() * 1000))
-        await self.session.commit()
-        await self.session.refresh(execution)
+        if commit:
+            await self.session.commit()
+            await self.session.refresh(execution)
         return execution

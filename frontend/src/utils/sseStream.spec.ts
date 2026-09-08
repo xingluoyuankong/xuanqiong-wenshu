@@ -147,6 +147,49 @@ describe('connectSSE', () => {
     expect(error).toHaveBeenCalledTimes(3)
   })
 
+  it('rejects a foreign durable event before cursor acknowledgement or terminal shutdown', async () => {
+    vi.useFakeTimers()
+    const encoder = new TextEncoder()
+    const readers = [
+      {
+        read: vi.fn()
+          .mockResolvedValueOnce({
+            done: false,
+            value: encoder.encode(
+              'id: 7\nevent: assistant_delta\ndata: {\"run_id\":\"run-a\",\"sequence\":7}\n\n' +
+              'id: 99\nevent: run_completed\ndata: {\"run_id\":\"run-b\",\"sequence\":99}\n\n',
+            ),
+          })
+          .mockResolvedValueOnce({ done: true, value: undefined }),
+      },
+      { read: vi.fn().mockResolvedValueOnce({ done: true, value: undefined }), cancel: vi.fn() },
+    ]
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      body: { getReader: () => readers[Math.min(fetchMock.mock.calls.length - 1, 1)] },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const raw = vi.fn()
+    const states: string[] = []
+    const controller = connectSSE('/api/agent/runs/run-a/stream', {
+      acceptEvent: (_type, payload) => !(
+        payload && typeof payload === 'object' && (payload as Record<string, unknown>).run_id === 'run-b'
+      ),
+      isTerminalEvent: (type) => type === 'run_completed',
+      onRawEvent: raw,
+      onConnectionState: (state) => states.push(state),
+    }, 1, { cursorParam: 'after_sequence' })
+
+    await vi.waitFor(() => expect(raw).toHaveBeenCalledTimes(1))
+    await vi.advanceTimersByTimeAsync(2000)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    const [url, init] = fetchMock.mock.calls[1] as unknown as [string, RequestInit]
+    expect(url).toContain('after_sequence=7')
+    expect((init.headers as Record<string, string>)['Last-Event-ID']).toBe('7')
+    expect(states).not.toContain('terminal')
+    controller.close()
+  })
+
   it('does not reconnect after an Agent terminal event', async () => {
     vi.useFakeTimers()
     const encoder = new TextEncoder()

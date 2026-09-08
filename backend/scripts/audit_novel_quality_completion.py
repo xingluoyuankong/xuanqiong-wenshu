@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,7 @@ CORE_LABELS = (
 VALID_LABELS = {"true", "false", "na"}
 IDENTITY_COLUMNS = ("source_version_id", "source_chapter_id", "content_sha256")
 ANNOTATION_DIR = "output/quality-annotation-bundle-t18-exemption-20260823"
-MERGED_RESULT_NAMES = ("merged-annotations.json", "adjudicated-annotations.json")
+MERGED_RESULT_NAMES = ("adjudicated-annotations.json", "merged-annotations.json")
 
 
 def load(path: Path) -> dict[str, Any]:
@@ -76,6 +77,8 @@ def _validate_merged_result(
     path: Path,
     reviewer_a: dict[str, dict[str, str]],
     reviewer_b: dict[str, dict[str, str]],
+    *,
+    allow_unresolved: bool = False,
 ) -> list[str]:
     errors: list[str] = []
     try:
@@ -134,18 +137,139 @@ def _validate_merged_result(
                     errors.append(f"{path.name}: {sample_id} {column} does not match CSVs")
         for label in CORE_LABELS:
             value = str(row.get(label) or "").strip().lower()
-            if value not in VALID_LABELS:
+            if value not in VALID_LABELS and not (allow_unresolved and value == "adjudicate"):
                 errors.append(f"{path.name}: {sample_id} {label} is unresolved or invalid")
     if seen != set(reviewer_a):
         errors.append(f"{path.name}: merged rows do not cover reviewer CSVs exactly")
+    errors.extend(_label_provenance_errors(path, payload, reviewer_a, reviewer_b, allow_unresolved=allow_unresolved))
     return errors
+
+
+def _manifest_errors(
+    annotation_dir: Path,
+    reviewer_a: dict[str, dict[str, str]],
+    reviewer_b: dict[str, dict[str, str]],
+) -> list[str]:
+    path = annotation_dir / "manifest.json"
+    try:
+        manifest = load(path)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        return [f"manifest.json: invalid or missing manifest: {type(exc).__name__}"]
+    errors = []
+    if type(manifest.get("schema_version")) is not int or manifest.get("schema_version") != 1:
+        errors.append("manifest.json: schema_version must be 1")
+    if manifest.get("content_emitted") is not False:
+        errors.append("manifest.json: content_emitted must be false")
+    raw_samples = manifest.get("samples")
+    if not isinstance(raw_samples, list) or not raw_samples:
+        return errors + ["manifest.json: samples must be a non-empty list"]
+    count = manifest.get("selected_count")
+    if type(count) is not int or count != len(raw_samples):
+        errors.append("manifest.json: selected_count must match sample rows")
+    samples = {}
+    for sample in raw_samples:
+        if not isinstance(sample, dict):
+            errors.append("manifest.json: sample must be an object")
+            continue
+        sample_id = sample.get("sample_id")
+        if not isinstance(sample_id, str) or not sample_id.strip() or sample_id.strip() in samples:
+            errors.append("manifest.json: missing or duplicate sample_id")
+            continue
+        sample_id = sample_id.strip()
+        samples[sample_id] = sample
+        for column in ("source_version_id", "source_chapter_id"):
+            value = str(sample.get(column) or "")
+            if not value.isascii() or not value.isdecimal() or not value.lstrip("0"):
+                errors.append(f"manifest.json: {sample_id} {column} must be a positive integer")
+        if re.fullmatch(r"[0-9a-fA-F]{64}", str(sample.get("content_sha256") or "")) is None:
+            errors.append(f"manifest.json: {sample_id} content_sha256 must be a SHA256 digest")
+    for filename, rows in (("reviewer-a-template.csv", reviewer_a), ("reviewer-b-template.csv", reviewer_b)):
+        if set(rows) != set(samples):
+            errors.append(f"manifest.json: {filename} sample_id set must match manifest exactly")
+        for sample_id in set(rows) & set(samples):
+            for column in IDENTITY_COLUMNS:
+                if str(rows[sample_id].get(column) or "").strip() != str(samples[sample_id].get(column) or "").strip():
+                    errors.append(f"manifest.json: {filename} {sample_id} {column} differs from manifest")
+    return errors
+
+
+def _adjudication_errors(
+    path: Path,
+    payload: dict[str, Any],
+    reviewer_a: dict[str, dict[str, str]],
+    reviewer_b: dict[str, dict[str, str]],
+) -> list[str]:
+    """Replay the existing adjudication contract against its preserved inputs."""
+    metadata = payload.get("adjudication")
+    if not isinstance(metadata, dict):
+        return ["adjudication metadata is required"]
+    source = path.parent / "merged-annotations.json"
+    source_errors = _validate_merged_result(source, reviewer_a, reviewer_b, allow_unresolved=True)
+    if source_errors:
+        return [f"adjudication source merge invalid: {error}" for error in source_errors]
+    name = metadata.get("decision_file")
+    if not isinstance(name, str) or not name or name in {".", ".."} or any(c in name for c in ("/", "\\", ":")):
+        return ["adjudication decision_file must be a local filename"]
+    try:
+        decision_file = path.parent / name
+        if decision_file.resolve().parent != path.parent.resolve() or not decision_file.is_file():
+            return ["adjudication decision file is missing or outside its bundle"]
+        try:
+            from scripts.adjudicate_quality_annotations import apply_adjudication
+        except ModuleNotFoundError:
+            from adjudicate_quality_annotations import apply_adjudication
+        expected = apply_adjudication(source, decision_file)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return [f"adjudication input validation failed: {type(exc).__name__}"]
+    if expected.get("valid") is not True:
+        return [f"adjudication decisions invalid: {error}" for error in expected.get("errors", ["invalid decision input"])]
+    return [f"adjudication {field} differs from verified source merge/decision file"
+            for field in ("evidence_kind", "source_files", "sample_count", "rows", "adjudication")
+            if payload.get(field) != expected.get(field)]
+
+
+def _label_provenance_errors(
+    path: Path,
+    payload: dict[str, Any],
+    reviewer_a: dict[str, dict[str, str]],
+    reviewer_b: dict[str, dict[str, str]],
+    *,
+    allow_unresolved: bool = False,
+) -> list[str]:
+    errors = []
+    for row in payload["rows"]:
+        if not isinstance(row, dict):
+            continue
+        sample_id = str(row.get("sample_id") or "").strip()
+        if sample_id not in reviewer_a or sample_id not in reviewer_b:
+            continue
+        for label in CORE_LABELS:
+            a = str(reviewer_a[sample_id].get(label) or "").strip().lower()
+            b = str(reviewer_b[sample_id].get(label) or "").strip().lower()
+            value = str(row.get(label) or "").strip().lower()
+            for suffix, original in (("a", a), ("b", b)):
+                field = f"{label}_{suffix}"
+                if field in row and str(row[field] or "").strip().lower() != original:
+                    errors.append(f"{path.name}: {sample_id} {field} differs from reviewer CSV")
+            if a == b and value != a:
+                errors.append(f"{path.name}: {sample_id} {label} must preserve unanimous reviewer value")
+            elif a != b:
+                if allow_unresolved:
+                    if value != "adjudicate":
+                        errors.append(f"{path.name}: {sample_id} {label} source disagreement must remain adjudicate")
+                elif path.name != "adjudicated-annotations.json":
+                    errors.append(f"{path.name}: {sample_id} {label} requires verified adjudication")
+    if not allow_unresolved and path.name == "adjudicated-annotations.json":
+        errors.extend(_adjudication_errors(path, payload, reviewer_a, reviewer_b))
+    return errors
+
 
 
 def _annotation_errors(root: Path) -> list[str]:
     annotation_dir = root / ANNOTATION_DIR
     reviewer_a, errors_a = _read_reviewer_csv(annotation_dir / "reviewer-a-template.csv")
     reviewer_b, errors_b = _read_reviewer_csv(annotation_dir / "reviewer-b-template.csv")
-    errors = errors_a + errors_b
+    errors = errors_a + errors_b + _manifest_errors(annotation_dir, reviewer_a, reviewer_b)
     if reviewer_a and reviewer_b:
         if set(reviewer_a) != set(reviewer_b):
             errors.append("reviewer CSV sample_id sets do not match")

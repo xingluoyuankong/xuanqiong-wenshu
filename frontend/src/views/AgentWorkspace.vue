@@ -192,6 +192,7 @@
           :stream-connection-state="streamConnectionState"
           :session-error="sessionError"
           :runtime-supported="runtimeSupported"
+          :runtime-ready="runtimeReady"
           :sending="sending"
           :planning="planning"
           :streaming-assistant="streamingAssistant"
@@ -204,6 +205,7 @@
           :artifact-preview-artifact-id="artifactPreviewArtifactId"
           :artifact-preview-error="artifactPreviewError"
           :public-work-summary="publicWorkSummary"
+          :reasoning-context-key="activeRun?.id || ''"
           :reasoning-chunks="reasoningChunks"
           :reasoning-text="reasoningText"
           :reasoning-has-previous="reasoningHistory.hasPrevious.value"
@@ -747,6 +749,17 @@ const runtimeSupported = computed(
     typeof AgentAPI.sendMessage === 'function' &&
     typeof AgentAPI.sessionStreamUrl === 'function',
 )
+// API capability is distinct from project/session readiness. Never route a
+// supported runtime to compat planning during initial load or a context switch.
+const runtimeReady = computed(() => Boolean(
+  !sessionLoading.value && !sessionError.value && selectedProjectId.value &&
+  session.value?.id && session.value.project_id === selectedProjectId.value &&
+  session.value.id === selectedSessionId.value,
+))
+const canSubmitMessage = computed(() => Boolean(
+  goal.value.trim() && !sessionLoading.value && !sending.value && !planning.value &&
+  (!runtimeSupported.value || runtimeReady.value),
+))
 const riskLabel = (risk: AgentRiskLevel) =>
   ({ read: '读取', suggest: '建议', write: '写入', destructive: '高风险' })[risk]
 const toolSource = (tool: AgentToolDescriptor) => {
@@ -1071,7 +1084,7 @@ const selectRunAction = async (runId: string) => {
   resetArtifactFacts({ preserveScopedState: true })
   const loads: Promise<unknown>[] = [loadRunSteps(run.id), loadRunState(run.id), loadRunFacts(run.id), loadExecutionFacts(run.id), dataDetailsLoaded.value ? loadProviderUsageSummary(run.id) : Promise.resolve()]
   if (typeof AgentAPI.listApprovals === 'function') {
-    loads.push(AgentAPI.listApprovals(run.id).then((items) => runProjection.setRunApprovals(run.id, items)))
+    loads.push(Promise.resolve(AgentAPI.listApprovals(run.id)).then((items) => runProjection.setRunApprovals(run.id, items || [])))
   }
   if (typeof AgentAPI.listArtifactsPage === 'function' || typeof AgentAPI.listArtifacts === 'function') loads.push(loadRunDetailPage(run.id, 'artifacts'))
   await Promise.all(loads)
@@ -1185,17 +1198,20 @@ const requestPlan = async (text: string) => {
 }
 const submitMessage = async () => {
   const text = goal.value.trim()
-  if (!text || sessionLoading.value) return
-  goal.value = ''
-  if (!runtimeSupported.value || !session.value) {
+  if (!canSubmitMessage.value) return
+  if (!runtimeSupported.value) {
+    goal.value = ''
     await requestPlan(text)
     return
   }
+  const currentSession = session.value
+  if (!currentSession) return
+  goal.value = ''
   sending.value = true
   add('正在发送消息', text)
   try {
     const messageContextRefs = activeContextRefs.value.map((ref) => ({ ...ref }))
-    const result = await AgentAPI.sendMessage(session.value.id, {
+    const result = await AgentAPI.sendMessage(currentSession.id, {
       content: text,
       context_refs: messageContextRefs,
     })
@@ -1221,10 +1237,10 @@ const submitMessage = async () => {
     } else {
       add('Agent 已排队', 'Run 已创建；正在由执行器实时生成计划。')
     }
-    await loadEventsAndStream(session.value, result.run)
+    await loadEventsAndStream(currentSession, result.run)
     syncAgentRoute({
       projectId: selectedProjectId.value,
-      sessionId: session.value.id,
+      sessionId: currentSession.id,
       runId: result.run.id,
       artifactId: undefined,
     })
@@ -2095,7 +2111,7 @@ onBeforeUnmount(() => {
   min-height: min(78vh, 60rem);
 }
 .workspace-chat-column :deep(.messages) {
-  min-height: min(30rem, 52vh);
+  min-height: 0;
   max-height: min(70vh, 58rem);
   scrollbar-gutter: stable;
 }
@@ -2127,7 +2143,7 @@ onBeforeUnmount(() => {
   .workspace-activity-stack { grid-template-columns: 1fr; }
   .workspace-activity-stack > * { grid-column: auto !important; }
   .workspace-chat-column :deep(.messages) {
-    min-height: 16rem;
+    min-height: 0;
     max-height: 55vh;
   }
 }

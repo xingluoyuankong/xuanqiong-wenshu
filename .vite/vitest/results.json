@@ -1,0 +1,1 @@
+{"version":"2.1.9","results":[[":frontend/src/views/AgentWorkspace.spec.ts",{"duration":0,"failed":true}],[":frontend/src/features/agent/AgentConversation.spec.ts",{"duration":0,"failed":true}],[":frontend/src/api/agent.spec.ts",{"duration":0,"failed":true}],[":frontend/src/features/agent/composables/useAgentSessionLifecycle.spec.ts",{"duration":0,"failed":true}]]}

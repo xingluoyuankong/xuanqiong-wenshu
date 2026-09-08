@@ -52,14 +52,17 @@ def upgrade() -> None:
     _add("agent_run_commands", sa.Column("idempotency_key", sa.String(255), nullable=True))
     _add("agent_run_commands", sa.Column("payload_hash", sa.String(64), nullable=False, server_default=""))
     _add("agent_run_commands", sa.Column("expected_state_version", sa.Integer(), nullable=True))
-    _add("agent_run_commands", sa.Column("result_json", sa.JSON(), nullable=False, server_default=sa.text("'{}'")))
+    _add("agent_run_commands", sa.Column("result_json", sa.JSON(), nullable=False, server_default=sa.text("('{}')")))
     _add("agent_run_commands", sa.Column("attempt_count", sa.Integer(), nullable=False, server_default="0"))
     _add("agent_run_commands", sa.Column("lease_owner", sa.String(128), nullable=True))
     _add("agent_run_commands", sa.Column("lease_expires_at", sa.DateTime(timezone=True), nullable=True))
     _add("agent_run_commands", sa.Column("started_at", sa.DateTime(timezone=True), nullable=True))
     _add("agent_run_commands", sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True))
     # Backfill old 017 rows deterministically before creating the idempotency index.
-    op.execute(sa.text("UPDATE agent_run_commands SET idempotency_key = 'legacy:' || id WHERE idempotency_key IS NULL"))
+    if op.get_bind().dialect.name == 'mysql':
+        op.execute(sa.text("UPDATE agent_run_commands SET idempotency_key = CONCAT('legacy:', id) WHERE idempotency_key IS NULL"))
+    else:
+        op.execute(sa.text("UPDATE agent_run_commands SET idempotency_key = 'legacy:' || id WHERE idempotency_key IS NULL"))
     op.execute(sa.text("UPDATE agent_run_commands SET payload_hash = '' WHERE payload_hash IS NULL"))
     index_names = {item.get("name") for item in inspect(op.get_bind()).get_indexes("agent_run_commands")}
     # Fresh installs are created by 000_initial_schema from the current ORM

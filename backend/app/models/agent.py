@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Optional
 from uuid import uuid4
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db.base import Base
@@ -60,7 +60,7 @@ class AgentRun(Base):
     # Latest safe, user-visible work summary.  The full activity remains in
     # AgentEventRecord; this checkpoint lets the state endpoint recover the
     # current action without scanning the complete event ledger.
-    latest_public_summary_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    latest_public_summary_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default=text("('{}')"))
     latest_public_summary_sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     latest_public_summary_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     context_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
@@ -211,7 +211,7 @@ class AgentRunCommand(Base):
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
     expected_state_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
-    result_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    result_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default=text("('{}')"))
     error_type: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
     error_detail: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")

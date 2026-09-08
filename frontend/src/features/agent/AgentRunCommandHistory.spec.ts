@@ -40,3 +40,19 @@ describe('AgentRunCommandHistory', () => {
     expect(wrapper.find('[data-testid="agent-run-command-history"]').exists()).toBe(false)
   })
 })
+
+
+describe('durable request chronology', () => {
+  it('preserves server sequence order when timestamps tie and IDs run backwards', () => {
+    const wrapper = mount(AgentRunCommandHistory, { props: {
+      commands: [
+        { ...commands[0]!, id: 'z-pause', requested_at: '2026-09-07T09:00:00Z' },
+        { ...commands[0]!, id: 'm-resume', command_type: 'resume', requested_at: '2026-09-07T09:00:00Z' },
+        { ...commands[0]!, id: 'a-cancel', command_type: 'cancel', requested_at: '2026-09-07T09:00:00Z' },
+      ],
+    } })
+    const content = wrapper.text()
+    expect(content.indexOf('暂停')).toBeLessThan(content.indexOf('继续'))
+    expect(content.indexOf('继续')).toBeLessThan(content.indexOf('取消'))
+  })
+})

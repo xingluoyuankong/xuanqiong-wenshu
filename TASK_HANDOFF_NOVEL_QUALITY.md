@@ -1,4 +1,96 @@
+<!-- STAGE13_CURRENT_BEGIN -->
+> **20:56文学输入包：**25个既有去重样本的双盲A/B空白表与空仲裁表已冻结，验证器valid=true，4种变异全部检出且原包恢复；R2反向审计只改临时副本，原包字节恢复；没有人工真值，7项文学hard gap仍在，整体active/NO-GO。
+
+## 阶段十三当前状态（2026-09-07 20:47 +08:00）
+
+原任务“全面优化重构玄穹文枢”在本任务接续，使用子智能体，不创建新任务。总目标 **active / 发布 NO-GO**。此块覆盖下方全部历史“当前/最终”措辞；历史证据保留。
+
+### 工程门禁已闭环
+
+- 后端最终冻结全量：**3103 passed / 1681.28s / exit0 / valid_gate=true**；648 backend/部署非秘密代码配置输入、2760既有资产无漂移。`logs/backend-stage13-frozen-20260907T195722318687+0800.result.json`
+- 前端最终门禁：**type-check=0、654 tests、build-only=0、114产物**；包括进度语义、可读性和会话初始化竞态修复。`logs/stage13-session-ready-fix-20260907-190347/final-gates.json`
+- 真实工作台R7(dev)与R8(preview)均通过：真实JWT/API/Alembic/SQLite/独立worker/SSE/UI；候选、continuation、当前进度、DOM可读性、接受版本、重复接受幂等、刷新终态均有证据。R8：`logs/stage13-real-workspace-20260907T195925-c6d74764/runner-result.json`
+- F06原生备份：64项默认临时目录契约通过；真实MySQL完整88表/2trigger/revision030包恢复通过。S13-07真实read completion提交前/后强杀通过，变异检出。证据见`logs/stage13-native-manifest-fix/`、`logs/stage13-native-live/run-20260907T184417-e9677d71/`、`logs/stage13-mysql-transaction-crash/`
+
+### 发布仍保持NO-GO的真实缺口
+
+- Docker实际运行：只读预检确认`desktop-linux` Engine命名管道不可达、Docker Desktop服务Stopped、`deploy/.env`缺失；示例Compose静态解析exit0不替代运行验收。`logs/stage13-docker-preflight-20260907/`
+- 文学质量：**7项hard gap仍在、completion_eligible=false**；阶段十三只做只读证据盘点，Provider调用/新样本/人工标签/正文/数据库改动均为0。最小下一批是既有去重25样本双人盲审+仲裁，再做严格T16/E01.2、T06、E11/T22。`logs/stage13-literary-next-audit-20260907/`
+- 其他未闭合：原生writer停写协调、完整MySQL网络/故障切换/其他事务矩阵、商业Provider端到端证据。
+
+最终聚合：`logs/stage13-final-gate-manifest-20260907T2026.json`；完整计划：`docs/reports/STAGE13_EXECUTION_PLAN_20260907.md`。
+<!-- STAGE13_CURRENT_END -->
+
+<!-- STAGE12_CURRENT_BEGIN -->
+## 阶段十二当前权威状态（2026-09-07 16:43 +08:00）
+
+**包含数据库回归的后端默认全量已通过：3005 passed / 2283.95s / exit0 / valid_gate=true**。`logs/backend-stage12-frozen-20260907T160529164332+0800.result.json`；637代码/配置、2749既有资产无漂移。此前2993项通过，但默认testpaths遗漏app/db；已扩展而非缩小范围，并新增收集守护回归。旧“最终通过”不外推到新增收集范围。
+
+- 时区策略6项+既有db5项+收集守护1项：12通过，移除策略/移除收集范围的进程内负控制检出。
+- 真实+08 MySQL R4四项通过；实际Alembic首DDL同连接UTC、TIMESTAMP/归一化DATETIME正确，单event loop干净退出。
+- SQLite与MySQL迁移库工具执行前/中强杀均通过；read至少一次、候选与冻结计划保持，仅模拟lease expiry；其他故障窗口待补。
+- 文学审计29项/7反向通过但七项hard gap不变，completion_eligible=false。
+- 原生MySQL全87表备份恢复、121外键检查、026写入拒绝与迁移重入通过；下一步其他MySQL事务崩溃窗口、真实后端浏览器、Docker部署；整体active/NO-GO。
+
+详见`docs/reports/STAGE12_RUNTIME_AND_GATE_20260907.md`及`docs/reports/STAGE12_EXECUTION_PLAN_20260907.md`。下方所有旧阶段数字和“final”结论属于历史时点。
+
+当前前端三门禁已重新执行并通过：83文件/634项，type-check/test/build均exit0，`logs/stage12-frontend-final-gates-summary-20260907-164721.json`。Docker实际daemon与deploy/.env缺失，配置夹具五种分支仅解析通过，不是部署通过。
+<!-- STAGE12_CURRENT_END -->
+
+<!-- S12_FINAL_GATE_CURRENT_BEGIN -->
+阶段十二新增源码后的原始后端全量已通过：`logs/backend-stage11-frozen-20260907T153311499845+0800.result.json`，2993 passed，636代码/配置与2746既有资产无漂移。S12-03时区真实验收四项通过，S12-04 SQLite live强杀两场景通过；MySQL强杀矩阵和Docker部署仍待完成。整体目标仍 active，文学质量 `completion_eligible=false`、7项hard gap保留。
+<!-- S12_FINAL_GATE_CURRENT_END -->
+
+<!-- STAGE11_LIVE_STATUS_BEGIN -->
+## 当前执行状态：阶段十二新增连接时区/强杀证据与最终全量已通过，继续收口未完成项
+
+> 更新：2026-09-07 13:41 +08:00；以下覆盖旧“当前/最新”叙述。原任务 **全面优化重构玄穹文枢** 已只读核对，继续在当前任务 `01a06d1c-19e0-75e0-a30e-9c3d0bae9867` 执行，不新建任务。目标 **active**，发布 **NO-GO**。
+
+| 范围 | 当前实测 | 证据及适用边界 |
+|---|---|---|
+| 阶段十二新增源码后最终后端冻结全量 | **2993 passed / 1547.77s / exit0 / valid_gate=true**；636代码/配置、2746既有资产无漂移 | `logs/backend-stage11-frozen-20260907T131232785321+0800.result.json`；原始pytest-q从头完整重跑，非拼接定向结果 |
+| 当前前端三门禁 | type-check、build-only均exit0；**83文件 / 634 passed / 127.06s** | `frontend/audit/frontend-final-gates-20260907-112159/summary.verified.json`；重点8文件哈希一致，不声称全前端冻结 |
+| SSE真实浏览器 | **2/2 passed**；独立29999端口，真实HTTP断流重连、60秒流、终态取消、Run切换隔离 | `frontend/audit/sse-isolation-20260907/final-sse-results.json`、`REPORT.md`；生产前端+受控HTTP流，不等于真实Provider全链路 |
+| Continuation维护扫描 | 当前扫描15项通过；MySQL代次/时钟等组合 **141 passed** | `logs/stage11-mutation-audit/FINAL_SUMMARY.json`、`logs/stage11-mysql-claim-clock-directed.log` |
+| 后端内存反向 | **旧修订10项7检出/3存活；新修订复验3/3检出**；无collection error | `logs/stage11-mutation-audit/FINAL_SUMMARY.json`；新增9项后扫描15项通过；M10默认正整数路径冗余，非正预算路径真实检出 |
+| MySQL迁移及建表 | 独立MySQL 8.4.9；fresh upgrade exit0、head=030、实查87表；ORM新库83表 | `logs/stage11-mysql-fresh-readonly-verify.json`、`logs/stage11-mysql-alembic-upgrade-fresh.json`、`logs/stage11-mysql-create-all.json`；fresh库已单独只读复核，不混用旧head证据 |
+| MySQL真实业务链 | **7/7通过**：Job/Run代次、旧完成拒绝、四实体CAS、双恢复者单赢家、UTC/expiry | `logs/stage11-mysql-continuation-business-20260907T122916-e70a7d19/result.json`；两类缺陷已修复；旧红测与真实MySQL反向结果均保留 |
+| Docker | 2026-09-07 12:38只读探针exit1、daemon管道缺失；未改卷 | `logs/stage11-deployment-readonly-20260907T123803.json`；native MySQL不等于Docker部署矩阵 |
+| 文学质量 | 七项hard gap仍保留；completion_eligible=false | `logs/stage11-quality-recheck-20260907T122447/gap-recheck.json`；四审计重算exit=0/2/2/0，标签与manifest未改；基础19条和T18六条均未填人工标签 |
+
+### 当前执行计划与分工
+
+1. **已修复 MySQL代次隔离**：`backend/app/agent/jobs.py` 的 claim 和 `backend/app/services/agent_runtime.py` 的 Run claim，采用明确赋值顺序；保留同owner未过期Run续租代次不变，换代后旧completion失效。定向141项、真实7/7、进程内Job/Run/clock三负控制及真实MySQL排序回退均检出。
+2. **已补齐 反向覆盖闭环**：专属子智能体已补 `backend/app/agent/test_continuation_scan_fairness.py` 的activation扫描上限和异常游标回滚；3个旧存活变异均重新检出；正整数预算M10冗余与非正预算差异分开说明。
+3. **阶段十二新增源码后最终门禁待重跑**：阶段十一第三轮历史基线为2993 passed；本轮新增MySQL连接UTC策略、时区测试及seed字节修复，必须重新执行原始pytest-q。S12-03专属18 passed，S12-04 live强杀通过，S12-07仍completion_eligible=false。
+4. **P1 MySQL恢复矩阵**：同实例双连接与跨OS进程claim/recovery/CLI重启已通过，`logs/stage11-mysql-cross-process-20260907T125031-69e4e31d/result.json`；MySQL命令9项验收`logs/stage11-mysql-command-order-20260907T131017-9950da8c/result.json`。下一步为执行中强杀、部署默认时区和真实迁移建库启动路径；保留所有失败数据库和日志。
+5. **P1 部署矩阵**：Docker daemon可用时另验迁移/备份/恢复/部署；不重置既有卷，不把native MySQL结果外推为Docker通过。
+6. **P2 文学质量七项**：依次推进E01.2受控对照、E11/T22真实repair、T06统一cohort、T16严格before/after、T18豁免质量真值、T26真实语料校准、human标签；缺样本时记录缺口，不伪造收益。
+
+阶段十一实施记录：`docs/reports/UI005_STAGE11_MYSQL_BUSINESS_AND_FINAL_GATE_20260907.md`及`docs/reports/UI005_STAGE11_SCAN_FAIRNESS.md`。下一阶段方案：`docs/reports/STAGE12_EXECUTION_PLAN_20260907.md`。所有历史失败与旧门禁继续保留。
+<!-- STAGE11_LIVE_STATUS_END -->
+
+> **阶段十一接续入口（2026-09-07）**：阶段十后端冻结全量 **2720 passed / 1209.75s / exit0**，前端公共Job投影消费定向75项、前端全量615项/type-check/build通过。当前继续审查MySQL跨实例恢复、SSE长连接/E2E和部署矩阵；Docker只读探针仍 `Server=null`，未改卷。最新排期见 `docs/reports/CURRENT_EXECUTION_STATUS_20260906.md`，阶段十报告见 `docs/reports/UI005_STAGE10_PUBLIC_PROJECTION_AND_OBSERVABILITY.md`。目标 **active**，发布 **NO-GO**。
+
+> **阶段十门禁完成（2026-09-07）**：后端原始全量 **2720 passed / 1209.75s / exit0**，621代码/配置与2734既有数据无漂移；公共Job投影、恢复可观测性与前端只读消费已验收。最新报告：`docs/reports/UI005_STAGE10_PUBLIC_PROJECTION_AND_OBSERVABILITY.md`。目标仍 **active**、发布 **NO-GO**；下一批是MySQL跨实例、SSE/E2E与部署矩阵，文学质量缺口独立保留。
+
+> **阶段九验收、阶段十接续**：后端原始冻结全量 **2672 passed / 1198.96s / exit0**，618个代码/配置与2728个既有数据文件无漂移；见 `docs/reports/UI005_STAGE9_FAILURE_RECOVERY_IMPLEMENTATION.md`。提交前/后强退出与历史孤儿真实CLI恢复已验证。阶段十已开始恢复器可观测性与只读API状态审查；新代码须再跑全量，2672不外推到阶段十。所有旧数字/下一任务保留为历史，最新排期以 `docs/reports/CURRENT_EXECUTION_STATUS_20260906.md` 顶部为准。目标 **active**，发布 **NO-GO**。
+
 ﻿# 任务接续文档：小说生成质量优化（xuanqiong-wenshu）
+
+
+## 当前接续入口：阶段八持久化审批续跑
+
+> 本节覆盖下方历史章节的“当前权威入口”“唯一下一任务”和旧通过数。历史记录保留；当前目标 **active**，整体发布 **NO-GO**。
+
+- 原任务 **全面优化重构玄穹文枢**：`01a02410-94af-7002-9585-3532293aa587`，已只读核对；实际执行在本任务接续，没有启动新的 Codex 任务。
+- 当前状态与完整排期见 `docs/reports/CURRENT_EXECUTION_STATUS_20260906.md`。
+- UI005 持久化续跑执行计划见 `docs/reports/UI005_WORKER_CONTINUATION_PLAN_20260907.md`；阶段八实现与证据见 `docs/reports/UI005_STAGE8_CONTINUATION_IMPLEMENTATION.md`。
+- 阶段八最新定向：**486 passed / 232.44s**；它不是后端全量。后端上一有效全量为阶段七 **2358 passed**，新源码待冻结重跑。
+- 主线：补齐畸形 intent 隔离、ACK/lease 竞争、dead-letter 状态收敛和并行审批来源绑定；之后执行冻结后端全量并更新证据。
+- 前端上一有效门禁：**601 passed**、type-check/build 通过；本批哈希复核见 `logs/stage8-frontend-baseline-recheck.json`。
+- 文学质量七项硬缺口与 Docker/MySQL 实机门禁独立保留；工程回归通过不代表小说收益或整体发布通过。
+
 
 > **当前权威入口**：请优先阅读文末 2026-08-26 23:59｜Provider 原子合并缺陷修复与最终门禁复核。历史章节保留作为审计证据；如与文末最新权威章节冲突，以文末状态、精确门禁和未完成边界为准。
 

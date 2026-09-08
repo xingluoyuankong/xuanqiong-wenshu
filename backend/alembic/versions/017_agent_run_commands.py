@@ -31,7 +31,7 @@ def upgrade() -> None:
         sa.Column("command_type", sa.String(24), nullable=False),
         sa.Column("status", sa.String(24), nullable=False, server_default="requested"),
         sa.Column("reason", sa.String(255), nullable=True),
-        sa.Column("payload_json", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+        sa.Column("payload_json", sa.JSON(), nullable=False, server_default=sa.text("('{}')")),
         sa.Column("error_type", sa.String(160), nullable=True),
         sa.Column("error_detail", sa.String(1000), nullable=True),
         sa.Column("requested_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),

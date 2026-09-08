@@ -269,3 +269,39 @@ async def test_job_lease_generation_fences_old_completion_after_reclaim(tmp_path
                 await jobs.complete(job_id=job.id, user_id=run.user_id, lease_owner="reused-job-owner", lease_generation=first_generation, result={"late": True})
     finally:
         await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_command_recovery_fails_orphaned_run_without_crashing_worker(tmp_path):
+    engine, factory = await _factory(tmp_path)
+    try:
+        async with factory() as session:
+            now = AgentCommandRecovery(session).now()
+            orphan = AgentRunCommand(
+                id="orphan-command-2406",
+                run_id="missing-run-2406",
+                correlation_id="orphan-correlation-2406",
+                transaction_id="orphan-transaction-2406",
+                user_id=2406,
+                command_type="cancel",
+                status=COMMAND_APPLYING,
+                idempotency_key="orphan-command-key-2406",
+                expected_state_version=0,
+                payload_json={},
+                result_json={},
+                lease_owner="crashed-command-worker",
+                lease_expires_at=now - timedelta(seconds=1),
+            )
+            session.add(orphan)
+            await session.commit()
+
+            recovery = AgentCommandRecovery(session, lease_seconds=30)
+            recovered = await recovery.recover_stale_commands()
+            assert [item.id for item in recovered] == [orphan.id]
+            current = await recovery.get(command_id=orphan.id)
+            assert current is not None
+            assert current.status == COMMAND_FAILED
+            assert current.error_type == "OrphanedRun"
+            assert current.lease_owner is None
+            assert current.finished_at is not None
+    finally:
+        await engine.dispose()

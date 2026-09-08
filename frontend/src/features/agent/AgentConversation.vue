@@ -1,5 +1,5 @@
 <template>
-  <XqPanel tone="ink" title="创作对话" subtitle="展示目标、公开轨迹、Provider reasoning、Assistant 正文、工具调用和结果摘要。">
+  <XqPanel class="agent-conversation" tone="ink" title="创作对话" subtitle="展示目标、公开轨迹、Provider reasoning、Assistant 正文、工具调用和结果摘要。">
     <div class="session-bar">
       <span data-testid="agent-session-status">{{ sessionLabel }}</span>
       <small v-if="sessionLoading">正在恢复历史…</small>
@@ -68,6 +68,7 @@
     </div>
     <p v-else class="empty-chat" data-testid="agent-empty-chat">请选择项目并发送目标，Agent 的历史消息会显示在这里。</p>
     <AgentReasoningCard
+      :context-key="reasoningContextKey"
       :chunks="reasoningChunks"
       :text="reasoningText"
       :status="reasoningStatus"
@@ -97,13 +98,14 @@
       :replay-required="replayRequired"
       :pending-sequences="pendingSequences"
     />
-    <form class="composer" @submit.prevent="emit('submit')">
+    <form class="composer" @submit.prevent="submitGoal">
       <AgentContextChips :refs="contextRefs" :project-title="projectTitle || undefined" :chapter-title="chapterTitle || undefined" @remove="emit('remove-context-ref', $event)" />
       <label class="sr-only" for="agent-goal">给小说 Agent 的指令</label>
       <textarea id="agent-goal" :value="goal" data-testid="agent-message-input" rows="4" placeholder="例如：检查当前项目第三章的质量风险，并给出不改正文的计划" @input="updateGoal" />
       <div>
-        <small>{{ runtimeSupported ? '消息会写入当前会话，并接收真实运行事件。' : '当前测试/兼容模式只生成计划，不执行写入。' }}</small>
-        <XqButton type="submit" data-testid="agent-plan-submit" :loading="sending || planning" :disabled="!goal.trim() || sessionLoading">{{ runtimeSupported ? '发送给 Agent' : '生成执行计划' }}</XqButton>
+        <small v-if="runtimeSupported && !runtimeReady" data-testid="agent-runtime-not-ready" role="status">{{ sessionError ? '会话初始化失败，请重试；输入已保留。' : '正在准备项目会话，输入已保留，就绪后可发送。' }}</small>
+        <small v-else>{{ runtimeSupported ? '消息会写入当前会话，并接收真实运行事件。' : '当前测试/兼容模式只生成计划，不执行写入。' }}</small>
+        <XqButton type="submit" data-testid="agent-plan-submit" :loading="submitLoading" :disabled="!canSubmitGoal">{{ runtimeSupported ? '发送给 Agent' : '生成执行计划' }}</XqButton>
       </div>
     </form>
   </XqPanel>
@@ -131,6 +133,7 @@ const props = withDefaults(
     streamConnectionState?: SSEConnectionState
     sessionError?: string
     runtimeSupported?: boolean
+    runtimeReady?: boolean
     sending?: boolean
     planning?: boolean
     streamingAssistant?: string
@@ -143,6 +146,7 @@ const props = withDefaults(
     artifactPreviewArtifactId?: string | null
     artifactPreviewError?: string
     publicWorkSummary?: AgentPublicWorkSummaryType | null
+    reasoningContextKey?: string
     reasoningChunks?: AgentReasoningChunk[]
     reasoningText?: string
     reasoningStatus?: AgentReasoningStatus
@@ -168,6 +172,7 @@ const props = withDefaults(
     streamConnectionState: 'closed',
     sessionError: '',
     runtimeSupported: false,
+    runtimeReady: false,
     sending: false,
     planning: false,
     streamingAssistant: '',
@@ -180,6 +185,7 @@ const props = withDefaults(
     artifactPreviewArtifactId: null,
     artifactPreviewError: '',
     publicWorkSummary: null,
+    reasoningContextKey: '',
     reasoningChunks: () => [],
     reasoningText: '',
     reasoningStatus: 'idle',
@@ -206,6 +212,16 @@ const emit = defineEmits<{
   (event: 'load-previous-reasoning'): void
   (event: 'load-older-messages'): void
 }>()
+
+const canSubmitGoal = computed(() => Boolean(
+  props.goal.trim() && !props.sessionLoading && !props.sending && !props.planning &&
+  (!props.runtimeSupported || props.runtimeReady),
+))
+const submitLoading = computed(() => props.sending || props.planning ||
+  (props.runtimeSupported && !props.runtimeReady && !props.sessionError))
+const submitGoal = () => {
+  if (canSubmitGoal.value) emit('submit')
+}
 
 const sessionLabel = computed(() => {
   if (props.sessionTitle) return `会话：${props.sessionTitle}`
@@ -324,8 +340,31 @@ const updateGoal = (event: Event) => {
 </script>
 
 <style scoped>
-.session-bar { display: flex; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; color: rgba(255, 255, 255, 0.86); font-size: 0.82rem; }
-.session-bar small { color: rgba(255, 255, 255, 0.68); }
+/* This chat is a token surface, not inverse text on a globally whitened ink
+   panel. Pair foreground/background locally, including nested paper content.
+   The surface override matches the existing global !important surface rule. */
+.agent-conversation.xq-panel {
+  color: var(--xq-text-body);
+  background: var(--xq-surface) !important;
+}
+.agent-conversation :deep(.xq-panel--paper) {
+  color: var(--xq-text-body);
+  background: var(--xq-surface) !important;
+}
+.agent-conversation :deep(.xq-panel__subtitle) { color: var(--xq-text-muted); }
+.agent-conversation :deep(.public-work-summary) {
+  color: var(--xq-text-body);
+  background: var(--xq-warning-soft);
+}
+.agent-conversation :deep(.context-title) { color: var(--xq-text-muted); }
+.agent-conversation :deep(.context-chip) {
+  color: var(--xq-text-body);
+  background: var(--xq-surface-2);
+  border-color: var(--xq-border);
+}
+
+.session-bar { display: flex; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; color: var(--xq-text-muted); font-size: 0.82rem; }
+.session-bar small { color: var(--xq-text-muted); }
 .current-progress {
   display: flex;
   flex-wrap: wrap;
@@ -349,18 +388,19 @@ const updateGoal = (event: Event) => {
 }
 .message-history { margin-bottom: 1rem; }
 .message-history__controls { display: flex; justify-content: center; margin-bottom: 0.65rem; }
-.messages { display: grid; gap: 0.7rem; max-height: 26rem; overflow: auto; }
-.message { max-width: 88%; padding: 0.7rem 0.85rem; border-radius: 0.8rem; background: rgba(255, 255, 255, 0.1); }
+.messages { display: grid; align-content: start; gap: 0.7rem; max-height: 26rem; overflow: auto; }
+.message { max-width: 88%; padding: 0.7rem 0.85rem; border-radius: 0.8rem; background: var(--xq-surface-2); color: var(--xq-text-body); }
 .message-streaming { border-left: 3px solid var(--xq-jade); opacity: 0.92; }
 .artifact-preview { max-height: 28rem; overflow: auto; white-space: pre-wrap; line-height: 1.65; margin: 0 0 0.65rem; font: inherit; }
 .message p { margin: 0.25rem 0 0; white-space: pre-wrap; line-height: 1.6; }
-.message-user { justify-self: end; background: rgba(8, 145, 178, 0.35); }
-.message-assistant { justify-self: start; background: rgba(255, 255, 255, 0.12); }
-.empty-chat { color: rgba(255, 255, 255, 0.7); line-height: 1.6; }
+.message-user { justify-self: end; background: var(--xq-info-soft); color: var(--xq-text-body); }
+.message-assistant { justify-self: start; background: var(--xq-surface-2); }
+.empty-chat { color: var(--xq-text-muted); line-height: 1.6; }
 .composer { display: grid; gap: 0.65rem; margin-top: 1rem; }
-.composer textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--xq-border); border-radius: 0.7rem; padding: 0.7rem; background: rgba(255, 255, 255, 0.85); font: inherit; resize: vertical; line-height: 1.6; }
+.composer textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--xq-border); border-radius: 0.7rem; padding: 0.7rem; background: var(--xq-surface); color: var(--xq-text-body); font: inherit; resize: vertical; line-height: 1.6; }
+.composer textarea::placeholder { color: var(--xq-text-muted); opacity: 1; }
 .composer > div { display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; }
-.composer small { color: rgba(255, 255, 255, 0.7); }
+.composer small { color: var(--xq-text-muted); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
 @media (max-width: 650px) { .composer > div { align-items: flex-start; flex-direction: column; } }
 </style>

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import app.models  # register every ORM table before creating the disposable schema
 from app.db.base import Base
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool

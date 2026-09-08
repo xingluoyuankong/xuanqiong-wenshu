@@ -15,22 +15,45 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (
+    AgentApproval,
+    AgentArtifactRef,
+    AgentCapabilityExecution,
+    AgentEventRecord,
+    AgentJob,
+    AgentMessage,
+    AgentRun,
+    AgentRunCapabilitySnapshot,
+    AgentRunCommand,
+    AgentRunReasoningChunk,
+    AgentRunStep,
     AgentSession,
+    ArtifactLineage,
     BlueprintCharacter,
     BlueprintRelationship,
     Chapter,
     ChapterEvaluation,
     ChapterOutline,
     ChapterVersion,
+    ContextSnapshot,
+    ContextSnapshotRef,
+    ConversationSummary,
     Faction,
     NovelBlueprint,
     NovelConversation,
     NovelProject,
     ProjectMember,
+    PlanRevision,
     ProjectMemberRole,
+    QualityFinding,
+    QualityGate,
+    QualityResult,
     TaskRuntime,
     TaskRuntimeEvent,
 )
+from ..models.clue_tracker import StoryClue, ClueChapterLink, ClueThread
+from ..models.token_budget import TokenBudget, TokenUsage, TokenBudgetAlert
+from ..models.knowledge_graph import CharacterNode, EventEdge, KnowledgeGraphMetadata
+from ..models.research import ProjectResearchConfig, ResearchArtifact
 from ..models.memory_layer import CharacterState, TimelineEvent
 from ..services.vector_store_service import VectorStoreService
 from ..repositories.novel_repository import NovelRepository
@@ -1928,15 +1951,129 @@ class NovelService:
                 await self.session.execute(
                     delete(TaskRuntime).where(TaskRuntime.task_id.in_(runtime_ids))
                 )
-            agent_sessions = list(
+
+            agent_session_ids = list(
                 (
                     await self.session.execute(
-                        select(AgentSession).where(AgentSession.project_id == pid)
+                        select(AgentSession.id).where(AgentSession.project_id == pid)
                     )
                 ).scalars()
             )
-            for agent_session in agent_sessions:
-                await self.session.delete(agent_session)
+            agent_run_ids = list(
+                (
+                    await self.session.execute(
+                        select(AgentRun.id).where(
+                            (AgentRun.project_id == pid)
+                            | (AgentRun.session_id.in_(agent_session_ids) if agent_session_ids else False)
+                        )
+                    )
+                ).scalars()
+            )
+            artifact_ids = list(
+                (await self.session.scalars(
+                    select(AgentArtifactRef.id).where(
+                        (AgentArtifactRef.project_id == pid)
+                        | AgentArtifactRef.run_id.in_(agent_run_ids)
+                    )
+                )).all()
+            )
+            # Materialize IDs before deleting parents. Quality facts can exist
+            # without an Artifact (including runs with no artifacts at all).
+            quality_result_ids = list(
+                (await self.session.scalars(
+                    select(QualityResult.id).where(
+                        (QualityResult.project_id == pid)
+                        | QualityResult.run_id.in_(agent_run_ids)
+                        | QualityResult.artifact_ref_id.in_(artifact_ids)
+                    )
+                )).all()
+            )
+            snapshot_ids = list(
+                (await self.session.scalars(
+                    select(ContextSnapshot.id).where(
+                        (ContextSnapshot.project_id == pid)
+                        | ContextSnapshot.run_id.in_(agent_run_ids)
+                        | ContextSnapshot.session_id.in_(agent_session_ids)
+                    )
+                )).all()
+            )
+
+            # Explicit child-first DML works with SQLite FK enforcement both on
+            # and off. Do not rely on database cascades: they leave already
+            # loaded ORM identities alive in expire_on_commit=False sessions.
+            # fetch synchronizes even predicates containing materialized IDs.
+            graph_deletes = [
+                (ArtifactLineage,
+                 ArtifactLineage.run_id.in_(agent_run_ids)
+                 | ArtifactLineage.source_artifact_ref_id.in_(artifact_ids)
+                 | ArtifactLineage.derived_artifact_ref_id.in_(artifact_ids)),
+                (QualityFinding, QualityFinding.quality_result_id.in_(quality_result_ids)),
+                (QualityGate,
+                 QualityGate.quality_result_id.in_(quality_result_ids)
+                 | QualityGate.run_id.in_(agent_run_ids)
+                 | QualityGate.artifact_ref_id.in_(artifact_ids)),
+                (QualityResult, QualityResult.id.in_(quality_result_ids)),
+                (AgentCapabilityExecution, AgentCapabilityExecution.run_id.in_(agent_run_ids)),
+                (AgentRunCapabilitySnapshot, AgentRunCapabilitySnapshot.run_id.in_(agent_run_ids)),
+                # PlanRevision.context_snapshot_id is RESTRICT, not CASCADE.
+                (PlanRevision,
+                 (PlanRevision.project_id == pid)
+                 | PlanRevision.run_id.in_(agent_run_ids)
+                 | PlanRevision.session_id.in_(agent_session_ids)
+                 | PlanRevision.context_snapshot_id.in_(snapshot_ids)),
+                (ContextSnapshotRef, ContextSnapshotRef.context_snapshot_id.in_(snapshot_ids)),
+                (ContextSnapshot, ContextSnapshot.id.in_(snapshot_ids)),
+                (ConversationSummary,
+                 (ConversationSummary.project_id == pid)
+                 | ConversationSummary.run_id.in_(agent_run_ids)
+                 | ConversationSummary.session_id.in_(agent_session_ids)),
+                (AgentRunReasoningChunk, AgentRunReasoningChunk.run_id.in_(agent_run_ids)),
+                (AgentEventRecord, AgentEventRecord.run_id.in_(agent_run_ids)),
+                (AgentApproval, AgentApproval.run_id.in_(agent_run_ids)),
+                (AgentRunCommand, AgentRunCommand.run_id.in_(agent_run_ids)),
+                (AgentJob, AgentJob.run_id.in_(agent_run_ids)),
+                (AgentArtifactRef, AgentArtifactRef.id.in_(artifact_ids)),
+                (AgentRunStep, AgentRunStep.run_id.in_(agent_run_ids)),
+                (AgentRun, AgentRun.id.in_(agent_run_ids)),
+                (AgentMessage, AgentMessage.session_id.in_(agent_session_ids)),
+                (AgentSession, AgentSession.id.in_(agent_session_ids)),
+            ]
+            for model, predicate in graph_deletes:
+                await self.session.execute(
+                    delete(model).where(predicate).execution_options(synchronize_session="fetch")
+                )
+
+            # These API-created writing domains have database CASCADE FKs but
+            # no NovelProject ORM delete cascade. Delete explicitly before the
+            # repository removes chapters/characters/project, including on FK-OFF
+            # connections; synchronize loaded identities just like the Agent graph.
+            clue_ids = list((await self.session.scalars(
+                select(StoryClue.id).where(StoryClue.project_id == pid)
+            )).all())
+            node_ids = list((await self.session.scalars(
+                select(CharacterNode.id).where(CharacterNode.project_id == pid)
+            )).all())
+            writing_deletes = [
+                (ClueChapterLink, ClueChapterLink.clue_id.in_(clue_ids)),
+                (ClueThread, ClueThread.project_id == pid),
+                (StoryClue, StoryClue.id.in_(clue_ids)),
+                (EventEdge,
+                 (EventEdge.project_id == pid)
+                 | EventEdge.source_node_id.in_(node_ids)
+                 | EventEdge.target_node_id.in_(node_ids)),
+                (CharacterNode, CharacterNode.id.in_(node_ids)),
+                (KnowledgeGraphMetadata, KnowledgeGraphMetadata.project_id == pid),
+                (TokenUsage, TokenUsage.project_id == pid),
+                (TokenBudgetAlert, TokenBudgetAlert.project_id == pid),
+                (TokenBudget, TokenBudget.project_id == pid),
+                (ResearchArtifact, ResearchArtifact.project_id == pid),
+                (ProjectResearchConfig, ProjectResearchConfig.project_id == pid),
+            ]
+            for model, predicate in writing_deletes:
+                await self.session.execute(
+                    delete(model).where(predicate).execution_options(synchronize_session="fetch")
+                )
+
             await self.repo.delete(project)
             # 同步清理向量数据
             try:

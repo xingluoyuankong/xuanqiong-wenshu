@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Optional
 from uuid import uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, event, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, event, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..db.base import Base
@@ -37,7 +37,7 @@ class ContextSnapshot(Base):
     transaction_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     context_kind: Mapped[str] = mapped_column(String(80), nullable=False, default="run_context", server_default="run_context", index=True)
-    context_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    context_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default=text("('{}')"))
     digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -67,7 +67,7 @@ class ContextSnapshotRef(Base):
     ref_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     ref_version: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     role: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
-    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, server_default=text("('{}')"))
     digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

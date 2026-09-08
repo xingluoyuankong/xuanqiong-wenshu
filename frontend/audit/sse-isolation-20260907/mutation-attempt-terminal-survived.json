@@ -1,0 +1,56 @@
+{
+  "results": [
+    {
+      "mode": "scope",
+      "exit_code": 1,
+      "failed": 6,
+      "passed": 12,
+      "detected": true
+    },
+    {
+      "mode": "dedupe",
+      "exit_code": 1,
+      "failed": 2,
+      "passed": 16,
+      "detected": true
+    },
+    {
+      "mode": "generation",
+      "exit_code": 1,
+      "failed": 1,
+      "passed": 17,
+      "detected": true
+    },
+    {
+      "mode": "transport",
+      "exit_code": 1,
+      "failed": 2,
+      "passed": 16,
+      "detected": true
+    },
+    {
+      "mode": "terminal",
+      "exit_code": 0,
+      "failed": 0,
+      "passed": 18,
+      "detected": false
+    },
+    {
+      "mode": "control",
+      "exit_code": 1,
+      "failed": 1,
+      "passed": 17,
+      "detected": true
+    }
+  ],
+  "before": {
+    "src/utils/sseStream.ts": "96824987f70bd3b28cd6538d58cc1e5077492f4253f5c52b7929c0345e27de96",
+    "src/features/agent/composables/useAgentRunStream.ts": "414ef42ab50d8ff8b84662053a52fac730a1141527aeb9db2e4ce9a29838c297"
+  },
+  "after": {
+    "src/utils/sseStream.ts": "96824987f70bd3b28cd6538d58cc1e5077492f4253f5c52b7929c0345e27de96",
+    "src/features/agent/composables/useAgentRunStream.ts": "414ef42ab50d8ff8b84662053a52fac730a1141527aeb9db2e4ce9a29838c297"
+  },
+  "source_hashes_unchanged": true,
+  "all_detected": false
+}

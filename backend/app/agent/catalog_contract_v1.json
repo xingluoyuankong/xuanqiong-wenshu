@@ -250,6 +250,10 @@
           "_approval_id": {
             "type": "string"
           },
+          "actor_user_id": {
+            "minimum": 1,
+            "type": "integer"
+          },
           "artifact_id": {
             "maxLength": 36,
             "minLength": 1,

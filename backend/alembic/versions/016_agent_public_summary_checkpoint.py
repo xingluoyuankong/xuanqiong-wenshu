@@ -30,7 +30,7 @@ def upgrade() -> None:
     if not _has_column("agent_runs", "latest_public_summary_json"):
         op.add_column(
             "agent_runs",
-            sa.Column("latest_public_summary_json", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+            sa.Column("latest_public_summary_json", sa.JSON(), nullable=False, server_default=sa.text("('{}')")),
         )
     if not _has_column("agent_runs", "latest_public_summary_sequence"):
         op.add_column(

@@ -1,0 +1,101 @@
+{
+  "started_at": "2026-09-07T11:21:59.2802764+08:00",
+  "ended_at": "2026-09-07T11:25:22.6016173+08:00",
+  "verified_at": "2026-09-07T03:35:02.864Z",
+  "commands": [
+    {
+      "name": "type-check",
+      "command": "npm run type-check",
+      "started_at": "2026-09-07T11:21:59.3374086+08:00",
+      "ended_at": "2026-09-07T11:22:45.2811010+08:00",
+      "duration_seconds": 45.94,
+      "exit_code": 0,
+      "log": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\frontend-final-gates-20260907-112159\\type-check.log"
+    },
+    {
+      "name": "test-run",
+      "command": "npm run test:run",
+      "started_at": "2026-09-07T11:22:45.3269699+08:00",
+      "ended_at": "2026-09-07T11:24:54.4319650+08:00",
+      "duration_seconds": 129.1,
+      "exit_code": 0,
+      "log": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\frontend-final-gates-20260907-112159\\test-run.log"
+    },
+    {
+      "name": "build-only",
+      "command": "npm run build-only",
+      "started_at": "2026-09-07T11:24:54.4330108+08:00",
+      "ended_at": "2026-09-07T11:25:22.6011421+08:00",
+      "duration_seconds": 28.17,
+      "exit_code": 0,
+      "log": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\audit\\frontend-final-gates-20260907-112159\\build-only.log"
+    }
+  ],
+  "status": "passed",
+  "source_hashes_unchanged": true,
+  "source_check": [
+    {
+      "file": "src/features/agent/composables/useAgentRunStream.ts",
+      "before": "414EF42AB50D8FF8B84662053A52FAC730A1141527AEB9DB2E4CE9A29838C297",
+      "after": "414ef42ab50d8ff8b84662053a52fac730a1141527aeb9db2e4ce9a29838c297"
+    },
+    {
+      "file": "src/features/agent/composables/useAgentRunStream.transport.spec.ts",
+      "before": "8B908B1A4C21A418D53CE3EA3EF7F1D6B781943BB6E3207380FCEE3D0CD8DA46",
+      "after": "8b908b1a4c21a418d53ce3ea3ef7f1d6b781943bb6e3207380fcee3d0cd8da46"
+    },
+    {
+      "file": "src/features/agent/composables/useAgentRunStream.isolation.spec.ts",
+      "before": "DC213406C338A8E520EEA14D4AC0B2770D4F9C392F3EA0D71FA7589A878BB376",
+      "after": "dc213406c338a8e520eea14d4ac0b2770d4f9c392f3ea0d71fa7589a878bb376"
+    },
+    {
+      "file": "src/utils/sseStream.ts",
+      "before": "96824987F70BD3B28CD6538D58CC1E5077492F4253F5C52B7929C0345E27DE96",
+      "after": "96824987f70bd3b28cd6538d58cc1e5077492f4253f5c52b7929c0345e27de96"
+    },
+    {
+      "file": "src/features/agent/data/AgentDataPanel.spec.ts",
+      "before": "CDCFD8D7274A170299A2D8A5F48366F3AA0D3959473F04E4716801F5C666781E",
+      "after": "cdcfd8d7274a170299a2d8a5f48366f3aa0d3959473f04e4716801f5c666781e"
+    },
+    {
+      "file": "src/features/agent/data/AgentDataPanel.vue",
+      "before": "71A5C7C8A258917FE724C3364956EB8528CE142F416C2B14672763A44AC8BD1E",
+      "after": "71a5c7c8a258917fe724c3364956eb8528ce142f416c2b14672763a44ac8bd1e"
+    },
+    {
+      "file": "src/utils/sseStream.spec.ts",
+      "before": "5D958E9EC6D89F97E0CF74422735462A05584710546291439B277CDCA29A2C00",
+      "after": "5d958e9ec6d89f97e0cf74422735462a05584710546291439b277cdca29a2c00"
+    },
+    {
+      "file": "src/api/agent.ts",
+      "before": "7A8FF38BCECF8B200958D2ACAB426B8504CE9334E168FC11CFADE4153E2746C3",
+      "after": "7a8ff38bcecf8b200958d2acab426b8504ce9334e168fc11cfade4153e2746c3"
+    }
+  ],
+  "tests": {
+    "files": 83,
+    "passed": 634,
+    "duration_seconds": 127.06
+  },
+  "build": {
+    "modules": 4918,
+    "duration_seconds": 26.07,
+    "entry_exists": true,
+    "outputs": [
+      {
+        "file": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\dist\\assets\\AgentWorkspace-Dm9b5-AQ.js",
+        "size": 197535,
+        "sha256": "f1484e5a1abe1bf5f0915a8dd4acefc192945ba846471031b39b86adf2d9e0a0"
+      },
+      {
+        "file": "D:\\小说写作\\xuanqiong-wenshu\\frontend\\dist\\assets\\sseStream-BtErK89E.js",
+        "size": 2862,
+        "sha256": "47eb30784f087866e4860d2d57460e1d7184d3c84bb13ecea642410918ec6a13"
+      }
+    ]
+  },
+  "evidence_note": "Original summary.json retained: PowerShell success-output capture polluted final_exit_codes. This verified summary uses integer commands[].exit_code captured immediately after each actual process."
+}

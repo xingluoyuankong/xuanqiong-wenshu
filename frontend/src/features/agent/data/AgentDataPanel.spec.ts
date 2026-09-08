@@ -96,6 +96,101 @@ describe('AgentDataPanel', () => {
     expect(wrapper.get('[data-testid="agent-audit-panel"]').text()).toContain('候选已生成')
   })
 
+  it('显示公共 Job 的终态、恢复状态和白名单结果，但不渲染私有结果字段', () => {
+    const continuationJob = {
+      ...job,
+      id: 'continuation-1',
+      kind: 'agent_continuation',
+      status: 'succeeded',
+      terminal_status: 'succeeded',
+      recovery_status: 'continuation_completed',
+      result_json: {
+        continuation_completed: true,
+        continuation_acknowledged: true,
+        private_output: 'SECRET_OUTPUT',
+      },
+    }
+    const wrapper = mountPanel({ jobs: [continuationJob], deadLetters: [] })
+    const panel = wrapper.get('[data-testid="agent-job-panel"]')
+
+    expect(panel.text()).toContain('终态：已完成')
+    expect(panel.text()).toContain('恢复：续跑已完成')
+    expect(panel.text()).toContain('结果：续跑完成标记：是 · 续跑确认标记：是')
+    expect(panel.text()).not.toContain('SECRET_OUTPUT')
+  })
+
+  it('死信面板消费公开终态和失败对账标记，不显示 error_detail', () => {
+    const deadLetter = {
+      ...job,
+      id: 'dead-reconciled',
+      status: 'dead_letter',
+      terminal_status: 'dead_letter',
+      recovery_status: 'failure_reconciled',
+      error_type: 'RuntimeError',
+      error_detail: 'PRIVATE_ERROR_DETAIL',
+      result_json: {},
+    }
+    const wrapper = mountPanel({ jobs: [], deadLetters: [deadLetter] })
+    const panel = wrapper.get('[data-testid="agent-dead-letter-panel"]')
+
+    expect(panel.text()).toContain('终态：死信待处理')
+    expect(panel.text()).toContain('恢复：失败已对账')
+    expect(panel.text()).toContain('无公开结果摘要')
+    expect(panel.text()).not.toContain('PRIVATE_ERROR_DETAIL')
+  })
+
+  it('保留 false 和等待后续审批，不将 Job 结束推断成 Run 完成', () => {
+    const wrapper = mountPanel({ jobs: [{
+      ...job, kind: 'agent_continuation', status: 'succeeded', terminal_status: 'succeeded',
+      recovery_status: 'not_recorded',
+      result_json: { continuation_completed: false, pending_approval: true, continuation_acknowledged: false },
+    }], deadLetters: [] })
+    const panel = wrapper.get('[data-testid="agent-job-panel"]')
+    expect(panel.text()).toContain('续跑完成标记：否 · 等待审批标记：是 · 续跑确认标记：否')
+    expect(panel.text()).not.toContain('恢复：续跑已完成')
+    expect(wrapper.emitted()).toEqual({})
+  })
+
+  it.each(['completed', 'succeeded', 'failed', 'cancelled', 'dead_letter'])('终态 %s 隐藏取消按钮', (status) => {
+    const panel = mountPanel({ jobs: [{ ...job, status, terminal_status: status }], deadLetters: [] })
+      .get('[data-testid="agent-job-panel"]')
+    expect(panel.text()).not.toContain('请求取消')
+    if (status === 'completed') expect(panel.text()).toContain('终态：已完成')
+  })
+
+  it('旧响应缺省字段、空结果和未记录恢复状态不生成成功标志', () => {
+    const panel = mountPanel({ jobs: [{ ...job, terminal_status: null, recovery_status: 'not_recorded' }], deadLetters: [] })
+      .get('[data-testid="agent-job-panel"]')
+    expect(panel.text()).not.toContain('终态：')
+    expect(panel.text()).not.toContain('恢复：')
+    expect(panel.text()).not.toContain('结果：')
+    expect(panel.text()).toContain('请求取消')
+  })
+
+  it('可见响应仅显示自绑定关联标记，不输出关联 ID 或未知结果正文', () => {
+    const panel = mountPanel({ jobs: [{ ...job, result_json: {
+      visible_response_job_id: job.id, continuation_completed: true, private_output: 'PRIVATE_RESULT',
+    } }], deadLetters: [] }).get('[data-testid="agent-job-panel"]')
+    expect(panel.text()).toContain('结果：可见响应已关联')
+    expect(panel.text()).not.toContain('续跑完成标记')
+    expect(panel.text()).not.toContain('PRIVATE_RESULT')
+    const unbound = mountPanel({ jobs: [{ ...job, result_json: { visible_response_job_id: 'UNBOUND_ID' } }], deadLetters: [] })
+      .get('[data-testid="agent-job-panel"]')
+    expect(unbound.text()).not.toContain('结果：')
+    expect(unbound.text()).not.toContain('UNBOUND_ID')
+  })
+
+  it('非布尔值和非成功续跑的结果标记不进入摘要', () => {
+    const malformed = mountPanel({ jobs: [{ ...job, kind: 'agent_continuation', status: 'succeeded', result_json: {
+      continuation_completed: 'true', pending_approval: 1, continuation_acknowledged: null,
+    } }], deadLetters: [] }).get('[data-testid="agent-job-panel"]')
+    expect(malformed.text()).not.toContain('结果：')
+    const pending = mountPanel({ jobs: [{ ...job, kind: 'agent_continuation', result_json: {
+      continuation_completed: true,
+    } }], deadLetters: [] }).get('[data-testid="agent-job-panel"]')
+    expect(pending.text()).not.toContain('结果：')
+  })
+
   it('显示当前 Run 的 Provider 调用统计且只展示脱敏字段', () => {
     const wrapper = mountPanel({
       providerUsageSummary: {

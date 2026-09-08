@@ -23,7 +23,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from app.agent.worker import AgentWorker, handle_agent_execution_job, handle_visible_response_job
+from app.agent.worker import AgentWorker, handle_agent_execution_job, handle_visible_response_job, handle_agent_continuation_job
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal, engine
 
@@ -51,7 +51,7 @@ async def _run() -> None:
     worker = AgentWorker(
         AsyncSessionLocal,
         worker_id=args.worker_id,
-        handlers={"agent_execution": handle_agent_execution_job, "visible_response": handle_visible_response_job},
+        handlers={"agent_execution": handle_agent_execution_job, "visible_response": handle_visible_response_job, "agent_continuation": handle_agent_continuation_job},
         lease_seconds=args.lease_seconds,
         poll_interval=args.poll_interval,
     )

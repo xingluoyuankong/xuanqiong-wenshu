@@ -66,3 +66,38 @@ async def test_cancel_marks_pending_approval_and_blocks_late_completion(task_ses
     assert saved_approval.status == "cancelled"
     with pytest.raises(Exception):
         await runtime.update_run(run_id=run.id, user_id=user.id, status="completed", progress=100)
+
+@pytest.mark.asyncio
+async def test_cancel_agent_run_http_contract_returns_terminal_run(task_session):
+    """The HTTP route must expose the same cancellation convergence as the service path."""
+    import httpx
+    from app.core.dependencies import get_current_user
+    from app.db.session import get_session
+    from app.main import app
+
+    user = await _user(task_session, 2603)
+    runtime = AgentRuntimeService(task_session)
+    agent_session = await runtime.create_session(user_id=user.id)
+    run = await runtime.create_run(session_id=agent_session.id, user_id=user.id)
+    await runtime.update_run(run_id=run.id, user_id=user.id, status="running")
+
+    async def override_session():
+        yield task_session
+
+    async def override_user():
+        return SimpleNamespace(id=user.id)
+
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_current_user] = override_user
+    try:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=True)
+        async with httpx.AsyncClient(transport=transport, base_url="http://agent-cancel-contract") as client:
+            response = await client.post(f"/api/agent/runs/{run.id}/cancel")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["id"] == run.id
+        assert payload["status"] == "cancelled"
+        assert payload["current_phase"] == "cancelled"
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+        app.dependency_overrides.pop(get_current_user, None)

@@ -21,6 +21,17 @@ def _tables() -> set[str]:
     return set(inspect(op.get_bind()).get_table_names())
 
 
+def _json_default(kind: str):
+    # MySQL 8.4 rejects a quoted JSON literal as a JSON DEFAULT. Its default
+    # must be an expression in parentheses; SQLite keeps the legacy literal.
+    dialect = op.get_bind().dialect.name
+    if dialect == "mysql":
+        expression = "JSON_ARRAY()" if kind == "array" else "JSON_OBJECT()"
+        return sa.text(f"({expression})")
+    literal = "'[]'" if kind == "array" else "'{}'"
+    return sa.text(literal)
+
+
 def _indexes(table: str) -> set[str]:
     inspector = inspect(op.get_bind())
     if table not in _tables():
@@ -45,7 +56,7 @@ def _create_catalog_release() -> None:
             sa.Column("generation", sa.Integer(), nullable=False),
             sa.Column("status", sa.String(24), nullable=False, server_default="published"),
             sa.Column("digest", sa.String(64), nullable=False),
-            sa.Column("manifest_json", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+            sa.Column("manifest_json", sa.JSON(), nullable=False, server_default=_json_default("object")),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
             sa.Column("published_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("deprecated_at", sa.DateTime(timezone=True), nullable=True),
@@ -76,10 +87,10 @@ def _create_provider_release() -> None:
             sa.Column("status", sa.String(24), nullable=False, server_default="loaded"),
             sa.Column("source", sa.String(255), nullable=False, server_default="builtin"),
             sa.Column("failure_code", sa.String(160), nullable=True),
-            sa.Column("tools_json", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
-            sa.Column("capability_tags_json", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
-            sa.Column("dependencies_json", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
-            sa.Column("metadata_json", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+            sa.Column("tools_json", sa.JSON(), nullable=False, server_default=_json_default("array")),
+            sa.Column("capability_tags_json", sa.JSON(), nullable=False, server_default=_json_default("array")),
+            sa.Column("dependencies_json", sa.JSON(), nullable=False, server_default=_json_default("array")),
+            sa.Column("metadata_json", sa.JSON(), nullable=False, server_default=_json_default("object")),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
             sa.UniqueConstraint("catalog_release_id", "provider_id", name="uq_agent_provider_release_provider"),
         )
@@ -103,9 +114,9 @@ def _create_capability_definition() -> None:
             sa.Column("name", sa.String(160), nullable=False),
             sa.Column("version", sa.String(64), nullable=False, server_default="1"),
             sa.Column("manifest_version", sa.String(64), nullable=True),
-            sa.Column("description", sa.Text(), nullable=False, server_default=""),
-            sa.Column("input_schema_json", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
-            sa.Column("output_schema_json", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+            sa.Column("description", sa.Text(), nullable=False, server_default=sa.text("('')")),
+            sa.Column("input_schema_json", sa.JSON(), nullable=False, server_default=_json_default("object")),
+            sa.Column("output_schema_json", sa.JSON(), nullable=False, server_default=_json_default("object")),
             sa.Column("risk_level", sa.String(24), nullable=False),
             sa.Column("confirmation_policy", sa.String(32), nullable=False, server_default="none"),
             sa.Column("requires_confirmation", sa.Boolean(), nullable=False, server_default="0"),
@@ -116,8 +127,8 @@ def _create_capability_definition() -> None:
             sa.Column("cancellation_policy", sa.String(32), nullable=False, server_default="cooperative"),
             sa.Column("idempotency_policy", sa.String(32), nullable=False, server_default="none"),
             sa.Column("audit_event_type", sa.String(128), nullable=False, server_default="capability_call"),
-            sa.Column("context_bindings_json", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
-            sa.Column("capability_tags_json", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
+            sa.Column("context_bindings_json", sa.JSON(), nullable=False, server_default=_json_default("array")),
+            sa.Column("capability_tags_json", sa.JSON(), nullable=False, server_default=_json_default("array")),
             sa.Column("handler_identity", sa.String(255), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
             sa.UniqueConstraint("catalog_release_id", "capability_id", name="uq_agent_capability_definition_key"),
@@ -149,10 +160,10 @@ def _create_run_snapshot() -> None:
             sa.Column("resolved_version", sa.String(64), nullable=True),
             sa.Column("release_digest", sa.String(64), nullable=False),
             sa.Column("digest", sa.String(64), nullable=False),
-            sa.Column("request_json", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
-            sa.Column("resolved_scope_json", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
-            sa.Column("selected_capability_ids_json", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
-            sa.Column("exclusions_json", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
+            sa.Column("request_json", sa.JSON(), nullable=False, server_default=_json_default("object")),
+            sa.Column("resolved_scope_json", sa.JSON(), nullable=False, server_default=_json_default("object")),
+            sa.Column("selected_capability_ids_json", sa.JSON(), nullable=False, server_default=_json_default("array")),
+            sa.Column("exclusions_json", sa.JSON(), nullable=False, server_default=_json_default("array")),
             sa.Column("selected_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
             sa.UniqueConstraint("run_id", "snapshot_id", name="uq_agent_run_capability_snapshot_run"),
@@ -188,9 +199,9 @@ def _create_capability_execution() -> None:
             sa.Column("status", sa.String(24), nullable=False, server_default="started"),
             sa.Column("attempt", sa.Integer(), nullable=False, server_default="1"),
             sa.Column("idempotency_key", sa.String(255), nullable=True),
-            sa.Column("input_json", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+            sa.Column("input_json", sa.JSON(), nullable=False, server_default=_json_default("object")),
             sa.Column("input_digest", sa.String(64), nullable=True),
-            sa.Column("output_json", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+            sa.Column("output_json", sa.JSON(), nullable=False, server_default=_json_default("object")),
             sa.Column("output_digest", sa.String(64), nullable=True),
             sa.Column("error_type", sa.String(160), nullable=True),
             sa.Column("error_detail", sa.String(1000), nullable=True),

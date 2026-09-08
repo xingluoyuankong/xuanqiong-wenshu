@@ -1,0 +1,8 @@
+{
+  "port": 32253,
+  "pid": 25088,
+  "started": "2026-09-07T02:13:03.324Z",
+  "args": [
+    "e2e/agent-workspace.spec.ts"
+  ]
+}

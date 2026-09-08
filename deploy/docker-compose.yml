@@ -167,7 +167,7 @@ services:
       retries: 3
       start_period: 30s
 
-  # 维护任务：发布时先执行 docker compose run --rm migrate，再启动 app/agent-worker。
+  # 维护任务：统一使用 bash deploy/scripts/deploy_docker.sh，在停写备份后迁移，再启动应用及两个 worker。
   migrate:
     profiles: ["maintenance"]
     build:
@@ -200,18 +200,36 @@ services:
     profiles:
       - mysql
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-ChangeMe_RootPassword123}
+      # 勿在此使用 ${VAR:?}：Compose 会先插值未启用的 profile，误阻断 SQLite/外部 MySQL。
+      # 发布脚本与下面的容器入口分别校验；不向缺失凭据注入默认密码。
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-xuanqiong_wenshu}
       MYSQL_USER: ${MYSQL_USER:-xuanqiong_wenshu}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ChangeMe_Password123}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-}
       TZ: Asia/Shanghai
     volumes:
       - mysql-data:/var/lib/mysql
     restart: unless-stopped
     networks:
       - app-network
+    # 在官方入口接触数据目录前验证，覆盖空值、缺值及直接启用 mysql profile 的路径。
+    # $$ 延迟到容器内展开；保留 mysqld 与全部 command 参数。
+    entrypoint:
+      - /bin/sh
+      - -eu
+      - -c
+      - |
+        : "$${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set and non-empty}"
+        : "$${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set and non-empty}"
+        exec /usr/local/bin/docker-entrypoint.sh mysqld "$$@"
+      - --
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      # 密码只通过容器环境传递；SQL 查询要求认证成功，避免 ping 在拒绝访问时仍报告健康。
+      test:
+        - CMD-SHELL
+        - >-
+          MYSQL_PWD="$${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set and non-empty}"
+          mysql --protocol=TCP --host=127.0.0.1 --user=root --connect-timeout=5 --execute="SELECT 1"
       interval: 10s
       timeout: 5s
       retries: 5
