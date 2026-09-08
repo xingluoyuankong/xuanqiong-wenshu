@@ -31,12 +31,24 @@ export interface StyleSummary {
 }
 
 /** Style source */
+export interface StyleSourceExtra {
+  batch_label?: string
+  file_name?: string
+  import_mode?: string
+  import_mode_label?: string
+  [key: string]: unknown
+}
+
 export interface StyleSource {
   id: string
-  name: string
-  type: string
+  name?: string
+  title?: string
+  type?: string
+  source_type?: string
   mode?: string
   content?: string
+  char_count?: number
+  extra?: StyleSourceExtra
   created_at?: string
   updated_at?: string
 }

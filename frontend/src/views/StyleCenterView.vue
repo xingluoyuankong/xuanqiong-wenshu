@@ -461,6 +461,7 @@
 </template>
 
 <script setup lang="ts">
+import type { StyleSource, StyleProfile } from '@/api/types/style'
 import { computed, onMounted, ref } from 'vue'
 import { NovelAPI, OptimizerAPI, type NovelProjectSummary, type StyleSourceUploadJobResponse } from '@/api/novel'
 import { useLocale } from '@/composables/useLocale'
@@ -646,7 +647,7 @@ const sourceTypeStats = computed(() => {
 })
 
 const groupedFilteredSources = computed(() => {
-  const groups = new Map<string, { key: string; label: string; fileName: string; count: number; totalChars: number; items: any[] }>()
+  const groups = new Map<string, { key: string; label: string; fileName: string; count: number; totalChars: number; items: StyleSource[] }>()
 
   for (const source of filteredSources.value) {
     const label = source.title || source.extra?.file_name || pick('未命名来源', 'Untitled source')
@@ -739,8 +740,8 @@ async function loadLibrary() {
       activeProfileId.value = ''
     }
     expandedHistoryGroups.value = groupedFilteredSources.value.map(group => group.key)
-  } catch (e: any) {
-    error.value = e.message || pick('加载文风库失败', 'Failed to load the style library')
+  } catch (e: unknown) {
+      error.value = (e as Error).message || pick('加载文风库失败', 'Failed to load the style library')
   }
 }
 
@@ -756,8 +757,8 @@ async function uploadSourceWithProgress(payload: {
   file: File
   title?: string
   source_type?: string
-  extra?: Record<string, any>
-}): Promise<{ success: boolean; source: any }> {
+  extra?: Record<string, unknown>
+}): Promise<{ success: boolean; source: StyleSource }> {
   if (!selectedProjectId.value) throw new Error(pick('请先选择项目', 'Select a project first'))
   const projectId = selectedProjectId.value
 
@@ -802,7 +803,7 @@ async function createSource() {
     const noteText = draftContent.value.trim()
     const noteLabel = batchLabel.value.trim() || noteText.slice(0, 80) || pick('未命名批次', 'Untitled batch')
 
-    let res: { success: boolean; source: any }
+    let res: { success: boolean; source: StyleSource }
     if (selectedUploadFile.value) {
       res = await uploadSourceWithProgress({
         file: selectedUploadFile.value,
@@ -858,8 +859,8 @@ async function createSource() {
     selectedFileChars.value = 0
     selectedUploadFile.value = null
     if (!draftTitle.value.trim()) draftTitle.value = res.source.title || ''
-  } catch (e: any) {
-    error.value = e.message || pick('保存素材失败', 'Failed to save the source')
+  } catch (e: unknown) {
+      error.value = (e as Error).message || pick('保存素材失败', 'Failed to save the source')
   } finally {
     savingSource.value = false
     sourceUploadRunId.value = ''
@@ -879,9 +880,9 @@ async function cancelSourceUpload() {
     if (status.status !== 'cancelled') {
       sourceUploadCancelRequested.value = false
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     sourceUploadCancelRequested.value = false
-    sourceUploadMessage.value = e?.message || pick('取消失败，文风素材导入仍在继续', 'Cancel failed; the style source import is still running')
+    sourceUploadMessage.value = (e as Error)?.message || pick('取消失败，文风素材导入仍在继续', 'Cancel failed; the style source import is still running')
   }
 }
 
@@ -892,8 +893,8 @@ async function deleteSource(sourceId: string) {
     await OptimizerAPI.deleteStyleSource(selectedProjectId.value, sourceId)
     await loadLibrary()
     selectedSourceIds.value = selectedSourceIds.value.filter((id) => id !== sourceId)
-  } catch (e: any) {
-    error.value = e.message || pick('删除素材失败', 'Failed to delete the source')
+  } catch (e: unknown) {
+      error.value = (e as Error).message || pick('删除素材失败', 'Failed to delete the source')
   }
 }
 
@@ -910,14 +911,14 @@ async function createProfile() {
     profileName.value = ''
     activeProfileId.value = ''
     await loadLibrary()
-  } catch (e: any) {
-    error.value = e.message || pick('生成画像失败', 'Failed to generate the profile')
+  } catch (e: unknown) {
+      error.value = (e as Error).message || pick('生成画像失败', 'Failed to generate the profile')
   } finally {
     creatingProfile.value = false
   }
 }
 
-async function saveProfileEdits(profile: any) {
+async function saveProfileEdits(profile: StyleProfile) {
   if (!selectedProjectId.value) return
   error.value = ''
   try {
@@ -936,8 +937,8 @@ async function saveProfileEdits(profile: any) {
       }
     })
     await loadLibrary()
-  } catch (e: any) {
-    error.value = e.message || pick('保存画像字段失败', 'Failed to save the profile fields')
+  } catch (e: unknown) {
+      error.value = (e as Error).message || pick('保存画像字段失败', 'Failed to save the profile fields')
   }
 }
 
@@ -947,8 +948,8 @@ async function applyProfile(profileId: string, scope: 'global' | 'project') {
   try {
     await OptimizerAPI.activateStyleProfile(selectedProjectId.value, profileId, scope)
     await loadLibrary()
-  } catch (e: any) {
-    error.value = e.message || pick('应用文风失败', 'Failed to apply the style')
+  } catch (e: unknown) {
+      error.value = (e as Error).message || pick('应用文风失败', 'Failed to apply the style')
   }
 }
 
@@ -958,8 +959,8 @@ async function clearApplication(scope: 'global' | 'project') {
   try {
     await OptimizerAPI.clearActiveStyleProfile(selectedProjectId.value, scope)
     await loadLibrary()
-  } catch (e: any) {
-    error.value = e.message || pick('清理应用失败', 'Failed to clear the application')
+  } catch (e: unknown) {
+      error.value = (e as Error).message || pick('清理应用失败', 'Failed to clear the application')
   }
 }
 
@@ -1022,8 +1023,8 @@ async function handleFilePicked(event: Event) {
         `Selected file ${file.name}. The server will parse the body and create the source.`,
       )
     }
-  } catch (e: any) {
-    error.value = e?.message || pick('读取文件失败', 'Failed to read the file')
+  } catch (e: unknown) {
+      error.value = (e as Error)?.message || pick('读取文件失败', 'Failed to read the file')
   } finally {
     if (input) input.value = ''
   }
