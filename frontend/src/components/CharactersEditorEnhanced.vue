@@ -244,7 +244,7 @@ interface Character {
   relationship_to_protagonist: string;
   extra?: {
     dna_profile?: DNAProfile;
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
