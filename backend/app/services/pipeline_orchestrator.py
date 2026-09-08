@@ -2727,408 +2727,46 @@ class PipelineOrchestrator:
                 },
             )
 
-    async def generate_chapter(
+    async def _prepare_chapter_context(
         self,
         *,
         project_id: str,
         chapter_number: int,
         user_id: int,
-        writing_notes: Optional[str] = None,
-        flow_config: Optional[Dict[str, Any]] = None,
-        generation_run_id: Optional[str] = None,
-        runtime_event_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+        project: Any,
+        chapter_mission: Optional[Dict[str, Any]],
+        config: Any,
     ) -> Dict[str, Any]:
-        self._runtime_event_callback = runtime_event_callback
-        stage_timings: Dict[str, float] = {}
-
-        async def mark_stage(stage_name: str, started_at: float, *, detail: Optional[str] = None) -> None:
-            duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
-            stage_timings[stage_name] = duration_ms
-            logger.info(
-                "Pipeline stage completed: project=%s chapter=%s stage=%s duration_ms=%s",
-                project_id,
-                chapter_number,
-                stage_name,
-                duration_ms,
-            )
-            runtime_detail = detail or f"阶段 {stage_name} 完成，用时 {round(duration_ms / 1000, 2)} 秒"
-            await self._update_generation_runtime(
-                chapter,
-                generation_run_id=generation_run_id,
-                stage=stage_name,
-                message=runtime_detail,
-                progress_percent=self._infer_stage_progress_percent(stage_name),
-                event_kind="progress",
-                title=f"{stage_name} 完成",
-                summary=runtime_detail,
-                extra={
-                    "stage_duration_ms": duration_ms,
-                    "stage_duration_seconds": round(duration_ms / 1000, 2),
-                    "stage_timings": dict(stage_timings),
-                },
-            )
-
-        pipeline_started_at = time.perf_counter()
-        config = await self._resolve_config(flow_config)
-        longform_runtime = (flow_config or {}).get("longform_runtime")
-        longform_execution_state = (
-            self._restore_longform_execution_state(
-                flow_config=flow_config,
-                project_id=project_id,
-                chapter_number=chapter_number,
-                target_word_count=config.target_word_count,
-            )
-            if isinstance(longform_runtime, dict) and longform_runtime.get("checkpoint_enabled")
-            else None
-        )
-        requested_preset = str((flow_config or {}).get("preset", "") or "").strip() or config.preset
-        runtime_metadata: Dict[str, Any] = {
-            "provider_preflight": {},
-            "degraded_stages": [],
-            "generation_mode": "quality",
-            "stable_retry_used": False,
-            "requested_preset": requested_preset,
-            "actual_preset": config.preset,
-            "preset_downgraded": False,
-            "downgraded_capabilities": [],
-            "target_word_count": 0,
-            "min_word_count": 0,
-            "actual_word_count": 0,
-            "enrichment_triggered": False,
-            "word_requirement_met": False,
-            "word_requirement_reason": None,
-            "generation_attempts": [],
-            "candidate_generation": {},
-            "quality_gates": {},
-            "review_status": "skipped",
-            "consistency_status": "skipped",
-            "writer_prompt_budget_tokens": self._resolve_writer_prompt_budget(config.target_word_count),
-        }
-        runtime_metadata["provider_preflight"] = await self._ensure_provider_ready(user_id)
-        runtime_metadata["target_word_count"] = config.target_word_count
-        runtime_metadata["min_word_count"] = config.min_word_count
-        runtime_metadata["chapter_draft_contract"] = self._resolve_chapter_draft_contract(
-            config.target_word_count,
-            config.min_word_count,
-        )
-        runtime_metadata["chapter_generation_limits"] = {
-            "timeout_seconds": self._resolve_chapter_generation_timeout(config.target_word_count),
-            "soft_timeout_seconds": self._resolve_chapter_generation_soft_timeout(config.target_word_count),
-            "max_tokens": self._resolve_chapter_generation_max_tokens(config.target_word_count),
-            "mission_timeout_seconds": self._resolve_chapter_mission_timeout(config.target_word_count),
-            "mission_max_tokens": self._resolve_chapter_mission_max_tokens(config.target_word_count),
-            "writer_prompt_budget_tokens": self._resolve_writer_prompt_budget(config.target_word_count),
-        }
-        runtime_metadata["writing_contract_snapshot"] = self._writing_contract_runtime_metadata()
-        # T-24 production candidates consume max_tokens=self._resolve_writer_prompt_budget(config.target_word_count)
-        # inside _generate_single_version, invoked by this orchestration path.
-        # HTTP entrypoints have already authorized the actor. A queued worker
-        # must load its project by project_id, not by the legacy project creator,
-        # because its durable execution owner may be an Editor or Admin.
-        project = await self.novel_service.repo.get_by_id(project_id)
-        if project is None:
-            raise HTTPException(status_code=404, detail="项目不存在")
-
-        token_budget_warning = await self._check_token_budget_before_generation(project_id)
-        if token_budget_warning:
-            runtime_metadata["token_budget_warning"] = token_budget_warning
-
-        # 长篇项目（大纲超过 10 章）自动启用 memory，保障跨章连续性
-        # 仅在 preset 非 basic 且 memory 尚未显式启用时自动开启
-        outline_count = len(project.outlines) if hasattr(project, "outlines") and project.outlines else 0
-        if outline_count > 10 and config.preset != "basic" and not config.enable_memory:
-            config.enable_memory = True
-            logger.info(
-                "Auto-enabled memory layer for long-form project: project=%s outlines=%s preset=%s",
-                project_id,
-                outline_count,
-                config.preset,
-            )
-
-        outline = await self.novel_service.get_outline(project_id, chapter_number)
-        if not outline:
-            raise HTTPException(status_code=404, detail="蓝图中未找到对应章节纲要")
-
-        chapter = await self.novel_service.get_or_create_chapter(project_id, chapter_number)
-        chapter_needs_reset = chapter.status != ChapterGenerationStatus.GENERATING.value
-        await self._rebind_generation_run_if_needed(
-            chapter, generation_run_id=generation_run_id, stage="pre_mission_context"
-        )
-        if chapter_needs_reset:
-            chapter.selected_version_id = None
-            chapter.status = "generating"
-            await self.session.commit()
-
-        await self._update_generation_runtime(
-            chapter,
-            generation_run_id=generation_run_id,
-            stage="prepare_context",
-            message="正在整理章节上下文、历史摘要和写作约束",
-            progress_percent=8,
-            extra={
-                "target_word_count": config.target_word_count,
-                "min_word_count": config.min_word_count,
-                "generation_mode": config.preset,
-                "chapter_draft_contract": runtime_metadata["chapter_draft_contract"],
-                "chapter_generation_limits": runtime_metadata["chapter_generation_limits"],
-            },
-        )
-        await self._assert_generation_active(
-            chapter,
-            generation_run_id=generation_run_id,
-            stage="prepare_context",
-        )
-
-        outlines_map = {item.chapter_number: item for item in project.outlines}
-        prepare_context_started_at = time.perf_counter()
-        history_context = await self._collect_history_context(
+        # Prepare all context needed for chapter generation
+        context_result = {}
+        
+        # Prepare chapter context
+        context_data = await self._prepare_chapter_context(
             project_id=project_id,
             chapter_number=chapter_number,
-            outlines_map=outlines_map,
-            chapters=project.chapters,
             user_id=user_id,
+            project=project,
+            chapter_mission=chapter_mission,
+            config=config,
         )
-
-        blueprint_dict = await self._get_writer_blueprint(project)
-
-        outline_title = outline.title or f"第{outline.chapter_number}章"
-        outline_summary = outline.summary or "暂无摘要"
-        writing_notes = writing_notes or "无额外写作指令"
-
-        pre_mission_scope = self.context_builder.analyze_character_scope(
-            blueprint=blueprint_dict,
-            completed_summaries=history_context["completed_summaries"],
-            previous_tail=history_context["previous_tail"],
-            outline_title=outline_title,
-            outline_summary=outline_summary,
-            writing_notes=writing_notes,
-        )
-        all_characters = pre_mission_scope["all_names"]
-        introduced_characters = pre_mission_scope["introduced_characters"]
-        planned_characters = pre_mission_scope["planned_characters"]
-
-        mission_started_at = time.perf_counter()
-        chapter_mission = await self._generate_chapter_mission(
-            blueprint_dict=blueprint_dict,
-            previous_summary=history_context["previous_summary"],
-            previous_tail=history_context["previous_tail"],
-            recent_track=history_context.get("recent_track", ""),
-            plot_arc_digest=history_context.get("plot_arc_digest", ""),
-            outline_title=outline_title,
-            outline_summary=outline_summary,
-            writing_notes=writing_notes,
-            introduced_characters=introduced_characters,
-            planned_characters=planned_characters,
-            all_characters=all_characters,
-            target_word_count=config.target_word_count,
-            user_id=user_id,
-        )
-        await mark_stage("generate_mission", mission_started_at, detail="章节导演脚本阶段完成")
-
-        allowed_new_characters = chapter_mission.get("allowed_new_characters", []) if chapter_mission else []
-
-        visibility_context = self.context_builder.build_visibility_context(
-            blueprint=blueprint_dict,
-            completed_summaries=history_context["completed_summaries"],
-            previous_tail=history_context["previous_tail"],
-            outline_title=outline_title,
-            outline_summary=outline_summary,
-            writing_notes=writing_notes,
-            allowed_new_characters=allowed_new_characters,
-        )
-
-        writer_blueprint = visibility_context["writer_blueprint"]
-        forbidden_characters = visibility_context["forbidden_characters"]
-        introduced_characters = visibility_context["introduced_characters"]
-        macro_continuity_context = visibility_context.get("macro_continuity_context")
-
-        logger.info(
-            "Pipeline context: project=%s chapter=%s introduced=%d allowed_new=%d forbidden=%d",
-            project_id,
-            chapter_number,
-            len(introduced_characters),
-            len(allowed_new_characters),
-            len(forbidden_characters),
-        )
-
-        longform_context: Optional[LongformContextPackage] = None
-        longform_context_started_at = time.perf_counter()
-        try:
-            await self._update_generation_runtime(
-                chapter,
-                generation_run_id=generation_run_id,
-                stage="audit_context",
-                message="正在审计长期记忆、章节快照、时间线与知识图谱",
-                progress_percent=11,
-                extra={
-                    "context_stage": "audit_context",
-                    "context_stage_label": "长期上下文审计",
-                },
-            )
-            await self._assert_generation_active(
-                chapter,
-                generation_run_id=generation_run_id,
-                stage="audit_context",
-            )
-            longform_context = await self.longform_context_service.build_context_package(
-                project=project,
-                outline=outline,
-                chapter_number=chapter_number,
-                writing_notes=writing_notes,
-                chapter_mission=chapter_mission,
-                allowed_new_characters=allowed_new_characters,
-            )
-            runtime_metadata["longform_context"] = longform_context.to_metadata()
-            await self._update_generation_runtime(
-                chapter,
-                generation_run_id=generation_run_id,
-                stage="cast_plan",
-                message="正在装配角色规模、登场层级、势力归属和动态角色规则",
-                progress_percent=14,
-                extra={
-                    "target_character_count": longform_context.cast_plan.target_character_count,
-                    "planned_character_count": longform_context.cast_plan.planned_character_count,
-                    "chapter_focus_names": longform_context.cast_plan.chapter_focus_names,
-                },
-            )
-            await self._update_generation_runtime(
-                chapter,
-                generation_run_id=generation_run_id,
-                stage="foreshadowing_plan",
-                message="正在规划本章伏笔回收、强化、禁忘和可新增线索",
-                progress_percent=17,
-                extra={
-                    "must_resolve_count": len(longform_context.foreshadowing_task.must_resolve),
-                    "should_reinforce_count": len(longform_context.foreshadowing_task.should_reinforce),
-                    "avoid_forgetting_count": len(longform_context.foreshadowing_task.avoid_forgetting),
-                    "active_clue_count": len(longform_context.foreshadowing_task.active_clues),
-                },
-            )
-            await mark_stage("longform_context", longform_context_started_at, detail="长篇上下文包装配完成")
-        except Exception as exc:  # noqa: BLE001 - longform context should improve generation, not take the writer down.
-            runtime_metadata["degraded_stages"].append({"stage": "longform_context", "reason": str(exc)})
-            if isinstance(exc, SQLAlchemyError):
-                await self._safe_session_rollback("longform_context")
-            await self._update_generation_runtime(
-                chapter,
-                generation_run_id=generation_run_id,
-                stage="audit_context",
-                message="长篇上下文装配已降级跳过，继续使用基础上下文生成",
-                progress_percent=17,
-                level="warning",
-                extra={
-                    "degraded_stage": "longform_context",
-                    "degraded_reason": self._truncate_runtime_text(exc),
-                },
-            )
-            logger.warning("长篇上下文装配已降级：project=%s chapter=%s error=%s", project_id, chapter_number, exc)
-
-        enhanced_flow = None
-        enhanced_context = None
-        if config.enable_constitution or config.enable_persona or config.enable_foreshadowing or config.enable_faction:
-            enhanced_flow = EnhancedWritingFlow(self.session, self.llm_service, self.prompt_service)
-
-            async def report_enhanced_context_progress(stage: str, message: str) -> None:
-                await self._update_generation_runtime(
-                    chapter,
-                    generation_run_id=generation_run_id,
-                    stage=stage,
-                    message=message,
-                    progress_percent=self._infer_stage_progress_percent(stage),
-                    event_kind="progress",
-                    title="写前账本等待中",
-                    summary=message,
-                    extra={
-                        "provider_waiting": True,
-                        "context_stage": stage,
-                        "context_stage_label": "写前增强上下文",
-                        "target_word_count": config.target_word_count,
-                        "min_word_count": config.min_word_count,
-                    },
-                )
-                await self._assert_generation_active(
-                    chapter,
-                    generation_run_id=generation_run_id,
-                    stage=f"{stage}_provider_wait",
-                )
-
-            await self._update_generation_runtime(
-                chapter,
-                generation_run_id=generation_run_id,
-                stage="enhanced_context",
-                message="正在装配小说宪法、文风、伏笔提醒和势力关系",
-                progress_percent=18,
-                extra={
-                    "context_stage": "enhanced_context",
-                    "context_stage_label": "写前增强上下文",
-                    "enable_constitution": config.enable_constitution,
-                    "enable_persona": config.enable_persona,
-                    "enable_foreshadowing": config.enable_foreshadowing,
-                    "enable_faction": config.enable_faction,
-                },
-            )
-            await self._assert_generation_active(
-                chapter,
-                generation_run_id=generation_run_id,
-                stage="enhanced_context",
-            )
-            enhanced_context = await enhanced_flow.prepare_writing_context(
-                project_id=project_id,
-                chapter_number=chapter_number,
-                chapter_outline=outline_summary,
-                user_id=user_id,
-                progress_callback=report_enhanced_context_progress,
-            )
-
-        memory_context = None
-        if config.enable_memory:
-            memory_context = await self._get_memory_context(
-                project_id=project_id,
-                chapter_number=chapter_number,
-                involved_characters=introduced_characters,
-            )
-
-        project_memory_text = await self._get_project_memory_text(project_id)
-        style_context = await self._get_style_context(project_id, user_id)
-        analysis_guidance_context = await self._build_story_guidance_context(
-            project_id=project_id,
-            chapter_number=chapter_number,
-        )
-
-        rag_context = None
-        knowledge_context = None
-        rag_stats = None
-        if config.enable_rag:
-            if config.rag_mode == "two_stage":
-                knowledge_context, rag_stats = await self._get_two_stage_rag_context(
-                    project_id=project_id,
-                    chapter_number=chapter_number,
-                    writing_notes=writing_notes,
-                    pov_character=self._resolve_pov_character(chapter_mission),
-                    user_id=user_id,
-                )
-                continuity_injection = self._build_continuity_retrieval_injection(history_context)
-                if continuity_injection:
-                    knowledge_context = "\n\n".join(part for part in [continuity_injection, knowledge_context] if part)
-                    if isinstance(rag_stats, dict):
-                        rag_stats["continuity_injection"] = True
-            else:
-                rag_context = await self._get_rag_context(
-                    project_id=project_id,
-                    outline_title=outline_title,
-                    outline_summary=outline_summary,
-                    writing_notes="\n".join(filter(None, [writing_notes, history_context.get("plot_arc_digest", ""), history_context.get("recent_track", "")])),
-                    user_id=user_id,
-                )
-                rag_context = self._inject_continuity_into_rag(rag_context, history_context)
-                rag_stats = {
-                    "mode": "simple",
-                    "chunks": len(rag_context.get("chunks", [])) if rag_context else 0,
-                    "summaries": len(rag_context.get("summaries", [])) if rag_context else 0,
-                    "continuity_injection": bool((rag_context or {}).get("continuity_injection")),
-                }
-        await mark_stage("prepare_context", prepare_context_started_at, detail="上下文准备阶段完成")
-
+        
+        # Extract context data
+        history_context = context_data['history_context']
+        blueprint_dict = context_data['blueprint_dict']
+        outline_title = context_data['outline_title']
+        outline_summary = context_data['outline_summary']
+        writing_notes = context_data['writing_notes']
+        introduced_characters = context_data['introduced_characters']
+        allowed_new_characters = context_data['allowed_new_characters']
+        all_characters = context_data['all_characters']
+        longform_context = context_data.get('longform_context')
+        enhanced_context = context_data.get('enhanced_context')
+        memory_context = context_data.get('memory_context')
+        project_memory_text = context_data.get('project_memory_text', '')
+        style_context = context_data.get('style_context', '')
+        analysis_guidance_context = context_data.get('analysis_guidance_context')
+        rag_context = context_data.get('rag_context')
+        knowledge_context = context_data.get('knowledge_context')
         writer_prompt = await self.prompt_service.get_prompt("writing_v2")
         if not writer_prompt:
             writer_prompt = await self.prompt_service.get_prompt("writing")
