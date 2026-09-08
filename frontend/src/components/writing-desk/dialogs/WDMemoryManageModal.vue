@@ -172,8 +172,8 @@ async function loadSnapshots() {
     snapshots.value = res.snapshots || []
     currentVersion.value = `v${res.current_memory_version || 0}`
     currentSnapshotId.value = res.current_snapshot_id ?? (snapshots.value.length > 0 ? snapshots.value[0].id : null)
-  } catch (e: any) {
-    error.value = e.message || pick('加载快照失败', 'Failed to load snapshots')
+  } catch (e: unknown) {
+    error.value = (e as Error).message || pick('加载快照失败', 'Failed to load snapshots')
     console.error('加载记忆快照失败:', e)
   } finally {
     loading.value = false
@@ -191,8 +191,8 @@ async function triggerIncrementalUpdate() {
     actionSuccess.value = true
     emit('updated')
     await loadSnapshots()
-  } catch (e: any) {
-    actionMessage.value = e.message || pick('增量更新失败', 'Incremental update failed')
+  } catch (e: unknown) {
+    actionMessage.value = (e as Error).message || pick('增量更新失败', 'Incremental update failed')
     actionSuccess.value = false
     console.error('增量更新失败:', e)
   } finally {
@@ -212,8 +212,8 @@ async function rollbackToSnapshot(snapshotId: number) {
     actionSuccess.value = true
     emit('updated')
     await loadSnapshots()
-  } catch (e: any) {
-    actionMessage.value = e.message || pick('回滚失败', 'Rollback failed')
+  } catch (e: unknown) {
+    actionMessage.value = (e as Error).message || pick('回滚失败', 'Rollback failed')
     actionSuccess.value = false
     console.error('回滚失败:', e)
   } finally {
@@ -231,8 +231,8 @@ async function compressMemory() {
     actionSuccess.value = true
     emit('updated')
     await loadSnapshots()
-  } catch (e: any) {
-    actionMessage.value = e.message || pick('压缩失败', 'Compaction failed')
+  } catch (e: unknown) {
+    actionMessage.value = (e as Error).message || pick('压缩失败', 'Compaction failed')
     actionSuccess.value = false
     console.error('压缩失败:', e)
   } finally {
