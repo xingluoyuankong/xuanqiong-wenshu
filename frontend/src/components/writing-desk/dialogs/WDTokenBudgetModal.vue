@@ -372,8 +372,8 @@ const loadData = async () => {
       },
       warning_threshold: config.warning_threshold
     }
-  } catch (e: any) {
-    error.value = e.message || pick('加载失败', 'Failed to load')
+  } catch (e: unknown) {
+    error.value = (e as Error).message || pick('加载失败', 'Failed to load')
   } finally {
     loading.value = false
   }
@@ -397,8 +397,8 @@ const saveConfig = async () => {
       warning_threshold: result.warning_threshold
     }
     emit('updated')
-  } catch (e: any) {
-    error.value = e.message || pick('保存失败', 'Failed to save')
+  } catch (e: unknown) {
+    error.value = (e as Error).message || pick('保存失败', 'Failed to save')
   } finally {
     saving.value = false
   }
@@ -408,8 +408,8 @@ const resolveAlert = async (alertId: number) => {
   try {
     await TokenBudgetAPI.resolveAlert(props.projectId, alertId)
     alerts.value = alerts.value.filter(a => a.id !== alertId)
-  } catch (e: any) {
-    error.value = e.message || pick('操作失败', 'Action failed')
+  } catch (e: unknown) {
+    error.value = (e as Error).message || pick('操作失败', 'Action failed')
   }
 }
 
