@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from ..services.generation_call_service import GenerationCallPolicy, call_generation_text
+from ..agent.provider_attempt import ProviderAttemptLedger
 from ..services.llm_service import LLMService
 from ..services.prompt_service import PromptService
 from ..utils.json_utils import remove_think_tags, unwrap_markdown_json
@@ -54,6 +55,9 @@ class AIReviewService:
         versions: List[str],
         chapter_mission: Optional[dict] = None,
         user_id: int = 0,
+        *,
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
+        attempt_role: str = "ai_review",
     ) -> Optional[ReviewResult]:
         """
         对多个版本进行评审，返回评审结果。
@@ -76,6 +80,8 @@ class AIReviewService:
                     version=versions[0],
                     chapter_mission=chapter_mission,
                     user_id=user_id,
+                    attempt_ledger=attempt_ledger,
+                    attempt_role=attempt_role,
                 )
 
             # 获取评审提示词
@@ -97,12 +103,13 @@ class AIReviewService:
                     timeout=180.0,
                     policy=GenerationCallPolicy(
                         stage_label="多候选版本 AI 评审",
-                        attempt_role="quality",
                         progress_stage="review",
                         retry_attempts=2,
                         response_format="json_object",
                         max_tokens=5000,
                         retry_same_model_once=True,
+                        attempt_ledger=attempt_ledger,
+                        attempt_role=attempt_role,
                     ),
                 )
                 cleaned = remove_think_tags(text_result.text)
@@ -513,6 +520,8 @@ class AIReviewService:
         version: str,
         chapter_mission: Optional[dict],
         user_id: int,
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
+        attempt_role: str = "ai_review",
     ) -> Optional[ReviewResult]:
         review_prompt = await self.prompt_service.get_prompt("editor_review")
         if not review_prompt:
@@ -538,7 +547,8 @@ class AIReviewService:
                 timeout=180.0,
                 policy=GenerationCallPolicy(
                     stage_label="单候选版本 AI 评审",
-                    attempt_role="quality",
+                    attempt_ledger=attempt_ledger,
+                    attempt_role=attempt_role,
                     progress_stage="review",
                     retry_attempts=2,
                     response_format="json_object",
@@ -550,6 +560,7 @@ class AIReviewService:
             normalized = unwrap_markdown_json(cleaned)
             result = self._parse_review_response(normalized)
             result.raw_response = cleaned
+            result.provider_attempts = text_result.provider_attempts
             result.best_version_index = 0
             result.status = "single_version_reviewed" if result.status == "passed" else result.status
             logger.info("单版本 AI 评审完成")
@@ -617,6 +628,9 @@ class AIReviewService:
         versions: List[str],
         chapter_mission: Optional[dict] = None,
         user_id: int = 0,
+        *,
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
+        attempt_role: str = "ai_review",
     ) -> int:
         """
         自动选择最佳版本的索引。
@@ -629,7 +643,13 @@ class AIReviewService:
         Returns:
             最佳版本的索引（从 0 开始）
         """
-        result = await self.review_versions(versions, chapter_mission, user_id)
+        result = await self.review_versions(
+            versions,
+            chapter_mission,
+            user_id,
+            attempt_ledger=attempt_ledger,
+            attempt_role=attempt_role,
+        )
         if result:
             return result.best_version_index
         return 0  # 默认返回第一个版本

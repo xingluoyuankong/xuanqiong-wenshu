@@ -99,7 +99,7 @@ function Test-ServiceHealth {
         $response = Invoke-WebRequest -UseBasicParsing $Url -TimeoutSec 2
         if ($response.StatusCode -ne 200) { return $false }
         if ($Frontend) {
-            return [bool]($response.Content -match '<title>\s*玄穹文枢\s*</title>')
+            return [bool]($response.Content -match '<div\s+id="app"\s*>')
         }
         $health = $response.Content | ConvertFrom-Json -ErrorAction Stop
         return ($health.status -eq 'healthy' -and $health.app -eq $expectedBackendApp)

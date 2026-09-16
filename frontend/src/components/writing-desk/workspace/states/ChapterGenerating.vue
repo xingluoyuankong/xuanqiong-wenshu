@@ -641,8 +641,17 @@ const alerts = computed<CgAlert[]>(() => {
       })),
     })
   }
-  if (taskUiModel.value.degradedSummary) {
-    add({ key: 'degraded', tone: 'info', title: pick('阶段降级', 'Degraded stages'), desc: String(taskUiModel.value.degradedSummary) })
+  const assurance = taskUiModel.value.assuranceSummary
+  if (assurance.visible) {
+    add({
+      key: 'assurance',
+      tone: assurance.tone,
+      title: pick('质量保障状态', 'Quality assurance'),
+      desc: assurance.body,
+      tags: assurance.items.map((item) => `${item.label}${labelSeparator.value}${item.value}`),
+    })
+  } else if (taskUiModel.value.degradedSummary) {
+    add({ key: 'degraded', tone: 'warning', title: pick('阶段降级', 'Degraded stages'), desc: String(taskUiModel.value.degradedSummary) })
   }
   if (source.recovered_from_reload) {
     add({

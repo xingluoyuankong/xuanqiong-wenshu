@@ -68,6 +68,9 @@ class LongformContextPackage:
     memory_digest: Dict[str, Any] = field(default_factory=dict)
     timeline_digest: Dict[str, Any] = field(default_factory=dict)
     knowledge_digest: Dict[str, Any] = field(default_factory=dict)
+    # A bounded, writer-facing projection of the ledgers.  Keep this separate
+    # from the full digests so continuation does not resend the whole prompt.
+    continuation_digest: Dict[str, Any] = field(default_factory=dict)
 
     def to_metadata(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -82,6 +85,7 @@ class LongformContextPackage:
             "foreshadowing_task": asdict(self.foreshadowing_task),
             "memory_digest": self.memory_digest,
             "timeline_digest": self.timeline_digest,
+            "continuation_digest": self.continuation_digest,
         }
 
 
@@ -330,6 +334,13 @@ class LongformContextService:
             chapter_mission=chapter_mission,
             cast_focus=cast_plan.chapter_focus_names,
         )
+        continuation_digest = self._build_continuation_digest(
+            memory_digest=memory_digest,
+            timeline_digest=timeline_digest,
+            knowledge_digest=knowledge_digest,
+            cast_plan=cast_plan,
+            foreshadowing_task=foreshadowing_task,
+        )
         prompt_text = self._format_prompt_text(
             chapter_number=chapter_number,
             writing_notes=writing_notes,
@@ -348,7 +359,93 @@ class LongformContextService:
             memory_digest=memory_digest,
             timeline_digest=timeline_digest,
             knowledge_digest=knowledge_digest,
+            continuation_digest=continuation_digest,
         )
+
+    @staticmethod
+    def _build_continuation_digest(
+        *,
+        memory_digest: Dict[str, Any],
+        timeline_digest: Dict[str, Any],
+        knowledge_digest: Dict[str, Any],
+        cast_plan: CastPlan,
+        foreshadowing_task: ForeshadowingChapterTask,
+    ) -> Dict[str, Any]:
+        """Project long-form ledgers into a bounded continuation contract.
+
+        The continuation path needs facts, not another copy of the full
+        long-form prompt. Every list is capped and every record is rendered to
+        a short string so its size remains predictable across rounds.
+        """
+        def record(value: Any, keys: tuple[str, ...], limit: int = 180) -> str:
+            if isinstance(value, dict):
+                parts = [str(value.get(key) or "").strip() for key in keys if str(value.get(key) or "").strip()]
+                return "；".join(parts)[:limit].rstrip()
+            return str(value or "").strip()[:limit].rstrip()
+
+        def records(values: Any, keys: tuple[str, ...], limit: int) -> List[str]:
+            if not isinstance(values, list):
+                return []
+            output: List[str] = []
+            seen: set[str] = set()
+            for value in values:
+                item = record(value, keys)
+                if item and item not in seen:
+                    seen.add(item)
+                    output.append(item)
+                if len(output) >= limit:
+                    break
+            return output
+
+        active_states = records(
+            cast_plan.active_character_states,
+            ("character_name", "location", "emotion", "health_status", "current_goals", "known_secrets"),
+            6,
+        )
+        relationships = records(
+            cast_plan.relationship_edges,
+            ("from", "from_name", "source", "to", "to_name", "target", "relation", "relationship", "description"),
+            8,
+        )
+        timeline_facts = records(
+            (timeline_digest or {}).get("recent_events"),
+            ("chapter_number", "title", "description", "location", "characters"),
+            5,
+        )
+        causal_facts = records(
+            (timeline_digest or {}).get("causal_chains"),
+            ("cause_chapter", "cause", "effect_chapter", "effect", "status"),
+            4,
+        )
+        knowledge_boundaries = records(
+            (knowledge_digest or {}).get("knowledge_nodes"),
+            ("name", "role_type", "status", "location", "emotional_state"),
+            6,
+        )
+        event_edges = records(
+            (knowledge_digest or {}).get("recent_event_edges"),
+            ("chapter_number", "type", "description", "causality"),
+            4,
+        )
+        memory_facts = records(
+            (memory_digest or {}).get("recent_snapshots"),
+            ("chapter_number", "chapter_summary", "word_count"),
+            3,
+        )
+        return {
+            "version": 1,
+            "active_character_states": active_states,
+            "relationship_edges": relationships,
+            "timeline_facts": timeline_facts + causal_facts,
+            "knowledge_boundaries": knowledge_boundaries + event_edges,
+            "memory_facts": memory_facts,
+            "must_resolve": records(foreshadowing_task.must_resolve, ("name", "content", "status", "target_reveal_chapter"), 6),
+            "overdue_risks": records(foreshadowing_task.overdue_risks, ("name", "content", "status", "target_reveal_chapter"), 6),
+            "avoid_forgetting": records(foreshadowing_task.avoid_forgetting, ("name", "content", "status"), 5),
+            "active_clues": records(foreshadowing_task.active_clues, ("name", "description", "status", "resolution_chapter"), 6),
+            "rules": _compact_list([*cast_plan.rules, *foreshadowing_task.rules], limit=6, item_limit=180),
+            "current_story_time": dict((timeline_digest or {}).get("current_story_time") or {}),
+        }
 
     async def _build_memory_digest(self, project_id: str, chapter_number: int) -> Dict[str, Any]:
         result = await self.session.execute(select(ProjectMemory).where(ProjectMemory.project_id == project_id))

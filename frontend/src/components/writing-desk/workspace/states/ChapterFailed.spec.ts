@@ -65,4 +65,54 @@ describe('ChapterFailed', () => {
     expect(wrapper.text()).toContain('章节缺少目标')
     expect(wrapper.text()).toContain('重写章节导演脚本')
   })
+
+  it('把可重试诊断和章节动作投影为直接重试语义', () => {
+    const wrapper = mount(ChapterFailed, {
+      props: {
+        chapterNumber: 4,
+        generatingChapter: null,
+        chapter: { allowed_actions: ['refresh_status', 'retry_generation'] } as any,
+        generationRuntime: { diagnostics: { retryable: true } }
+      }
+    })
+
+    expect(wrapper.text()).toContain('可直接重试')
+    expect(wrapper.text()).toContain('重新生成')
+    expect(wrapper.text()).not.toContain('请先处理根因')
+    wrapper.get('.cf-action').trigger('click')
+    expect(wrapper.emitted('refreshStatus')).toHaveLength(1)
+  })
+
+  it('候选恢复动作优先于重新生成并支持打开候选版本', async () => {
+    const wrapper = mount(ChapterFailed, {
+      props: {
+        chapterNumber: 5,
+        generatingChapter: null,
+        chapter: { allowed_actions: ['refresh_status', 'confirm_version', 'review_versions', 'retry_generation'] } as any,
+        generationRuntime: { diagnostics: { retryable: true } }
+      }
+    })
+
+    expect(wrapper.text()).toContain('候选正文仍可恢复')
+    expect(wrapper.text()).toContain('可确认候选版本')
+    expect(wrapper.text()).toContain('可重新评审候选')
+    await wrapper.get('.cf-recovery__actions .cf-action:nth-child(2)').trigger('click')
+    expect(wrapper.emitted('openVersionSelector')).toHaveLength(1)
+  })
+
+  it('章节级动作覆盖运行态 fallback，且不可重试时提示先处理根因', () => {
+    const wrapper = mount(ChapterFailed, {
+      props: {
+        chapterNumber: 6,
+        generatingChapter: null,
+        chapter: { allowed_actions: ['refresh_status'] } as any,
+        generationRuntime: { allowed_actions: ['retry_generation'], diagnostics: { retryable: false, rootCause: '任务书缺少冲突' } }
+      }
+    })
+
+    expect(wrapper.text()).toContain('请先处理根因')
+    expect(wrapper.text()).not.toContain('可直接重试')
+    expect(wrapper.text()).toContain('任务书缺少冲突')
+  })
+
 })

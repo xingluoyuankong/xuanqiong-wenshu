@@ -688,6 +688,140 @@ export const taskRuntimeEventToChapterEvent = (event: TaskRuntimeEventLike): Gen
   }
 }
 
+export type GenerationAssuranceState = 'completed' | 'skipped' | 'degraded'
+export type GenerationAssuranceSeverity = 'info' | 'warning' | 'danger'
+export type GenerationAssuranceItemKind = 'review' | 'consistency' | 'degraded_stage' | 'word_requirement' | 'quality_gate'
+
+export type GenerationAssuranceItem = {
+  key: string
+  kind: GenerationAssuranceItemKind
+  state: GenerationAssuranceState
+  severity: GenerationAssuranceSeverity
+  label: string
+  value: string
+  detail?: string
+  stage?: string
+  reason?: string
+  actionIds: string[]
+}
+
+export type GenerationAssuranceSummary = {
+  visible: boolean
+  tone: 'warning' | 'danger'
+  body: string
+  items: GenerationAssuranceItem[]
+  attentionItems: GenerationAssuranceItem[]
+  actions: string[]
+  actionIds: string[]
+  degradedSummary: string
+  hasCoreRisk: boolean
+  hasBlockingRisk: boolean
+  primaryReason?: string
+}
+
+export const buildGenerationAssuranceSummary = (
+  runtime?: GenerationRuntime | null,
+): GenerationAssuranceSummary => {
+  const value = (runtime || {}) as Record<string, any>
+  const items: GenerationAssuranceItem[] = []
+  const actionIds = Array.from(new Set(
+    (Array.isArray(value.allowed_actions) ? value.allowed_actions : [])
+      .filter((item: unknown): item is string => typeof item === 'string')
+      .filter((item) => ['refresh_status', 'retry_generation', 'retry_ledger_sync', 'review_versions', 'confirm_version'].includes(item)),
+  ))
+  const normalizeStatus = (status: unknown): { state: GenerationAssuranceState; severity: GenerationAssuranceSeverity } | null => {
+    const normalized = String(status || '').toLowerCase()
+    if (['passed', 'completed', 'success'].includes(normalized)) return { state: 'completed', severity: 'info' }
+    if (normalized === 'skipped') return { state: 'skipped', severity: 'warning' }
+    if (['degraded', 'warning', 'error'].includes(normalized)) return { state: 'degraded', severity: 'warning' }
+    return null
+  }
+  const addStatusItem = (kind: 'review' | 'consistency', status: unknown, reason?: unknown) => {
+    const normalized = normalizeStatus(status)
+    if (!normalized || normalized.state === 'completed') return
+    items.push({
+      key: kind,
+      kind,
+      ...normalized,
+      label: kind === 'review' ? pick('评审', 'Review') : pick('连续性', 'Continuity'),
+      value: normalized.state === 'skipped' ? pick('已跳过', 'Skipped') : pick('已降级', 'Degraded'),
+      detail: reason ? String(reason).slice(0, 220) : undefined,
+      reason: reason ? String(reason).slice(0, 220) : undefined,
+      actionIds: actionIds.filter((id) => id === 'refresh_status' || id === 'retry_generation' || id === 'review_versions'),
+    })
+  }
+  addStatusItem('review', value.review_status, value.review_skip_reason)
+  addStatusItem('consistency', value.consistency_status, value.consistency_skip_reason)
+
+  const degraded = Array.isArray(value.degraded_stages) ? value.degraded_stages : []
+  for (const [index, raw] of degraded.slice(0, 8).entries()) {
+    const record = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+    const stage = String(record.stage || pick('未知阶段', 'Unknown stage'))
+    const reason = String(record.reason || record.degraded_reason || '').slice(0, 220)
+    const core = ['review', 'self_critique', 'consistency', 'enrichment'].some((name) => stage.includes(name))
+    items.push({
+      key: `degraded-${stage}-${index}`,
+      kind: 'degraded_stage',
+      state: 'degraded',
+      severity: 'warning',
+      label: pick('核心保障降级', 'Core assurance degraded'),
+      value: getStageDisplayLabel(value, normalizeRuntimeStage(stage)),
+      detail: reason || pick('正文已保留，后续保障需要复核。', 'Draft retained; follow-up assurance needs review.'),
+      stage,
+      reason: reason || undefined,
+      actionIds: core ? actionIds.filter((id) => ['refresh_status', 'retry_generation', 'review_versions'].includes(id)) : actionIds.filter((id) => ['refresh_status', 'retry_ledger_sync'].includes(id)),
+    })
+  }
+  const wordRisk = value.word_requirement_met === false
+  if (wordRisk) items.push({
+    key: 'word-requirement', kind: 'word_requirement', state: 'degraded', severity: 'danger',
+    label: pick('字数门槛', 'Word-count gate'), value: pick('未满足', 'Not met'),
+    detail: String(value.word_requirement_reason || pick('正文低于最低要求。', 'Draft is below the minimum requirement.')).slice(0, 220),
+    reason: String(value.word_requirement_reason || '').slice(0, 220) || undefined,
+    actionIds: actionIds.filter((id) => ['refresh_status', 'retry_generation'].includes(id)),
+  })
+  const quality = value.quality_metrics && typeof value.quality_metrics === 'object' ? value.quality_metrics as Record<string, unknown> : {}
+  const gates = value.quality_gates && typeof value.quality_gates === 'object' ? value.quality_gates as Record<string, any> : {}
+  const gateFailed = quality.passed === false || quality.quality_gate_passed === false ||
+    Object.values(gates).some((gate) => gate && typeof gate === 'object' && (gate.passed === false || gate.quality_gate_failed === true))
+  if (gateFailed) items.push({
+    key: 'quality-gate', kind: 'quality_gate', state: 'degraded', severity: 'danger',
+    label: pick('最终质量门', 'Final quality gate'), value: pick('未通过', 'Not passed'),
+    detail: pick('后续章节承接和当前正文质量需要复核。', 'Continuity and draft quality need review.'),
+    actionIds: actionIds.filter((id) => ['refresh_status', 'retry_generation', 'review_versions', 'confirm_version'].includes(id)),
+  })
+
+  const attentionItems = items.filter((item) => item.state !== 'completed')
+  const hasCoreRisk = attentionItems.some((item) => ['review', 'consistency', 'degraded_stage'].includes(item.kind))
+  const hasBlockingRisk = attentionItems.some((item) => item.severity === 'danger')
+  const actionLabels: Record<string, string> = {
+    refresh_status: pick('刷新状态', 'Refresh status'),
+    retry_generation: pick('重试生成', 'Retry generation'),
+    retry_ledger_sync: pick('重试保障流程', 'Retry assurance'),
+    review_versions: pick('重新评审候选', 'Review candidates'),
+    confirm_version: pick('确认候选版本', 'Confirm candidate'),
+  }
+  const actions = actionIds.map((id) => actionLabels[id]).filter(Boolean)
+  if (!actions.length && attentionItems.length) actions.push(pick('检查降级日志后再继续下一章', 'Review degraded logs before the next chapter'))
+  const degradedValues = attentionItems.filter((item) => item.kind === 'degraded_stage').map((item) => item.value)
+  const degradedSummary = degradedValues.length ? pick(`降级阶段：${degradedValues.join('、')}`, `Degraded stages: ${degradedValues.join(', ')}`) : ''
+  return {
+    visible: attentionItems.length > 0,
+    tone: hasBlockingRisk ? 'danger' : 'warning',
+    body: hasBlockingRisk || attentionItems.some((item) => item.state === 'skipped')
+      ? pick('正文已保留，但并非所有质量保障都完成。', 'Draft retained, but not all quality assurance completed.')
+      : pick('正文已保留，部分辅助保障需要复核。', 'Draft retained; some supporting assurance needs review.'),
+    items,
+    attentionItems,
+    actions,
+    actionIds,
+    degradedSummary,
+    hasCoreRisk,
+    hasBlockingRisk,
+    primaryReason: attentionItems.find((item) => item.reason || item.detail)?.reason || attentionItems[0]?.detail,
+  }
+}
+
 export type ChapterTaskUiModel = {
   stage: string
   stageLabel: string
@@ -702,6 +836,7 @@ export type ChapterTaskUiModel = {
   critiqueSummary: string
   critiqueHighlights: string[]
   degradedSummary: string
+  assuranceSummary: GenerationAssuranceSummary
   currentStep: number
   totalSteps: number
   currentStepLabel: string
@@ -816,15 +951,8 @@ export const buildChapterTaskUiModel = (
     .filter(Boolean)
     .slice(0, 3)
 
-  const degradedStages = Array.isArray(runtimeRecord.degraded_stages) ? runtimeRecord.degraded_stages : []
-  const degradedNames = degradedStages.map((item) => {
-    if (!item || typeof item !== 'object') return pick('未知步骤', 'Unknown step')
-    const record = item as Record<string, any>
-    return getStageDisplayLabel(runtimeRecord, normalizeRuntimeStage(record.stage))
-  })
-  const degradedSummary = degradedNames.length
-    ? pick(`降级阶段：${degradedNames.join('、')}`, `Degraded stages: ${degradedNames.join(', ')}`)
-    : ''
+  const assuranceSummary = buildGenerationAssuranceSummary(runtimeRecord)
+  const degradedSummary = assuranceSummary.degradedSummary
 
   const optimizationLogs = Array.isArray(runtimeRecord.optimization_logs) ? runtimeRecord.optimization_logs : []
   const critiqueSummaryParts = [
@@ -867,6 +995,7 @@ export const buildChapterTaskUiModel = (
     critiqueSummary,
     critiqueHighlights,
     degradedSummary,
+    assuranceSummary,
     currentStep,
     totalSteps,
     currentStepLabel,

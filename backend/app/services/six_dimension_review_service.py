@@ -13,6 +13,7 @@ from .writer_persona_service import WriterPersonaService
 from .llm_service import LLMService
 from .prompt_service import PromptService
 from .generation_call_service import GenerationCallPolicy, call_generation_json
+from ..agent.provider_attempt import ProviderAttemptLedger
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,9 @@ class SixDimensionReviewService:
         character_profiles: Optional[str] = None,
         world_setting: Optional[str] = None,
         user_id: Optional[int] = None,
+        *,
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
+        attempt_role: str = "six_dimension_review",
     ) -> Dict[str, Any]:
         with LLMService.daily_limit_scope(f"six_dimension_review:{project_id}:{chapter_number}:{user_id or 0}:{len(chapter_content or '')}"):
             constitution = await self.constitution_service.get_constitution(project_id)
@@ -154,6 +158,8 @@ class SixDimensionReviewService:
                         progress_stage="six_dimension_review",
                         retry_attempts=2,
                         json_repair_attempts=1,
+                        attempt_ledger=attempt_ledger,
+                        attempt_role=attempt_role,
                     ),
                 )
                 parsed = self._normalize_review_result(result.data)

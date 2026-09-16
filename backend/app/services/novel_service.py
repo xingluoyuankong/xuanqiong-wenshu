@@ -2511,6 +2511,20 @@ class NovelService:
         追加写入新版本，并按时间保留最近 max_versions 个版本。
         用于“每次生成 2 个版本，但最多保留 6 个历史版本”的场景。
         """
+        # 迟到 worker 必须在创建任何 ChapterVersion 之前被 fenced：
+        # runtime 中的 superseded_run_id 会保留旧 run 用于诊断，不能把它当作
+        # 当前执行权。字符串包含会让 old-run 命中 superseded_run_id，从而污染
+        # 已重新绑定到 fresh-run 的章节版本列表。
+        if expected_generation_run_id:
+            await self.session.refresh(chapter)
+            runtime = _extract_generation_runtime_payload(chapter)
+            active_run_id = str(runtime.get("run_id") or "").strip()
+            if (
+                active_run_id != str(expected_generation_run_id).strip()
+                or chapter.status != ChapterGenerationStatus.GENERATING.value
+            ):
+                raise HTTPException(status_code=409, detail="章节生成任务已失效或被取消")
+
         current_stmt = (
             select(ChapterVersion)
             .where(ChapterVersion.chapter_id == chapter.id)
@@ -2532,12 +2546,6 @@ class NovelService:
             self.session.add(version)
 
         await self.session.flush()
-
-        if expected_generation_run_id:
-            await self.session.refresh(chapter)
-            chapter_runtime = str(chapter.real_summary or "")
-            if expected_generation_run_id not in chapter_runtime or chapter.status != ChapterGenerationStatus.GENERATING.value:
-                raise HTTPException(status_code=409, detail="章节生成任务已失效或被取消")
 
         refreshed_result = await self.session.execute(current_stmt)
         all_versions = refreshed_result.scalars().all()

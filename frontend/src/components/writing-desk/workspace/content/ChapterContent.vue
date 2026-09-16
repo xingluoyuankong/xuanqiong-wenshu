@@ -25,6 +25,27 @@
       </div>
     </section>
 
+    <section v-if="assuranceCard.visible" class="wc-assurance" :class="`wc-assurance--${assuranceCard.tone}`" data-testid="chapter-assurance-card">
+      <div class="wc-assurance__head">
+        <div>
+          <strong>{{ pick('定稿保障状态', 'Finalization assurance') }}</strong>
+          <span>{{ assuranceCard.body }}</span>
+        </div>
+        <span class="wc-assurance__badge">{{ assuranceCard.tone === 'danger' ? pick('有风险', 'Risk') : pick('需关注', 'Attention') }}</span>
+      </div>
+      <div class="wc-assurance__grid">
+        <div v-for="item in assuranceCard.items" :key="item.key" class="wc-assurance__item">
+          <span>{{ item.label }}</span>
+          <strong>{{ item.value }}</strong>
+          <small v-if="item.detail">{{ item.detail }}</small>
+        </div>
+      </div>
+      <div v-if="assuranceCard.actions.length" class="wc-assurance__actions">
+        <span>{{ pick('后续动作', 'Next actions') }}{{ punct.colon }}</span>
+        <strong>{{ assuranceCard.actions.join(pick('、', ', ')) }}</strong>
+      </div>
+    </section>
+
     <section class="wc-reader">
       <div class="wc-reader__head">
         <p class="wc-reader__kicker">{{ pick('正文预览', 'Draft preview') }}</p>
@@ -90,11 +111,13 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { Chapter } from '@/api/novel'
+import type { Chapter, GenerationRuntime } from '@/api/novel'
 import { useLocale } from '@/composables/useLocale'
+import { buildGenerationAssuranceSummary } from '@/utils/chapterGeneration'
 
 interface Props {
   selectedChapter: Chapter
+  generationRuntime?: GenerationRuntime | null
   selectedVersionIndex?: number
   compareVersionIndex?: number
 }
@@ -111,6 +134,9 @@ const emit = defineEmits<{
 }>()
 
 const { pick, t, punct } = useLocale()
+
+const runtime = computed<Record<string, any>>(() => (props.generationRuntime || props.selectedChapter.generation_runtime || {}) as Record<string, any>)
+const assuranceCard = computed(() => buildGenerationAssuranceSummary(runtime.value))
 
 const showOptimizer = ref(false)
 const selectedDimension = ref<string | null>(null)
@@ -271,6 +297,87 @@ function applyOptimizeResult() {
   display: flex;
   gap: 6px;
   align-items: center;
+}
+
+.wc-assurance {
+  display: grid;
+  gap: 10px;
+  margin: 10px 12px 0;
+  padding: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 251, 235, 0.9);
+  color: #78350f;
+}
+
+.wc-assurance--danger {
+  border-color: rgba(220, 38, 38, 0.28);
+  background: rgba(254, 242, 242, 0.92);
+  color: #7f1d1d;
+}
+
+.wc-assurance__head,
+.wc-assurance__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.wc-assurance__head > div {
+  display: grid;
+  gap: 3px;
+}
+
+.wc-assurance__head span,
+.wc-assurance__item small {
+  color: rgba(120, 53, 15, 0.78);
+}
+
+.wc-assurance--danger .wc-assurance__head span,
+.wc-assurance--danger .wc-assurance__item small {
+  color: rgba(127, 29, 29, 0.78);
+}
+
+.wc-assurance__badge {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.16);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.wc-assurance--danger .wc-assurance__badge {
+  background: rgba(220, 38, 38, 0.12);
+}
+
+.wc-assurance__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+}
+
+.wc-assurance__item {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.58);
+  font-size: 10px;
+}
+
+.wc-assurance__item strong {
+  font-size: 11px;
+}
+
+.wc-assurance__item small {
+  line-height: 1.45;
+}
+
+.wc-assurance__actions {
+  justify-content: flex-start;
+  color: inherit;
 }
 
 .wc-reader {

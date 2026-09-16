@@ -144,3 +144,92 @@ async def test_formal_generate_chapter_entry_rebinds_before_runtime_updates():
     assert runtime["run_id"] == "fresh-run"
     assert runtime["superseded_run_id"] == "stale-run"
     assert chapter.status == ChapterGenerationStatus.GENERATING.value
+
+
+@pytest.mark.asyncio
+async def test_superseded_generation_run_cannot_append_late_versions(task_session):
+    """旧 run 只可作为诊断字段存在，绝不可授权迟到版本写入。"""
+    from fastapi import HTTPException
+    from sqlalchemy import select
+
+    from app.models import Chapter, ChapterVersion, NovelProject, User
+    from app.services.novel_service import NovelService
+
+    owner = User(
+        id=98190,
+        username="late-run-owner",
+        email="late-run-owner@example.com",
+        hashed_password="fixture",
+        is_active=True,
+    )
+    project = NovelProject(id="superseded-run-project", user_id=owner.id, title="迟到 run 回归")
+    chapter = Chapter(
+        project_id=project.id,
+        chapter_number=1,
+        status=ChapterGenerationStatus.GENERATING.value,
+        real_summary=json.dumps(
+            {
+                "generation_runtime": {
+                    "run_id": "fresh-run",
+                    "superseded_run_id": "old-run",
+                    "cancel_requested": False,
+                }
+            },
+            ensure_ascii=False,
+        ),
+    )
+    task_session.add_all([owner, project, chapter])
+    await task_session.commit()
+
+    service = NovelService(task_session)
+    with pytest.raises(HTTPException) as rejected:
+        await service.append_chapter_versions(
+            chapter,
+            ["旧 worker 的迟到正文不得写入。"],
+            expected_generation_run_id="old-run",
+        )
+
+    assert rejected.value.status_code == 409
+    versions = await task_session.execute(
+        select(ChapterVersion).where(ChapterVersion.chapter_id == chapter.id)
+    )
+    assert versions.scalars().all() == []
+    await task_session.refresh(chapter)
+    assert chapter.status == ChapterGenerationStatus.GENERATING.value
+
+
+@pytest.mark.asyncio
+async def test_current_generation_run_can_append_versions_after_rebind(task_session):
+    """精确 fencing 不应阻断重新绑定后的当前 run。"""
+    from app.models import Chapter, NovelProject, User
+    from app.services.novel_service import NovelService
+
+    owner = User(
+        id=98191,
+        username="fresh-run-owner",
+        email="fresh-run-owner@example.com",
+        hashed_password="fixture",
+        is_active=True,
+    )
+    project = NovelProject(id="fresh-run-project", user_id=owner.id, title="当前 run 回归")
+    chapter = Chapter(
+        project_id=project.id,
+        chapter_number=1,
+        status=ChapterGenerationStatus.GENERATING.value,
+        real_summary=json.dumps(
+            {"generation_runtime": {"run_id": "fresh-run", "superseded_run_id": "old-run"}},
+            ensure_ascii=False,
+        ),
+    )
+    task_session.add_all([owner, project, chapter])
+    await task_session.commit()
+
+    versions = await NovelService(task_session).append_chapter_versions(
+        chapter,
+        ["当前 run 的正文可以正常落库。"],
+        expected_generation_run_id="fresh-run",
+    )
+
+    assert len(versions) == 1
+    assert versions[0].content == "当前 run 的正文可以正常落库。"
+    assert chapter.status == ChapterGenerationStatus.WAITING_FOR_CONFIRM.value

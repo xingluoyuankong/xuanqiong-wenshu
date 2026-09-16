@@ -11,12 +11,16 @@
           <h3>{{ pick(`第 ${chapterNumber} 章处理失败`, `Chapter ${chapterNumber} failed`) }}</h3>
         </div>
       </div>
-      <p class="cf-desc">
-        {{ pick(
-          '当前章节没有形成可交付正文。刷新状态确认原因后，请用顶部主操作栏重新生成。',
-          'This chapter produced no deliverable text. Refresh to confirm the cause, then regenerate from the command bar at the top.'
-        ) }}
-      </p>
+      <p class="cf-desc">{{ recoveryState.message }}</p>
+
+      <div class="cf-recovery" :class="`cf-recovery--${recoveryState.tone}`" data-testid="chapter-failure-recovery">
+        <strong>{{ recoveryState.title }}</strong>
+        <span>{{ recoveryState.actionText }}</span>
+        <div class="cf-recovery__actions">
+          <button v-if="canRefresh" type="button" class="cf-action" @click="emit('refreshStatus')">{{ pick('刷新状态', 'Refresh status') }}</button>
+          <button v-if="canOpenVersions" type="button" class="cf-action" @click="emit('openVersionSelector')">{{ pick('查看候选版本', 'View candidate versions') }}</button>
+        </div>
+      </div>
 
       <div v-if="failureSummary || diagnosticRows.length" class="cf-diagnostics">
         <div v-if="failureSummary" class="cf-diagnostics__summary">
@@ -47,6 +51,7 @@
 import { computed } from 'vue'
 import { useLocale } from '@/composables/useLocale'
 import type { Chapter, GenerationRuntime } from '@/api/novel'
+import { resolveChapterActions } from '@/utils/chapterGeneration'
 
 const { pick } = useLocale()
 
@@ -55,10 +60,16 @@ interface Props {
   generatingChapter: number | null
   chapter?: Chapter | null
   generationRuntime?: GenerationRuntime | null
+  generationStatus?: Chapter['generation_status'] | null
+  allowedActions?: string[]
   lastErrorSummary?: string | null
 }
 
 const props = defineProps<Props>()
+const emit = defineEmits<{
+  (e: 'refreshStatus'): void
+  (e: 'openVersionSelector'): void
+}>()
 
 const runtime = computed<Record<string, any>>(() =>
   (props.generationRuntime || props.chapter?.generation_runtime || {}) as Record<string, any>
@@ -74,6 +85,50 @@ const diagnostics = computed<Record<string, any>>(() => {
   const value = runtime.value?.diagnostics
   return value && typeof value === 'object' ? value as Record<string, any> : {}
 })
+const allowedActions = computed(() =>
+  Array.isArray(props.allowedActions)
+    ? props.allowedActions
+    : resolveChapterActions(props.chapter || null, runtime.value as GenerationRuntime)
+)
+const retryable = computed(() => diagnostics.value.retryable)
+const canRefresh = computed(() => allowedActions.value.includes('refresh_status'))
+const canRetryGeneration = computed(() => allowedActions.value.includes('retry_generation'))
+const canConfirmVersion = computed(() => allowedActions.value.includes('confirm_version'))
+const canReviewVersions = computed(() => allowedActions.value.includes('review_versions'))
+const canOpenVersions = computed(() => canConfirmVersion.value || canReviewVersions.value)
+const recoveryState = computed(() => {
+  if (canOpenVersions.value) {
+    return {
+      tone: 'warning',
+      title: pick('候选正文仍可恢复', 'Candidate draft can still be recovered'),
+      message: pick('评审或质量门未完成，但候选正文已保留；优先确认或复审候选，避免无意义地重生整章。', 'Review or quality gates did not complete, but candidate drafts were retained.'),
+      actionText: [canConfirmVersion.value ? pick('可确认候选版本', 'Candidate can be confirmed') : '', canReviewVersions.value ? pick('可重新评审候选', 'Candidate can be reviewed') : '', canRetryGeneration.value ? pick('仍可重新生成', 'Generation can also be retried') : ''].filter(Boolean).join(pick('；', '; ')),
+    }
+  }
+  if (retryable.value === true && canRetryGeneration.value) {
+    return {
+      tone: 'warning',
+      title: pick('可直接重试', 'Ready to retry'),
+      message: pick('当前失败可直接重试生成；刷新状态后可从顶部主操作继续。', 'This failure can be retried directly after refreshing status.'),
+      actionText: pick('允许动作：刷新状态、重新生成。', 'Available actions: refresh status and retry generation.'),
+    }
+  }
+  if (retryable.value === false) {
+    return {
+      tone: 'danger',
+      title: pick('请先处理根因', 'Resolve the root cause first'),
+      message: pick('当前诊断不建议直接重试；请依据根因和建议修正任务书或配置。', 'The diagnostics do not recommend an immediate retry.'),
+      actionText: pick('先处理诊断中的根因与建议，再重新提交。', 'Resolve the diagnostic root cause before submitting again.'),
+    }
+  }
+  return {
+    tone: 'neutral',
+    title: pick('请刷新状态后处理', 'Refresh status before continuing'),
+    message: pick('当前章节没有形成可交付正文；请先确认最新运行状态与可用恢复动作。', 'This chapter has no deliverable draft; confirm the latest runtime state and recovery actions first.'),
+    actionText: pick('可用恢复动作会在刷新后显示。', 'Available recovery actions appear after refresh.'),
+  }
+})
+
 const diagnosticRows = computed(() => {
   const rows = [
     diagnostics.value.code ? { label: pick('错误码', 'Error code'), value: String(diagnostics.value.code) } : null,
@@ -81,6 +136,7 @@ const diagnosticRows = computed(() => {
     diagnostics.value.status ? { label: pick('状态码', 'Status code'), value: String(diagnostics.value.status) } : null,
     diagnostics.value.requestId ? { label: pick('请求ID', 'Request ID'), value: String(diagnostics.value.requestId) } : null,
     diagnostics.value.hint ? { label: pick('建议', 'Suggestion'), value: String(diagnostics.value.hint) } : null,
+    typeof diagnostics.value.retryable === 'boolean' ? { label: pick('可重试', 'Retryable'), value: diagnostics.value.retryable ? pick('是', 'Yes') : pick('否', 'No') } : null,
   ]
   return rows.filter(Boolean) as Array<{ label: string; value: string }>
 })
@@ -167,6 +223,50 @@ const diagnosticRows = computed(() => {
   color: #64748b;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.cf-recovery {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 7px;
+  border: 1px solid rgba(100, 116, 139, 0.2);
+  background: rgba(248, 250, 252, 0.86);
+  color: #334155;
+}
+
+.cf-recovery--warning {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: rgba(255, 251, 235, 0.9);
+  color: #78350f;
+}
+
+.cf-recovery--danger {
+  border-color: rgba(220, 38, 38, 0.28);
+  background: rgba(254, 242, 242, 0.9);
+  color: #7f1d1d;
+}
+
+.cf-recovery > span {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cf-recovery__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cf-action {
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.62);
+  color: inherit;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .cf-diagnostics {

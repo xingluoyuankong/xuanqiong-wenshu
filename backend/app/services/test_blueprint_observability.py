@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 from datetime import datetime, timedelta, timezone
 import json
 
@@ -2717,7 +2717,7 @@ async def test_run_consistency_check_retries_with_post_fix_feedback(monkeypatch)
         suggested_fix="统一物件流转来源，只保留一个正式版本。",
     )
 
-    async def fake_check_consistency(self, project_id, chapter_text, user_id, include_foreshadowing=True):
+    async def fake_check_consistency(self, project_id, chapter_text, user_id, include_foreshadowing=True, **_kwargs):
         if chapter_text == "原稿":
             return type(
                 "CheckResult",
@@ -2756,7 +2756,7 @@ async def test_run_consistency_check_retries_with_post_fix_feedback(monkeypatch)
             )()
         raise AssertionError(f"unexpected chapter_text: {chapter_text}")
 
-    async def fake_auto_fix(self, project_id, chapter_text, violations, user_id):
+    async def fake_auto_fix(self, project_id, chapter_text, violations, user_id, **_kwargs):
         if chapter_text == "原稿":
             return "第一次修复"
         if chapter_text == "第一次修复":
@@ -2797,7 +2797,7 @@ async def test_run_consistency_check_reports_deferred_full_chapter_fallback(monk
         suggested_fix="统一来源，只保留一个正式版本。",
     )
 
-    async def fake_check_consistency(self, project_id, chapter_text, user_id, include_foreshadowing=True):
+    async def fake_check_consistency(self, project_id, chapter_text, user_id, include_foreshadowing=True, **_kwargs):
         return type(
             "CheckResult",
             (),
@@ -2810,7 +2810,7 @@ async def test_run_consistency_check_reports_deferred_full_chapter_fallback(monk
             },
         )()
 
-    async def fake_auto_fix(self, project_id, chapter_text, violations, user_id):
+    async def fake_auto_fix(self, project_id, chapter_text, violations, user_id, **_kwargs):
         return None
 
     monkeypatch.setattr(ConsistencyService, "check_consistency", fake_check_consistency)
@@ -4572,3 +4572,4 @@ def test_blueprint_recovery_worker_is_not_recursive():
     source = novels_router._schedule_blueprint_recovery.__code__.co_names
     assert "_run_blueprint_generation_job" in source
     assert "_schedule_blueprint_recovery" not in source
+

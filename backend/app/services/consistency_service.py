@@ -25,6 +25,7 @@ from ..models.memory_layer import CharacterState
 from ..models.novel import NovelBlueprint
 from ..models.project_memory import ProjectMemory
 from ..utils.json_utils import remove_think_tags, unwrap_markdown_json
+from ..agent.provider_attempt import ProviderAttemptLedger
 from .continuity_guard_utils import continuity_terms_guard_failure
 from .generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text
 from .llm_service import LLMService
@@ -272,6 +273,9 @@ class ConsistencyService:
         chapter_text: str,
         user_id: int,
         include_foreshadowing: bool = True,
+        *,
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
+        attempt_role: str = "consistency_check",
     ) -> ConsistencyCheckResult:
         with LLMService.daily_limit_scope(f"consistency_check:{project_id}:{user_id}:{len(chapter_text or '')}"):
             started_at = time.time()
@@ -293,7 +297,8 @@ class ConsistencyService:
                     timeout=120.0,
                     policy=GenerationCallPolicy(
                         stage_label="跨章节一致性检查",
-                        attempt_role="quality",
+                        attempt_ledger=attempt_ledger,
+                        attempt_role=attempt_role,
                         progress_stage="continuity_gate",
                         retry_attempts=2,
                         response_format="json_object",
@@ -323,6 +328,8 @@ class ConsistencyService:
         violations: List[ConsistencyViolation],
         context: Dict[str, Any],
         user_id: int,
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
+        attempt_role: str = "consistency_repair_local",
     ) -> Optional[str]:
         paragraphs = self._split_paragraphs(chapter_text)
         if len(paragraphs) < 3:
@@ -390,7 +397,8 @@ class ConsistencyService:
                 timeout=150.0,
                 policy=GenerationCallPolicy(
                     stage_label="局部一致性修复",
-                    attempt_role="quality",
+                    attempt_ledger=attempt_ledger,
+                    attempt_role=attempt_role,
                     progress_stage="consistency",
                     retry_attempts=2,
                     response_format=None,
@@ -431,6 +439,8 @@ class ConsistencyService:
         user_id: int,
         *,
         allow_full_chapter_fallback: bool = False,
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
+        attempt_role: str = "consistency_repair",
     ) -> Optional[str]:
         with LLMService.daily_limit_scope(f"consistency_fix:{project_id}:{user_id}:{len(chapter_text or '')}"):
             if not violations:
@@ -442,6 +452,8 @@ class ConsistencyService:
                 violations=violations,
                 context=context,
                 user_id=user_id,
+                attempt_ledger=attempt_ledger,
+                attempt_role=f"{attempt_role}_local",
             )
             if localized_fixed and localized_fixed != chapter_text:
                 return localized_fixed
@@ -484,7 +496,8 @@ class ConsistencyService:
                     timeout=240.0,
                     policy=GenerationCallPolicy(
                         stage_label="一致性补丁兜底",
-                        attempt_role="quality",
+                        attempt_ledger=attempt_ledger,
+                        attempt_role=f"{attempt_role}_fallback",
                         progress_stage="consistency",
                         retry_attempts=2,
                         response_format=None,
@@ -564,9 +577,17 @@ class ConsistencyService:
         auto_fix_threshold: ViolationSeverity = ViolationSeverity.CRITICAL,
         *,
         allow_full_chapter_fallback: bool = False,
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
+        attempt_role: str = "consistency",
     ) -> Dict[str, Any]:
         with LLMService.daily_limit_scope(f"consistency_check_fix:{project_id}:{user_id}:{len(chapter_text or '')}"):
-            check_result = await self.check_consistency(project_id=project_id, chapter_text=chapter_text, user_id=user_id)
+            check_result = await self.check_consistency(
+                project_id=project_id,
+                chapter_text=chapter_text,
+                user_id=user_id,
+                attempt_ledger=attempt_ledger,
+                attempt_role=f"{attempt_role}_check",
+            )
             result: Dict[str, Any] = {
                 "check_result": check_result,
                 "fixed_content": None,
@@ -588,6 +609,8 @@ class ConsistencyService:
                     violations=violations_to_fix,
                     user_id=user_id,
                     allow_full_chapter_fallback=allow_full_chapter_fallback,
+                    attempt_ledger=attempt_ledger,
+                    attempt_role=f"{attempt_role}_repair",
                 )
 
             result["needs_manual_review"] = any(

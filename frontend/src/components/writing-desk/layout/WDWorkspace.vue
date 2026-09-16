@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="wd-workspace-root">
     <FloatingProgressCard
       :visible="floatingProgressVisible"
@@ -150,6 +150,8 @@
           @consumeOptimizerSuggestion="$emit('consumeOptimizerSuggestion')"
           @chapterUpdated="$emit('chapterUpdated', $event)"
           @fetchStatusNow="$emit('fetchChapterStatus')"
+          @refreshStatus="$emit('fetchChapterStatus')"
+          @openVersionSelector="openVersionSelector"
           @terminateChapter="$emit('terminateChapter', $event)"
           @openPatchDiff="$emit('openPatchDiff')"
           @deleteVersion="$emit('deleteVersion', $event)"
@@ -226,6 +228,7 @@ import {
   isRecoverableVersionStatus,
   resolveChapterActionDecision,
   resolveActualWordCount,
+  resolveChapterActions,
   resolveChapterRuntime,
   resolveStageProgressWindow,
 } from '@/utils/chapterGeneration'
@@ -503,7 +506,8 @@ const shouldShowVersionSelector = computed(() => {
   const status = selectedChapter.value?.generation_status
   const allowsRecoverableStatus = isRecoverableVersionStatus(status)
   const shouldFallbackFromMissingContent = status === 'successful' && !hasSelectedChapterContent.value && hasPreviewableVersions.value
-  if (!hasPreviewableVersions.value && !allowsRecoverableStatus) return false
+  // 可恢复状态只是“候选可恢复”的前提；没有候选正文时必须展示失败诊断。
+  if (!hasPreviewableVersions.value) return false
   if (versionSelectorDismissed.value && !shouldFallbackFromMissingContent) return false
   if (forceVersionSelector.value || props.showVersionSelector) return true
   return allowsRecoverableStatus || shouldFallbackFromMissingContent
@@ -523,7 +527,7 @@ const isChapterCompleted = (chapterNumber: number) => {
 
 const isChapterFailed = (chapterNumber: number) => {
   const chapter = props.project?.chapters.find((item) => item.chapter_number === chapterNumber)
-  return chapter?.generation_status === 'failed'
+  return ['failed', 'evaluation_failed'].includes(chapter?.generation_status || '')
 }
 
 const isChapterEvaluationFailed = (chapterNumber: number) => {
@@ -546,7 +550,9 @@ const selectedChapterStatusText = computed(() => {
   if (status === 'evaluating') return pick('正在评估', 'Reviewing')
   if (status === 'selecting') return pick('准备确认', 'Ready to confirm')
   if (status === 'waiting_for_confirm') return pick('等待你确认', 'Awaiting your confirmation')
-  if (status === 'evaluation_failed') return pick('评审异常（候选版本可继续确认）', 'Review error (candidates can still be confirmed)')
+  if (status === 'evaluation_failed') return hasPreviewableVersions.value
+    ? pick('评审异常（候选版本可继续确认）', 'Review error (candidates can still be confirmed)')
+    : pick('评审未通过，请先处理根因或重试', 'Review failed; resolve the cause or retry')
   if (status === 'failed') return pick('生成失败', 'Generation failed')
   return pick('尚未开始', 'Not started')
 })
@@ -843,6 +849,7 @@ const currentComponentProps = computed(() => {
     return {
       selectedChapter: selectedChapter.value,
       projectId: props.project?.id,
+      generationRuntime: chapterRuntime.value,
       optimizerSuggestionNotes: props.optimizerSuggestionNotes
     }
   }
@@ -853,6 +860,8 @@ const currentComponentProps = computed(() => {
       generatingChapter: props.generatingChapter,
       chapter: selectedChapter.value,
       generationRuntime: chapterRuntime.value,
+      generationStatus: selectedChapter.value?.generation_status,
+      allowedActions: resolveChapterActions(selectedChapter.value, chapterRuntime.value),
       lastErrorSummary: selectedChapter.value?.last_error_summary
     }
   }

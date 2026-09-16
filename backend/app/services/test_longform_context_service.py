@@ -520,3 +520,111 @@ async def test_knowledge_graph_sync_backfills_blueprint_relationship_edges(tmp_p
             assert edge.extra["source"] == "blueprint_relationship"
     finally:
         await engine.dispose()
+
+
+
+def test_continuation_digest_is_bounded_and_preserves_cross_chapter_ledgers():
+    from app.services.longform_context_service import (
+        CastPlan,
+        ForeshadowingChapterTask,
+        LongformContextService,
+    )
+
+    cast = CastPlan(
+        target_character_count=40,
+        planned_character_count=3,
+        chapter_focus_names=["林七"],
+        active_character_states=[
+            {"character_name": f"林七{index}", "location": "旧码头", "emotion": "警惕", "health_status": "负伤", "current_goals": ["查账"], "known_secrets": ["盐仓"]}
+            for index in range(12)
+        ],
+        relationship_edges=[
+            {"from_name": f"林七{index}", "to_name": "沈舟", "relationship": "互相试探", "description": f"沈舟隐瞒账册来源{index}"}
+            for index in range(12)
+        ],
+        rules=["角色知识边界不能越级", "状态变化必须落到账本"],
+    )
+    task = ForeshadowingChapterTask(
+        must_resolve=[{"name": "盐渍编号", "content": "编号必须回收", "status": "open"}],
+        overdue_risks=[{"name": "旧码头追兵", "content": "追兵已逾期", "status": "open"}],
+        avoid_forgetting=[{"name": "半枚印章", "content": "不能遗忘", "status": "active"}],
+        active_clues=[{"name": "潮雾账册", "description": "指向盐仓", "status": "active"}],
+        rules=["回收必须给出后果"],
+    )
+    digest = LongformContextService._build_continuation_digest(
+        memory_digest={"recent_snapshots": [{"chapter_number": 2, "chapter_summary": "拿到账册", "word_count": 2100}]},
+        timeline_digest={
+            "current_story_time": {"date": "第三夜", "time": "子时"},
+            "recent_events": [{"chapter_number": 2, "title": "拿到账册", "description": "盐渍编号出现", "location": "档案馆"}],
+            "causal_chains": [{"cause_chapter": 1, "cause": "发现残页", "effect_chapter": 3, "effect": "追兵逼近", "status": "open"}],
+        },
+        knowledge_digest={
+            "knowledge_nodes": [{"name": "沈舟", "role_type": "盟友", "status": "active", "location": "旧码头", "emotional_state": "隐瞒"}],
+            "recent_event_edges": [{"chapter_number": 2, "type": "clue", "description": "线索指向盐仓", "causality": "编号关联印章"}],
+        },
+        cast_plan=cast,
+        foreshadowing_task=task,
+    )
+
+    assert digest["version"] == 1
+    assert len(digest["active_character_states"]) == 6
+    assert len(digest["relationship_edges"]) == 8
+    assert len(digest["timeline_facts"]) == 2
+    assert len(digest["knowledge_boundaries"]) == 2
+    assert len(digest["must_resolve"]) == 1
+    assert digest["must_resolve"][0] == "盐渍编号；编号必须回收；open"
+    assert digest["overdue_risks"] == ["旧码头追兵；追兵已逾期；open"]
+    assert digest["current_story_time"] == {"date": "第三夜", "time": "子时"}
+    assert len(digest["rules"]) == 3
+
+    from app.services.longform_context_service import LongformContextPackage
+    package = LongformContextPackage(
+        project_id="p-digest",
+        chapter_number=3,
+        prompt_text="full prompt",
+        cast_plan=cast,
+        foreshadowing_task=task,
+        memory_digest={"recent_snapshots": []},
+        timeline_digest={"current_story_time": {"date": "第三夜"}},
+        knowledge_digest={},
+        continuation_digest=digest,
+    )
+    assert package.to_optimizer_payload()["continuation_digest"] == digest
+
+
+def test_continuation_context_consumes_service_owned_digest_before_legacy_fields():
+    from types import SimpleNamespace
+    from app.services.pipeline_orchestrator import PipelineOrchestrator
+
+    package = SimpleNamespace(
+        continuation_digest={
+            "version": 1,
+            "active_character_states": ["状态：林七负伤"],
+            "relationship_edges": ["关系：林七试探沈舟"],
+            "timeline_facts": ["时间线：追兵逼近"],
+            "knowledge_boundaries": ["知识边界：沈舟隐瞒来源"],
+            "memory_facts": ["记忆：上一章拿到账册"],
+            "must_resolve": ["必须回收：盐渍编号"],
+            "overdue_risks": ["逾期风险：旧码头追兵"],
+            "avoid_forgetting": ["避免遗忘：半枚印章"],
+            "active_clues": ["活跃线索：潮雾账册"],
+            "rules": ["规则：回收必须给出后果"],
+            "current_story_time": {"date": "第三夜", "time": "子时"},
+        },
+        cast_plan=SimpleNamespace(chapter_focus_names=["旧版焦点"]),
+        foreshadowing_task=SimpleNamespace(must_resolve=[{"name": "旧版伏笔"}], should_reinforce=[]),
+    )
+    context = PipelineOrchestrator._build_continuation_context(
+        chapter_content="门外脚步逼近。",
+        chapter_mission=None,
+        history_context={},
+        longform_context=package,
+    )
+
+    instruction = context["instruction"]
+    assert "状态：林七负伤" in instruction
+    assert "逾期风险：旧码头追兵" in instruction
+    assert "第三夜" in instruction
+    assert "旧版焦点" not in instruction
+    assert context["metadata"]["longform_item_count"] >= 11
+    assert "日期=第三夜；时间=子时" in instruction

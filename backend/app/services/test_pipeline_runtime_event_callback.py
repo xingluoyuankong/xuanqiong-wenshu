@@ -51,6 +51,7 @@ async def test_runtime_update_forwards_persisted_event_to_worker_callback():
     assert received[0]["stage"] == "generate_variants"
     assert received[0]["progress"] == 62
     assert received[0]["payload"]["metadata"]["candidate_count"] == 3
+    assert received[0]["payload"]["message"] == "候选生成中"
 
 
 @pytest.mark.asyncio

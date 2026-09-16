@@ -13,6 +13,7 @@ from ..models.constitution import NovelConstitution
 from .llm_service import LLMService
 from .prompt_service import PromptService
 from .generation_call_service import GenerationCallPolicy, call_generation_json
+from ..agent.provider_attempt import ProviderAttemptLedger
 from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
 
 
@@ -55,7 +56,10 @@ class ConstitutionService:
         project_id: str,
         chapter_number: int,
         chapter_title: str,
-        chapter_content: str
+        chapter_content: str,
+        *,
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
+        attempt_role: str = "constitution_check",
     ) -> dict:
         """检查章节是否符合小说宪法"""
         with LLMService.daily_limit_scope(f"constitution_check:{project_id}:{chapter_number}:{len(chapter_content or '')}"):
@@ -99,6 +103,8 @@ class ConstitutionService:
                         progress_stage="constitution_check",
                         retry_attempts=2,
                         json_repair_attempts=1,
+                        attempt_ledger=attempt_ledger,
+                        attempt_role=attempt_role,
                     ),
                 )
                 return result.data

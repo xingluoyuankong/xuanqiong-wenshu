@@ -1493,7 +1493,7 @@ class TestGenerationQualityGuards:
             "metadata": {},
         }
 
-        async def fake_review_versions(self, versions, chapter_mission=None, user_id=None):
+        async def fake_review_versions(self, versions, chapter_mission=None, user_id=None, **_kwargs):
             return ReviewResult(
                 best_version_index=0,
                 scores={"immersion": 72, "pacing": 58, "hook": 55, "character": 68},
@@ -1560,7 +1560,7 @@ class TestGenerationQualityGuards:
             "metadata": {},
         }
 
-        async def fake_review_versions(self, versions, chapter_mission=None, user_id=None):
+        async def fake_review_versions(self, versions, chapter_mission=None, user_id=None, **_kwargs):
             return ReviewResult(
                 best_version_index=0,
                 scores={"immersion": 80, "pacing": 78, "hook": 76, "character": 75},

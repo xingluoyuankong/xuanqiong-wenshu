@@ -11,8 +11,9 @@ import hashlib
 import inspect
 import time
 from copy import deepcopy
+from contextvars import ContextVar
 from datetime import datetime, timezone
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
 
 import httpx
@@ -23,6 +24,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import settings
+from ..agent.provider_attempt import ProviderAttemptLedger
 from ..models.novel import Chapter, ChapterVersion, ChapterOutline
 from ..models.memory_layer import CharacterState, TimelineEvent
 from ..models.foreshadowing import Foreshadowing
@@ -71,6 +73,19 @@ DEFAULT_GENERATED_VERSION_COUNT = 3  # 默认生成3个并行版本
 MIN_GENERATED_VERSION_COUNT = 1
 MAX_GENERATED_VERSION_COUNT = 4  # 最多生成4个版本
 MAX_STORED_CHAPTER_VERSIONS = 4  # 最多保存4个版本
+
+# 章节 Provider 账本必须按本次协程调用隔离，不能挂在 PipelineOrchestrator 实例上。
+# generate_chapter 创建的候选子任务会继承同一个上下文，因此可安全汇总本章尝试；
+# 另一个章节的并发协程则拥有独立 ContextVar 值。
+_ACTIVE_PROVIDER_ATTEMPT_LEDGER: ContextVar[Optional[ProviderAttemptLedger]] = ContextVar(
+    "active_provider_attempt_ledger", default=None
+)
+_ACTIVE_PROVIDER_LOGICAL_CALLS: ContextVar[Optional[Dict[str, int]]] = ContextVar(
+    "active_provider_budget_logical_calls", default=None
+)
+_ACTIVE_PROVIDER_ESTIMATED_USAGE: ContextVar[Optional[Dict[str, int]]] = ContextVar(
+    "active_provider_budget_estimated_usage", default=None
+)
 
 
 CHAPTER_DRAFT_SUPPORTED_RANGE = {
@@ -1249,6 +1264,133 @@ class PipelineOrchestrator:
             return
         await self.cache_service.set(key, value, expire=expire)
 
+    def _begin_provider_budget_ledger(self, *, generation_run_id: Optional[str], project_id: str, chapter_number: int) -> None:
+        """Start one bounded, redacted Provider ledger for this chapter coroutine context."""
+        run_id = str(generation_run_id or f"chapter:{project_id}:{chapter_number}")
+        _ACTIVE_PROVIDER_ATTEMPT_LEDGER.set(ProviderAttemptLedger(run_id=run_id, max_attempts=64))
+        _ACTIVE_PROVIDER_LOGICAL_CALLS.set({})
+        _ACTIVE_PROVIDER_ESTIMATED_USAGE.set({
+            "estimated_input_tokens": 0,
+            "estimated_output_tokens": 0,
+            "estimated_total_tokens": 0,
+        })
+
+    def _record_provider_logical_call(self, role: str) -> None:
+        logical_calls = _ACTIVE_PROVIDER_LOGICAL_CALLS.get()
+        if isinstance(logical_calls, dict):
+            normalized_role = str(role or "generation").strip()[:80] or "generation"
+            logical_calls[normalized_role] = int(logical_calls.get(normalized_role) or 0) + 1
+
+    def _track_generation_call_policy(
+        self,
+        policy: GenerationCallPolicy,
+        *,
+        role: str,
+    ) -> GenerationCallPolicy:
+        """Attach the active chapter ledger without changing callers outside generate_chapter."""
+        normalized_role = str(role or "generation").strip()[:80] or "generation"
+        ledger = _ACTIVE_PROVIDER_ATTEMPT_LEDGER.get()
+        logical_calls = _ACTIVE_PROVIDER_LOGICAL_CALLS.get()
+        self._record_provider_logical_call(normalized_role)
+        if not isinstance(ledger, ProviderAttemptLedger):
+            return policy
+        return replace(policy, attempt_ledger=ledger, attempt_role=normalized_role)
+
+    def _record_provider_usage(self, text_result: Any) -> None:
+        """Accumulate non-authoritative token estimates without storing prompt/output text."""
+        usage = _ACTIVE_PROVIDER_ESTIMATED_USAGE.get()
+        if not isinstance(usage, dict):
+            return
+        for key in ("estimated_input_tokens", "estimated_output_tokens", "estimated_total_tokens"):
+            try:
+                usage[key] = int(usage.get(key) or 0) + max(0, int(getattr(text_result, key, 0) or 0))
+            except (TypeError, ValueError):
+                continue
+
+    def _provider_budget_summary(self) -> Dict[str, Any]:
+        """Return a compact chapter-level view of direct generation_call_service usage.
+
+        The summary deliberately excludes prompts, raw outputs, provider headers and per-attempt
+        model/provider references. Independent services that do not yet use generation_call_service
+        are named by scope rather than being silently counted as zero.
+        """
+        ledger = _ACTIVE_PROVIDER_ATTEMPT_LEDGER.get()
+        logical_calls = _ACTIVE_PROVIDER_LOGICAL_CALLS.get()
+        logical_calls = logical_calls if isinstance(logical_calls, dict) else {}
+        usage = _ACTIVE_PROVIDER_ESTIMATED_USAGE.get()
+        usage = usage if isinstance(usage, dict) else {}
+        if not isinstance(ledger, ProviderAttemptLedger):
+            return {
+                "scope": "generation_call_service_direct_only",
+                "tracked": False,
+                "logical_call_count": 0,
+                "provider_attempt_count": 0,
+            }
+
+        snapshot = ledger.snapshot()
+        records = snapshot.get("provider_attempts") if isinstance(snapshot.get("provider_attempts"), list) else []
+        roles: Dict[str, Dict[str, int]] = {}
+        error_categories: Dict[str, int] = {}
+        succeeded = failed = running = cancelled = 0
+        retry_attempts = fallback_attempts = 0
+        latest_error_category: Optional[str] = None
+        for raw_record in records:
+            if not isinstance(raw_record, dict):
+                continue
+            role = str(raw_record.get("role") or "unknown")[:80]
+            item = roles.setdefault(role, {"logical_calls": 0, "provider_attempts": 0, "succeeded": 0, "failed": 0, "running": 0, "cancelled": 0})
+            item["provider_attempts"] += 1
+            try:
+                retry_attempts += max(0, int(raw_record.get("retry_index") or 0))
+            except (TypeError, ValueError):
+                pass
+            if raw_record.get("fallback_from_attempt") is not None:
+                fallback_attempts += 1
+            status = str(raw_record.get("status") or "failed").lower()
+            if status == "succeeded":
+                succeeded += 1
+                item["succeeded"] += 1
+            elif status == "running":
+                running += 1
+                item["running"] += 1
+            else:
+                failed += 1
+                item["failed"] += 1
+                category = str(raw_record.get("error_category") or "UNKNOWN")[:48]
+                error_categories[category] = int(error_categories.get(category) or 0) + 1
+                latest_error_category = category
+                if bool(raw_record.get("cancel_observed")) or category == "CANCELLED":
+                    cancelled += 1
+                    item["cancelled"] += 1
+        for role, count in logical_calls.items():
+            normalized_role = str(role)[:80]
+            item = roles.setdefault(normalized_role, {"logical_calls": 0, "provider_attempts": 0, "succeeded": 0, "failed": 0, "running": 0, "cancelled": 0})
+            item["logical_calls"] += max(0, int(count or 0))
+
+        logical_call_count = sum(max(0, int(value or 0)) for value in logical_calls.values())
+        return {
+            "scope": "generation_call_service_direct_only",
+            "tracked": True,
+            "logical_call_count": logical_call_count,
+            "provider_attempt_count": len(records),
+            "succeeded_attempt_count": succeeded,
+            "failed_attempt_count": failed,
+            "running_attempt_count": running,
+            "cancelled_attempt_count": cancelled,
+            "retry_attempt_count": retry_attempts,
+            "fallback_attempt_count": fallback_attempts,
+            "remaining_attempt_count": max(0, ledger.max_attempts - len(records)),
+            "attempt_record_limit": ledger.max_attempts,
+            "attempt_record_capacity_reached": len(records) >= ledger.max_attempts,
+            "fallback_used": bool(snapshot.get("fallback_used")),
+            "latest_error_category": latest_error_category,
+            "error_categories": error_categories,
+            "estimated_input_tokens": max(0, int(usage.get("estimated_input_tokens") or 0)),
+            "estimated_output_tokens": max(0, int(usage.get("estimated_output_tokens") or 0)),
+            "estimated_total_tokens": max(0, int(usage.get("estimated_total_tokens") or 0)),
+            "roles": roles,
+        }
+
     @staticmethod
     def _parse_generation_runtime(raw_summary: Optional[str]) -> Dict[str, Any]:
         if not raw_summary:
@@ -1995,6 +2137,9 @@ class PipelineOrchestrator:
         }
         if runtime.get("reason"):
             normalized_runtime["reason"] = runtime.get("reason")
+        provider_budget = self._provider_budget_summary()
+        if provider_budget.get("tracked"):
+            normalized_runtime["provider_budget"] = self._compact_runtime_value(provider_budget)
         if extra:
             normalized_runtime.update({
                 key: self._compact_runtime_value(value)
@@ -2727,46 +2872,732 @@ class PipelineOrchestrator:
                 },
             )
 
-    async def _prepare_chapter_context(
+    @staticmethod
+    def _compact_continuation_items(values: Any, *, limit: int = 3, item_limit: int = 180) -> List[str]:
+        """将续写所需的状态压缩为稳定、可审计的短条目。"""
+        if values is None:
+            return []
+        if isinstance(values, str):
+            raw_values: List[Any] = [values]
+        elif isinstance(values, dict):
+            raw_values = [values]
+        elif isinstance(values, (list, tuple, set)):
+            raw_values = list(values)
+        else:
+            raw_values = [values]
+
+        compact: List[str] = []
+        seen: set[str] = set()
+        for value in raw_values:
+            if isinstance(value, dict):
+                parts = [
+                    str(value.get(key) or "").strip()
+                    for key in (
+                        "scene", "goal", "conflict", "obstacle", "turn", "outcome", "payoff",
+                        "bridge", "dialogue_value", "end_hook", "hook", "name", "content", "description",
+                    )
+                    if str(value.get(key) or "").strip()
+                ]
+                item = "；".join(parts)
+            else:
+                item = str(value or "").strip()
+            if not item:
+                continue
+            item = item[:item_limit].rstrip()
+            if item in seen:
+                continue
+            seen.add(item)
+            compact.append(item)
+            if len(compact) >= limit:
+                break
+        return compact
+
+    @classmethod
+    def _build_continuation_context(
+        cls,
+        *,
+        chapter_content: str,
+        chapter_mission: Optional[Dict[str, Any]],
+        history_context: Optional[Dict[str, Any]],
+        longform_context: Optional[LongformContextPackage],
+        continuation_constraints: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """为长章节续写保留正文衔接与尚未兑现的叙事约束。
+
+        续写不能只看到一个孤立的字尾：它还必须知道本章承接什么、场景还要完成什么、
+        以及长篇账本里哪些角色/线索仍处于活跃状态。这里刻意使用受限短包，避免每轮
+        续写重复注入整份写作 prompt 而拖慢生成或挤占正文输出窗口。
+        """
+        mission = chapter_mission if isinstance(chapter_mission, dict) else {}
+        history = history_context if isinstance(history_context, dict) else {}
+        tail = str(chapter_content or "").strip()[-1200:]
+
+        anchor = mission.get("continuity_anchor") or {}
+        inherit = cls._compact_continuation_items(
+            anchor.get("inherit_from_previous") if isinstance(anchor, dict) else None,
+            limit=3,
+            item_limit=140,
+        )
+        raw_scenes = mission.get("scene_list") if isinstance(mission.get("scene_list"), list) else []
+        scene_tasks: List[str] = []
+        completed_scene_count = 0
+        recent_scene_evidence = str(chapter_content or "")[-1600:]
+        for scene in raw_scenes[:8]:
+            if not isinstance(scene, dict):
+                continue
+            scene_values = [scene.get(key) for key in (
+                "scene", "goal", "conflict", "turn", "outcome", "payoff", "bridge",
+                "dialogue_value", "end_hook",
+            )]
+            scene_text = "；".join(cls._compact_continuation_items(scene_values, limit=10, item_limit=120))
+            if not scene_text:
+                continue
+            _, scene_hits = cls._score_text_hits(scene_values, recent_scene_evidence)
+            decisive_values = [scene.get(key) for key in ("turn", "outcome", "payoff", "end_hook") if scene.get(key)]
+            _, decisive_hits = cls._score_text_hits(decisive_values, recent_scene_evidence)
+            if len(decisive_hits) >= 1 or len(scene_hits) >= 3:
+                completed_scene_count += 1
+                continue
+            scene_tasks.append(scene_text)
+            if len(scene_tasks) >= 3:
+                break
+        focus_characters = cls._compact_continuation_items(
+            mission.get("focus_characters") or mission.get("character_focus") or mission.get("pov_character"),
+            limit=5,
+            item_limit=80,
+        )
+        dialogue_purpose = cls._compact_continuation_items(
+            (mission.get("dialogue_strategy") or {}).get("purpose")
+            if isinstance(mission.get("dialogue_strategy"), dict) else None,
+            limit=3,
+            item_limit=120,
+        )
+
+        active_longform: List[str] = []
+        if longform_context is not None:
+            continuation_digest = getattr(longform_context, "continuation_digest", None)
+            if isinstance(continuation_digest, dict) and continuation_digest:
+                # The service-owned digest is the source of truth. Keep labels
+                # on each category so a compact prompt does not blur facts,
+                # risks, and rules together.
+                digest_sections = (
+                    ("活跃人物状态", continuation_digest.get("active_character_states"), 3),
+                    ("关系张力", continuation_digest.get("relationship_edges"), 2),
+                    ("时间线事实", continuation_digest.get("timeline_facts"), 2),
+                    ("知识边界", continuation_digest.get("knowledge_boundaries"), 2),
+                    ("记忆快照", continuation_digest.get("memory_facts"), 1),
+                    ("必须回收", continuation_digest.get("must_resolve"), 2),
+                    ("逾期风险", continuation_digest.get("overdue_risks"), 2),
+                    ("避免遗忘", continuation_digest.get("avoid_forgetting"), 1),
+                    ("活跃线索", continuation_digest.get("active_clues"), 2),
+                    ("时间状态", [
+                        "；".join(
+                            f"{label}={value}"
+                            for key, label, value in (
+                                ("date", "日期", (continuation_digest.get("current_story_time") or {}).get("date")),
+                                ("time", "时间", (continuation_digest.get("current_story_time") or {}).get("time")),
+                            )
+                            if str(value or "").strip()
+                        )
+                    ], 1),
+                )
+                for label, values, limit in digest_sections:
+                    items = cls._compact_continuation_items(values, limit=limit, item_limit=180)
+                    active_longform.extend(f"{label}：{item}" for item in items)
+                active_longform.extend(
+                    f"连续性规则：{item}"
+                    for item in cls._compact_continuation_items(
+                        continuation_digest.get("rules"), limit=1, item_limit=180
+                    )
+                )
+            else:
+                # Compatibility for older manually-created packages in tests
+                # and persisted tasks that predate the service-owned digest.
+                cast_plan = getattr(longform_context, "cast_plan", None)
+                active_longform.extend(
+                    cls._compact_continuation_items(
+                        getattr(cast_plan, "chapter_focus_names", None), limit=4, item_limit=80
+                    )
+                )
+                foreshadowing_task = getattr(longform_context, "foreshadowing_task", None)
+                active_longform.extend(
+                    cls._compact_continuation_items(
+                        getattr(foreshadowing_task, "must_resolve", None), limit=2, item_limit=150
+                    )
+                )
+                active_longform.extend(
+                    cls._compact_continuation_items(
+                        getattr(foreshadowing_task, "should_reinforce", None), limit=1, item_limit=150
+                    )
+                )
+        active_longform = cls._compact_continuation_items(active_longform, limit=20, item_limit=180)
+
+        previous_summary = str(history.get("previous_summary") or "").strip()[:260]
+        constraints = continuation_constraints if isinstance(continuation_constraints, dict) else {}
+        pov = str(constraints.get("pov") or "").strip()[:100]
+        style_hint = str(constraints.get("style_hint") or "").strip()[:260]
+        writing_note = str(constraints.get("writing_notes") or "").strip()[:320]
+        forbidden = cls._compact_continuation_items(
+            constraints.get("forbidden_characters"), limit=8, item_limit=80
+        )
+        instructions = [
+            "【续写状态约束】只接续已写正文的最后一句之后，禁止复述、重启场景或解释写作过程。",
+        ]
+        if previous_summary:
+            instructions.append(f"上一章承接：{previous_summary}")
+        if pov:
+            instructions.append(f"叙述视角：{pov}；不得无故切换视角。")
+        if style_hint:
+            instructions.append(f"文风约束：{style_hint}")
+        if writing_note:
+            instructions.append(f"用户写作要求：{writing_note}")
+        if forbidden:
+            instructions.append("禁止提前出场/提及角色：" + "、".join(forbidden))
+        if inherit:
+            instructions.append("必须延续的承接锚点：" + "；".join(inherit))
+        if scene_tasks:
+            instructions.append("本章尚需推进的场景任务：" + " / ".join(scene_tasks))
+        if focus_characters:
+            instructions.append("焦点人物：" + "、".join(focus_characters))
+        if dialogue_purpose:
+            instructions.append("对话必须承担：" + "、".join(dialogue_purpose))
+        if active_longform:
+            instructions.append("长篇连续性账本：" + "；".join(active_longform))
+        instructions.append("续写必须制造可见行动、阻碍、信息或关系变化，并把压力递向本章后段。")
+
+        return {
+            "assistant_tail": tail,
+            "instruction": "\n".join(instructions),
+            "metadata": {
+                "tail_chars": len(tail),
+                "inherit_anchor_count": len(inherit),
+                "scene_task_count": len(scene_tasks),
+                "completed_scene_count": completed_scene_count,
+                "focus_character_count": len(focus_characters),
+                "longform_item_count": len(active_longform),
+                "constraint_count": sum(bool(item) for item in (pov, style_hint, writing_note, forbidden)),
+                "instruction_chars": len("\n".join(instructions)),
+                "state_chars": len(tail) + len("\n".join(instructions)),
+            },
+        }
+
+    @staticmethod
+    def _resolve_continuation_min_increment(
+        configured_minimum: int,
+        remaining_to_floor: int,
+    ) -> int:
+        """最后一轮不应因全局增量阈值高于剩余缺口而丢掉有效收尾。"""
+        configured = max(1, int(configured_minimum or 1))
+        remaining = max(1, int(remaining_to_floor or 0))
+        return min(configured, remaining)
+
+    @staticmethod
+    def _build_continuation_history(
+        *,
+        prompt_input: str,
+        continuation_context: Dict[str, Any],
+        continuation_prompt: str,
+        include_full_prompt: bool,
+    ) -> List[Dict[str, str]]:
+        """构造续写消息：首轮继承全量写前约束，后续轮只传受限状态包。"""
+        history: List[Dict[str, str]] = [
+            {"role": "assistant", "content": str(continuation_context.get("assistant_tail") or "")},
+            {"role": "user", "content": str(continuation_prompt or "")},
+        ]
+        if include_full_prompt:
+            history.insert(0, {"role": "user", "content": str(prompt_input or "")})
+        return history
+
+    async def _call_continuation_generation(
+        self,
+        *,
+        writer_prompt: str,
+        conversation_history: List[Dict[str, str]],
+        user_id: int,
+        remaining_to_floor: int,
+        minimum_increment: int,
+        round_number: int,
+    ):
+        """执行单轮续写 Provider 请求，统一按剩余量收敛预算。"""
+        requested_words = max(1, int(remaining_to_floor or 0))
+        budget_words = max(int(minimum_increment or 1), requested_words + 240)
+        result = await call_generation_text(
+            llm_service=self.llm_service,
+            system_prompt=writer_prompt,
+            conversation_history=conversation_history,
+            temperature=0.75,
+            user_id=user_id,
+            timeout=self._resolve_chapter_generation_timeout(budget_words),
+            policy=self._track_generation_call_policy(
+                GenerationCallPolicy(
+                    stage_label=f"续写轮{round_number}",
+                    progress_stage="multi_round_continuation",
+                    retry_attempts=1,
+                    max_tokens=self._resolve_chapter_generation_max_tokens(budget_words),
+                    allow_truncated_response=True,
+                ),
+                role="continuation",
+            ),
+        )
+        self._record_provider_usage(result)
+        return result
+
+    @classmethod
+    def _audit_continuation_output(
+        cls,
+        *,
+        existing_content: str,
+        raw_output: Any,
+        minimum_increment: int,
+    ) -> Dict[str, Any]:
+        """规范化并审计续写增量，阻止短回复和重复回复把任务拖成假进度。"""
+        raw = str(raw_output or "")
+        normalized = cls._normalize_generated_prose(raw)
+        # 续写单独处理普通 Markdown 代码围栏；JSON 围栏由通用规范化解析，
+        # 纯文本围栏则必须在拼接前剥离，避免把 Provider 外壳写进正文。
+        normalized, _ = cls._sanitize_markdown_presentation(normalized)
+        normalized = "\n".join(
+            line for line in normalized.split("\n")
+            if not re.match(r"^\s*```(?:[A-Za-z0-9_-]+)?\s*$", line)
+        ).strip()
+        existing = str(existing_content or "").strip()
+        tail = existing[-400:]
+        overlap = 0
+        max_overlap = min(len(tail), len(normalized), 240)
+        for size in range(max_overlap, 39, -1):
+            if normalized[:size] == tail[-size:]:
+                overlap = size
+                break
+        normalized_chars = len(normalized.replace("\n", ""))
+        duplicate_ratio = round(overlap / max(1, min(len(normalized), 240)), 4)
+        min_increment = max(1, int(minimum_increment or 1))
+        stop_reason: Optional[str] = None
+        if not normalized:
+            stop_reason = "empty_output"
+        elif cls._detect_generation_meta_leakage(normalized):
+            stop_reason = "generation_meta_leakage"
+        elif overlap >= 80 and duplicate_ratio >= 0.5:
+            stop_reason = "duplicate_tail"
+        elif normalized_chars < min_increment:
+            stop_reason = "low_increment"
+        return {
+            "raw_chars": len(raw),
+            "normalized_chars": normalized_chars,
+            "increment_chars": normalized_chars,
+            "duplicate_overlap_chars": overlap,
+            "duplicate_ratio": duplicate_ratio,
+            "accepted": stop_reason is None,
+            "stop_reason": stop_reason,
+            "text": normalized,
+        }
+
+    async def generate_chapter(
         self,
         *,
         project_id: str,
         chapter_number: int,
         user_id: int,
-        project: Any,
-        chapter_mission: Optional[Dict[str, Any]],
-        config: Any,
+        writing_notes: Optional[str] = None,
+        flow_config: Optional[Dict[str, Any]] = None,
+        generation_run_id: Optional[str] = None,
+        runtime_event_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     ) -> Dict[str, Any]:
-        # Prepare all context needed for chapter generation
-        context_result = {}
-        
-        # Prepare chapter context
-        context_data = await self._prepare_chapter_context(
+        self._runtime_event_callback = runtime_event_callback
+        self._begin_provider_budget_ledger(
+            generation_run_id=generation_run_id,
             project_id=project_id,
             chapter_number=chapter_number,
-            user_id=user_id,
-            project=project,
-            chapter_mission=chapter_mission,
-            config=config,
         )
-        
-        # Extract context data
-        history_context = context_data['history_context']
-        blueprint_dict = context_data['blueprint_dict']
-        outline_title = context_data['outline_title']
-        outline_summary = context_data['outline_summary']
-        writing_notes = context_data['writing_notes']
-        introduced_characters = context_data['introduced_characters']
-        allowed_new_characters = context_data['allowed_new_characters']
-        all_characters = context_data['all_characters']
-        longform_context = context_data.get('longform_context')
-        enhanced_context = context_data.get('enhanced_context')
-        memory_context = context_data.get('memory_context')
-        project_memory_text = context_data.get('project_memory_text', '')
-        style_context = context_data.get('style_context', '')
-        analysis_guidance_context = context_data.get('analysis_guidance_context')
-        rag_context = context_data.get('rag_context')
-        knowledge_context = context_data.get('knowledge_context')
+        stage_timings: Dict[str, float] = {}
+
+        async def mark_stage(stage_name: str, started_at: float, *, detail: Optional[str] = None) -> None:
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+            stage_timings[stage_name] = duration_ms
+            logger.info(
+                "Pipeline stage completed: project=%s chapter=%s stage=%s duration_ms=%s",
+                project_id,
+                chapter_number,
+                stage_name,
+                duration_ms,
+            )
+            runtime_detail = detail or f"阶段 {stage_name} 完成，用时 {round(duration_ms / 1000, 2)} 秒"
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage=stage_name,
+                message=runtime_detail,
+                progress_percent=self._infer_stage_progress_percent(stage_name),
+                event_kind="progress",
+                title=f"{stage_name} 完成",
+                summary=runtime_detail,
+                extra={
+                    "stage_duration_ms": duration_ms,
+                    "stage_duration_seconds": round(duration_ms / 1000, 2),
+                    "stage_timings": dict(stage_timings),
+                },
+            )
+
+        pipeline_started_at = time.perf_counter()
+        config = await self._resolve_config(flow_config)
+        longform_runtime = (flow_config or {}).get("longform_runtime")
+        longform_execution_state = (
+            self._restore_longform_execution_state(
+                flow_config=flow_config,
+                project_id=project_id,
+                chapter_number=chapter_number,
+                target_word_count=config.target_word_count,
+            )
+            if isinstance(longform_runtime, dict) and longform_runtime.get("checkpoint_enabled")
+            else None
+        )
+        requested_preset = str((flow_config or {}).get("preset", "") or "").strip() or config.preset
+        runtime_metadata: Dict[str, Any] = {
+            "provider_preflight": {},
+            "degraded_stages": [],
+            "generation_mode": "quality",
+            "stable_retry_used": False,
+            "requested_preset": requested_preset,
+            "actual_preset": config.preset,
+            "preset_downgraded": False,
+            "downgraded_capabilities": [],
+            "target_word_count": 0,
+            "min_word_count": 0,
+            "actual_word_count": 0,
+            "enrichment_triggered": False,
+            "word_requirement_met": False,
+            "word_requirement_reason": None,
+            "generation_attempts": [],
+            "candidate_generation": {},
+            "quality_gates": {},
+            "review_status": "skipped",
+            "consistency_status": "skipped",
+            "writer_prompt_budget_tokens": self._resolve_writer_prompt_budget(config.target_word_count),
+        }
+        runtime_metadata["provider_preflight"] = await self._ensure_provider_ready(user_id)
+        runtime_metadata["target_word_count"] = config.target_word_count
+        runtime_metadata["min_word_count"] = config.min_word_count
+        runtime_metadata["chapter_draft_contract"] = self._resolve_chapter_draft_contract(
+            config.target_word_count,
+            config.min_word_count,
+        )
+        runtime_metadata["chapter_generation_limits"] = {
+            "timeout_seconds": self._resolve_chapter_generation_timeout(config.target_word_count),
+            "soft_timeout_seconds": self._resolve_chapter_generation_soft_timeout(config.target_word_count),
+            "max_tokens": self._resolve_chapter_generation_max_tokens(config.target_word_count),
+            "mission_timeout_seconds": self._resolve_chapter_mission_timeout(config.target_word_count),
+            "mission_max_tokens": self._resolve_chapter_mission_max_tokens(config.target_word_count),
+            "writer_prompt_budget_tokens": self._resolve_writer_prompt_budget(config.target_word_count),
+        }
+        runtime_metadata["writing_contract_snapshot"] = self._writing_contract_runtime_metadata()
+        # T-24 production candidates consume max_tokens=self._resolve_writer_prompt_budget(config.target_word_count)
+        # inside _generate_single_version, invoked by this orchestration path.
+        # HTTP entrypoints have already authorized the actor. A queued worker
+        # must load its project by project_id, not by the legacy project creator,
+        # because its durable execution owner may be an Editor or Admin.
+        project = await self.novel_service.repo.get_by_id(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="项目不存在")
+
+        token_budget_warning = await self._check_token_budget_before_generation(project_id)
+        if token_budget_warning:
+            runtime_metadata["token_budget_warning"] = token_budget_warning
+
+        # 长篇项目（大纲超过 10 章）自动启用 memory，保障跨章连续性
+        # 仅在 preset 非 basic 且 memory 尚未显式启用时自动开启
+        outline_count = len(project.outlines) if hasattr(project, "outlines") and project.outlines else 0
+        if outline_count > 10 and config.preset != "basic" and not config.enable_memory:
+            config.enable_memory = True
+            logger.info(
+                "Auto-enabled memory layer for long-form project: project=%s outlines=%s preset=%s",
+                project_id,
+                outline_count,
+                config.preset,
+            )
+
+        outline = await self.novel_service.get_outline(project_id, chapter_number)
+        if not outline:
+            raise HTTPException(status_code=404, detail="蓝图中未找到对应章节纲要")
+
+        chapter = await self.novel_service.get_or_create_chapter(project_id, chapter_number)
+        chapter_needs_reset = chapter.status != ChapterGenerationStatus.GENERATING.value
+        await self._rebind_generation_run_if_needed(
+            chapter, generation_run_id=generation_run_id, stage="pre_mission_context"
+        )
+        if chapter_needs_reset:
+            chapter.selected_version_id = None
+            chapter.status = "generating"
+            await self.session.commit()
+
+        await self._update_generation_runtime(
+            chapter,
+            generation_run_id=generation_run_id,
+            stage="prepare_context",
+            message="正在整理章节上下文、历史摘要和写作约束",
+            progress_percent=8,
+            extra={
+                "target_word_count": config.target_word_count,
+                "min_word_count": config.min_word_count,
+                "generation_mode": config.preset,
+                "chapter_draft_contract": runtime_metadata["chapter_draft_contract"],
+                "chapter_generation_limits": runtime_metadata["chapter_generation_limits"],
+            },
+        )
+        await self._assert_generation_active(
+            chapter,
+            generation_run_id=generation_run_id,
+            stage="prepare_context",
+        )
+
+        outlines_map = {item.chapter_number: item for item in project.outlines}
+        prepare_context_started_at = time.perf_counter()
+        history_context = await self._collect_history_context(
+            project_id=project_id,
+            chapter_number=chapter_number,
+            outlines_map=outlines_map,
+            chapters=project.chapters,
+            user_id=user_id,
+        )
+
+        blueprint_dict = await self._get_writer_blueprint(project)
+
+        outline_title = outline.title or f"第{outline.chapter_number}章"
+        outline_summary = outline.summary or "暂无摘要"
+        writing_notes = writing_notes or "无额外写作指令"
+
+        pre_mission_scope = self.context_builder.analyze_character_scope(
+            blueprint=blueprint_dict,
+            completed_summaries=history_context["completed_summaries"],
+            previous_tail=history_context["previous_tail"],
+            outline_title=outline_title,
+            outline_summary=outline_summary,
+            writing_notes=writing_notes,
+        )
+        all_characters = pre_mission_scope["all_names"]
+        introduced_characters = pre_mission_scope["introduced_characters"]
+        planned_characters = pre_mission_scope["planned_characters"]
+
+        mission_started_at = time.perf_counter()
+        chapter_mission = await self._generate_chapter_mission(
+            blueprint_dict=blueprint_dict,
+            previous_summary=history_context["previous_summary"],
+            previous_tail=history_context["previous_tail"],
+            recent_track=history_context.get("recent_track", ""),
+            plot_arc_digest=history_context.get("plot_arc_digest", ""),
+            outline_title=outline_title,
+            outline_summary=outline_summary,
+            writing_notes=writing_notes,
+            introduced_characters=introduced_characters,
+            planned_characters=planned_characters,
+            all_characters=all_characters,
+            target_word_count=config.target_word_count,
+            user_id=user_id,
+        )
+        await mark_stage("generate_mission", mission_started_at, detail="章节导演脚本阶段完成")
+
+        allowed_new_characters = chapter_mission.get("allowed_new_characters", []) if chapter_mission else []
+
+        visibility_context = self.context_builder.build_visibility_context(
+            blueprint=blueprint_dict,
+            completed_summaries=history_context["completed_summaries"],
+            previous_tail=history_context["previous_tail"],
+            outline_title=outline_title,
+            outline_summary=outline_summary,
+            writing_notes=writing_notes,
+            allowed_new_characters=allowed_new_characters,
+        )
+
+        writer_blueprint = visibility_context["writer_blueprint"]
+        forbidden_characters = visibility_context["forbidden_characters"]
+        introduced_characters = visibility_context["introduced_characters"]
+        macro_continuity_context = visibility_context.get("macro_continuity_context")
+
+        logger.info(
+            "Pipeline context: project=%s chapter=%s introduced=%d allowed_new=%d forbidden=%d",
+            project_id,
+            chapter_number,
+            len(introduced_characters),
+            len(allowed_new_characters),
+            len(forbidden_characters),
+        )
+
+        longform_context: Optional[LongformContextPackage] = None
+        longform_context_started_at = time.perf_counter()
+        try:
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="audit_context",
+                message="正在审计长期记忆、章节快照、时间线与知识图谱",
+                progress_percent=11,
+                extra={
+                    "context_stage": "audit_context",
+                    "context_stage_label": "长期上下文审计",
+                },
+            )
+            await self._assert_generation_active(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="audit_context",
+            )
+            longform_context = await self.longform_context_service.build_context_package(
+                project=project,
+                outline=outline,
+                chapter_number=chapter_number,
+                writing_notes=writing_notes,
+                chapter_mission=chapter_mission,
+                allowed_new_characters=allowed_new_characters,
+            )
+            runtime_metadata["longform_context"] = longform_context.to_metadata()
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="cast_plan",
+                message="正在装配角色规模、登场层级、势力归属和动态角色规则",
+                progress_percent=14,
+                extra={
+                    "target_character_count": longform_context.cast_plan.target_character_count,
+                    "planned_character_count": longform_context.cast_plan.planned_character_count,
+                    "chapter_focus_names": longform_context.cast_plan.chapter_focus_names,
+                },
+            )
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="foreshadowing_plan",
+                message="正在规划本章伏笔回收、强化、禁忘和可新增线索",
+                progress_percent=17,
+                extra={
+                    "must_resolve_count": len(longform_context.foreshadowing_task.must_resolve),
+                    "should_reinforce_count": len(longform_context.foreshadowing_task.should_reinforce),
+                    "avoid_forgetting_count": len(longform_context.foreshadowing_task.avoid_forgetting),
+                    "active_clue_count": len(longform_context.foreshadowing_task.active_clues),
+                },
+            )
+            await mark_stage("longform_context", longform_context_started_at, detail="长篇上下文包装配完成")
+        except Exception as exc:  # noqa: BLE001 - longform context should improve generation, not take the writer down.
+            runtime_metadata["degraded_stages"].append({"stage": "longform_context", "reason": str(exc)})
+            if isinstance(exc, SQLAlchemyError):
+                await self._safe_session_rollback("longform_context")
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="audit_context",
+                message="长篇上下文装配已降级跳过，继续使用基础上下文生成",
+                progress_percent=17,
+                level="warning",
+                extra={
+                    "degraded_stage": "longform_context",
+                    "degraded_reason": self._truncate_runtime_text(exc),
+                },
+            )
+            logger.warning("长篇上下文装配已降级：project=%s chapter=%s error=%s", project_id, chapter_number, exc)
+
+        enhanced_flow = None
+        enhanced_context = None
+        if config.enable_constitution or config.enable_persona or config.enable_foreshadowing or config.enable_faction:
+            enhanced_flow = EnhancedWritingFlow(self.session, self.llm_service, self.prompt_service)
+
+            async def report_enhanced_context_progress(stage: str, message: str) -> None:
+                await self._update_generation_runtime(
+                    chapter,
+                    generation_run_id=generation_run_id,
+                    stage=stage,
+                    message=message,
+                    progress_percent=self._infer_stage_progress_percent(stage),
+                    event_kind="progress",
+                    title="写前账本等待中",
+                    summary=message,
+                    extra={
+                        "provider_waiting": True,
+                        "context_stage": stage,
+                        "context_stage_label": "写前增强上下文",
+                        "target_word_count": config.target_word_count,
+                        "min_word_count": config.min_word_count,
+                    },
+                )
+                await self._assert_generation_active(
+                    chapter,
+                    generation_run_id=generation_run_id,
+                    stage=f"{stage}_provider_wait",
+                )
+
+            await self._update_generation_runtime(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="enhanced_context",
+                message="正在装配小说宪法、文风、伏笔提醒和势力关系",
+                progress_percent=18,
+                extra={
+                    "context_stage": "enhanced_context",
+                    "context_stage_label": "写前增强上下文",
+                    "enable_constitution": config.enable_constitution,
+                    "enable_persona": config.enable_persona,
+                    "enable_foreshadowing": config.enable_foreshadowing,
+                    "enable_faction": config.enable_faction,
+                },
+            )
+            await self._assert_generation_active(
+                chapter,
+                generation_run_id=generation_run_id,
+                stage="enhanced_context",
+            )
+            enhanced_context = await enhanced_flow.prepare_writing_context(
+                project_id=project_id,
+                chapter_number=chapter_number,
+                chapter_outline=outline_summary,
+                user_id=user_id,
+                progress_callback=report_enhanced_context_progress,
+            )
+
+        memory_context = None
+        if config.enable_memory:
+            memory_context = await self._get_memory_context(
+                project_id=project_id,
+                chapter_number=chapter_number,
+                involved_characters=introduced_characters,
+            )
+
+        project_memory_text = await self._get_project_memory_text(project_id)
+        style_context = await self._get_style_context(project_id, user_id)
+        analysis_guidance_context = await self._build_story_guidance_context(
+            project_id=project_id,
+            chapter_number=chapter_number,
+        )
+
+        rag_context = None
+        knowledge_context = None
+        rag_stats = None
+        if config.enable_rag:
+            if config.rag_mode == "two_stage":
+                knowledge_context, rag_stats = await self._get_two_stage_rag_context(
+                    project_id=project_id,
+                    chapter_number=chapter_number,
+                    writing_notes=writing_notes,
+                    pov_character=self._resolve_pov_character(chapter_mission),
+                    user_id=user_id,
+                )
+                continuity_injection = self._build_continuity_retrieval_injection(history_context)
+                if continuity_injection:
+                    knowledge_context = "\n\n".join(part for part in [continuity_injection, knowledge_context] if part)
+                    if isinstance(rag_stats, dict):
+                        rag_stats["continuity_injection"] = True
+            else:
+                rag_context = await self._get_rag_context(
+                    project_id=project_id,
+                    outline_title=outline_title,
+                    outline_summary=outline_summary,
+                    writing_notes="\n".join(filter(None, [writing_notes, history_context.get("plot_arc_digest", ""), history_context.get("recent_track", "")])),
+                    user_id=user_id,
+                )
+                rag_context = self._inject_continuity_into_rag(rag_context, history_context)
+                rag_stats = {
+                    "mode": "simple",
+                    "chunks": len(rag_context.get("chunks", [])) if rag_context else 0,
+                    "summaries": len(rag_context.get("summaries", [])) if rag_context else 0,
+                    "continuity_injection": bool((rag_context or {}).get("continuity_injection")),
+                }
+        await mark_stage("prepare_context", prepare_context_started_at, detail="上下文准备阶段完成")
+
         writer_prompt = await self.prompt_service.get_prompt("writing_v2")
         if not writer_prompt:
             writer_prompt = await self.prompt_service.get_prompt("writing")
@@ -3203,7 +4034,7 @@ class PipelineOrchestrator:
                 },
             )
 
-        # ── Multi-round continuation for long chapters (free API workaround) ──
+        # ── Multi-round continuation for long chapters ──
         if config.enable_multi_round_fallback and versions:
             best_initial = max(
                 versions,
@@ -3212,67 +4043,198 @@ class PipelineOrchestrator:
             best_content_initial = best_initial.get("content") or ""
             initial_words = len(best_content_initial.replace(chr(10), ""))
             target_words = config.target_word_count
-
+            continuation_floor = max(1, int(target_words * 0.6))
             continuation_rounds = 0
-            while (initial_words < target_words * 0.6
-                   and continuation_rounds < config.multi_round_max_rounds):
+            continuation_attempts: List[Dict[str, Any]] = []
+            continuation_stop_reason: Optional[str] = None
+            last_continuation_context: Dict[str, Any] = {}
+
+            while (
+                initial_words < continuation_floor
+                and continuation_rounds < config.multi_round_max_rounds
+            ):
                 continuation_rounds += 1
+                round_started_at = time.perf_counter()
                 await self._update_generation_runtime(
                     chapter,
                     generation_run_id=generation_run_id,
                     stage="multi_round_continuation",
-                    message=f"字数不足（{initial_words}/{target_words}），启动第{continuation_rounds}轮续写...",
+                    message=(
+                        f"字数不足（{initial_words}/{target_words}，续写最低完成线 {continuation_floor}），"
+                        f"启动第{continuation_rounds}轮续写..."
+                    ),
                     progress_percent=min(62 + continuation_rounds * 3, 68),
                     event_kind="progress",
                     title=f"多轮续写 第{continuation_rounds}轮",
                 )
+                await self._assert_generation_active(
+                    chapter,
+                    generation_run_id=generation_run_id,
+                    stage=f"multi_round_continuation_{continuation_rounds}_before_call",
+                )
 
+                continuation_context = self._build_continuation_context(
+                    chapter_content=best_content_initial,
+                    chapter_mission=chapter_mission,
+                    history_context=history_context,
+                    longform_context=longform_context,
+                    continuation_constraints={
+                        "pov": self._resolve_pov_character(chapter_mission),
+                        "style_hint": self._truncate_text(style_context, 260),
+                        "writing_notes": writing_notes,
+                        "forbidden_characters": forbidden_characters,
+                    },
+                )
+                last_continuation_context = continuation_context.get("metadata", {})
+                remaining_to_floor = max(0, continuation_floor - initial_words)
+                round_minimum_increment = self._resolve_continuation_min_increment(
+                    config.multi_round_min_increment,
+                    remaining_to_floor,
+                )
                 continuation_prompt = (
-                    f"【续写指令】请紧接着上面的内容继续写下去，保持同样的风格、视角和节奏。"
-                    f"当前已写{initial_words}字，目标{target_words}字，还需要至少{int(target_words * 0.6) - initial_words}字。"
-                    f"不要重复已写内容，直接接续结尾继续推进剧情。"
+                    f"【续写指令】当前已写{initial_words}字，目标{target_words}字，"
+                    f"本轮至少补足{remaining_to_floor}字以达到续写完成线。\n"
+                    f"{continuation_context['instruction']}"
+                )
+                # 首轮保留完整写前上下文；后续轮次只保留经审计的最小状态包，防止 prompt 膨胀。
+                continuation_history = self._build_continuation_history(
+                    prompt_input=prompt_input,
+                    continuation_context=continuation_context,
+                    continuation_prompt=continuation_prompt,
+                    include_full_prompt=continuation_rounds == 1,
+                )
+                continuation_max_tokens = self._resolve_chapter_generation_max_tokens(
+                    max(round_minimum_increment, remaining_to_floor + 240)
                 )
 
                 try:
-                    cont_result = await call_generation_text(
-                        llm_service=self.llm_service,
-                        system_prompt=writer_prompt,
-                        conversation_history=[
-                            {"role": "user", "content": prompt_input},
-                            {"role": "assistant", "content": best_content_initial[-800:]},
-                            {"role": "user", "content": continuation_prompt},
-                        ],
-                        temperature=0.75,
+                    cont_result = await self._call_continuation_generation(
+                        writer_prompt=writer_prompt,
+                        conversation_history=continuation_history,
                         user_id=user_id,
-                        timeout=self._resolve_chapter_generation_timeout(config.target_word_count),
-                        policy=GenerationCallPolicy(
-                            stage_label=f"续写轮{continuation_rounds}",
-                            progress_stage="multi_round_continuation",
-                            retry_attempts=1,
-                            max_tokens=self._resolve_chapter_generation_max_tokens(target_words),
-                            allow_truncated_response=True,
-                        ),
+                        remaining_to_floor=remaining_to_floor,
+                        minimum_increment=round_minimum_increment,
+                        round_number=continuation_rounds,
                     )
-                    if cont_result and cont_result.text:
-                        new_content = best_content_initial + "\n\n" + cont_result.text
-                        best_initial["content"] = new_content
-                        best_initial["word_count"] = len(new_content.replace(chr(10), ""))
-                        best_content_initial = new_content
-                        initial_words = best_initial["word_count"]
-                        logger.info(
-                            "Continuation round %s: words -> %s",
-                            continuation_rounds,
-                            initial_words,
+                    await self._assert_generation_active(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage=f"multi_round_continuation_{continuation_rounds}_after_call",
+                    )
+                    audit = self._audit_continuation_output(
+                        existing_content=best_content_initial,
+                        raw_output=cont_result.text if cont_result else "",
+                        minimum_increment=round_minimum_increment,
+                    )
+                    audit.update({
+                        "round": continuation_rounds,
+                        "duration_ms": round((time.perf_counter() - round_started_at) * 1000, 2),
+                        "remaining_to_floor_before": remaining_to_floor,
+                        "minimum_increment": round_minimum_increment,
+                        "max_tokens": continuation_max_tokens,
+                    })
+                    continuation_attempts.append(audit)
+                    if not audit["accepted"]:
+                        continuation_stop_reason = str(audit["stop_reason"] or "rejected_output")
+                        runtime_metadata["degraded_stages"].append({
+                            "stage": f"multi_round_continuation_{continuation_rounds}",
+                            "reason": continuation_stop_reason,
+                        })
+                        await self._update_generation_runtime(
+                            chapter,
+                            generation_run_id=generation_run_id,
+                            stage="multi_round_continuation",
+                            message=f"第{continuation_rounds}轮续写未采纳：{continuation_stop_reason}。保留已有正文并结束续写。",
+                            progress_percent=min(62 + continuation_rounds * 3, 68),
+                            level="warning",
+                            event_kind="continuation",
+                            title="续写止损",
+                            metrics={key: value for key, value in audit.items() if key not in {"text"}},
                         )
-                    else:
-                        logger.warning("Continuation round %s returned empty", continuation_rounds)
                         break
-                except Exception as exc:
+
+                    new_content = best_content_initial + "\n\n" + str(audit["text"])
+                    best_initial["content"] = new_content
+                    best_initial["word_count"] = len(new_content.replace(chr(10), ""))
+                    best_content_initial = new_content
+                    initial_words = best_initial["word_count"]
+                    audit["total_words_after"] = initial_words
+                    logger.info(
+                        "Continuation round %s accepted: increment=%s total=%s",
+                        continuation_rounds,
+                        audit["increment_chars"],
+                        initial_words,
+                    )
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="multi_round_continuation",
+                        message=(
+                            f"第{continuation_rounds}轮续写已追加 {audit['increment_chars']} 字，"
+                            f"当前 {initial_words}/{target_words} 字。"
+                        ),
+                        progress_percent=min(62 + continuation_rounds * 3, 68),
+                        event_kind="continuation",
+                        title=f"多轮续写 第{continuation_rounds}轮完成",
+                        metrics={key: value for key, value in audit.items() if key not in {"text"}},
+                    )
+                except HTTPException as exc:
+                    detail = exc.detail if isinstance(exc.detail, dict) else {}
+                    if exc.status_code == 409 and detail.get("code") == "GENERATION_CANCELLED":
+                        # 取消和状态失效是控制流，不能被降级记录吞掉后继续调用模型。
+                        raise
+                    continuation_stop_reason = "provider_error"
                     logger.warning("Continuation round %s failed: %s", continuation_rounds, exc)
+                    failure = {
+                        "round": continuation_rounds,
+                        "duration_ms": round((time.perf_counter() - round_started_at) * 1000, 2),
+                        "accepted": False,
+                        "stop_reason": continuation_stop_reason,
+                        "error": self._summarize_generation_error(exc),
+                    }
+                    continuation_attempts.append(failure)
                     runtime_metadata["degraded_stages"].append({
                         "stage": f"multi_round_continuation_{continuation_rounds}",
-                        "reason": str(exc),
+                        "reason": failure["error"],
                     })
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="multi_round_continuation",
+                        message=f"第{continuation_rounds}轮续写调用失败，保留已有正文并结束续写。",
+                        progress_percent=min(62 + continuation_rounds * 3, 68),
+                        level="warning",
+                        event_kind="continuation",
+                        title="续写调用降级",
+                        metrics=failure,
+                    )
+                    break
+                except Exception as exc:
+                    continuation_stop_reason = "provider_error"
+                    logger.warning("Continuation round %s failed: %s", continuation_rounds, exc)
+                    failure = {
+                        "round": continuation_rounds,
+                        "duration_ms": round((time.perf_counter() - round_started_at) * 1000, 2),
+                        "accepted": False,
+                        "stop_reason": continuation_stop_reason,
+                        "error": self._summarize_generation_error(exc),
+                    }
+                    continuation_attempts.append(failure)
+                    runtime_metadata["degraded_stages"].append({
+                        "stage": f"multi_round_continuation_{continuation_rounds}",
+                        "reason": failure["error"],
+                    })
+                    await self._update_generation_runtime(
+                        chapter,
+                        generation_run_id=generation_run_id,
+                        stage="multi_round_continuation",
+                        message=f"第{continuation_rounds}轮续写调用失败，保留已有正文并结束续写。",
+                        progress_percent=min(62 + continuation_rounds * 3, 68),
+                        level="warning",
+                        event_kind="continuation",
+                        title="续写调用降级",
+                        metrics=failure,
+                    )
                     break
 
             if continuation_rounds > 0:
@@ -3280,6 +4242,15 @@ class PipelineOrchestrator:
                     "rounds": continuation_rounds,
                     "final_words": initial_words,
                     "target_words": target_words,
+                    "continuation_floor": continuation_floor,
+                    "stateful_context": True,
+                    "full_prompt_rounds": 1,
+                    "compact_context_rounds": max(0, continuation_rounds - 1),
+                    "last_context": last_continuation_context,
+                    "attempts": continuation_attempts,
+                    "stop_reason": continuation_stop_reason or (
+                        "continuation_floor_reached" if initial_words >= continuation_floor else "round_limit_reached"
+                    ),
                 }
 
         review_started_at = time.perf_counter()
@@ -3345,6 +4316,7 @@ class PipelineOrchestrator:
                         chapter_content=best_content,
                         chapter_plan=json.dumps(chapter_mission, ensure_ascii=False) if chapter_mission else None,
                         previous_summary=history_context["previous_summary"],
+                        attempt_ledger=_ACTIVE_PROVIDER_ATTEMPT_LEDGER.get(),
                     )
                     review_summaries["enhanced_review"] = review_result
                     enhanced_review_issues = self._extract_enhanced_review_issues(review_result)
@@ -3465,6 +4437,7 @@ class PipelineOrchestrator:
                             chapter_content=best_content,
                             user_id=user_id,
                             context=critique_context,
+                            attempt_ledger=_ACTIVE_PROVIDER_ATTEMPT_LEDGER.get(),
                         )
                         best_content, content_guard = self._preserve_non_regressive_content(
                             previous_content=pre_critique_content,
@@ -3606,6 +4579,7 @@ class PipelineOrchestrator:
                         project_id=project_id,
                         chapter_text=best_content,
                         user_id=user_id,
+                        attempt_ledger=_ACTIVE_PROVIDER_ATTEMPT_LEDGER.get(),
                     )
                     consistency_fix_issues = self._normalize_consistency_issues_for_local_fix(consistency_report)
                     if consistency_fix_issues and not consistency_report.get("auto_fix_accepted", False):
@@ -3650,6 +4624,8 @@ class PipelineOrchestrator:
                                 project_id=project_id,
                                 chapter_text=repaired_content,
                                 user_id=user_id,
+                        attempt_ledger=_ACTIVE_PROVIDER_ATTEMPT_LEDGER.get(),
+                                mode="check_only",
                             )
                             repaired_report["repair_strategy"] = "self_critique_local_repair"
                             improved_repair, repair_reason, before_counts, after_counts = self._should_accept_consistency_improvement(
@@ -3802,6 +4778,8 @@ class PipelineOrchestrator:
                 "final": None,
             }
 
+            pre_enrichment_content: Optional[str] = None
+            pre_enrichment_gate: Optional[Dict[str, Any]] = None
             if active_config.enable_enrichment:
                 review_summaries, pre_enrichment_gate = self._evaluate_structural_quality_gate_for_content(
                     review_summaries=review_summaries,
@@ -3812,6 +4790,7 @@ class PipelineOrchestrator:
                     target_word_count=active_config.target_word_count,
                     min_word_count=active_config.min_word_count,
                 )
+                pre_enrichment_content = best_content
                 runtime_metadata["quality_gates"]["pre_enrichment_structural_gate"] = pre_enrichment_gate
             else:
                 review_summaries, structural_quality_gate = self._evaluate_structural_quality_gate_for_content(
@@ -3954,7 +4933,6 @@ class PipelineOrchestrator:
                             "min_word_count": active_config.min_word_count,
                         },
                     )
-                    pre_enrichment_content = best_content
                     enriched_content, enrichment_summary = await self._run_enrichment(
                         best_content,
                         user_id=user_id,
@@ -4043,14 +5021,28 @@ class PipelineOrchestrator:
                     )
                     logger.warning("线索同步失败：project=%s chapter=%s error=%s", project_id, chapter_number, clue_exc)
 
-            review_summaries, structural_quality_gate = self._evaluate_structural_quality_gate_for_content(
-                review_summaries=review_summaries,
-                content=best_content,
-                violations=guardrail_violations,
-                chapter_mission=chapter_mission,
-                target_word_count=active_config.target_word_count,
-                min_word_count=active_config.min_word_count,
-            )
+            if (
+                active_config.enable_enrichment
+                and pre_enrichment_gate is not None
+                and pre_enrichment_content is not None
+                and best_content == pre_enrichment_content
+            ):
+                # 结构质量门依赖段落、换行与重复片段；只能对原始正文全等复用，
+                # 不能使用会归一化空白的 _content_fingerprint。
+                pre_guard = review_summaries.get("story_progression_guard_pre_enrichment")
+                if isinstance(pre_guard, dict):
+                    review_summaries["story_progression_guard"] = deepcopy(pre_guard)
+                structural_quality_gate = deepcopy(pre_enrichment_gate)
+                structural_quality_gate["reused_from"] = "pre_enrichment_structural_gate"
+            else:
+                review_summaries, structural_quality_gate = self._evaluate_structural_quality_gate_for_content(
+                    review_summaries=review_summaries,
+                    content=best_content,
+                    violations=guardrail_violations,
+                    chapter_mission=chapter_mission,
+                    target_word_count=active_config.target_word_count,
+                    min_word_count=active_config.min_word_count,
+                )
             if not structural_quality_gate.get("passed", True):
                 gate_repair_result = await self._attempt_structural_gate_repair(
                     best_content=best_content,
@@ -4159,6 +5151,7 @@ class PipelineOrchestrator:
                     },
                 )
 
+            pre_final_cleanup_content = best_content
             best_content, final_cleanup = self._apply_deterministic_cleanup(
                 content=best_content,
                 chapter_mission=chapter_mission,
@@ -4170,16 +5163,20 @@ class PipelineOrchestrator:
                 "final": final_cleanup,
             }
             runtime_metadata["deterministic_cleanup_summary"] = {"initial": initial_cleanup, "final": final_cleanup}
-            # T-17：最终清理可能改变字数、段落数或其他质量字段；质量门必须以最终正文重算，
-            # 不能把清理前的 structural_quality_gate 与清理后的 quality_metrics 混在一起落库。
-            review_summaries, structural_quality_gate = self._evaluate_structural_quality_gate_for_content(
-                review_summaries=review_summaries,
-                content=best_content,
-                violations=guardrail_violations,
-                chapter_mission=chapter_mission,
-                target_word_count=active_config.target_word_count,
-                min_word_count=active_config.min_word_count,
-            )
+            # T-17：最终清理若改变任意字符（含段落空白），必须以最终正文重算。
+            # 原文全等时当前 gate 已对应最终正文，只标记复用，仍继续计算最终质量指标。
+            if best_content == pre_final_cleanup_content:
+                structural_quality_gate = deepcopy(structural_quality_gate)
+                structural_quality_gate["reused_from"] = structural_quality_gate.get("reused_from") or "pre_final_cleanup_structural_gate"
+            else:
+                review_summaries, structural_quality_gate = self._evaluate_structural_quality_gate_for_content(
+                    review_summaries=review_summaries,
+                    content=best_content,
+                    violations=guardrail_violations,
+                    chapter_mission=chapter_mission,
+                    target_word_count=active_config.target_word_count,
+                    min_word_count=active_config.min_word_count,
+                )
             runtime_metadata["quality_gates"]["structural_gate"] = structural_quality_gate
             runtime_metadata["quality_gates"]["structural_gate_final"] = structural_quality_gate
             final_word_count = self._count_words(best_content)
@@ -4367,6 +5364,7 @@ class PipelineOrchestrator:
 
         runtime_metadata["stage_timings_ms"] = stage_timings
         runtime_metadata["pipeline_total_duration_ms"] = round((time.perf_counter() - pipeline_started_at) * 1000, 2)
+        runtime_metadata["provider_budget"] = self._provider_budget_summary()
         logger.info(
             "Pipeline total duration: project=%s chapter=%s duration_ms=%s stages=%s",
             project_id,
@@ -4396,6 +5394,9 @@ class PipelineOrchestrator:
                 "pipeline_total_duration_ms": runtime_metadata["pipeline_total_duration_ms"],
                 "token_budget_records": token_budget_usage.get("record_count"),
                 "estimated_generation_tokens": token_budget_usage.get("total_tokens"),
+                "provider_logical_calls": runtime_metadata["provider_budget"].get("logical_call_count"),
+                "provider_attempt_count": runtime_metadata["provider_budget"].get("provider_attempt_count"),
+                "provider_failed_attempt_count": runtime_metadata["provider_budget"].get("failed_attempt_count"),
             },
             artifact_refs={
                 "version_ids": [item.get("version_id") for item in variants if item.get("version_id")],
@@ -4415,6 +5416,7 @@ class PipelineOrchestrator:
                 "stage_timings_ms": runtime_metadata["stage_timings_ms"],
                 "pipeline_total_duration_ms": runtime_metadata["pipeline_total_duration_ms"],
                 "token_budget_usage": token_budget_usage,
+                "provider_budget": runtime_metadata["provider_budget"],
                 "degraded_stages": runtime_metadata.get("degraded_stages", []),
                 "self_critique_final_score": self_critique_summary.get("final_score"),
                 "self_critique_improvement": self_critique_summary.get("improvement"),
@@ -5152,19 +6154,23 @@ class PipelineOrchestrator:
                 temperature=0.3,
                 user_id=user_id,
                 timeout=self._resolve_chapter_mission_timeout(target_word_count),
-                policy=GenerationCallPolicy(
-                    stage_label="章节导演脚本",
-                    progress_stage="generate_mission",
-                    retry_attempts=1,
-                    response_format="json_object",
-                    json_schema=self._build_chapter_mission_schema(),
-                    json_schema_name="chapter_mission",
-                    json_schema_strict=False,
-                    max_tokens=self._resolve_chapter_mission_max_tokens(target_word_count),
-                    retry_same_model_once=True,
-                    json_repair_attempts=2,
+                policy=self._track_generation_call_policy(
+                    GenerationCallPolicy(
+                        stage_label="章节导演脚本",
+                        progress_stage="generate_mission",
+                        retry_attempts=1,
+                        response_format="json_object",
+                        json_schema=self._build_chapter_mission_schema(),
+                        json_schema_name="chapter_mission",
+                        json_schema_strict=False,
+                        max_tokens=self._resolve_chapter_mission_max_tokens(target_word_count),
+                        retry_same_model_once=True,
+                        json_repair_attempts=2,
+                    ),
+                    role="chapter_mission",
                 ),
             )
+            self._record_provider_usage(json_result)
             mission = self._normalize_chapter_mission(json_result.data, target_word_count)
             await self._cache_set(cache_key, mission, expire=600)
             logger.info("章节导演脚本生成完成: macro_beat=%s", mission.get("macro_beat"))
@@ -5916,6 +6922,7 @@ class PipelineOrchestrator:
             }
 
             def record_generation_call_metrics(label: str, text_result: Any) -> None:
+                self._record_provider_usage(text_result)
                 metrics = {
                     "label": label,
                     "attempts": getattr(text_result, "attempts", None),
@@ -5970,20 +6977,26 @@ class PipelineOrchestrator:
                         temperature=temperature,
                         user_id=user_id,
                         timeout=self._resolve_chapter_generation_timeout(config.target_word_count),
-                        policy=GenerationCallPolicy(
-                            stage_label=f"章节正文候选 {index + 1}",
-                            progress_stage="generate_variants",
-                            retry_attempts=2,
-                            response_format=None,
-                            max_tokens=self._resolve_chapter_generation_max_tokens(config.target_word_count),
-                            prompt_cache_key=(
-                                f"xq:{project_id}:{chapter_number}:draft:contamination-retry"
-                                if contamination_retry else f"xq:{project_id}:{chapter_number}:draft"
+                        policy=self._track_generation_call_policy(
+                            GenerationCallPolicy(
+                                stage_label=f"章节正文候选 {index + 1}",
+                                progress_stage="generate_variants",
+                                retry_attempts=2,
+                                response_format=None,
+                                max_tokens=self._resolve_chapter_generation_max_tokens(config.target_word_count),
+                                prompt_cache_key=(
+                                    f"xq:{project_id}:{chapter_number}:draft:contamination-retry"
+                                    if contamination_retry else f"xq:{project_id}:{chapter_number}:draft"
+                                ),
+                                allow_truncated_response=config.allow_truncated_response,
+                                retry_same_model_once=True,
+                                heartbeat_interval_seconds=60.0,
+                                soft_timeout_seconds=self._resolve_chapter_generation_soft_timeout(config.target_word_count),
                             ),
-                            allow_truncated_response=config.allow_truncated_response,
-                            retry_same_model_once=True,
-                            heartbeat_interval_seconds=60.0,
-                            soft_timeout_seconds=self._resolve_chapter_generation_soft_timeout(config.target_word_count),
+                            role=(
+                                f"draft_candidate_{index + 1}.contamination_retry"
+                                if contamination_retry else f"draft_candidate_{index + 1}"
+                            ),
                         ),
                         progress_callback=progress_callback,
                     )
@@ -6105,17 +7118,20 @@ class PipelineOrchestrator:
                         temperature=0.9,
                         user_id=user_id,
                         timeout=self._resolve_chapter_generation_timeout(config.target_word_count),
-                        policy=GenerationCallPolicy(
-                            stage_label=f"章节正文候选 {index + 1} 兜底生成",
-                            progress_stage="generate_variants",
-                            retry_attempts=2,
-                            response_format=None,
-                            max_tokens=self._resolve_writer_prompt_budget(config.target_word_count),
-                            prompt_cache_key=f"xq:{project_id}:{chapter_number}:draft",
-                            allow_truncated_response=config.allow_truncated_response,
-                            retry_same_model_once=True,
-                            heartbeat_interval_seconds=60.0,
-                            soft_timeout_seconds=self._resolve_chapter_generation_soft_timeout(config.target_word_count),
+                        policy=self._track_generation_call_policy(
+                            GenerationCallPolicy(
+                                stage_label=f"章节正文候选 {index + 1} 兜底生成",
+                                progress_stage="generate_variants",
+                                retry_attempts=2,
+                                response_format=None,
+                                max_tokens=self._resolve_writer_prompt_budget(config.target_word_count),
+                                prompt_cache_key=f"xq:{project_id}:{chapter_number}:draft",
+                                allow_truncated_response=config.allow_truncated_response,
+                                retry_same_model_once=True,
+                                heartbeat_interval_seconds=60.0,
+                                soft_timeout_seconds=self._resolve_chapter_generation_soft_timeout(config.target_word_count),
+                            ),
+                            role=f"draft_candidate_{index + 1}.fallback",
                         ),
                         progress_callback=progress_callback,
                     )
@@ -6351,15 +7367,19 @@ class PipelineOrchestrator:
                 temperature=0.3,
                 user_id=user_id,
                 timeout=120.0,
-                policy=GenerationCallPolicy(
-                    stage_label="章节护栏局部修复",
-                    progress_stage="consistency",
-                    retry_attempts=2,
-                    response_format=None,
-                    max_tokens=8000,
-                    retry_same_model_once=True,
+                policy=self._track_generation_call_policy(
+                    GenerationCallPolicy(
+                        stage_label="章节护栏局部修复",
+                        progress_stage="consistency",
+                        retry_attempts=2,
+                        response_format=None,
+                        max_tokens=8000,
+                        retry_same_model_once=True,
+                    ),
+                    role="guardrail_rewrite",
                 ),
             )
+            self._record_provider_usage(text_result)
             cleaned = remove_think_tags(text_result.text)
             guard_failure = self._guardrail_rewrite_guard_failure(original_text, cleaned, chapter_mission=chapter_mission)
             if guard_failure:
@@ -8064,10 +9084,14 @@ class PipelineOrchestrator:
         )
         try:
             ai_review_service = AIReviewService(self.llm_service, self.prompt_service)
+            ledger = _ACTIVE_PROVIDER_ATTEMPT_LEDGER.get()
+            self._record_provider_logical_call("ai_review")
             ai_review_result = await ai_review_service.review_versions(
                 versions=contents,
                 chapter_mission=chapter_mission,
                 user_id=user_id,
+                attempt_ledger=ledger,
+                attempt_role="ai_review",
             )
         except Exception as exc:
             logger.warning("AI 评审失败，跳过: %s", exc)
@@ -8138,6 +9162,7 @@ class PipelineOrchestrator:
         chapter_content: str,
         user_id: int,
         context: Optional[Dict[str, Any]] = None,
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
     ) -> Tuple[str, Dict[str, Any]]:
         service = SelfCritiqueService(self.session, self.llm_service, self.prompt_service)
 
@@ -8250,6 +9275,7 @@ class PipelineOrchestrator:
                     progress_callback=_report_diagnosis_progress,
                     stage_optimize_callback=_report_stage_optimization,
                     strategy_optimize_callback=_report_strategy_optimization,
+                    attempt_ledger=attempt_ledger,
                 ),
                 timeout=540.0,
             )
@@ -8432,15 +9458,31 @@ class PipelineOrchestrator:
         project_id: str,
         chapter_text: str,
         user_id: int,
+        mode: str = "repair",
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
     ) -> Tuple[str, Dict[str, Any]]:
+        normalized_mode = str(mode or "repair").strip().lower()
+        if normalized_mode not in {"repair", "check_only"}:
+            normalized_mode = "repair"
+        active_ledger = attempt_ledger or _ACTIVE_PROVIDER_ATTEMPT_LEDGER.get()
         with LLMService.daily_limit_scope(f"consistency_pipeline:{project_id}:{user_id}:{len(chapter_text)}"):
             service = ConsistencyService(self.session, self.llm_service)
-            result = await service.check_consistency(project_id, chapter_text, user_id, include_foreshadowing=True)
+            if isinstance(active_ledger, ProviderAttemptLedger):
+                self._record_provider_logical_call("consistency_check")
+            result = await service.check_consistency(
+                project_id,
+                chapter_text,
+                user_id,
+                include_foreshadowing=True,
+                attempt_ledger=active_ledger,
+                attempt_role="consistency_check",
+            )
             report = {
                 "is_consistent": result.is_consistent,
                 "status": result.status,
                 "summary": result.summary,
                 "check_time_ms": result.check_time_ms,
+                "mode": normalized_mode,
                 "auto_fix_applied": False,
                 "auto_fix_accepted": False,
                 "violations": [
@@ -8456,7 +9498,7 @@ class PipelineOrchestrator:
                 ],
             }
 
-            if result.status == "error":
+            if result.status == "error" or normalized_mode == "check_only":
                 return chapter_text, report
 
             needs_fix = any(
@@ -8465,10 +9507,28 @@ class PipelineOrchestrator:
             )
             if needs_fix:
                 report["repair_attempts"] = []
-                fixed = await service.auto_fix(project_id, chapter_text, result.violations, user_id)
+                if isinstance(active_ledger, ProviderAttemptLedger):
+                    self._record_provider_logical_call("consistency_repair")
+                fixed = await service.auto_fix(
+                    project_id,
+                    chapter_text,
+                    result.violations,
+                    user_id,
+                    attempt_ledger=active_ledger,
+                    attempt_role="consistency_repair",
+                )
                 if fixed and fixed != chapter_text:
                     report["auto_fix_applied"] = True
-                    recheck = await service.check_consistency(project_id, fixed, user_id, include_foreshadowing=True)
+                    if isinstance(active_ledger, ProviderAttemptLedger):
+                        self._record_provider_logical_call("consistency_check_recheck")
+                    recheck = await service.check_consistency(
+                        project_id,
+                        fixed,
+                        user_id,
+                        include_foreshadowing=True,
+                        attempt_ledger=active_ledger,
+                        attempt_role="consistency_check_recheck",
+                    )
                     post_fix_report = {
                         "status": recheck.status,
                         "is_consistent": recheck.is_consistent,
@@ -8514,9 +9574,27 @@ class PipelineOrchestrator:
                         if item.severity in (ViolationSeverity.CRITICAL, ViolationSeverity.MAJOR)
                     ]
                     if retry_violations:
-                        retry_fixed = await service.auto_fix(project_id, fixed, retry_violations, user_id)
+                        if isinstance(active_ledger, ProviderAttemptLedger):
+                            self._record_provider_logical_call("consistency_repair_retry")
+                        retry_fixed = await service.auto_fix(
+                            project_id,
+                            fixed,
+                            retry_violations,
+                            user_id,
+                            attempt_ledger=active_ledger,
+                            attempt_role="consistency_repair_retry",
+                        )
                         if retry_fixed and retry_fixed not in {chapter_text, fixed}:
-                            retry_recheck = await service.check_consistency(project_id, retry_fixed, user_id, include_foreshadowing=True)
+                            if isinstance(active_ledger, ProviderAttemptLedger):
+                                self._record_provider_logical_call("consistency_check_retry")
+                            retry_recheck = await service.check_consistency(
+                                project_id,
+                                retry_fixed,
+                                user_id,
+                                include_foreshadowing=True,
+                                attempt_ledger=active_ledger,
+                                attempt_role="consistency_check_retry",
+                            )
                             retry_post_fix_report = {
                                 "status": retry_recheck.status,
                                 "is_consistent": retry_recheck.is_consistent,

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   buildChapterTaskUiModel,
+  buildGenerationAssuranceSummary,
   canCancelGeneration,
   getBlockingChapterNumber,
   isBusyChapterStatus,
@@ -14,12 +15,36 @@ import {
 } from './chapterGeneration'
 
 describe('chapterGeneration utils', () => {
+  it('统一归一化保障状态：通过静默、跳过/降级和质量风险可区分', () => {
+    expect(buildGenerationAssuranceSummary({ review_status: 'passed', consistency_status: 'passed', word_requirement_met: true }).visible).toBe(false)
+
+    const summary = buildGenerationAssuranceSummary({
+      review_status: 'skipped',
+      consistency_status: 'warning',
+      review_skip_reason: '未启用评审',
+      degraded_stages: [{ stage: 'ledger_memory', reason: '同步超时' }],
+      word_requirement_met: false,
+      word_requirement_reason: 'below_minimum',
+      quality_metrics: { quality_gate_passed: false },
+      allowed_actions: ['refresh_status', 'retry_ledger_sync', 'review_versions'],
+    })
+
+    expect(summary.visible).toBe(true)
+    expect(summary.tone).toBe('danger')
+    expect(summary.items.map((item) => item.key)).toEqual(expect.arrayContaining(['review', 'consistency', 'degraded-ledger_memory-0', 'word-requirement', 'quality-gate']))
+    expect(summary.actions).toEqual(expect.arrayContaining(['刷新状态', '重试保障流程', '重新评审候选']))
+    expect(summary.degradedSummary).toContain('记忆层更新')
+  })
   it('GenerationRuntime 类型显式保留质量运行字段，而非仅依赖索引签名', () => {
     const source = readFileSync('src/api/types/novel.ts', 'utf8')
     expect(source).toContain('quality_metrics?: Record<string, unknown> | null')
     expect(source).toContain('story_progression_guard?: Record<string, unknown> | null')
     expect(source).toContain('generation_call_metrics?: Array<Record<string, unknown>> | null')
     expect(source).toContain('enrichment_triggered?: boolean | null')
+    expect(source).toContain('review_status?: string | null')
+    expect(source).toContain('consistency_status?: string | null')
+    expect(source).toContain('quality_gates?: Record<string, unknown> | null')
+    expect(source).toContain('degraded_stages?: GenerationDegradedStage[] | null')
   })
 
   it('GenerationRuntime 显式声明字数三态字段', () => {

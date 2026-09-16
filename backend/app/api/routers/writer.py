@@ -3257,7 +3257,14 @@ async def _generate_chapter_async(
                     str(event.get("event_type") or TaskRuntimeEventType.PROGRESS.value),
                     stage=event.get("stage"),
                     progress=event.get("progress"),
-                    message=event.get("message"),
+                    message=(
+                        event.get("message")
+                        or (
+                            event.get("payload", {}).get("message")
+                            if isinstance(event.get("payload"), dict)
+                            else None
+                        )
+                    ),
                     payload=event.get("payload") if isinstance(event.get("payload"), dict) else None,
                 )
 

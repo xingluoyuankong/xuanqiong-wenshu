@@ -21,6 +21,7 @@ from .foreshadowing_tracker_service import ForeshadowingTrackerService
 from .faction_service import FactionService
 from .llm_service import LLMService
 from .prompt_service import PromptService
+from ..agent.provider_attempt import ProviderAttemptLedger
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +158,9 @@ class EnhancedWritingFlow:
         chapter_title: str,
         chapter_content: str,
         chapter_plan: Optional[str] = None,
-        previous_summary: Optional[str] = None
+        previous_summary: Optional[str] = None,
+        *,
+        attempt_ledger: Optional[ProviderAttemptLedger] = None,
     ) -> Dict[str, Any]:
         """
         生成后的审查流程
@@ -178,7 +181,9 @@ class EnhancedWritingFlow:
                 chapter_title=chapter_title,
                 chapter_content=chapter_content,
                 chapter_plan=chapter_plan,
-                previous_summary=previous_summary
+                previous_summary=previous_summary,
+                attempt_ledger=attempt_ledger,
+                attempt_role="six_dimension_review",
             )
             results["six_dimension_review"] = review_result
             
@@ -195,7 +200,9 @@ class EnhancedWritingFlow:
                 project_id=project_id,
                 chapter_number=chapter_number,
                 chapter_title=chapter_title,
-                chapter_content=chapter_content
+                chapter_content=chapter_content,
+                attempt_ledger=attempt_ledger,
+                attempt_role="constitution_check",
             )
             results["constitution_compliance"] = compliance_result
             

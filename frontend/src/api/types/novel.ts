@@ -264,6 +264,22 @@ export interface GenerationRuntimeEvent {
   segment_index?: number
 }
 
+export interface GenerationDiagnostics {
+  code?: string
+  message?: string
+  rootCause?: string
+  status?: string | number
+  requestId?: string
+  hint?: string
+  retryable?: boolean
+}
+
+export interface GenerationDegradedStage {
+  stage?: string
+  reason?: string
+  degraded_reason?: string
+}
+
 export interface GenerationRuntime {
   queued?: boolean
   generation_mode?: string
@@ -274,13 +290,18 @@ export interface GenerationRuntime {
   actual_word_count?: number | null
   word_requirement_met?: boolean | null
   word_requirement_reason?: string | null
+  review_status?: string | null
+  review_skip_reason?: string | null
+  consistency_status?: string | null
+  consistency_skip_reason?: string | null
+  quality_gates?: Record<string, unknown> | null
   quality_metrics?: Record<string, unknown> | null
   story_progression_guard?: Record<string, unknown> | null
   generation_call_metrics?: Array<Record<string, unknown>> | null
   enrichment_triggered?: boolean | null
   pipeline_total_duration_ms?: number | null
   stage_timings_ms?: Record<string, number> | null
-  degraded_stages?: Array<Record<string, unknown>> | null
+  degraded_stages?: GenerationDegradedStage[] | null
   progress_stage?: string
   progress_message?: string
   progress_percent?: number
@@ -290,6 +311,7 @@ export interface GenerationRuntime {
   chapter_number?: number
   allowed_actions?: string[]
   last_error_summary?: string | null
+  diagnostics?: GenerationDiagnostics | null
   task_id?: string | null
   task_status?: string | null
   task_stage?: string | null

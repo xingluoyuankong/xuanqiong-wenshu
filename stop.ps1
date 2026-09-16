@@ -44,22 +44,34 @@ function Test-RepoOwnedProcess {
         return $false
     }
 
-    try {
-        $procInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction Stop
-    } catch {
-        return $false
+    # A uvicorn/node child may run from a global executable while its launcher
+    # is rooted in this repository. Walk only the bounded parent chain and use
+    # executable path/command line evidence; never infer ownership from a name.
+    $seen = [System.Collections.Generic.HashSet[int]]::new()
+    $currentId = $ProcessId
+    for ($depth = 0; $depth -lt 16 -and $currentId -gt 0; $depth++) {
+        if (-not $seen.Add($currentId)) {
+            return $false
+        }
+        try {
+            $procInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $currentId" -ErrorAction Stop
+        } catch {
+            return $false
+        }
+        if ($procInfo.ExecutablePath -and $procInfo.ExecutablePath.StartsWith($RepoPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+        $commandLine = [string]$procInfo.CommandLine
+        if ($commandLine -and $commandLine -match $repoServicePattern) {
+            return $true
+        }
+        $parentId = [int]$procInfo.ParentProcessId
+        if ($parentId -le 0 -or $parentId -eq $currentId) {
+            return $false
+        }
+        $currentId = $parentId
     }
-
-    if ($procInfo.ExecutablePath -and $procInfo.ExecutablePath.StartsWith($RepoPath, [System.StringComparison]::OrdinalIgnoreCase)) {
-        return $true
-    }
-
-    $commandLine = [string]$procInfo.CommandLine
-    if ([string]::IsNullOrWhiteSpace($commandLine)) {
-        return $false
-    }
-
-    return $commandLine -match $repoServicePattern
+    return $false
 }
 
 function Get-RepoRuntimeProcesses {
