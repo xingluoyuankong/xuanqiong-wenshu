@@ -229,7 +229,8 @@ if ($dbProvider -eq 'mysql') {
     Write-Host "`n[2/5] skip local MySQL (DB_PROVIDER=$dbProvider)" -ForegroundColor DarkGray
 }
 
-Write-Host "`n[3/5] start backend..." -ForegroundColor Cyan
+Write-Host "`n[3/5] start backend (timeout: ${TIMEOUT_SECONDS}s)..." -ForegroundColor Cyan
+Write-Host "  Configuring environment variables for backend startup..." -ForegroundColor Gray
 $backendWd = Join-Path $repo 'backend'
 $backendPy = Join-Path $backendWd '.venv\python.exe'
 $backendOut = Join-Path $runDir 'backend.log'
@@ -245,6 +246,7 @@ $env:PYTHONUTF8 = '1'
 $env:PYTHONIOENCODING = 'utf-8'
 
 $startTimeBackend = Get-Date
+Write-Host "  Starting uvicorn process with timeout monitoring..." -ForegroundColor Gray
 $backendJob = Start-Process -FilePath $backendPy `
     -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', $backendHost, '--port', "$backendPort", '--log-level', 'info', '--no-access-log') `
     -WorkingDirectory $backendWd `
@@ -255,21 +257,31 @@ $backendJob = Start-Process -FilePath $backendPy `
 Write-Host "  backend PID: $($backendJob.Id)" -ForegroundColor Gray
 
 # Check if backend started within timeout
+Write-Host "  Waiting for backend health check (timeout: ${TIMEOUT_SECONDS}s)..." -ForegroundColor Gray
+$elapsedSeconds = 0
 while ((Get-Date).Subtract($startTimeBackend).TotalSeconds -lt $TIMEOUT_SECONDS) {
     try {
         $resp = Invoke-WebRequest -UseBasicParsing "$backendBaseUrl/api/health" -TimeoutSec 2
         if ($resp.StatusCode -eq 200) {
-            Write-Host '  [OK] backend ready' -ForegroundColor Green
+            Write-Host "  ✓ Backend healthy after ${elapsedSeconds}s" -ForegroundColor Green
             break
         }
     } catch {}
     
     # Still starting, wait a bit
     Start-Sleep -Milliseconds $CHECK_INTERVAL_MS
+    $elapsedSeconds += ($CHECK_INTERVAL_MS / 1000)
+    
+    # Log progress every 5 seconds
+    if ([math]::Floor($elapsedSeconds) % 5 -eq 0) {
+        $remaining = [math]::Floor($TIMEOUT_SECONDS - $elapsedSeconds)
+        Write-Host "  ⏱ Backend still starting... (${elapsedSeconds}s elapsed, ${remaining}s remaining)" -ForegroundColor DarkGray
+    }
 }
 
 # Timeout check for backend
 if (-not (Test-Path $backendOut)) {
+    Write-Host "❌ TIMEOUT: Backend failed to start within ${TIMEOUT_SECONDS}s after ${elapsedSeconds}s" -ForegroundColor Red
     # Try reading what we have
     try {
         $lastLines = Get-Content $backendErr -Tail 10 2>$null
@@ -286,7 +298,7 @@ if (-not (Test-Path $backendOut)) {
     exit 1
 }
 
-Write-Host "`n[4/5] start frontend..." -ForegroundColor Cyan
+Write-Host "`n[4/5] start frontend (timeout: ${TIMEOUT_SECONDS}s)..." -ForegroundColor Cyan
 $frontendWd = Join-Path $repo 'frontend'
 $npmCmd = Get-Command npm.cmd -ErrorAction SilentlyContinue
 if (-not $npmCmd) {
@@ -301,6 +313,7 @@ $frontendOut = Join-Path $runDir 'frontend.log'
 $frontendErr = Join-Path $runDir 'frontend-error.log'
 
 $startTimeFrontend = Get-Date
+Write-Host "  Starting npm dev process with timeout monitoring..." -ForegroundColor Gray
 $frontendJob = Start-Process -FilePath $npmCmd.Source `
     -ArgumentList @('run', 'dev', '--', '--host', $frontendHost, '--port', "$frontendPort") `
     -WorkingDirectory $frontendWd `
@@ -311,21 +324,31 @@ $frontendJob = Start-Process -FilePath $npmCmd.Source `
 Write-Host "  frontend PID: $($frontendJob.Id)" -ForegroundColor Gray
 
 # Check if frontend started within timeout
+Write-Host "  Waiting for frontend health check (timeout: ${TIMEOUT_SECONDS}s)..." -ForegroundColor Gray
+$elapsedSeconds = 0
 while ((Get-Date).Subtract($startTimeFrontend).TotalSeconds -lt $TIMEOUT_SECONDS) {
     try {
         $resp = Invoke-WebRequest -UseBasicParsing "$frontendBaseUrl/" -TimeoutSec 2
         if ($resp.StatusCode -eq 200) {
-            Write-Host '  [OK] frontend ready' -ForegroundColor Green
+            Write-Host "  ✓ Frontend healthy after ${elapsedSeconds}s" -ForegroundColor Green
             break
         }
     } catch {}
     
     # Still starting, wait a bit
     Start-Sleep -Milliseconds $CHECK_INTERVAL_MS
+    $elapsedSeconds += ($CHECK_INTERVAL_MS / 1000)
+    
+    # Log progress every 5 seconds
+    if ([math]::Floor($elapsedSeconds) % 5 -eq 0) {
+        $remaining = [math]::Floor($TIMEOUT_SECONDS - $elapsedSeconds)
+        Write-Host "  ⏱ Frontend still starting... (${elapsedSeconds}s elapsed, ${remaining}s remaining)" -ForegroundColor DarkGray
+    }
 }
 
 # Timeout check for frontend
 if (-not (Test-Path $frontendOut)) {
+    Write-Host "❌ TIMEOUT: Frontend failed to start within ${TIMEOUT_SECONDS}s after ${elapsedSeconds}s" -ForegroundColor Red
     try {
         $lastLines = Get-Content $frontendErr -Tail 10 2>$null
         if ($lastLines) {
