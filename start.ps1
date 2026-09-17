@@ -7,7 +7,9 @@ $OutputEncoding = [Console]::OutputEncoding
 # === Timeout Configuration ===
 $TIMEOUT_SECONDS = 30  # Maximum wait time for each service (configurable)
 $CHECK_INTERVAL_MS = 500  # Health check interval in milliseconds
-Write-Host "⏱ Startup timeout configured: ${TIMEOUT_SECONDS}s" -ForegroundColor DarkGray
+$CLEANUP_TIMEOUT_MS = 3000  # Max wait time for process termination
+Write-Host "⏱ Startup timeout configured: ${TIMEOUT_SECONDS}s per service" -ForegroundColor DarkGray
+Write-Host "⚙️ Cleanup timeout configured: ${CLEANUP_TIMEOUT_MS}ms" -ForegroundColor DarkGray
 
 $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo = $scriptPath
@@ -101,7 +103,7 @@ function Execute-Startup {
             Write-Host "`n[2/5] skip local MySQL (DB_PROVIDER=$dbProvider)" -ForegroundColor DarkGray
         }
 
-        # [3/5] Backend startup
+        # [3/5] Backend startup with detailed timeout tracking
         Write-Host "`n[3/5] start backend (timeout: ${TIMEOUT_SECONDS}s)..." -ForegroundColor Cyan
         Write-Host "  Configuring environment variables for backend startup..." -ForegroundColor Gray
         $backendWd = Join-Path $repo 'backend'
@@ -118,43 +120,80 @@ function Execute-Startup {
         $env:PYTHONUTF8 = '1'
         $env:PYTHONIOENCODING = 'utf-8'
 
-        $startTimeBackend = Get-Date
+        $backendStartTime = Get-Date
         Write-Host "  Starting uvicorn process with timeout monitoring..." -ForegroundColor Gray
-        $backendJob = Start-Process -FilePath $backendPy `
+        $global:backendJob = Start-Process -FilePath $backendPy `
             -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', $backendHost, '--port', "$backendPort", '--log-level', 'info', '--no-access-log') `
             -WorkingDirectory $backendWd `
             -RedirectStandardOutput $backendOut `
             -RedirectStandardError $backendErr `
             -PassThru
 
-        Write-Host "  backend PID: $($backendJob.Id)" -ForegroundColor Gray
+        Write-Host "  backend PID: $($global:backendJob.Id)" -ForegroundColor Gray
 
-        # Health check loop
+        # Backend health check loop with detailed timeout tracking
         Write-Host "  Waiting for backend health check (timeout: ${TIMEOUT_SECONDS}s)..." -ForegroundColor Gray
-        $elapsedSeconds = 0
-        while ((Get-Date).Subtract($startTimeBackend).TotalSeconds -lt $TIMEOUT_SECONDS) {
+        $backendHealthy = $false
+        $backendTimeoutReached = $false
+        
+        while ((Get-Date).Subtract($backendStartTime).TotalSeconds -lt $TIMEOUT_SECONDS) {
             try {
                 $resp = Invoke-WebRequest -UseBasicParsing "$backendBaseUrl/api/health" -TimeoutSec 2
                 if ($resp.StatusCode -eq 200) {
-                    Write-Host "  ✓ Backend healthy after ${elapsedSeconds}s" -ForegroundColor Green
+                    $elapsed = [math]::Floor((Get-Date).Subtract($backendStartTime).TotalSeconds)
+                    Write-Host "  ✓ Backend healthy after ${elapsed}s" -ForegroundColor Green
+                    $backendHealthy = $true
                     break
                 }
-            } catch {}
+            } catch {
+                # Health check failed, continue retrying
+            }
             
             Start-Sleep -Milliseconds $CHECK_INTERVAL_MS
-            $elapsedSeconds += ($CHECK_INTERVAL_MS / 1000)
             
-            if ([math]::Floor($elapsedSeconds) % 5 -eq 0) {
-                $remaining = [math]::Floor($TIMEOUT_SECONDS - $elapsedSeconds)
-                Write-Host "  ⏱ Backend still starting... (${elapsedSeconds}s elapsed, ${remaining}s remaining)" -ForegroundColor DarkGray
+            # Log progress every 5 seconds
+            $elapsed = [math]::Floor((Get-Date).Subtract($backendStartTime).TotalSeconds)
+            if ($elapsed % 5 -eq 0 -and $elapsed -gt 0) {
+                $remaining = [math]::Floor($TIMEOUT_SECONDS - $elapsed)
+                Write-Host "  ⏱ Backend still starting... (${elapsed}s elapsed, ${remaining}s remaining)" -ForegroundColor DarkGray
+            }
+            
+            # Check if we've exceeded timeout
+            if ((Get-Date).Subtract($backendStartTime).TotalSeconds -ge $TIMEOUT_SECONDS) {
+                $backendTimeoutReached = $true
+                break
             }
         }
 
-        if (-not (Test-Path $backendOut)) {
-            throw "Backend failed to start within ${TIMEOUT_SECONDS}s after ${elapsedSeconds}s"
+        # Backend timeout check - provide detailed error information
+        if (-not $backendHealthy -or $backendTimeoutReached) {
+            $elapsed = [math]::Floor((Get-Date).Subtract($backendStartTime).TotalSeconds)
+            Write-Host "`n❌ STARTUP FAILED: Backend timed out after ${elapsed}s/${TIMEOUT_SECONDS}s" -ForegroundColor Red
+            Write-Host "   Service: uvicorn on port ${backendPort}" -ForegroundColor Yellow
+            Write-Host "   PID: $($global:backendJob.Id)" -ForegroundColor Yellow
+            
+            # Show last lines of both stdout and stderr
+            try {
+                if (Test-Path $backendErr) {
+                    $lastLines = Get-Content $backendErr -Tail 20
+                    if ($lastLines) {
+                        Write-Host "   stderr tail (last 20 lines):" -ForegroundColor DarkYellow
+                        foreach ($line in $lastLines) {
+                            Write-Host "     $line" -ForegroundColor DarkGray
+                        }
+                    }
+                }
+            } catch {}
+            
+            # Cleanup orphaned processes before exiting
+            Write-Host "`n🔧 Initiating cleanup..." -ForegroundColor Yellow
+            $frontendPid = if ($global:frontendJob -and $global:frontendJob.Id) { $global:frontendJob.Id } else { 0 }
+            CleanupOrphanedProcesses -BackendPid $global:backendJob.Id -FrontendPid $frontendPid
+            
+            return 1
         }
 
-        # [4/5] Frontend startup
+        # [4/5] Frontend startup with detailed timeout tracking
         Write-Host "`n[4/5] start frontend (timeout: ${TIMEOUT_SECONDS}s)..." -ForegroundColor Cyan
         $frontendWd = Join-Path $repo 'frontend'
         $npmCmd = Get-Command npm.cmd -ErrorAction SilentlyContinue
@@ -162,45 +201,83 @@ function Execute-Startup {
             $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
         }
         if (-not $npmCmd) {
-            throw "npm not found"
+            Write-Host "❌ ERROR: npm not found" -ForegroundColor Red
+            return 1
         }
         $frontendOut = Join-Path $runDir 'frontend.log'
         $frontendErr = Join-Path $runDir 'frontend-error.log'
 
-        $startTimeFrontend = Get-Date
+        $frontendStartTime = Get-Date
         Write-Host "  Starting npm dev process with timeout monitoring..." -ForegroundColor Gray
-        $frontendJob = Start-Process -FilePath $npmCmd.Source `
+        $global:frontendJob = Start-Process -FilePath $npmCmd.Source `
             -ArgumentList @('run', 'dev', '--', '--host', $frontendHost, '--port', "$frontendPort") `
             -WorkingDirectory $frontendWd `
             -RedirectStandardOutput $frontendOut `
             -RedirectStandardError $frontendErr `
             -PassThru
 
-        Write-Host "  frontend PID: $($frontendJob.Id)" -ForegroundColor Gray
+        Write-Host "  frontend PID: $($global:frontendJob.Id)" -ForegroundColor Gray
 
         # Frontend health check loop
         Write-Host "  Waiting for frontend health check (timeout: ${TIMEOUT_SECONDS}s)..." -ForegroundColor Gray
-        $elapsedSeconds = 0
-        while ((Get-Date).Subtract($startTimeFrontend).TotalSeconds -lt $TIMEOUT_SECONDS) {
+        $frontendHealthy = $false
+        $frontendTimeoutReached = $false
+        
+        while ((Get-Date).Subtract($frontendStartTime).TotalSeconds -lt $TIMEOUT_SECONDS) {
             try {
                 $resp = Invoke-WebRequest -UseBasicParsing "$frontendBaseUrl/" -TimeoutSec 2
                 if ($resp.StatusCode -eq 200) {
-                    Write-Host "  ✓ Frontend healthy after ${elapsedSeconds}s" -ForegroundColor Green
+                    $elapsed = [math]::Floor((Get-Date).Subtract($frontendStartTime).TotalSeconds)
+                    Write-Host "  ✓ Frontend healthy after ${elapsed}s" -ForegroundColor Green
+                    $frontendHealthy = $true
                     break
                 }
-            } catch {}
+            } catch {
+                # Health check failed, continue retrying
+            }
             
             Start-Sleep -Milliseconds $CHECK_INTERVAL_MS
-            $elapsedSeconds += ($CHECK_INTERVAL_MS / 1000)
             
-            if ([math]::Floor($elapsedSeconds) % 5 -eq 0) {
-                $remaining = [math]::Floor($TIMEOUT_SECONDS - $elapsedSeconds)
-                Write-Host "  ⏱ Frontend still starting... (${elapsedSeconds}s elapsed, ${remaining}s remaining)" -ForegroundColor DarkGray
+            # Log progress every 5 seconds
+            $elapsed = [math]::Floor((Get-Date).Subtract($frontendStartTime).TotalSeconds)
+            if ($elapsed % 5 -eq 0 -and $elapsed -gt 0) {
+                $remaining = [math]::Floor($TIMEOUT_SECONDS - $elapsed)
+                Write-Host "  ⏱ Frontend still starting... (${elapsed}s elapsed, ${remaining}s remaining)" -ForegroundColor DarkGray
+            }
+            
+            # Check if we've exceeded timeout
+            if ((Get-Date).Subtract($frontendStartTime).TotalSeconds -ge $TIMEOUT_SECONDS) {
+                $frontendTimeoutReached = $true
+                break
             }
         }
 
-        if (-not (Test-Path $frontendOut)) {
-            throw "Frontend failed to start within ${TIMEOUT_SECONDS}s after ${elapsedSeconds}s"
+        # Frontend timeout check
+        if (-not $frontendHealthy -or $frontendTimeoutReached) {
+            $elapsed = [math]::Floor((Get-Date).Subtract($frontendStartTime).TotalSeconds)
+            Write-Host "`n❌ STARTUP FAILED: Frontend timed out after ${elapsed}s/${TIMEOUT_SECONDS}s" -ForegroundColor Red
+            Write-Host "   Service: npm dev on port ${frontendPort}" -ForegroundColor Yellow
+            Write-Host "   PID: $($global:frontendJob.Id)" -ForegroundColor Yellow
+            
+            # Show last lines of frontend errors
+            try {
+                if (Test-Path $frontendErr) {
+                    $lastLines = Get-Content $frontendErr -Tail 20
+                    if ($lastLines) {
+                        Write-Host "   stderr tail (last 20 lines):" -ForegroundColor DarkYellow
+                        foreach ($line in $lastLines) {
+                            Write-Host "     $line" -ForegroundColor DarkGray
+                        }
+                    }
+                }
+            } catch {}
+            
+            # Cleanup orphaned processes
+            Write-Host "`n🔧 Initiating cleanup..." -ForegroundColor Yellow
+            $backendPid = if ($global:backendJob -and $global:backendJob.Id) { $global:backendJob.Id } else { 0 }
+            CleanupOrphanedProcesses -BackendPid $backendPid -FrontendPid $global:frontendJob.Id
+            
+            return 1
         }
 
         # [5/5] Final readiness checks
@@ -265,7 +342,21 @@ function Execute-Startup {
             
             return 0
         } else {
-            throw "Services failed to become ready"
+            Write-Host "`n❌ STARTUP FAILED - Services did not become ready within ${maxWait}s" -ForegroundColor Red
+            
+            $backendPid = if ($global:backendJob -and $global:backendJob.Id) { $global:backendJob.Id } else { 0 }
+            $frontendPid = if ($global:frontendJob -and $global:frontendJob.Id) { $global:frontendJob.Id } else { 0 }
+            
+            CleanupOrphanedProcesses -BackendPid $backendPid -FrontendPid $frontendPid
+            
+            if (-not $backendReady) {
+                Write-Host "  backend health check failing" -ForegroundColor Yellow
+            }
+            if (-not $frontendReady -or -not $frontendProxyReady) {
+                Write-Host "  frontend/proxy health check failing" -ForegroundColor Yellow
+            }
+            
+            return 1
         }
     }
     catch {
@@ -285,8 +376,8 @@ catch {
     Write-Error "❌ Startup failed with error: $_"
     
     # Call cleanup function
-    $backendPid = if ($backendJob -and $backendJob.Id) { $backendJob.Id } else { 0 }
-    $frontendPid = if ($frontendJob -and $frontendJob.Id) { $frontendJob.Id } else { 0 }
+    $backendPid = if ($global:backendJob -and $global:backendJob.Id) { $global:backendJob.Id } else { 0 }
+    $frontendPid = if ($global:frontendJob -and $global:frontendJob.Id) { $global:frontendJob.Id } else { 0 }
     CleanupOrphanedProcesses -BackendPid $backendPid -FrontendPid $frontendPid
     
     ExitWithCode 1
@@ -442,7 +533,7 @@ print(f"Cleanup completed: sockets={len(result['sockets_cleaned'])}, remaining_o
         try {
             Write-Host "  terminating backend PID=$($backendJob.Id)..." -ForegroundColor Yellow
             Stop-Process -Id $backendJob.Id -Force -ErrorAction Stop 2>$null
-            $null = $backendJob | Wait-Job -Timeout 3 -ErrorAction SilentlyContinue
+            $null = $backendJob | Wait-Job -Timeout ($CLEANUP_TIMEOUT_MS / 1000) -ErrorAction SilentlyContinue
         } catch {
             Write-Host "  backend process already terminated" -ForegroundColor DarkGray
         }
@@ -453,7 +544,7 @@ print(f"Cleanup completed: sockets={len(result['sockets_cleaned'])}, remaining_o
         try {
             Write-Host "  terminating frontend PID=$($frontendJob.Id)..." -ForegroundColor Yellow
             Stop-Process -Id $frontendJob.Id -Force -ErrorAction Stop 2>$null
-            $null = $frontendJob | Wait-Job -Timeout 3 -ErrorAction SilentlyContinue
+            $null = $frontendJob | Wait-Job -Timeout ($CLEANUP_TIMEOUT_MS / 1000) -ErrorAction SilentlyContinue
         } catch {
             Write-Host "  frontend process already terminated" -ForegroundColor DarkGray
         }
