@@ -13,6 +13,10 @@ $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo = $scriptPath
 $logsRoot = Join-Path $repo 'logs'
 
+# === Global variables for cleanup ===
+$global:backendJob = $null
+$global:frontendJob = $null
+
 function Get-EnvValue {
     param(
         [string[]]$Names,
