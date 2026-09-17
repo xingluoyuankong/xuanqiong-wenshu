@@ -157,25 +157,70 @@ function Stop-PortProcess {
 }
 
 function CleanupOrphanedProcesses {
+    param(
+        [int]$BackendPid = 0,
+        [int]$FrontendPid = 0
+    )
+    
     Write-Host "`n🛑 Starting process cleanup due to startup failure..." -ForegroundColor Red
     
+    # Use Python cleanup module for cross-platform support if available
+    $pythonCleanupPath = Join-Path $repo 'backend\app\cleanup.py'
+    if (Test-Path $pythonCleanupPath) {
+        try {
+            $backendPy = Join-Path $repo 'backend\.venv\python.exe'
+            if (-not (Test-Path $backendPy)) {
+                $backendPy = "python"
+            }
+            
+            $pythonArgs = @(
+                "-c", 
+                @"
+import sys
+sys.path.insert(0, r'$repo\backend')
+from app.cleanup import perform_graceful_cleanup
+result = perform_graceful_cleanup(
+    backend_pid=$BackendPid if '$BackendPid' != '0' else None,
+    frontend_pid=$FrontendPid if '$FrontendPid' != '0' else None,
+    repo_path=r'$repo',
+    run_dir=r'$runDir',
+    ports=[8013, 5174]
+)
+print(f"Cleanup completed: sockets={len(result['sockets_cleaned'])}, remaining_orphans={len(result['remaining_orphans'])}")
+"@
+            )
+            
+            $pythonResult = & $backendPy @pythonArgs 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  ✓ Python cleanup executed: $pythonResult" -ForegroundColor Green
+            } else {
+                Write-Host "  ⚠ Python cleanup failed with exit code $LASTEXITCODE" -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "  ⚠ Python cleanup module not available: $($_.Exception.Message)" -ForegroundColor DarkGray
+        }
+    }
+    
+    # Fallback: PowerShell-native cleanup
+    Write-Host "  running PowerShell native cleanup..." -ForegroundColor Gray
+    
     # Terminate backend job if still running
-    if ($backendJob -and $backendJob.Id) {
+    if ($backendJob -and $backendJob.Id -gt 0) {
         try {
             Write-Host "  terminating backend PID=$($backendJob.Id)..." -ForegroundColor Yellow
-            Stop-Process -Id $backendJob.Id -Force -ErrorAction Stop
-            $null = $backendJob | Wait-Job -ErrorAction SilentlyContinue 2>$null
+            Stop-Process -Id $backendJob.Id -Force -ErrorAction Stop 2>$null
+            $null = $backendJob | Wait-Job -Timeout 3 -ErrorAction SilentlyContinue
         } catch {
             Write-Host "  backend process already terminated" -ForegroundColor DarkGray
         }
     }
     
     # Terminate frontend job if still running
-    if ($frontendJob -and $frontendJob.Id) {
+    if ($frontendJob -and $frontendJob.Id -gt 0) {
         try {
             Write-Host "  terminating frontend PID=$($frontendJob.Id)..." -ForegroundColor Yellow
-            Stop-Process -Id $frontendJob.Id -Force -ErrorAction Stop
-            $null = $frontendJob | Wait-Job -ErrorAction SilentlyContinue 2>$null
+            Stop-Process -Id $frontendJob.Id -Force -ErrorAction Stop 2>$null
+            $null = $frontendJob | Wait-Job -Timeout 3 -ErrorAction SilentlyContinue
         } catch {
             Write-Host "  frontend process already terminated" -ForegroundColor DarkGray
         }
@@ -189,11 +234,13 @@ function CleanupOrphanedProcesses {
     # Clean socket files if present
     $socketFiles = @(
         Join-Path $runDir 'uvicorn.sock',
-        Join-Path $runDir 'fastapi.sock'
+        Join-Path $runDir 'fastapi.sock',
+        Join-Path $runDir '*.sock',
+        Join-Path $runDir '*.socket'
     )
     foreach ($sock in $socketFiles) {
         if (Test-Path $sock) {
-            try { Remove-Item $sock -Force } catch {}
+            try { Remove-Item $sock -Force -ErrorAction SilentlyContinue } catch {}
         }
     }
     
@@ -294,7 +341,8 @@ if (-not (Test-Path $backendOut)) {
     } catch {}
     
     Write-Host "❌ TIMEOUT: Backend failed to respond within ${TIMEOUT_SECONDS}s" -ForegroundColor Red
-    CleanupOrphanedProcesses
+    $backendPid = if ($backendJob -and $backendJob.Id) { $backendJob.Id } else { 0 }
+    CleanupOrphanedProcesses -BackendPid $backendPid -FrontendPid (if ($frontendJob -and $frontendJob.Id) { $frontendJob.Id } else { 0 })
     exit 1
 }
 
@@ -360,7 +408,9 @@ if (-not (Test-Path $frontendOut)) {
     } catch {}
     
     Write-Host "❌ TIMEOUT: Frontend failed to respond within ${TIMEOUT_SECONDS}s" -ForegroundColor Red
-    CleanupOrphanedProcesses
+    $backendPid = if ($backendJob -and $backendJob.Id) { $backendJob.Id } else { 0 }
+    $frontendPid = if ($frontendJob -and $frontendJob.Id) { $frontendJob.Id } else { 0 }
+    CleanupOrphanedProcesses -BackendPid $backendPid -FrontendPid $frontendPid
     exit 1
 }
 
@@ -425,7 +475,11 @@ if ($backendReady) {
 
 if (-not $backendReady -or -not $frontendReady -or -not $frontendProxyReady) {
     Write-Host "`n❌ STARTUP FAILED - inspect logs:" -ForegroundColor Red
-    CleanupOrphanedProcesses
+    
+    $backendPid = if ($backendJob -and $backendJob.Id) { $backendJob.Id } else { 0 }
+    $frontendPid = if ($frontendJob -and $frontendJob.Id) { $frontendJob.Id } else { 0 }
+    
+    CleanupOrphanedProcesses -BackendPid $backendPid -FrontendPid $frontendPid
     
     if (-not $backendReady) {
         Write-Host "  backend stderr: $backendErr" -ForegroundColor Yellow
