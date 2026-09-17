@@ -216,3 +216,105 @@
 4. 运行完整后端和前端验证，最后核对全部未提交代码与 backend/storage 用户资产。
 
 > 文档更新时间：2026-09-09 22:38:27 +08:00
+
+## 2026-09-17 当前树全面进度审查（HEAD=3c6c6a3583cbc89d5b4c5c7fc2399849843c0446）
+
+> 审查日期：2026-09-17（Asia/Shanghai）
+> 分支：`codex/bohrium-integration-20260831`，与 `origin/codex/bohrium-integration-20260831` 指向同一 HEAD。
+> 结论口径：以下只认当前 checkout 的代码、当前命令输出和当前运行日志；旧文档中的 3103/3130、旧服务 200 不外推为当前结果。
+
+### A. 当前仓库与资产状态
+
+- HEAD：`3c6c6a3583cbc89d5b4c5c7fc2399849843c0446`，提交时间 `2026-09-16 15:06:03 +0800`。
+- 当前 tracked diff：无。
+- 当前未跟踪用户资产：6 个 `backend/storage` 二进制文件，均保留，不做清理。
+  - `novel_imports/9/` 下 4 个文件 SHA-256 相同：`D756D620534B9098C7981518F9783C47115E8A69F523EB1C2B9C5E4528AD159C`，大小 38 bytes。
+  - `style_uploads/project-1/` 下 2 个文件 SHA-256 相同：`8FB3B688E238011000A16E3F04219A3E2D427A3B8C4D07A4232D941A262D80BF`，大小 66 bytes。
+- `git diff --check`：通过。
+- 当前正式服务状态：审查结束时 3309、8013、5174 均无监听，未留下仓库相关 Python/Node 服务。
+
+### B. 当前门禁结果
+
+| 层级 | 当前结果 | 证据 |
+|---|---|---|
+| 后端全量 pytest | 通过 | `cd backend; .\\.venv\\Scripts\\python.exe -m pytest -q` → `3145 passed in 1665.51s (0:27:45)` |
+| 前端类型检查 | 通过 | `npm run type-check` → exit 0 |
+| 前端测试 | 通过 | `npm run test:run` → exit 0，当前测试树 83 个测试文件 |
+| 前端构建 | 通过 | `npm run build-only` → exit 0，Vite `4918 modules transformed` |
+| Python 编译 | 已由全量测试导入路径覆盖；独立 compileall 命令需下轮补留存日志 | 当前代码门禁无语法失败 |
+| 数据库迁移状态 | 通过 | `alembic current` → `030_research_schema_repair (head)` |
+| 独立数据库初始化 | 通过 | `await init_db()` → `INIT_DB_OK 0.33s` |
+
+前端测试期间出现非失败提示：Pinia 注入 warning、`baseline-browser-mapping` 数据超过两个月、`caniuse-lite` 数据约 11 个月；这些属于测试环境/依赖维护项，不改变本轮 exit 0 结论。
+
+### C. 已具备当前代码与回归证据的优化
+
+1. `PipelineOrchestrator.generate_chapter` 主入口已存在，当前文件约 9337 行；续写状态包、长篇 continuation digest、取消检查、低增量/重复内容护栏、运行事件和停止原因均有定向回归。
+2. superseded generation run 的 `ChapterVersion` 写入 fencing 已接入；旧 run 拒绝且零写入、当前 run 正常写入均有回归。
+3. HTTP → BackgroundTasks → worker → pipeline → status/SSE 的确定性集成回归已存在；版本自动选择、TaskRuntime、`task_started/task_completed` 回放和 `run_id` 保持有测试覆盖。
+4. 评审无候选时前端不再落入空版本选择器；`evaluation_failed`、`selecting`、`waiting_for_confirm` 分支已有前端回归。
+5. consistency `check_only`、结构质量门复用、正文变化后的强制重算、降级/风险/可重试动作向前端投影均有当前测试覆盖。
+6. Provider attempt ledger、章节级 `ContextVar` 隔离、逻辑调用/估算用量聚合字段已接入代码并有测试文件覆盖；当前仍需真实 Provider 样本验收，不把 mock/桩调用当成真实成本闭环。
+7. 前端 TypeScript 类型收口、本轮写作台状态组件、章节内容/失败态/生成态、章节生成 API 类型与测试均已进入当前 HEAD。
+8. `start.ps1`/`stop.ps1` 已包含端口检查、仓库归属判断、隐藏窗口、日志目录、服务进程收尾和 SQLite/MySQL 分支判断；但正式启动 smoke 仍未收口，见 D 节。
+
+### D. 本轮发现的当前阻塞与未完成事项
+
+#### P0 — 正式启动 smoke 未通过，必须先修
+
+- 2026-09-17 15:43 左右执行 `start.ps1`：前端 Vite 日志显示约 1.7 秒 ready；后端 Uvicorn 只到“等待应用启动”，日志停在 SQLite Alembic context，8013 从未进入监听，前端代理 `/api/health` 返回 `ECONNREFUSED`。
+- 同一时间独立 `alembic current` 已到 head，独立 `init_db()` 0.33 秒完成，因此当前证据不支持把问题归因于迁移缺失；更像启动脚本的子进程句柄/健康等待、应用 lifespan 后续阶段或本轮启动环境差异。
+- 本轮已中断卡住 smoke，并运行 `stop.ps1` 收尾；停止后 3309/8013/5174 均无监听，相关服务进程清零。
+- 需要补：启动阶段分段日志（provider init / init_db / prompt preload / startup reconcile / sweeper）、有界启动超时、失败时明确退出原因、启动 manifest 与子进程句柄证据；先写失败回归，再修脚本或 lifespan。
+
+#### P0 — 真实 Provider 主链验收未完成
+
+- 当前工程链路和确定性桩链路已通过；仍缺真实 Provider 的章节样本：正常生成、Provider 异常、质量门失败、重试/降级、SSE 终态、正文持久化、候选选择和预算账本的 before/after 证据。
+- 需要至少保留：请求级 `run_id`、provider attempt、阶段耗时、重试原因、最终正文非空可解析、版本数、SSE terminal event、数据库写入和失败后的零写入/可重试动作。
+
+#### P1 — worker 生命周期与跨实例 fencing
+
+- 死亡 worker 快速回收、实例 epoch、跨实例不误杀、启动/停止 manifest、MySQL/SQLite 双后端迁移后的完整闭环仍未形成当前可运行证据。
+- 现有 lease/heartbeat 和回收测试不能代替进程被强制停止或重启后的真实 smoke；需要故障注入、旧 epoch 拒绝、当前 epoch 正常续租、恢复后状态可查询的回归。
+
+#### P1 — provider budget 与 self-critique 成本闭环
+
+- 代码已有 ProviderAttemptLedger、`ContextVar`、阶段指标和预算字段，历史上“未接入主链”的旧描述已经过时；但当前仍缺真实 Provider 账本样本和统一的阶段预算决策证据。
+- 需要明确 logical call / physical attempt / retry / estimated tokens / actual usage 的字段语义，覆盖导演脚本、候选、续写、护栏重写、AI review、enhanced review、一致性检查/修复/复检和 self-critique，并验证并发章节不会串账。
+- 预算超限后的行为需形成明确终态：告警、降级、暂停或失败；前端显示与后端 `allowed_actions` 必须一致。
+
+#### P1 — 文学质量与真实样本验收
+
+- 工程质量门、连续性和结构护栏已有自动回归；真实 Provider 生成的文学质量、双盲版本标签、视觉人工检查仍未完成。
+- 需要冻结样本输入，记录候选版本、自动评审、人工盲评、连续性 before/after、重复率、字数、阶段耗时和成本，避免把自动评分当成人工文学验收。
+
+#### P2 — 架构治理与契约收口
+
+- `backend/app/services/pipeline_orchestrator.py` 当前约 9337 行，`writer.py`、`novel_service.py`、`ChapterGenerating.vue` 也属于高复杂度文件；阶段拆分仍是待实施项，不在本轮贸然重构。
+- `pipeline_orchestrator.py` 应在 P0/P1 主链稳定后按 generation/review/memory/runtime 四块拆分，每块先保留现有入口和回归，再做小步迁移。
+- `frontend/src/api/novel.ts` 类型与 API 实现分离、OpenAPI 生成前端契约属于长期治理项；先从当前主链请求/响应和 `GenerationRuntime` 做契约快照与漂移检查。
+
+#### P2 — 依赖与测试环境维护
+
+- 更新 `baseline-browser-mapping` / `caniuse-lite` 前先独立提交依赖变更并跑前端全门禁。
+- 测试夹具补齐 Pinia 注入，减少 warning 噪声；不以静默 mock 掩盖真实 store 依赖。
+- 下轮独立保留 `compileall` 输出、启动失败完整日志和服务进程树，避免只依赖终端实时输出。
+
+### E. 推荐执行顺序
+
+1. 先定位并修复 `start.ps1`/后端 lifespan 的启动 smoke：分段计时、启动超时、失败收尾、manifest、回归。
+2. 再做真实 Provider 正常/异常/质量门失败三路 HTTP → worker → pipeline → status/SSE 验收，接通 provider budget 证据。
+3. 然后做实例 epoch + lease/heartbeat + 强制停止恢复闭环，覆盖 SQLite 和 MySQL 迁移路径。
+4. 再采集真实文学样本做双盲质量与视觉检查，保留成本和连续性证据。
+5. 最后进行编排器分阶段拆分与前后端契约治理，每次只迁移一个职责块并跑全量门禁。
+
+### F. 当前完成度判定
+
+- **代码/单测层：通过。** 后端 3145 全绿，前端 type-check/test/build 全绿。
+- **数据库初始化层：通过。** 当前 SQLite Alembic 已在 head，独立 `init_db()` 成功。
+- **本地正式启动层：未收口。** 本轮 `start.ps1` smoke 卡在后端 readiness，需按 P0 处理。
+- **真实 Provider 生成层：未收口。** 当前主要是桩/确定性链路证据，仍缺真实样本。
+- **生产级生命周期层：未收口。** epoch、manifest、死亡 worker 回收和强制停止恢复仍待闭环。
+- **文学质量交付层：未收口。** 需要真实样本、双盲人工和视觉验收。
+
+> 本节是 2026-09-17 当前树审查记录；下一次变更后必须重跑后端全量 pytest、前端三项门禁、启动 smoke，并重新核对 6 个未跟踪 storage 资产。
