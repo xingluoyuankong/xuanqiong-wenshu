@@ -1,0 +1,22 @@
+
+
+## [2026-09-17 19:00 UTC] - US-005: Differentiate slow vs failed health checks
+- **What was implemented:**
+  - Updated `healthcheck.sh` with comprehensive service classification logic
+  - Implemented exponential backoff retry strategy (2s, 4s, 8s intervals)
+  - Added curl exit code detection: 28 for timeout (SLOW), 7 for connection refused (FAILED)
+  - Configurable parameters via environment variables (MAX_RETRIES, RETRY_BASE_INTERVAL, TIMEOUT, SLOW_THRESHOLD)
+  - Distinct warning messages for each failure mode with timestamps
+  - Exit codes: 0=healthy, 1=degraded/slow, 2=failed
+  
+- **Files changed:**
+  - `healthcheck.sh` - Complete rewrite with state classification
+  - `test_healthcheck_classify.sh` - New validation test script
+
+- **Learnings for future iterations:**
+  - Curl's built-in timing and error codes provide reliable differentiation without custom implementations
+  - Exponential backoff is more robust than fixed delays for handling transient failures
+  - Environment variable defaults allow production override without code changes
+  - State machine approach (0/1/2) makes monitoring scripts composable
+  - Health check exit codes should be treated as semi-colonial signals in monitoring dashboards
+---
