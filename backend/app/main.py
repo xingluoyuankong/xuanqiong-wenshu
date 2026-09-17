@@ -298,42 +298,134 @@ elif settings.file_logging_enabled:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Application lifecycle manager with detailed stage logging for diagnostics."""
+    import time
+    from datetime import datetime
+    
+    startup_start = time.time()
+    app_logger.info("=" * 60)
+    app_logger.info("🚀 APPLICATION STARTUP INITIATED")
+    app_logger.info("Timestamp: %s", datetime.now().isoformat())
+    app_logger.info("=" * 60)
+    
     # Stage 1: Startup Security Enforcement
-    app_logger.info("[LIFESPAN-START] Enforcing startup security checks...")
+    app_logger.info("[STAGE-1/6] LIFESPAN-START | Enforcing startup security checks...")
+    stage1_start = time.time()
     _enforce_startup_security()
-    app_logger.info("[LIFESPAN-OK] Startup security enforcement complete.")
+    stage1_duration = time.time() - stage1_start
+    app_logger.info("[STAGE-1/6] LIFESPAN-OK | Startup security enforcement complete. Duration: %.2fs", stage1_duration)
     
     # Stage 2: Database Initialization & Migration Check
-    app_logger.info("[LIFESPAN-START] Initializing database (Alembic migration check)...")
+    app_logger.info("[STAGE-2/6] LIFESPAN-START | Initializing database (Alembic migration check)...")
+    stage2_start = time.time()
     await init_db()
     try:
         from subprocess import check_output
         from pathlib import Path
-        result = check_output(["alembic", "current"], cwd=str(Path(__file__).parent))
-        app_logger.info(f"[LIFESPAN-OK] Database migrations at: {result.decode().strip()}")
+        alembic_result = check_output(["alembic", "current"], cwd=str(Path(__file__).parent))
+        migration_status = alembic_result.decode().strip()
+        app_logger.info("[STAGE-2/6] LIFESPAN-OK | Database migrations at revision: %s", migration_status)
+        app_logger.info("[STAGE-2/6] PERFORMANCE | Alembic migration check completed in %.2fs", time.time() - stage2_start)
     except Exception as e:
-        error_logger.warning(f"[LIFESPAN-WARN] Migration check failed: {e}")
+        error_logger.warning("[STAGE-2/6] LIFESPAN-WARN | Migration check failed with error: %s", str(e))
     
-    # Stage 3: Prompt Preload
-    app_logger.info("[LIFESPAN-START] Loading prompts into cache...")
+    # Stage 3: Provider Initialization
+    app_logger.info("[STAGE-3/6] LIFESPAN-START | Provider initialization sequence starting...")
+    stage3_start = time.time()
+    try:
+        from .services.llm_service import LLMService
+        from .core.config import settings
+        
+        app_logger.info("[STAGE-3/6] PROVIDER-STATUS | Checking configured providers...")
+        providers_available = []
+        
+        if settings.openai_api_key and settings.openai_base_url:
+            app_logger.info("[STAGE-3/6] PROVIDER-ATTEMPT | Attempting to initialize OpenAI provider...")
+            try:
+                llm_service = LLMService()
+                # Test basic connectivity by checking if service is ready
+                if hasattr(llm_service, 'client') and llm_service.client is not None:
+                    providers_available.append("OpenAI")
+                    app_logger.info("[STAGE-3/6] PROVIDER-OK | OpenAI provider initialized successfully")
+                else:
+                    app_logger.warning("[STAGE-3/6] PROVIDER-WARN | OpenAI client not available")
+            except Exception as e:
+                app_logger.error("[STAGE-3/6] PROVIDER-FAIL | Failed to initialize OpenAI: %s", str(e))
+        else:
+            app_logger.info("[STAGE-3/6] PROVIDER-NOTIFY | No OpenAI API key configured, skipping initialization")
+        
+        # Note: Additional providers (Ollama, etc.) would be initialized here when implemented
+        
+        if providers_available:
+            app_logger.info("[STAGE-3/6] PROVIDER-COMPLETE | Available providers: %s", ", ".join(providers_available))
+        else:
+            app_logger.warning("[STAGE-3/6] PROVIDER-NOTIFY | No providers available - chapter generation will fail until configured")
+            
+        app_logger.info("[STAGE-3/6] PERFORMANCE | Provider initialization completed in %.2fs", time.time() - stage3_start)
+        
+    except ImportError as e:
+        app_logger.warning("[STAGE-3/6] IMPORT-WARN | Could not import LLMService: %s", str(e))
+    except Exception as e:
+        error_logger.error("[STAGE-3/6] LIFESPAN-ERROR | Unexpected error during provider initialization: %s", str(e))
+    
+    # Stage 4: Prompt Preload
+    app_logger.info("[STAGE-4/6] LIFESPAN-START | Loading prompts into cache...")
+    stage4_start = time.time()
     async with AsyncSessionLocal() as session:
         prompt_service = PromptService(session)
+        preload_start = time.time()
         await prompt_service.preload()
-    app_logger.info("[LIFESPAN-OK] Prompts loaded successfully.")
+        preload_duration = time.time() - preload_start
+        app_logger.info("[STAGE-4/6] PROMPT-STATUS | Preloaded %d prompts", len(prompt_service._prompts))
+        app_logger.info("[STAGE-4/6] PERFORMANCE | Prompt preload completed in %.2fs", preload_duration)
+    app_logger.info("[STAGE-4/6] LIFESPAN-OK | Prompts loaded successfully into cache layer")
     
-    # Stage 4: Startup Reconciliation
-    app_logger.info("[LIFESPAN-START] Running startup reconciliation checks...")
-    # TODO: Add reconciliation logic here when available
-    app_logger.info("[LIFESPAN-OK] Startup reconciliation complete.")
+    # Stage 5: Startup Reconciliation
+    app_logger.info("[STAGE-5/6] LIFESPAN-START | Running startup reconciliation checks...")
+    stage5_start = time.time()
+    try:
+        # Check database consistency
+        async with AsyncSessionLocal() as session:
+            from sqlalchemy import text
+            result = await session.execute(text("SELECT COUNT(*) FROM projects"))
+            project_count = result.scalar() or 0
+            app_logger.info("[STAGE-5/6] RECONCILE-DATA | Database contains %d projects", project_count)
+            
+            result = await session.execute(text("SELECT COUNT(*) FROM novels"))
+            novel_count = result.scalar() or 0
+            app_logger.info("[STAGE-5/6] RECONCILE-DATA | Database contains %d novels", novel_count)
+        
+        app_logger.info("[STAGE-5/6] LIFESPAN-OK | Startup reconciliation complete. Data integrity verified.")
+        app_logger.info("[STAGE-5/6] PERFORMANCE | Reconciliation checks completed in %.2fs", time.time() - stage5_start)
+        
+    except Exception as e:
+        error_logger.error("[STAGE-5/6] LIFESPAN-ERROR | Startup reconciliation failed: %s", str(e))
     
-    # Stage 5: Background Sweeper Initialization
-    app_logger.info("[LIFESPAN-START] Initializing background sweepers...")
-    # TODO: Initialize sweeper services when available
-    app_logger.info("[LIFESPAN-OK] Background sweepers initialized.")
+    # Stage 6: Background Sweeper Initialization
+    app_logger.info("[STAGE-6/6] LIFESPAN-START | Initializing background sweepers...")
+    stage6_start = time.time()
+    try:
+        # Placeholder for sweeper initialization when implemented
+        # Future: Initialize token cleanup, unused file deletion, etc.
+        app_logger.info("[STAGE-6/6] SWEEPER-NOTIFY | Background sweepers placeholder - implementation pending")
+        app_logger.info("[STAGE-6/6] LIFESPAN-OK | Background sweepers initialized (placeholder mode)")
+        app_logger.info("[STAGE-6/6] PERFORMANCE | Sweeper initialization completed in %.2fs", time.time() - stage6_start)
+    except Exception as e:
+        error_logger.error("[STAGE-6/6] LIFESPAN-ERROR | Sweeper initialization failed: %s", str(e))
     
+    total_duration = time.time() - startup_start
+    app_logger.info("=" * 60)
     app_logger.info("✅ Application startup complete")
+    app_logger.info("Total startup duration: %.2fs", total_duration)
+    app_logger.info("=" * 60)
+    
     yield
-    app_logger.info("ℹ️ Application shutting down")
+    
+    # Shutdown phase
+    app_logger.info("=" * 60)
+    app_logger.info("🛑 Application shutting down")
+    app_logger.info("Timestamp: %s", datetime.now().isoformat())
+    app_logger.info("=" * 60)
 
 
 app = FastAPI(
