@@ -83,6 +83,7 @@ from .clue_tracker import StoryClue, ClueChapterLink, ClueThread
 
 # 新增：阵营模型
 from .faction import Faction, FactionRelationship, FactionMember, FactionRelationshipHistory
+from .research import ProjectResearchConfig, ResearchArtifact
 
 __all__ = [
     # 基础模型
@@ -156,4 +157,6 @@ __all__ = [
     "FactionRelationship",
     "FactionMember",
     "FactionRelationshipHistory",
+    "ProjectResearchConfig",
+    "ResearchArtifact",
 ]
