@@ -18,7 +18,7 @@
 ## 验收标准
 
 - [x] 真实 Provider E2E usage 正常返回时 `attempt_index=1`。
-- [ ] 第一次物理调用失败、第二次成功时 usage 行 `attempt_index=2`；本轮真实 E2E 覆盖正常 attempt=1。
+- [x] 失败→重试→成功回归覆盖 usage_sink `attempt_index=2`；真实 E2E 覆盖正常 attempt=1。
 - [x] 真实 Provider E2E 的 usage 行包含 `attempt_indexes=[1]`。
 - [x] 后端全量测试：`267 passed`。
 - [ ] R8 提交推送 GitHub。
@@ -40,3 +40,10 @@
 - SQLite integrity：foreign_keys=1、orphan_project_rows={}。
 - schema drift audit：缺表/缺列/外键违规为 0，额外表 2 个 advisory。
 - 启动日志 warning grep：无 legacy admin email schema fallback。
+
+## Retry 回归
+
+- 新增 `backend/app/services/test_usage_attempt_index.py`。
+- 使用真实 OpenAI `RateLimitError` 类型模拟第一次物理调用失败。
+- 第二次调用成功并携带 usage，断言 `attempt_index=2`。
+- 定向结果：`13 passed`。
