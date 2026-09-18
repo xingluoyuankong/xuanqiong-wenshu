@@ -13,10 +13,14 @@ import sys
 import time
 from pathlib import Path
 
-# Add backend to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add backend to path (app 包位于 backend/ 下)
+sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 
-from app.utils.process_manager import ProcessManifestManager
+from app.services.process_manager import (
+    get_manifest,
+    spawn_child,
+    wait_child_exit,
+)
 
 
 def wait_for_health_check(url: str, timeout_seconds: int = 30) -> bool:
@@ -46,12 +50,15 @@ def main():
     parser.add_argument("--frontend-port", default="5174")
     args = parser.parse_args()
     
-    # Initialize manager
-    manager = ProcessManifestManager(args.log_dir)
-    
-    print(f"Started process manifest manager (PID={manager._manifest.parent_pid})")
+    # 使用 services/process_manager 的全局单例（唯一生效的 manifest 链路）。
+    # 注意：utils/process_manager.ProcessManifestManager 为 legacy 实现，
+    # 仅供其自身单测使用，启动流程不再使用，避免两套写同一 current_run.json。
+    manifest = get_manifest(log_dir=Path(args.log_dir))
+    manifest_path = manifest.write_to_file()
+
+    print(f"Started process manifest (parent PID={manifest.parent_pid})")
     print(f"Log directory: {args.log_dir}")
-    print(f"Manifest file: {manager.manifest_path}")
+    print(f"Manifest file: {manifest_path}")
     
     # Start backend
     backend_py = Path(__file__).parent.parent / ".venv" / "bin" / "python"
@@ -69,7 +76,11 @@ def main():
     ]
     
     print(f"\nStarting backend: {' '.join(backend_cmd)}")
-    backend_proc = manager.spawn_process(backend_cmd, "uvicorn", cwd=str(Path(__file__).parent.parent.parent / "backend"))
+    backend_proc = spawn_child(
+        backend_cmd,
+        # app 包位于 <project_root>/backend 下，uvicorn 需以该目录为 cwd
+        cwd=str(Path(__file__).parent.parent / "backend"),
+    )
     
     # Wait for health check
     print(f"Waiting for backend health check at http://{args.backend_host}:{args.backend_port}/api/health")
@@ -82,49 +93,46 @@ def main():
         print("✓ Backend healthy")
     else:
         print("✗ Backend failed to become healthy")
-        manager.record_termination(
-            backend_proc.pid,
-            backend_proc.returncode or -1,
-            "health check timeout"
-        )
+        wait_child_exit(backend_proc, reason="health check timeout", timeout_seconds=5)
         sys.exit(1)
     
     # Keep this process alive until child exits
     print("\nMonitoring processes... Press Ctrl+C to stop")
     
     try:
-        exit_code, reason = manager.wait_and_record(backend_proc, timeout=None, reason="completed normally")
-        print(f"\nBackend exited with code {exit_code}: {reason}")
+        exit_code = wait_child_exit(backend_proc, reason="completed normally")
+        print(f"\nBackend exited with code {exit_code}")
         
     except KeyboardInterrupt:
         print("\nReceived interrupt, terminating backend...")
-        manager.terminate_process(backend_proc, "keyboard interrupt")
+        import signal
+        backend_proc.send_signal(signal.SIGTERM)
+        wait_child_exit(backend_proc, reason="keyboard interrupt", timeout_seconds=10)
     
     # Write final manifest summary
     print("\n" + "="*60)
     print("Process Manifest Summary:")
     print("="*60)
     
-    manifest = manager.read_manifest()
-    if manifest:
-        print(f"Parent PID: {manifest.parent_pid}")
-        print(f"Spawned at: {manifest.spawned_at}")
-        print(f"Total processes spawned: {len(manifest.processes)}")
-        
-        running = len([p for p in manifest.processes if p.terminated_at is None])
-        terminated = len(manifest.processes) - running
-        
-        print(f"Currently running: {running}")
-        print(f"Terminated: {terminated}")
-        
-        if manifest.processes:
-            last = manifest.processes[-1]
-            print(f"\nLast process: PID={last.pid}, Name={last.name}")
-            if last.terminated_at:
-                print(f"Exit code: {last.exit_code}, Reason: {last.termination_reason}")
+    final_path = manifest.write_to_file()
+    print(f"Parent PID: {manifest.parent_pid}")
+    print(f"Spawned at: {manifest.timestamp}")
+    print(f"Total children spawned: {len(manifest.children)}")
+    
+    running = len([c for c in manifest.children if c["ended_at"] is None])
+    terminated = len(manifest.children) - running
+    
+    print(f"Currently running: {running}")
+    print(f"Terminated: {terminated}")
+    
+    if manifest.children:
+        last = manifest.children[-1]
+        print(f"\nLast child: PID={last['pid']}, CMD={last['command']}")
+        if last["ended_at"]:
+            print(f"Exit code: {last['exit_code']}, Reason: {last['reason']}")
     
     print("="*60)
-    print(f"Full manifest saved to: {manager.manifest_path}")
+    print(f"Full manifest saved to: {final_path}")
     
     return 0
 

@@ -4,7 +4,7 @@ import logging
 import os
 import signal
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -22,10 +22,19 @@ class ProcessManifest:
         timestamp: Manifest 创建时间戳
     """
 
-    def __init__(self) -> None:
+    def __init__(self, log_dir: Path | None = None) -> None:
+        """初始化 manifest.
+
+        Args:
+            log_dir: 显式指定写入目录。为 None 时用 settings.runtime_log_dir。
+                启动脚本通过 ``--log-dir`` 传入该值，保证 manifest 与
+                该轮 run 的 backend.log 落在同一目录。
+        """
         self.parent_pid = os.getpid()
         self.children: list[dict[str, Any]] = []
-        self.timestamp = datetime.utcnow().isoformat()
+        # timezone-aware，与 utils/process_manager.py 一致，避免跨文件 naive/aware 比较出错
+        self.timestamp = datetime.now(timezone.utc).isoformat()
+        self._log_dir = Path(log_dir) if log_dir is not None else None
 
     def add_child(
         self,
@@ -43,7 +52,7 @@ class ProcessManifest:
             kwargs: 传递给 subprocess.Popen 的其他参数
         """
         cmd_str = " ".join([command] + (args or []))
-        start_time = datetime.utcnow().isoformat()
+        start_time = datetime.now(timezone.utc).isoformat()
 
         self.children.append(
             {
@@ -70,7 +79,7 @@ class ProcessManifest:
             if child["pid"] == pid:
                 child["exit_code"] = exit_code
                 child["reason"] = reason
-                child["ended_at"] = datetime.utcnow().isoformat()
+                child["ended_at"] = datetime.now(timezone.utc).isoformat()
                 logger.info(
                     "子进程已退出｜PID=%d 退出码=%d 原因=%s",
                     pid,
@@ -78,6 +87,15 @@ class ProcessManifest:
                     reason,
                 )
                 break
+        else:
+            # 未命中时不能静默 no-op：排障时这里是黑洞，必须留痕
+            logger.warning(
+                "收到未知 PID 的退出事件｜PID=%d 不在 manifest 中（已追踪 PID=%s）｜退出码=%d 原因=%s",
+                pid,
+                [c["pid"] for c in self.children],
+                exit_code,
+                reason,
+            )
 
     def to_json(self) -> str:
         """将 manifest 转换为 JSON 字符串.
@@ -107,7 +125,7 @@ class ProcessManifest:
         Returns:
             写入的文件路径
         """
-        runtime_dir = settings.runtime_log_dir
+        runtime_dir = self._log_dir if self._log_dir is not None else settings.runtime_log_dir
         runtime_dir.mkdir(parents=True, exist_ok=True)
 
         manifest_path = runtime_dir / "current_run.json"
@@ -122,15 +140,19 @@ class ProcessManifest:
 _manifest_instance: Optional[ProcessManifest] = None
 
 
-def get_manifest() -> ProcessManifest:
+def get_manifest(log_dir: Path | None = None) -> ProcessManifest:
     """获取或创建唯一的 ProcessManifest 实例.
+
+    Args:
+        log_dir: 首次创建时指定的写入目录；后续调用忽略该参数，
+            返回既有单例并沿用其原目录。
 
     Returns:
         全局单例实例
     """
     global _manifest_instance
     if _manifest_instance is None:
-        _manifest_instance = ProcessManifest()
+        _manifest_instance = ProcessManifest(log_dir=log_dir)
     return _manifest_instance
 
 
@@ -184,6 +206,72 @@ def record_child_exit(pid: int, exit_code: int, reason: str) -> None:
     get_manifest().record_exit(pid=pid, exit_code=exit_code, reason=reason)
 
 
+# ---- 真实 spawn/回收链路专用 API（由 scripts/start_with_manifest.py 调用） ----
+
+
+def spawn_child(
+    cmd: list[str],
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.Popen[Any]:
+    """启动子进程并立即登记到 manifest（真实 spawn 点接入）.
+
+    这是 :func:`write_child_manifest` 的 Popen 封装：先写 manifest，
+    再返回句柄，保证 "进程只要启动就一定在 manifest 里有记录"。
+
+    Args:
+        cmd: 命令与参数列表
+        cwd: 工作目录
+        env: 环境变量覆盖项
+
+    Returns:
+        subprocess.Popen 对象
+    """
+    full_env = os.environ.copy()
+    if env:
+        full_env.update(env)
+
+    proc = subprocess.Popen(cmd, cwd=cwd, env=full_env)
+
+    write_child_manifest(
+        pid=proc.pid,
+        command=cmd[0] if cmd else "",
+        args=cmd[1:] if len(cmd) > 1 else [],
+    )
+    get_manifest().write_to_file()
+    track_process(proc)
+    return proc
+
+
+def wait_child_exit(
+    proc: subprocess.Popen[Any],
+    reason: str = "completed normally",
+    timeout_seconds: int | None = None,
+) -> int:
+    """等待子进程结束并记录退出信息（真实回收点接入）.
+
+    Args:
+        proc: 待等待的 Popen 对象
+        reason: 正常退出时的原因说明
+        timeout_seconds: 超时秒数，None 表示无限等待
+
+    Returns:
+        退出码（超时被杀返回 -1）
+    """
+    try:
+        exit_code = proc.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        exit_code = -1
+        reason = f"terminated after timeout ({timeout_seconds}s)"
+
+    record_child_exit(proc.pid, exit_code, reason)
+    get_manifest().write_to_file()
+    untrack_process(proc)
+    return exit_code
+
+
 def cleanup_orphan_children(pids: set[int]) -> None:
     """清理遗留的子进程.
 
@@ -207,11 +295,19 @@ _all_processes: set[subprocess.Popen[Any]] = set()
 def track_process(process: subprocess.Popen[Any]) -> None:
     """追踪一个子进程以便后续回收.
 
+    幂等：若该 PID 已在 manifest 中（例如 spawn_child 已登记过），
+    则只加入 Popen 集合，不再重复 add_child，避免同一 PID 出现两条记录。
+
     Args:
         process: subprocess.Popen 对象
     """
     _all_processes.add(process)
+
     manifest = get_manifest()
+    if any(c["pid"] == process.pid for c in manifest.children):
+        logger.debug("PID=%d 已在 manifest 中，跳过重复登记", process.pid)
+        return
+
     manifest.add_child(
         pid=process.pid,
         command=process.args[0] if isinstance(process.args, list) else process.args,
