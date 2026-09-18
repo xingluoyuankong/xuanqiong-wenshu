@@ -22,6 +22,7 @@ from .usage_metric import UsageMetric
 from .user import User
 from .user_daily_request import UserDailyRequest
 from .system_config import SystemConfig
+from .schema_state import SchemaState
 from .constitution import NovelConstitution
 from .outline_alternative import OutlineAlternative, OutlineEvolutionHistory
 from .writer_persona import WriterPersona
@@ -104,6 +105,7 @@ __all__ = [
     "User",
     "UserDailyRequest",
     "SystemConfig",
+    "SchemaState",
     "NovelConstitution",
     "OutlineAlternative",
     "OutlineEvolutionHistory",

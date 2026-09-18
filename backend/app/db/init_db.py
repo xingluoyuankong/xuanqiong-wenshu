@@ -1,4 +1,5 @@
 # AIMETA P=数据库初始化_创建表和默认数据|R=创建表_初始化管理员|NR=不含业务逻辑|E=init_db|X=internal|A=初始化函数|D=sqlalchemy|S=db|RD=./README.ai
+import json
 import logging
 
 from pathlib import Path
@@ -10,8 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from ..core.config import settings
 from ..core.security import hash_password
-from ..models import Prompt, SystemConfig, User
+from ..models import Prompt, SchemaState, SystemConfig, User
 from .base import Base
+from .schema_fingerprint import build_schema_state
 from .system_config_defaults import SYSTEM_CONFIG_DEFAULTS
 from .session import AsyncSessionLocal, engine
 
@@ -28,6 +30,13 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("数据库表结构已初始化")
     await _ensure_schema_updates()
+    schema_state = await _record_schema_state()
+    logger.info(
+        "运行时 schema 指纹已记录：status=%s orm=%s db=%s",
+        schema_state.get("status"),
+        schema_state.get("orm_metadata_sha256"),
+        schema_state.get("database_schema_sha256"),
+    )
 
     # ---- 第二步：确保管理员账号至少存在一个 ----
     async with AsyncSessionLocal() as session:
@@ -70,6 +79,21 @@ async def init_db() -> None:
         await _ensure_default_prompts(session)
 
         await session.commit()
+
+
+async def _record_schema_state() -> dict:
+    """Persist the current ORM/database schema fingerprint without migration claims."""
+    async with engine.connect() as connection:
+        state = await connection.run_sync(lambda sync_connection: build_schema_state(Base.metadata, sync_connection))
+    async with AsyncSessionLocal() as session:
+        row = await session.get(SchemaState, "runtime_schema")
+        value = json.dumps(state, ensure_ascii=False, sort_keys=True)
+        if row is None:
+            session.add(SchemaState(key="runtime_schema", value=value))
+        else:
+            row.value = value
+        await session.commit()
+    return state
 
 
 async def _ensure_database_exists() -> None:
