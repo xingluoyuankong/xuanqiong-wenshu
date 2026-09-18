@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 import logging
+from pathlib import Path
 from logging.config import dictConfig
 import re
 import sys
@@ -14,6 +15,7 @@ from .api.routers import api_router
 from .core.config import settings
 from .db.init_db import init_db
 from .db.session import AsyncSessionLocal
+from .models import SchemaState
 from .services.prompt_service import PromptService
 
 
@@ -320,30 +322,41 @@ async def lifespan(app: FastAPI):
     stage2_start = time.time()
     await init_db()
     migration_status = "unknown"
+    schema_state_status = "unavailable"
     try:
-        from subprocess import check_output
-        from pathlib import Path
-        alembic_result = check_output(["alembic", "current"], cwd=str(Path(__file__).parent))
-        migration_status = alembic_result.decode().strip()
-    except Exception as e:
-        error_logger.warning("[LIFESPAN] [STAGE-2/6] LIFESPAN-WARN | alembic CLI unavailable (%s), falling back to SQL version query", str(e))
-        try:
-            from sqlalchemy import text as _sqltext
-            async with AsyncSessionLocal() as _sess:
-                _rev = (await _sess.execute(_sqltext("SELECT version_num FROM alembic_version ORDER BY version_num DESC LIMIT 1"))).scalar()
-                migration_status = str(_rev) if _rev else "no-revision-row"
-        except Exception as e2:
-            # No alembic_version table means migrations were never run on this
-            # database. This is a degraded-but-valid state, NOT a startup error:
-            # report clearly and do not pollute the error tally.
-            migration_status = "unavailable (no alembic_version table)"
-            app_logger.warning(
-                "[LIFESPAN] [STAGE-2/6] LIFESPAN-WARN | No alembic_version table found (%s); "
-                "Alembic migrations have not been executed on this database (schema likely created "
-                "via init_db/create_all). Run 'alembic upgrade head' to enable version tracking.",
-                e2,
+        from json import loads as _json_loads
+        async with AsyncSessionLocal() as _schema_session:
+            _schema_row = await _schema_session.get(SchemaState, "runtime_schema")
+        if _schema_row is not None:
+            _schema_payload = _json_loads(_schema_row.value)
+            schema_state_status = str(_schema_payload.get("status") or "unknown")
+            migration_status = (
+                f"runtime_schema:{schema_state_status}"
+                f" orm={_schema_payload.get('orm_metadata_sha256', '')[:12]}"
+                f" db={_schema_payload.get('database_schema_sha256', '')[:12]}"
             )
-    app_logger.info("[LIFESPAN] [STAGE-2/6] LIFESPAN-OK | Database ready. Migration revision: %s", migration_status)
+            app_logger.info(
+                "[LIFESPAN] [STAGE-2/6] SCHEMA-STATE | status=%s expected_tables=%s actual_tables=%s",
+                schema_state_status,
+                _schema_payload.get("expected_table_count"),
+                _schema_payload.get("actual_table_count"),
+            )
+    except Exception as _schema_exc:
+        app_logger.warning("[LIFESPAN] [STAGE-2/6] SCHEMA-STATE-WARN | %s", _schema_exc)
+
+    _alembic_ini = Path(__file__).resolve().parents[1] / "alembic.ini"
+    if _alembic_ini.is_file():
+        try:
+            from subprocess import check_output
+            alembic_result = check_output(["alembic", "current"], cwd=str(_alembic_ini.parent))
+            migration_status = alembic_result.decode().strip() or migration_status
+        except Exception as _alembic_exc:
+            app_logger.warning("[LIFESPAN] [STAGE-2/6] ALEMBIC-WARN | configured but unavailable: %s", _alembic_exc)
+    elif schema_state_status == "unavailable":
+        migration_status = "runtime_schema_unavailable"
+        app_logger.warning("[LIFESPAN] [STAGE-2/6] SCHEMA-STATE-WARN | runtime schema state is unavailable")
+
+    app_logger.info("[LIFESPAN] [STAGE-2/6] LIFESPAN-OK | Database ready. Migration/schema status: %s", migration_status)
     app_logger.info("[LIFESPAN] [STAGE-2/6] PERFORMANCE | Database init + migration check completed in %.2fs", time.time() - stage2_start)
     
     startup_errors: list[str] = []
