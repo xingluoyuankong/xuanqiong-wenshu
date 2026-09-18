@@ -1,0 +1,19 @@
+--- a/start.ps1
++++ b/start.ps1
+@@ -4,6 +4,12 @@ $ErrorActionPreference = 'Continue'
+ [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+ $OutputEncoding = [Console]::OutputEncoding
+ 
++# === Timeout Configuration ===
++$TIMEOUT_SECONDS = 30  # Maximum wait time for each service (configurable)
++$CHECK_INTERVAL_MS = 500  # Health check interval in milliseconds
++Write-Host "⏱ Startup timeout configured: ${TIMEOUT_SECONDS}s" -ForegroundColor DarkGray
++
+ # === Timeout Configuration ===
+-$TIMEOUT_SECONDS = 30  # Maximum wait time for each service (configurable)
+-$CHECK_INTERVAL_MS = 500  # Health check interval in milliseconds
++
+ $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
+ $repo = $scriptPath
+ PATCH
+git apply TEMP_PATCH.txt 2>&1 || echo "Manual patch failed, will edit directly"

@@ -222,10 +222,19 @@ def perform_graceful_cleanup(
     frontend_pid: Optional[int],
     repo_path: str,
     run_dir: str,
-    ports: list[int] = None
+    ports: list[int] = None,
+    process_monitor=None
 ) -> dict:
     """
     Perform comprehensive cleanup of processes after startup failure.
+    
+    Args:
+        backend_pid: PID of the backend uvicorn process
+        frontend_pid: PID of the frontend node/http.server process
+        repo_path: Path to the repository root
+        run_dir: Runtime log directory for manifest writing
+        ports: List of ports to check (default: [8013, 5174])
+        process_monitor: Optional ProcessMonitor instance
     
     Returns cleanup report with detailed status.
     """
@@ -244,18 +253,39 @@ def perform_graceful_cleanup(
     if not run_dir_obj.is_dir():
         run_dir_obj.mkdir(parents=True, exist_ok=True)
     
-    # Stop specified PIDs
+    # Track and stop specified PIDs using ProcessMonitor (US-003)
+    if process_monitor is not None:
+        logger.info("🔍 Recording termination events via ProcessMonitor")
+    
+    # Stop backend process
     if backend_pid:
+        if process_monitor is not None:
+            process_monitor.on_child_terminate(
+                terminated_pid=backend_pid,
+                exit_code=0,
+                reason="cleanup_requested"
+            )
         if stop_process(backend_pid):
             result['backend_stopped'] = True
         else:
             result['errors'].append(f"Failed to stop backend PID={backend_pid}")
+            if process_monitor is not None:
+                process_monitor.update_status(backend_pid, "error")
     
+    # Stop frontend process
     if frontend_pid:
+        if process_monitor is not None:
+            process_monitor.on_child_terminate(
+                terminated_pid=frontend_pid,
+                exit_code=0,
+                reason="cleanup_requested"
+            )
         if stop_process(frontend_pid):
             result['frontend_stopped'] = True
         else:
             result['errors'].append(f"Failed to stop frontend PID={frontend_pid}")
+            if process_monitor is not None:
+                process_monitor.update_status(frontend_pid, "error")
     
     # Define ports to check
     if ports is None:
@@ -272,12 +302,24 @@ def perform_graceful_cleanup(
         pid = find_process_by_port(port)
         if pid:
             logger.info(f"Forcing stop of PID={pid} on port {port}")
+            if process_monitor is not None:
+                process_monitor.on_child_terminate(
+                    terminated_pid=pid,
+                    exit_code=-1,
+                    reason=f"force_stop_port_{port}"
+                )
             stop_process(pid, force=True)
+            result['ports_free'] = True
     
     # Verify no zombies remain
     verification = verify_no_zombie_processes(repo_path, ports)
     
     result['remaining_orphans'] = verification.get('orphan_python', [])
     result['ports_free'] = len(verification.get('ports_in_use', {})) == 0
+    
+    # Finalize monitoring session and write manifest (US-003)
+    if process_monitor is not None:
+        logger.info("💾 Finalizing process manifest")
+        process_monitor.finalize()
     
     return result

@@ -1,0 +1,503 @@
+"""
+预演-正式两阶段生成服务
+
+先生成章节预览（500字），确认方向后再扩写成完整章节。
+"""
+from typing import Optional, Dict, Any, List
+import json
+import logging
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .llm_service import LLMService
+from .prompt_service import PromptService
+from .generation_call_service import GenerationCallPolicy, call_generation_json, call_generation_text
+from ..utils.json_utils import remove_think_tags, sanitize_json_like_text, unwrap_markdown_json
+
+logger = logging.getLogger(__name__)
+
+
+class PreviewGenerationService:
+    """预演-正式两阶段生成服务"""
+
+    def __init__(self, db: AsyncSession, llm_service: LLMService, prompt_service: PromptService):
+        self.db = db
+        self.llm_service = llm_service
+        self.prompt_service = prompt_service
+
+    @staticmethod
+    def _count_content_chars(text: str) -> int:
+        return len("".join(str(text or "").split()))
+
+    @classmethod
+    def _expanded_chapter_failure_reason(cls, text: str, target_word_count: int) -> str:
+        if not str(text or "").strip():
+            return "empty_expanded_chapter"
+        actual = cls._count_content_chars(text)
+        target = max(500, int(target_word_count or 0))
+        floor = max(320, int(target * 0.72))
+        if actual < floor:
+            return "expanded_chapter_under_target_floor"
+        paragraphs = [part.strip() for part in str(text or "").splitlines() if part.strip()]
+        if target >= 3000 and len(paragraphs) < 4:
+            return "expanded_chapter_too_fragmented"
+        return ""
+
+    async def generate_preview(
+        self,
+        project_id: str,
+        chapter_number: int,
+        outline: Dict[str, Any],
+        blueprint_context: str,
+        emotion_context: str,
+        memory_context: str,
+        style_hint: str = "",
+        user_id: int = 0
+    ) -> Dict[str, Any]:
+        """
+        生成章节预览（500字左右）
+        
+        Returns:
+            包含预览内容、关键情节点、预期效果的字典
+        """
+        prompt = f"""你是一位资深网文作者，现在需要为第 {chapter_number} 章生成一个简短的"章节预览"。
+
+[蓝图上下文]
+{blueprint_context[:3000]}
+
+[情绪曲线指导]
+{emotion_context}
+
+[记忆层上下文]
+{memory_context[:2000]}
+
+[本章大纲]
+标题：{outline.get('title', '')}
+摘要：{outline.get('summary', '')}
+
+[风格提示]
+{style_hint or '无特殊要求'}
+
+请生成一个 500 字左右的"章节预览"，包含：
+1. 开场设定（时间、地点、人物状态）
+2. 3-5 个关键情节点（按顺序）
+3. 章节结尾的钩子设计
+4. 预期的读者情绪变化
+
+以 JSON 格式输出：
+```json
+{{
+  "preview_text": "500字左右的章节预览正文",
+  "key_plot_points": [
+    {{
+      "order": 1,
+      "description": "情节点描述",
+      "purpose": "这个情节点的作用",
+      "emotion_target": "预期读者情绪"
+    }}
+  ],
+  "opening": {{
+    "time": "时间设定",
+    "location": "地点",
+    "character_states": ["角色1的状态", "角色2的状态"]
+  }},
+  "ending_hook": {{
+    "type": "悬念/冲突/期待/情感",
+    "description": "钩子描述"
+  }},
+  "expected_emotions": ["情绪1", "情绪2", "情绪3"]
+}}
+```"""
+
+        try:
+            json_result = await call_generation_json(
+                llm_service=self.llm_service,
+                system_prompt="你是一位资深网文作者，擅长规划章节结构。请严格按照 JSON 格式输出。",
+                conversation_history=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                user_id=user_id,
+                timeout=120.0,
+                policy=GenerationCallPolicy(
+                    stage_label="章节预演规划",
+                    progress_stage="generate_mission",
+                    retry_attempts=2,
+                    response_format="json_object",
+                    max_tokens=2600,
+                    retry_same_model_once=True,
+                    json_repair_attempts=1,
+                ),
+            )
+            result = dict(json_result.data)
+            result["status"] = "success"
+            return result
+        except Exception as e:
+            logger.warning(f"生成章节预览失败: {e}")
+        
+        return {
+            "status": "failed",
+            "preview_text": "",
+            "key_plot_points": [],
+            "error": "生成预览失败"
+        }
+
+    async def evaluate_preview(
+        self,
+        preview: Dict[str, Any],
+        outline: Dict[str, Any],
+        emotion_context: str,
+        user_id: int = 0
+    ) -> Dict[str, Any]:
+        """
+        评估章节预览的质量
+        
+        Returns:
+            包含评分、问题、建议的字典
+        """
+        prompt = f"""评估以下章节预览的质量。
+
+[章节大纲]
+标题：{outline.get('title', '')}
+摘要：{outline.get('summary', '')}
+
+[情绪曲线要求]
+{emotion_context}
+
+[章节预览]
+{preview.get('preview_text', '')}
+
+[关键情节点]
+{json.dumps(preview.get('key_plot_points', []), ensure_ascii=False, indent=2)}
+
+请评估以下方面：
+1. 是否符合大纲要求
+2. 情节点安排是否合理
+3. 情绪节奏是否符合曲线要求
+4. 钩子设计是否有效
+5. 是否存在明显问题
+
+以 JSON 格式输出：
+```json
+{{
+  "overall_score": 1-100,
+  "scores": {{
+    "outline_compliance": 1-100,
+    "plot_arrangement": 1-100,
+    "emotion_rhythm": 1-100,
+    "hook_effectiveness": 1-100
+  }},
+  "issues": [
+    {{
+      "severity": "critical/warning/minor",
+      "description": "问题描述",
+      "suggestion": "修改建议"
+    }}
+  ],
+  "approved": true/false,
+  "revision_needed": true/false,
+  "revision_suggestions": ["修改建议1", "修改建议2"]
+}}
+```"""
+
+        try:
+            json_result = await call_generation_json(
+                llm_service=self.llm_service,
+                system_prompt="你是一位资深网文编辑，擅长评估章节结构。请严格按照 JSON 格式输出。",
+                conversation_history=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                user_id=user_id,
+                timeout=90.0,
+                policy=GenerationCallPolicy(
+                    stage_label="章节预演评估",
+                    progress_stage="review",
+                    retry_attempts=2,
+                    response_format="json_object",
+                    max_tokens=2000,
+                    retry_same_model_once=True,
+                    json_repair_attempts=1,
+                ),
+            )
+            return json_result.data
+        except Exception as e:
+            logger.warning(f"评估章节预览失败: {e}")
+        
+        return {
+            "overall_score": 70,
+            "approved": True,
+            "revision_needed": False,
+            "issues": []
+        }
+
+    async def expand_preview_to_full_chapter(
+        self,
+        preview: Dict[str, Any],
+        outline: Dict[str, Any],
+        blueprint_context: str,
+        memory_context: str,
+        target_word_count: int = 3000,
+        style_hint: str = "",
+        user_id: int = 0
+    ) -> str:
+        """
+        将预览扩写成完整章节
+        
+        Args:
+            preview: 章节预览
+            outline: 章节大纲
+            blueprint_context: 蓝图上下文
+            memory_context: 记忆层上下文
+            target_word_count: 目标字数
+            style_hint: 风格提示
+        
+        Returns:
+            完整的章节正文
+        """
+        prompt = f"""你是一位资深网文作者，现在需要将章节预览扩写成完整的章节正文。
+
+[蓝图上下文]
+{blueprint_context[:3000]}
+
+[记忆层上下文]
+{memory_context[:2000]}
+
+[章节大纲]
+标题：{outline.get('title', '')}
+摘要：{outline.get('summary', '')}
+
+[章节预览]
+{preview.get('preview_text', '')}
+
+[关键情节点]
+{json.dumps(preview.get('key_plot_points', []), ensure_ascii=False, indent=2)}
+
+[开场设定]
+{json.dumps(preview.get('opening', {}), ensure_ascii=False, indent=2)}
+
+[结尾钩子]
+{json.dumps(preview.get('ending_hook', {}), ensure_ascii=False, indent=2)}
+
+[风格提示]
+{style_hint or '无特殊要求'}
+
+[目标字数]
+**必须达到 {target_word_count} 字左右**（这是硬性要求，请务必写够字数！）
+支持范围说明：短章可以紧凑推进；3000-7000 字应以 3-5 个完整场景承载；7000 字以上必须使用真实场景组、对话攻防、行动回合、因果后果和章末压力承载篇幅，不能靠景物描写、总结、同义心理独白凑字数。
+
+请严格按照预览中的情节点顺序，扩写成完整的章节正文。
+
+写作要求：
+1. 必须包含预览中的所有关键情节点
+2. 开场必须符合设定的时间、地点、人物状态
+3. 结尾必须实现设计的钩子
+4. 使用镜头语言，多写动作、对话、感官描写
+5. 禁止总结性结尾，禁止"他知道..."、"他明白..."等全知视角
+6. 禁止使用"值得注意的是"、"总而言之"等 AI 典型词汇
+
+直接输出章节正文，不要输出 JSON 或其他格式。"""
+
+        try:
+            # Keep enough output room for long Chinese chapters. The preview path
+            # is a full draft path, not a short teaser expansion.
+            max_tokens = max(4000, min(32000, int(target_word_count * 2.35)))
+            if target_word_count >= 10000:
+                timeout = 2400.0
+            elif target_word_count >= 7000:
+                timeout = 1800.0
+            elif target_word_count >= 4500:
+                timeout = 900.0
+            else:
+                timeout = 420.0
+            text_result = await call_generation_text(
+                llm_service=self.llm_service,
+                system_prompt="你是一位资深网文作者，文笔流畅，擅长写出让读者欲罢不能的章节。",
+                conversation_history=[{"role": "user", "content": prompt}],
+                temperature=0.8,
+                user_id=user_id,
+                timeout=timeout,
+                policy=GenerationCallPolicy(
+                    stage_label="预演扩写完整章节",
+                    progress_stage="generate_variants",
+                    retry_attempts=2,
+                    response_format=None,
+                    max_tokens=max_tokens,
+                    retry_same_model_once=True,
+                ),
+            )
+            
+            cleaned = remove_think_tags(text_result.text) if text_result.text else ""
+            return cleaned.strip()
+        except Exception as e:
+            logger.error(f"扩写章节失败: {e}")
+            return ""
+
+    async def generate_with_preview(
+        self,
+        project_id: str,
+        chapter_number: int,
+        outline: Dict[str, Any],
+        blueprint_context: str,
+        emotion_context: str,
+        memory_context: str,
+        target_word_count: int = 3000,
+        style_hint: str = "",
+        auto_approve: bool = True,
+        max_preview_retries: int = 2,
+        user_id: int = 0
+    ) -> Dict[str, Any]:
+        """
+        完整的两阶段生成流程
+
+        Args:
+            auto_approve: 是否自动批准预览（True 则不需要人工确认）
+            max_preview_retries: 预览不通过时的最大重试次数
+
+        Returns:
+            包含预览、评估、正文的完整结果
+        """
+        with LLMService.daily_limit_scope(f"preview_flow:{project_id}:{chapter_number}:{user_id}"):
+            result = {
+                "preview": None,
+                "evaluation": None,
+                "full_chapter": "",
+                "retries": 0,
+                "status": "pending"
+            }
+
+            # 阶段 1：生成预览
+            for retry in range(max_preview_retries + 1):
+                result["retries"] = retry
+
+                # 生成预览
+                preview = await self.generate_preview(
+                    project_id=project_id,
+                    chapter_number=chapter_number,
+                    outline=outline,
+                    blueprint_context=blueprint_context,
+                    emotion_context=emotion_context,
+                    memory_context=memory_context,
+                    style_hint=style_hint,
+                    user_id=user_id
+                )
+
+                if preview.get("status") != "success":
+                    continue
+
+                result["preview"] = preview
+
+                # 评估预览
+                evaluation = await self.evaluate_preview(
+                    preview=preview,
+                    outline=outline,
+                    emotion_context=emotion_context,
+                    user_id=user_id
+                )
+
+                result["evaluation"] = evaluation
+
+                # 检查是否通过
+                if auto_approve or evaluation.get("approved", False):
+                    break
+
+                # 如果有严重问题且还有重试机会，重新生成
+                critical_issues = [
+                    issue for issue in evaluation.get("issues", [])
+                    if issue.get("severity") == "critical"
+                ]
+
+                if not critical_issues or retry >= max_preview_retries:
+                    break
+
+                # 将修改建议加入风格提示
+                suggestions = evaluation.get("revision_suggestions", [])
+                if suggestions:
+                    style_hint = style_hint + "\n注意：" + "；".join(suggestions)
+
+            # 阶段 2：扩写正文
+            if result["preview"]:
+                full_chapter = await self.expand_preview_to_full_chapter(
+                    preview=result["preview"],
+                    outline=outline,
+                    blueprint_context=blueprint_context,
+                    memory_context=memory_context,
+                    target_word_count=target_word_count,
+                    style_hint=style_hint,
+                    user_id=user_id
+                )
+
+                failure_reason = self._expanded_chapter_failure_reason(full_chapter, target_word_count)
+                if failure_reason:
+                    result["status"] = "expanded_quality_rejected"
+                    result["failure_reason"] = failure_reason
+                    result["rejected_full_chapter_preview"] = str(full_chapter or "")[:800]
+                    result["full_chapter"] = ""
+                else:
+                    result["full_chapter"] = full_chapter
+                    result["status"] = "success"
+            else:
+                result["status"] = "preview_failed"
+
+            return result
+
+    async def generate_multiple_previews(
+        self,
+        project_id: str,
+        chapter_number: int,
+        outline: Dict[str, Any],
+        blueprint_context: str,
+        emotion_context: str,
+        memory_context: str,
+        count: int = 3,
+        user_id: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        生成多个不同风格的预览供选择
+
+        Args:
+            count: 生成预览的数量
+
+        Returns:
+            预览列表
+        """
+        with LLMService.daily_limit_scope(f"preview_multi:{project_id}:{chapter_number}:{user_id}"):
+            style_hints = [
+                "情绪更细腻，节奏更慢，多写内心戏和感官描写",
+                "冲突更强，节奏更快，多写动作和对话",
+                "悬念更重，多埋伏笔，结尾钩子更强",
+                "幽默轻松，多写有趣的对话和互动",
+                "紧张刺激，多写危机和转折",
+            ]
+
+            previews = []
+            for i in range(min(count, len(style_hints))):
+                preview = await self.generate_preview(
+                    project_id=project_id,
+                    chapter_number=chapter_number,
+                    outline=outline,
+                    blueprint_context=blueprint_context,
+                    emotion_context=emotion_context,
+                    memory_context=memory_context,
+                    style_hint=style_hints[i],
+                    user_id=user_id
+                )
+
+                if preview.get("status") == "success":
+                    preview["style_hint"] = style_hints[i]
+                    preview["index"] = i
+
+                    # 评估预览
+                    evaluation = await self.evaluate_preview(
+                        preview=preview,
+                        outline=outline,
+                        emotion_context=emotion_context,
+                        user_id=user_id
+                    )
+                    preview["evaluation"] = evaluation
+
+                    previews.append(preview)
+
+            # 按评分排序
+            previews.sort(
+                key=lambda x: x.get("evaluation", {}).get("overall_score", 0),
+                reverse=True
+            )
+
+            return previews

@@ -1,0 +1,38 @@
+﻿# 玄穹文枢 Mission Progress Log
+Mission: optimization-smoke-fix
+
+## US-003: Create process manifest on child launch
+**Status**: Implemented and verified
+
+### Implementation Summary
+- Created `backend/app/process_monitor.py` module with comprehensive process tracking
+- Implemented `ProcessMonitor` class with methods for tracking subprocess lifecycle
+- Integrated `ProcessMonitor` into `cleanup.py` for graceful failure cleanup
+- Manifest format includes parent-child relationships and exit reasons
+
+### Files Changed
+1. `backend/app/process_monitor.py` (new file - 295 lines)
+   - `ProcessInfo` dataclass for storing process state
+   - `ProcessMonitor` class for lifecycle management
+   - Helper functions: `track_subprocess()`, `monitor_wrapper()`
+   - Cross-platform support (Windows/Linux/macOS)
+
+2. `backend/app/cleanup.py` (modified)
+   - Added `process_monitor` parameter to `perform_graceful_cleanup()`
+   - Calls `on_child_terminate()` for each stopped process
+   - Calls `finalize()` to write final manifest after cleanup
+
+### Acceptance Criteria Met
+✅ Logs PID, command, and start time for each subprocess  
+✅ Records exit code and reason when child terminates  
+✅ Writes manifest to runtime_log_dir/current_run.json  
+✅ Includes parent-child relationships (parent_map, child_map)  
+✅ No Python syntax errors (py_compile passed)  
+
+### Learnings for future iterations:
+- **Pattern**: Runtime log directory structure (`settings.runtime_log_dir`) already exists in config.py
+- **Pattern**: JSON file format follows project's UTF-8 encoding standard
+- **Gotcha**: Cross-platform path handling requires `sys.platform` checks
+- **Useful context**: ProcessMonitor integrates with existing cleanup flow via optional dependency injection
+
+---

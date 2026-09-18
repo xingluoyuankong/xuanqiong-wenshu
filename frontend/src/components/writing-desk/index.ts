@@ -1,0 +1,13 @@
+export { default as WDHeader } from './layout/WDHeader.vue'
+export { default as WDSidebar } from './layout/WDSidebar.vue'
+export { default as WDWorkspace } from './layout/WDWorkspace.vue'
+
+export { default as WDEditChapterModal } from './dialogs/WDEditChapterModal.vue'
+export { default as WDEvaluationDetailModal } from './dialogs/WDEvaluationDetailModal.vue'
+export { default as WDGenerateChapterModal } from './dialogs/WDGenerateChapterModal.vue'
+export { default as WDGenerateOutlineModal } from './dialogs/WDGenerateOutlineModal.vue'
+export { default as WDTextReaderModal } from './dialogs/WDTextReaderModal.vue'
+export { default as WDVersionDetailModal } from './dialogs/WDVersionDetailModal.vue'
+export { default as WDVersionDiffModal } from './dialogs/WDVersionDiffModal.vue'
+export { default as WDPatchDiffModal } from './dialogs/WDPatchDiffModal.vue'
+export { default as WDSkillSelectorModal } from './dialogs/WDSkillSelectorModal.vue'
