@@ -101,3 +101,12 @@ R10 后续审计发现旧 manifest 会用当前 Git HEAD 覆盖进程真实 comm
 - 外部文件权限：`755`。
 - `sh -n` 通过，直接执行通过。
 - 8099 ensure/manifest 仍保持 running，8013 公网入口未受影响。
+
+## R11 公网入口对齐验收
+
+- 8013 旧 PID `38940` 已受控停止。
+- 8013 新 PID `41198` 以当前 HEAD 启动。
+- 8013/8099/5174：均 HTTP 200。
+- 真实 budget smoke：通过并自动删除项目。
+- SQLite integrity：foreign_keys=1、orphan_project_rows={}。
+- 8013 新启动日志未出现 legacy admin email schema fallback warning。
