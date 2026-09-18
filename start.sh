@@ -129,17 +129,15 @@ echo "[2/5] skip local MySQL setup"
 # [3/5] Start backend
 echo ""
 echo "[3/5] start backend (timeout: ${TIMEOUT_SECONDS}s)..."
-cd "${REPO}/backend"
+cd "${REPO}"
+source "${REPO}/scripts/server_runtime.sh"
+xq_prepare_runtime
 
 backend_pid=""
-python_cmd=".venv/bin/python"
-if ! command -v "${python_cmd}" >/dev/null 2>&1; then
-    python_cmd="python3"
-fi
-
-"${python_cmd}" -m uvicorn app.main:app \
+"${XQ_PYTHON}" -m uvicorn "${XQ_BACKEND_APP}" \
     --host "${BACKEND_HOST}" \
     --port "${BACKEND_PORT}" \
+    --app-dir "${REPO}" \
     --log-level info \
     --no-access-log \
     >"${RUN_DIR}/backend.log" 2>"${RUN_DIR}/backend-error.log" &

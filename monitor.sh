@@ -10,7 +10,9 @@ echo "$(date): 开始监控检查" >> $LOG_FILE
 if ! pgrep -f "uvicorn.*8013" > /dev/null; then
     echo "$(date): 后端服务未运行，尝试重启..." >> $LOG_FILE
     cd /run/csi/mount-root/nas/4079184d856ecc166ed19d4887083405/qwenpaw-data/xuanqiong-wenshu
-    nohup uvicorn backend.app.main:app --host 0.0.0.0 --port 8013 --app-dir . >> /tmp/xuanqiong-backend.log 2>&1 &
+    source ./scripts/server_runtime.sh
+    xq_prepare_runtime
+    nohup "${XQ_PYTHON}" -m uvicorn "${XQ_BACKEND_APP}" --host 0.0.0.0 --port 8013 --app-dir "$PWD" >> /tmp/xuanqiong-backend.log 2>&1 &
     sleep 5
     if pgrep -f "uvicorn.*8013" > /dev/null; then
         echo "$(date): 后端服务重启成功" >> $LOG_FILE

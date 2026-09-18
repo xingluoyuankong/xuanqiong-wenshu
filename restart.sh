@@ -11,7 +11,9 @@ sleep 2
 # 启动后端
 echo "启动后端..."
 cd /run/csi/mount-root/nas/4079184d856ecc166ed19d4887083405/qwenpaw-data/xuanqiong-wenshu
-nohup uvicorn backend.app.main:app --host 0.0.0.0 --port 8013 --app-dir . >> /tmp/xuanqiong-backend.log 2>&1 &
+source ./scripts/server_runtime.sh
+xq_prepare_runtime
+nohup "${XQ_PYTHON}" -m uvicorn "${XQ_BACKEND_APP}" --host 0.0.0.0 --port 8013 --app-dir "$PWD" >> /tmp/xuanqiong-backend.log 2>&1 &
 sleep 5
 
 # 启动前端
