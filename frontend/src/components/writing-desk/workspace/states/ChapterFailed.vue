@@ -8,12 +8,22 @@
       </div>
 
       <div class="cf-copy">
-        <p class="cf-kicker">章节异常恢复</p>
-        <h3>第 {{ chapterNumber }} 章处理失败</h3>
-        <p>
+        <p class="cf-kicker">{{ isBudgetBlocked ? '预算门暂停' : '章节异常恢复' }}</p>
+        <h3>{{ isBudgetBlocked ? '本次生成已暂停' : `第 ${chapterNumber} 章处理失败` }}</h3>
+        <p v-if="isBudgetBlocked">
+          预算门已阻止新的物理生成调用，当前章节没有被写入半成品。请先在写作台的 Token Budget
+          中分配或调整总预算，再使用顶部主操作栏重试。
+        </p>
+        <p v-else>
           当前章节没有形成可交付正文。系统不会再把空正文伪装成成功状态；
           刷新状态确认原因后，请用顶部主操作栏重新生成，避免这里再放一颗重复按钮。
         </p>
+      </div>
+
+      <div v-if="isBudgetBlocked" class="cf-budget-summary">
+        <div><span>预算上限</span><strong>{{ budgetTotalLabel }}</strong></div>
+        <div><span>已记录成本</span><strong>{{ budgetCostLabel }}</strong></div>
+        <div><span>使用率</span><strong>{{ budgetUsageLabel }}</strong></div>
       </div>
 
       <div class="cf-checklist">
@@ -70,6 +80,7 @@ interface Props {
   generatingChapter: number | null
   chapter?: Chapter | null
   generationRuntime?: GenerationRuntime | null
+  budgetBlocked?: boolean
   lastErrorSummary?: string | null
 }
 
@@ -78,6 +89,23 @@ const props = defineProps<Props>()
 const runtime = computed<Record<string, any>>(() =>
   (props.generationRuntime || props.chapter?.generation_runtime || {}) as Record<string, any>
 )
+const isBudgetBlocked = computed(() => {
+  const stage = String(runtime.value.status || runtime.value.progress_stage || '').toLowerCase()
+  return Boolean(props.budgetBlocked)
+    || runtime.value.budget_exceeded === true
+    || runtime.value.budget_unallocated === true
+    || ['budget_exceeded', 'budget_not_allocated'].includes(stage)
+})
+const formatMoney = (value: unknown) => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? `¥${parsed.toFixed(2)}` : '未记录'
+}
+const budgetTotalLabel = computed(() => formatMoney(runtime.value.total_budget))
+const budgetCostLabel = computed(() => formatMoney(runtime.value.total_cost))
+const budgetUsageLabel = computed(() => {
+  const parsed = Number(runtime.value.usage_percent)
+  return Number.isFinite(parsed) ? `${parsed.toFixed(2)}%` : '未记录'
+})
 const failureSummary = computed(() =>
   props.lastErrorSummary ||
   props.chapter?.last_error_summary ||
@@ -188,6 +216,32 @@ const latestErrorEvent = computed(() => {
   margin: 0;
   color: #5b6472;
   line-height: 1.8;
+}
+
+.cf-budget-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cf-budget-summary > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid rgba(234, 88, 12, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 247, 237, 0.8);
+}
+
+.cf-budget-summary span {
+  color: #9a3412;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.cf-budget-summary strong {
+  color: #7c2d12;
+  font-size: 1rem;
 }
 
 .cf-checklist {
@@ -332,6 +386,10 @@ const latestErrorEvent = computed(() => {
 }
 
 @media (max-width: 720px) {
+  .cf-budget-summary {
+    grid-template-columns: 1fr;
+  }
+
   .cf-checklist {
     grid-template-columns: 1fr;
   }

@@ -80,9 +80,9 @@
         </div>
         <div class="mt-4 grid gap-4 xl:grid-cols-2">
           <article v-for="(thread, index) in threads" :key="index" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-            <div class="text-sm font-semibold text-slate-900">{{ thread.thread_name || `线程 ${index + 1}` }}</div>
+            <div class="text-sm font-semibold text-slate-900">{{ thread.thread_name || `线程 ${Number(index) + 1}` }}</div>
             <div class="mt-2 text-sm leading-6 text-slate-600">涉及线索：{{ (thread.clue_names || thread.clues || []).join('、') || '暂无' }}</div>
-            <div class="mt-2 text-xs leading-5 text-slate-500">状态分布：{{ Object.entries(thread.status_counts || {}).map(([key, value]) => `${getStatusLabel(String(key), String(key) === 'red_herring')}:${value}`).join('，') || '暂无' }}</div>
+            <div class="mt-2 text-xs leading-5 text-slate-500">状态分布：{{ Object.entries(thread.status_counts || {}).map(([key, value]) => `${getStatusLabel(String(key), String(key) === 'red_herring')}:${String(value)}`).join('，') || '暂无' }}</div>
           </article>
           <div v-if="!threads.length" class="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-sm text-slate-500">尚未生成线程分析结果。</div>
         </div>

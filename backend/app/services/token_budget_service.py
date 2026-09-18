@@ -188,7 +188,13 @@ class TokenBudgetService:
         # 获取预算信息
         budget = await self.get_or_create_budget(project_id)
         budget_remaining = budget.total_budget - total_cost
-        usage_percent = (total_cost / budget.total_budget * 100) if budget.total_budget > 0 else 0
+        # 语义修正：total_budget <= 0 表示"未分配预算"，而不是"无限预算"。
+        # 旧实现 (cost/budget*100 if budget>0 else 0) 会把 0 预算算成 0% 已用，
+        # 于是"把预算设为 0 以停止消费"反而变成不限量 —— 这正是预算门失效的原因。
+        if budget.total_budget > 0:
+            usage_percent = total_cost / budget.total_budget * 100
+        else:
+            usage_percent = 100.0 if total_cost > 0 else 0.0
 
         return {
             "project_id": project_id,

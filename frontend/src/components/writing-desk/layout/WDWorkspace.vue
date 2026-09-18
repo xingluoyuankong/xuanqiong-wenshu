@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="wd-workspace-root">
     <div class="wd-workspace-card">
       <header v-if="selectedChapterNumber" class="wd-workspace-head">
@@ -380,6 +380,13 @@ const activeVersionContent = computed(() => normalizeChapterContent(activeVersio
 const selectedChapterContent = computed(() => normalizeChapterContent(selectedChapter.value?.content || ''))
 const hasSelectedChapterContent = computed(() => selectedChapterContent.value.length > 0)
 const chapterRuntime = computed(() => resolveChapterRuntime(selectedChapter.value, props.generationRuntime))
+const isBudgetBlocked = computed(() => {
+  const runtime = chapterRuntime.value || {}
+  const stage = String(runtime.status || runtime.progress_stage || '').toLowerCase()
+  return runtime.budget_exceeded === true
+    || runtime.budget_unallocated === true
+    || ['budget_exceeded', 'budget_not_allocated'].includes(stage)
+})
 const chapterQualitySummary = computed(() => buildChapterQualitySummary(selectedChapter.value, chapterRuntime.value))
 const chapterWordGoalText = computed(() => {
   const min = chapterRuntime.value?.min_word_count
@@ -508,7 +515,7 @@ const currentComponent = computed(() => {
   const status = selectedChapter.value?.generation_status
   if (status === 'generating' || status === 'evaluating') return ChapterGenerating
   if (hasSelectedChapterContent.value) return ChapterContent
-  if (isChapterFailed(props.selectedChapterNumber)) return ChapterFailed
+  if (isBudgetBlocked.value || isChapterFailed(props.selectedChapterNumber)) return ChapterFailed
   return ChapterEmpty
 })
 
@@ -782,12 +789,13 @@ const currentComponentProps = computed(() => {
     }
   }
 
-  if (isChapterFailed(props.selectedChapterNumber)) {
+  if (isBudgetBlocked.value || isChapterFailed(props.selectedChapterNumber)) {
     return {
       chapterNumber: props.selectedChapterNumber,
       generatingChapter: props.generatingChapter,
       chapter: selectedChapter.value,
       generationRuntime: chapterRuntime.value,
+      budgetBlocked: isBudgetBlocked.value,
       lastErrorSummary: selectedChapter.value?.last_error_summary
     }
   }

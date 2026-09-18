@@ -63,4 +63,29 @@ describe('ChapterFailed', () => {
     expect(wrapper.text()).toContain('req-123')
     expect(wrapper.text()).toContain('最近错误事件 metadata')
   })
+  it('预算门暂停时展示预算原因和账本摘要，而不是普通失败空态', () => {
+    const wrapper = mount(ChapterFailed, {
+      props: {
+        chapterNumber: 4,
+        generatingChapter: null,
+        budgetBlocked: true,
+        generationRuntime: {
+          status: 'budget_exceeded',
+          progress_stage: 'budget_exceeded',
+          total_budget: 100,
+          total_cost: 125.5,
+          usage_percent: 125.5,
+          allowed_actions: ['pause']
+        }
+      }
+    })
+
+    expect(wrapper.text()).toContain('本次生成已暂停')
+    expect(wrapper.text()).toContain('预算门暂停')
+    expect(wrapper.text()).toContain('¥100.00')
+    expect(wrapper.text()).toContain('¥125.50')
+    expect(wrapper.text()).toContain('125.50%')
+    expect(wrapper.text()).toContain('Token Budget')
+  })
+
 })

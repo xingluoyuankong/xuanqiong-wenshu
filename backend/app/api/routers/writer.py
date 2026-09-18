@@ -129,6 +129,37 @@ def _build_busy_progress_stage(status_value: str) -> str:
     return "generating"
 
 
+async def _evaluate_budget_gate(session: AsyncSession, project_id: str) -> Optional[Dict[str, Any]]:
+    """预算门（US-010）：预算已超出时返回暂停快照，否则返回 None。
+
+    语义：超出 ``total_budget`` 后不再自动放行新的生成，而是把决定权交回用户
+    （``allowed_actions=["pause"]``）。与既有 check_and_create_alert 一致，
+    这里也会落一条 exceeded 告警，便于审计。
+    """
+    try:
+        from ...services.token_budget_service import TokenBudgetService
+
+        service = TokenBudgetService(session)
+        stats = await service.get_usage_stats(project_id)
+        total_budget = float(stats.get("total_budget") or 0)
+        usage_percent = float(stats.get("usage_percent") or 0)
+        budget_unallocated = total_budget <= 0
+        if not budget_unallocated and usage_percent < 100:
+            return None
+        await service.check_and_create_alert(project_id)
+        return {
+            "budget_exceeded": not budget_unallocated,
+            "budget_unallocated": budget_unallocated,
+            "total_budget": total_budget,
+            "total_cost": stats.get("total_cost", 0),
+            "usage_percent": usage_percent,
+            "budget_gate_reason": "budget_not_allocated" if budget_unallocated else "budget_exceeded",
+        }
+    except Exception as exc:  # noqa: BLE001 - 预算检查失败不得阻断生成
+        logger.warning("预算门检查失败（放行生成）：project=%s error=%s", project_id, exc)
+        return None
+
+
 def _review_context_value(item: Any, key: str, default: Any = None) -> Any:
     if isinstance(item, dict):
         return item.get(key, default)
@@ -2354,6 +2385,40 @@ async def generate_chapter(
                     **progress_runtime,
                 },
             )
+
+    # 预算门（US-010）：预算已超出时不再放行新的生成，将决定权交回用户。
+    # 放在 claim 之前，确保被暂停的请求不会占用章节生成状态。
+    budget_block = await _evaluate_budget_gate(session, project_id)
+    if budget_block:
+        logger.warning(
+            "Generate chapter paused by budget gate: user=%s project=%s chapter=%s usage_percent=%s",
+            current_user.id,
+            project_id,
+            request.chapter_number,
+            budget_block["usage_percent"],
+        )
+        return await _load_project_schema(
+            novel_service,
+            project_id,
+            current_user.id,
+            generation_runtime={
+                "queued": False,
+                "status": budget_block["budget_gate_reason"],
+                "generation_mode": flow_config["preset"],
+                "progress_stage": budget_block["budget_gate_reason"],
+                "progress_message": (
+                    (
+                        "项目尚未分配有效预算，请先在 Token Budget 中设置总预算。"
+                        if budget_block.get("budget_unallocated")
+                        else f"项目预算已超出（已用 {budget_block['usage_percent']:.2f}%，"
+                             f"上限 ¥{budget_block['total_budget']:.2f}）。请调整预算后重试。"
+                    )
+                ),
+                "progress_percent": 100,
+                "allowed_actions": ["pause"],
+                **budget_block,
+            },
+        )
 
     run_id = await _try_claim_chapter_generation(
         session,
