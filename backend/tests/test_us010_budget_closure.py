@@ -151,6 +151,17 @@ async def test_records_provider_reported_usage():
     assert call["is_estimated"] is False, "Provider 实际值不得标记为估算"
 
 
+async def test_records_physical_attempt_index():
+    async with usage_scope(project_id="p-attempt", run_id="run-attempt", stage="draft"):
+        await record_llm_usage(
+            None,
+            model_name="m",
+            usage={"prompt_tokens": 4, "completion_tokens": 6},
+            attempt_index=2,
+        )
+    assert RecordingService.calls[-1]["attempt_index"] == 2
+
+
 async def test_falls_back_to_estimate_and_flags_it():
     """Provider 未返回 usage 时必须估算，并如实标记 is_estimated=True。"""
     async with usage_scope(project_id="p2", run_id="run-2", stage="self_critique"):

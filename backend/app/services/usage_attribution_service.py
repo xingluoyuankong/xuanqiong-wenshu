@@ -138,6 +138,7 @@ async def record_llm_usage(
     usage: Any,
     prompt_text: str = "",
     completion_text: str = "",
+    attempt_index: Optional[int] = None,
 ) -> None:
     """把一次**成功的物理调用**记入预算账本。
 
@@ -175,7 +176,7 @@ async def record_llm_usage(
             description=f"auto-recorded (stage={scope.stage or 'unknown'})",
             run_id=scope.run_id,
             stage=scope.stage,
-            attempt_index=None,
+            attempt_index=attempt_index,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             is_estimated=is_estimated,

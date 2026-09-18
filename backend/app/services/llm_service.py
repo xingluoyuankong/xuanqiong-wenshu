@@ -568,6 +568,7 @@ class LLMService:
                 usage=usage_sink.get("usage"),
                 prompt_text=self._flatten_messages_for_usage(chat_messages),
                 completion_text=full_response,
+                attempt_index=usage_sink.get("attempt_index"),
             )
         except Exception as exc:  # noqa: BLE001 - 记账失败不得阻断生成
             logger.warning("LLM 用量归因记账失败，但不会阻断响应：error=%s", exc)
@@ -603,10 +604,10 @@ class LLMService:
         finish_reason = None
         network_retry_used = False
 
-        def _capture_usage(part: Dict[str, Any]) -> None:
+        def _capture_usage(part: Dict[str, Any], physical_attempt_index: int) -> None:
             if usage_sink is not None and part.get("usage") is not None:
                 usage_sink["usage"] = part["usage"]
-                usage_sink["attempts"] = int(usage_sink.get("attempts", 0)) + 1
+                usage_sink["attempt_index"] = physical_attempt_index + 1
 
         max_attempts = (2 if retry_same_model_once else 1) + int(bool(response_format)) + int(bool(prompt_cache_key))
         for attempt_index in range(max_attempts):
@@ -624,7 +625,7 @@ class LLMService:
                     top_p=top_p,
                     prompt_cache_key=stream_prompt_cache_key,
                 ):
-                    _capture_usage(part)
+                    _capture_usage(part, attempt_index)
                     if part.get("content"):
                         full_response += part["content"]
                     if part.get("finish_reason"):

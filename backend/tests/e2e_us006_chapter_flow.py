@@ -254,6 +254,7 @@ async def main():
         results["db_token_usage_run_ids"] = sorted({u.run_id for u in usage_rows if u.run_id})
         results["db_token_usage_stages"] = sorted({u.stage for u in usage_rows if u.stage})
         results["db_token_usage_models"] = sorted({u.model_name for u in usage_rows if u.model_name})
+        results["db_token_usage_attempt_indexes"] = sorted({u.attempt_index for u in usage_rows if u.attempt_index is not None})
 
     return results
 
