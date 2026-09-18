@@ -1633,6 +1633,7 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
 
         normalized_runtime: Dict[str, Any] = {
             "run_id": generation_run_id,
+            "task_id": generation_run_id,  # SSE 订阅 ID: GET /api/updates/stream/{task_id}
             "cancel_requested": bool(runtime.get("cancel_requested")),
             "progress_stage": stage,
             "progress_message": message,
@@ -1657,6 +1658,29 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
         normalized_runtime = self._compact_runtime_payload(normalized_runtime)
         chapter.real_summary = json.dumps({"generation_runtime": normalized_runtime}, ensure_ascii=False)
         await self.session.commit()
+
+        # 同时把该事件推给 SSE 订阅者（GET /api/updates/stream/{run_id}）。
+        # 终端态用 kind=terminal 标记，供前端判定流结束。
+        if generation_run_id:
+            try:
+                from .generation_log_service import get_generation_log_service
+
+                level = "error" if stage == "failed" else ("success" if stage in ("waiting_for_confirm", "completed") else "info")
+                await get_generation_log_service().log(
+                    generation_run_id,
+                    message or stage,
+                    level=level,
+                    metadata={
+                        "stage": stage,
+                        "event_kind": event_kind or ("terminal" if stage in ("failed", "waiting_for_confirm", "completed") else "progress"),
+                        "progress_percent": normalized_runtime["progress_percent"],
+                        "chapter_number": chapter.chapter_number,
+                    },
+                )
+                if stage in ("failed", "waiting_for_confirm", "completed"):
+                    await get_generation_log_service().complete_task(generation_run_id)
+            except Exception:  # noqa: BLE001 - 日志通道失败不得阻断正文生成
+                logger.debug("SSE log push skipped: %s", generation_run_id, exc_info=True)
 
     async def _record_provider_waiting_progress(
         self,
@@ -1827,6 +1851,17 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
         generation_run_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         stage_timings: Dict[str, float] = {}
+
+        # SSE 订阅标识：把 run_id 串到 GenerationLogService，让
+        # GET /api/updates/stream/{task_id} 真正能订阅本轮生成。
+        # 此前该端点是孤立的——pipeline 从不推日志，前端只能轮询 status。
+        if generation_run_id:
+            try:
+                from .generation_log_service import get_generation_log_service
+
+                get_generation_log_service().create_task(generation_run_id)
+            except Exception:  # noqa: BLE001 - 日志通道失败不得阻断正文生成
+                logger.debug("SSE log task init skipped: %s", generation_run_id, exc_info=True)
 
         async def mark_stage(stage_name: str, started_at: float, *, detail: Optional[str] = None) -> None:
             duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
@@ -2132,7 +2167,7 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
             raise HTTPException(status_code=500, detail="缺少写作提示词，请联系管理员配置")
 
         prompt_sections = self._build_prompt_sections(
-            preset=requested_preset,
+            preset=config.preset,
             writer_blueprint=writer_blueprint,
             previous_summary=history_context["previous_summary"],
             previous_tail=history_context["previous_tail"],
