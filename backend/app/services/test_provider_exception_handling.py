@@ -20,6 +20,7 @@ from anyio import sleep
 from fastapi import HTTPException
 
 from app.services.llm_service import LLMService
+from app.services.generation_call_service import GenerationCallPolicy, call_generation_text
 from app.utils.llm_tool import ChatMessage
 
 
@@ -122,21 +123,27 @@ async def test_429_retry_logic_triggers_once():
         (None, second_error),
     ])
 
-    # 期望：第一次调用抛 429，重试一次后再抛 429
-    exc_caught = None
-    try:
-        await llm.get_llm_response(
+    # 通过生产 GenerationCallPolicy 触发一次重试，而不是直接调用 fake 绕过重试层。
+    with pytest.raises(HTTPException) as exc_info:
+        await call_generation_text(
+            llm_service=llm,
             system_prompt="test",
             conversation_history=[{"role": "user", "content": "hello"}],
+            temperature=0.7,
+            user_id=None,
             timeout=30.0,
+            policy=GenerationCallPolicy(
+                stage_label="US-007 retry",
+                response_format=None,
+                retry_attempts=2,
+                backoff_base_seconds=0.01,
+                backoff_max_seconds=0.02,
+            ),
         )
-    except HTTPException as exc:
-        exc_caught = exc
-    
-    assert exc_caught is not None
-    assert exc_caught.status_code == 429
-    assert len(llm.calls) == 2  # 初始调用 + 1 次重试
-    assert exc_caught.detail["code"] == "PROVIDER_RATE_LIMITED"
+
+    assert exc_info.value.status_code == 429
+    assert len(llm.calls) == 2
+    assert exc_info.value.detail["code"] == "PROVIDER_RATE_LIMITED"
     print("✓ US-007-CRIT-1: 429 重试逻辑触发一次，最终正确传播异常")
 
 
@@ -154,14 +161,24 @@ async def test_503_retry_and_non_stream_fallback():
         ("success_fallback", None),
     ])
 
-    result = await llm.get_llm_response(
+    result = await call_generation_text(
+        llm_service=llm,
         system_prompt="test",
         conversation_history=[{"role": "user", "content": "hello"}],
+        temperature=0.7,
+        user_id=None,
         timeout=30.0,
+        policy=GenerationCallPolicy(
+            stage_label="US-007 fallback",
+            response_format=None,
+            retry_attempts=2,
+            backoff_base_seconds=0.01,
+            backoff_max_seconds=0.02,
+        ),
     )
 
-    assert result == "success_fallback"
-    assert len(llm.calls) == 2  # 初始调用 + 1 次重试/兜底
+    assert result.text == "success_fallback"
+    assert len(llm.calls) == 2
     print("✓ US-007-CRIT-2: 503 错误触发重试和非流式兜底机制")
 
 

@@ -18,6 +18,8 @@ import asyncio
 from typing import List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
+
 import pytest
 from fastapi import HTTPException
 
@@ -71,8 +73,9 @@ async def test_429_rate_limit_triggers_retry_with_backoff():
         if call_count[0] == 1:
             # 第一次调用：抛 OpenAI SDK 的 RateLimitError
             exc = OpenAIRateLimitError(
-                response=MagicMock(status_code=429),
-                message="Rate limit exceeded"
+                response=httpx.Response(429, request=httpx.Request("POST", "https://api.test.com")),
+                message="Rate limit exceeded",
+                body=None
             )
             raise exc
         else:
@@ -362,6 +365,11 @@ async def test_provider_attempt_ledger_records_all_attempts():
             self.attempts = []
         
         def record_attempt(self, **kwargs):
+            attempt_id = kwargs.get("attempt_id")
+            existing = next((item for item in self.attempts if item.get("attempt_id") == attempt_id), None)
+            if existing is not None:
+                existing.update(kwargs)
+                return
             self.attempts.append({
                 "timestamp": asyncio.get_event_loop().time(),
                 **kwargs
