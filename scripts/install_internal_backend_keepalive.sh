@@ -14,6 +14,9 @@ REPO_ROOT="$REPO_ROOT" KEEPALIVE_PATH="$KEEPALIVE_PATH" HOOK_BEGIN="$HOOK_BEGIN"
 import os
 from pathlib import Path
 keepalive=Path(os.environ["KEEPALIVE_PATH"]); repo=Path(os.environ["REPO_ROOT"]); text=keepalive.read_text(encoding="utf-8"); begin=os.environ["HOOK_BEGIN"]; end=os.environ["HOOK_END"]
+legacy = "\n".join(["# 玄穹文书 internal loopback backend (8099)", f"WENSHU_REPO={repo}", 'if [ -x \"$WENSHU_REPO/scripts/ensure_internal_backend.sh\" ]; then', '  \"$WENSHU_REPO/scripts/ensure_internal_backend.sh\" >>\"$LOG\" 2>&1 || log 'internal backend keepalive failed'', 'else', '  log 'internal backend keepalive script missing'', 'fi', ""])
+if legacy in text:
+    text = text.replace(legacy, "", 1)
 if begin not in text or end not in text:
  marker="# heartbeat for container activity"
  block="\n".join([begin,f"WENSHU_REPO={repo}",'if [ -x "$WENSHU_REPO/scripts/ensure_internal_backend.sh" ]; then','  "$WENSHU_REPO/scripts/ensure_internal_backend.sh" >>"$LOG" 2>&1 || log \'internal backend keepalive failed\'','else','  log \'internal backend keepalive script missing\'','fi',end,""])

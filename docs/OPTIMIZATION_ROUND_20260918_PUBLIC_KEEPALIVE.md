@@ -29,3 +29,10 @@
 - [x] 8013 故障后自动恢复。
 - [x] Cloudflare ingress 仍只指向 8013。
 - [x] R19 提交推送 GitHub。
+
+## R20 duplicate hook cleanup
+
+- 重新审查发现外部 keepalive 曾同时存在旧手工 internal hook 和标记 hook。
+- 已移除旧手工 internal hook，仅保留一个 begin/end 标记块。
+- 当前 keepalive 中 internal/public 各保留一套调用，`sh -n` 通过，直接执行后 8013/8099 health 均 HTTP 200。
+- `install_internal_backend_keepalive.sh` 后续安装会先移除已知 legacy 块，保持幂等。
