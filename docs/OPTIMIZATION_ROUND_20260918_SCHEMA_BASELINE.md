@@ -47,3 +47,11 @@ status=match
 - [x] baseline 不含业务数据。
 - [x] 可在副本数据库上用于后续 migration diff。
 - [ ] 正式 migration version/history 仍需独立设计和回滚演练。
+
+## R18 baseline verifier
+
+新增 `scripts/verify_sqlite_baseline.py`，只读比较当前 SQLite 与已提交 baseline 的表/列结构 hash。
+
+- 匹配返回 exit 0。
+- 任意结构漂移返回 exit 10。
+- 不读取或输出业务数据。
