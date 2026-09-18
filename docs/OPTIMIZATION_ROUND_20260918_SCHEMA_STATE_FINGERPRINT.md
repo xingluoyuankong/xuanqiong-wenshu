@@ -41,3 +41,10 @@
 - 8013/8099 重启后日志输出 schema fingerprint，不再触发旧 Alembic warning。
 - 8013/8099/5174 health 均 HTTP 200。
 - 运行时 manifest 检测 `working_tree_dirty=true`，提交后将重新对齐。
+
+## R14 运行时 dirty 过滤与最终回归
+
+- 发现：manifest 的 `working_tree_dirty` 会把 SQLite `-wal/-shm` 运行时文件误判为代码漂移，导致 keepalive 周期性重启服务。
+- 修复：manager 现在忽略 `storage/*.db-wal`、`storage/*.db-shm`、logs、backups、pycache、dist 等运行时资产，只把真正代码/配置改动标为 dirty。
+- 后端全量回归：`270 passed in 17.00s`。
+- 提交后运行两个 ensure，验证 `working_tree_dirty=false`、`code_drift=false`。
