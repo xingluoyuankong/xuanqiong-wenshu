@@ -46,6 +46,7 @@ if settings.is_sqlite_backend:
     if os.path.isfile(_db_path):
         try:
             _conn = _sqlite_pragma.connect(_db_path)
+            _conn.execute("PRAGMA foreign_keys=ON")
             _conn.execute("PRAGMA journal_mode=WAL")
             _conn.execute("PRAGMA synchronous=NORMAL")
             _conn.execute("PRAGMA busy_timeout=300000")
@@ -58,6 +59,7 @@ if settings.is_sqlite_backend:
         """Apply SQLite WAL and lock-wait settings exactly once per new connection."""
         cursor = dbapi_connection.cursor()
         try:
+            cursor.execute("PRAGMA foreign_keys=ON")
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA synchronous=NORMAL")
             cursor.execute("PRAGMA busy_timeout=300000")  # 5 分钟，适配长生成写锁。
