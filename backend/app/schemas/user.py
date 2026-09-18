@@ -36,8 +36,13 @@ class User(UserBase):
 
 
 class UserInDB(User):
-    """数据库内部使用的模型，包含哈希后的密码。"""
+    """数据库内部使用的模型，包含哈希后的密码。
 
+    DB 中可能保留历史内部地址（例如 `.local` 域名），读取时必须保真；
+    用户注册和更新仍由 UserBase/UserUpdate 的 EmailStr 严格校验。
+    """
+
+    email: Optional[str] = Field(default=None, description="数据库中保存的邮箱原值")
     hashed_password: str
 
 
