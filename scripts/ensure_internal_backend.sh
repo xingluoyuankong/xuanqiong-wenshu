@@ -15,7 +15,7 @@ if ! "$MANAGER" status >"$LOG_DIR/status.out" 2>"$LOG_DIR/status.err"; then
   exit 0
 fi
 
-if grep -q '"status": "running"' "$LOG_DIR/status.out" && ! grep -q '"code_drift": true' "$LOG_DIR/status.out" || grep -q '"working_tree_dirty": true' "$LOG_DIR/status.out" && ! grep -q '"working_tree_dirty": true' "$LOG_DIR/status.out"; then
+if grep -q '"status": "running"' "$LOG_DIR/status.out" && ! grep -q '"code_drift": true' "$LOG_DIR/status.out" && ! grep -q '"working_tree_dirty": true' "$LOG_DIR/status.out"; then
   log "internal backend healthy and commit-aligned; manifest refreshed"
   exit 0
 fi
