@@ -18,9 +18,9 @@
 ## 验收标准
 
 - [x] 真实 Provider E2E usage 正常返回时 `attempt_index=1`。
-- [ ] 第一次物理调用失败、第二次成功时 usage 行 `attempt_index=2`。
+- [ ] 第一次物理调用失败、第二次成功时 usage 行 `attempt_index=2`；本轮真实 E2E 覆盖正常 attempt=1。
 - [x] 真实 Provider E2E 的 usage 行包含 `attempt_indexes=[1]`。
-- [ ] 后端全量测试通过。
+- [x] 后端全量测试：`267 passed`。
 - [ ] R8 提交推送 GitHub。
 
 ## 最终真实 E2E
@@ -30,3 +30,13 @@
 - TokenUsage：2 行，总 16664；prompt 11769；completion 4895；estimated rows 0。
 - attempt indexes：`[1]`；stage=`chapter_generation`；model=`GLM-5.3-Flash`。
 - E2E exit：0。
+
+## 生产入口最终验收
+
+- R8 提交：`d69b444`。
+- 8013 重启后 PID：`38940`。
+- 8013/8099/5174：HTTP 200。
+- 真实 budget smoke：通过并自动删除测试项目。
+- SQLite integrity：foreign_keys=1、orphan_project_rows={}。
+- schema drift audit：缺表/缺列/外键违规为 0，额外表 2 个 advisory。
+- 启动日志 warning grep：无 legacy admin email schema fallback。
