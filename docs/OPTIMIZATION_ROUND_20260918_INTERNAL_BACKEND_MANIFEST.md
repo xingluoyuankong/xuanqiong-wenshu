@@ -55,3 +55,21 @@ Cloudflare ingress 配置仅把公网 API 指向 8013，没有把 8099 暴露到
 - 将 8099 manifest 接入 supervisor/keepalive，避免服务只依赖人工执行脚本。
 - 为 8013 也生成同格式 manifest，统一公网/内部服务观测。
 - 补强制停止、孤儿检测、旧 commit 拒绝启动的回归。
+
+## Keepalive 接入
+
+新增 `scripts/ensure_internal_backend.sh`，由 qwenpaw 容器的 keepalive 循环调用：
+
+- 先执行 `manage_internal_backend.sh status`，刷新 manifest。
+- 8099 正常时只记录健康，不重启。
+- 8099 缺失或 status 失败时调用 `start` 自动恢复。
+- 只管理回环 8099，不触碰公网 8013。
+
+## Keepalive 恢复演练
+
+- 外部 keepalive 文件：`qwenpaw-mingzhu/bin/keepalive.sh`。
+- 发现原权限为 `644`，直接执行会 `Permission denied`；已修复为 `755`。
+- 原文件备份：`/run/csi/mount-root/nas/cdbd15b8c05480833b893f85e09ee146/internal-backend/keepalive.sh.before-internal-backend`。
+- 演练：停止 8099 PID `39543`，执行 keepalive 后自动恢复为 PID `39998`。
+- 恢复后 8099 `/api/health` HTTP 200；8013 公网 `/api/health` 仍 HTTP 200。
+- manifest 更新为当前 commit、PID、启动时间和运行时 Python。
