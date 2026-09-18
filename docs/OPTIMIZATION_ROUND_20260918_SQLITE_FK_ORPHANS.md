@@ -25,7 +25,7 @@
 - [x] 删除项目后 chapters/token_budgets/token_usages/alerts 等关联行自动级联。
 - [x] 已知 smoke 残留清理后 orphan count 全部为 0。
 - [x] 后端定向 8 passed；全量 265 passed in 18.64s。
-- [ ] 推送 GitHub，并重启 8013 后复核健康。
+- [x] 已推送 GitHub；R4 修复后重启 8013，健康 200，真实 budget smoke 通过。
 
 ## 当前结果
 
@@ -34,3 +34,11 @@
 - 清理后：`chapters=0`、`token_budgets=0`、`token_usages=0`、`token_budget_alerts=0`。
 - 所有带 `project_id` 的关联表 orphan count：`{}`。
 - 新增只读审计：`scripts/audit_sqlite_integrity.py`。
+
+## 最终线上验收
+
+- R4 提交：`d8a7833`。
+- R4 重启后 8013 PID：`38242`。
+- 8013/8099/5174：均 HTTP 200。
+- 真实预算 smoke：登录/创建/预算/蓝图/生成/删除全部通过。
+- 日志未出现 SQLite 外键错误。

@@ -16,13 +16,20 @@
 
 ## 验收标准
 
-- [ ] 代码与回归已覆盖；待 8013 重启后检查运行日志不再出现该 warning。
+- [x] 代码与回归已覆盖；R5 重启后日志 grep 未发现 schema fallback/special-use warning。
 - [x] 用户输入 schema 仍拒绝 `.local` 特殊域。
 - [x] 后端全量：`267 passed in 15.59s`。
-- [ ] 8013 重启后健康且真实 HTTP budget smoke 继续通过。
-- [ ] 本轮提交推送 GitHub。
+- [x] 8013 重启后健康且真实 HTTP budget smoke 继续通过。
+- [x] 本轮提交 `5cc5e67` 已推送 GitHub。
 
 ## 当前测试
 
 - R5 定向：`11 passed`。
 - 后端全量：`267 passed in 15.59s`。
+
+## 最终线上验收
+
+- R5 重启后 8013 PID：`38242`。
+- 8013/8099/5174：均 HTTP 200。
+- 日志无 `用户数据校验失败`、`schema fallback`、`special-use` 或 `.local` 邮箱警告。
+- 真实预算 smoke 和 SQLite integrity audit 均通过。
