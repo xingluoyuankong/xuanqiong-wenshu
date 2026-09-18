@@ -92,3 +92,12 @@ R10 后续审计发现旧 manifest 会用当前 Git HEAD 覆盖进程真实 comm
 - 旧 PID `40446` 被停止，新 PID `40581` 启动。
 - manifest 恢复：`process_commit == current_commit`、`code_drift=false`、`status=running`。
 - 8099 与 8013 health 均 HTTP 200。
+
+## R11 可重放安装最终验收
+
+- `scripts/install_internal_backend_keepalive.sh` 已写入仓库。
+- 外部 keepalive hook 已幂等安装。
+- 安装备份：`keepalive.sh.20260918-220412.bak`。
+- 外部文件权限：`755`。
+- `sh -n` 通过，直接执行通过。
+- 8099 ensure/manifest 仍保持 running，8013 公网入口未受影响。
