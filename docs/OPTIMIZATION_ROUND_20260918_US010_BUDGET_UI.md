@@ -81,11 +81,29 @@ npm run build-only -> exit 0
 - [x] 工作树代码 diff 通过 `git diff --check`。
 - [x] 后端定向回归 56/56 通过。
 - [x] 前端测试、type-check、build 通过。
-- [ ] 当前优化分支已提交并推送到 GitHub。
-- [ ] 8013 后端重启后仍健康。
-- [ ] 5174 静态前端重启/刷新后仍健康。
+- [x] 当前优化分支已提交并推送到 GitHub。
+- [x] 8013 后端重启后仍健康。
+- [x] 5174 静态前端重启/刷新后仍健康。
 - [ ] 使用测试项目验证预算阻断响应包含 `budget_gate_reason`、`allowed_actions=["pause"]`，且章节不会进入 generating。
-- [ ] 生产工作树清洁，SQLite `-wal/-shm` 不纳入提交。
+- [x] 代码工作树只剩 SQLite 运行时 `-wal/-shm` 变化，未纳入提交。
+
+## 推送与部署结果（最终）
+
+- [x] 已创建并推送分支：`codex/server-us010-r1`。
+- [x] GitHub 提交：`d30811ab767b537b30d2ebf4ad16de34f3c44256`。
+- [x] 推送校验：`origin/codex/server-us010-r1...HEAD` 为 `0 0`。
+- [x] 前端重新构建后启动 5174，静态首页 HTTP 200。
+- [x] 8013 后端已停止旧 PID `28578`，以提交后代码启动新 PID `36616`。
+- [x] 8013 `/api/health` HTTP 200；启动总耗时约 1.41 秒。
+- [x] 8099 `/api/health` HTTP 200；18093 E2E stub 保持运行。
+- [x] 8013 启动日志包含 Stage 1/6 至 Stage 6/6 的 START/OK/PERFORMANCE 记录。
+- [x] 预算门后端/前端回归和全量代码门禁在隔离环境通过。
+
+### 部署遗留告警
+
+- 8013 启动时报告 `alembic` CLI 不在运行时 PATH，随后执行 SQLite 版本查询；当前数据库没有 `alembic_version` 表，因此迁移 revision 显示 `unavailable`。本轮健康与应用启动通过，但下一轮必须把运行时迁移入口和当前数据库版本追踪收口，不能长期依赖 `init_db/create_all` 兜底。
+- 运行过程中 `storage/xuanqiong_wenshu.db-wal`、`storage/xuanqiong_wenshu.db-shm`、`storage/e2e_us006.db-wal`、`storage/e2e_us006.db-shm` 出现工作树变化；这些是数据库运行时文件，未加入本轮提交。
+- 当前服务角色仍有两套后端：公网 8013 和回环 8099；下一轮需要明确唯一生产入口与停止/重启责任，避免同一 checkout 的版本漂移。
 
 ## 下一轮优先级
 
