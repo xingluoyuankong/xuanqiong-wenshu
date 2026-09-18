@@ -105,7 +105,10 @@ async def main():
         results["server_ready"] = wait_ready()
         assert results["server_ready"], f"服务未就绪，日志: {(proc.stdout.read() or '')[:2000] if proc.stdout else ''}"
 
-        async with httpx.AsyncClient(base_url=BASE, timeout=180.0) as client:
+        # 真实 Provider 生成耗时长，且后台任务会持 SQLite 写锁，
+        # status 读可能被阻塞 —— connect 短、read 长分别设置。
+        timeout_cfg = httpx.Timeout(connect=10.0, read=float(os.environ.get("E2E_READ_TIMEOUT", "300")), write=10.0, pool=10.0)
+        async with httpx.AsyncClient(base_url=BASE, timeout=timeout_cfg) as client:
             # 1. 登录
             r = await client.post("/api/auth/login", data={
                 "username": os.environ.get("ADMIN_DEFAULT_USERNAME", "admin"),
@@ -152,18 +155,34 @@ async def main():
             assert r.status_code == 200, f"generate 失败: {r.text[:500]}"
 
             # 4. 轮询 status 直到终态，拿到 run_id
+            #    真实 Provider 生成期间，单 worker uvicorn 可能被 pipeline 长时间占用，
+            #    且 SQLite 写锁会短暂阻塞读请求 —— 用短超时 + 容错重试，单次超时不致命。
             run_id = None
             status_body = {}
-            for _ in range(60):
-                await asyncio.sleep(1.0)
-                r = await client.get(f"/api/writer/novels/{project_id}/chapters/1/status", headers=headers)
+            consecutive_errors = 0
+            poll_deadline = time.time() + float(os.environ.get("E2E_POLL_TIMEOUT", "600"))
+            last_http = None
+            while time.time() < poll_deadline:
+                await asyncio.sleep(2.0)
+                try:
+                    r = await client.get(
+                        f"/api/writer/novels/{project_id}/chapters/1/status",
+                        headers=headers, timeout=20.0,
+                    )
+                except httpx.HTTPError:
+                    consecutive_errors += 1
+                    results["poll_transient_errors"] = consecutive_errors
+                    continue
+                last_http = r.status_code
                 if r.status_code != 200:
                     continue
                 status_body = r.json()
                 rt = status_body.get("generation_runtime") or {}
-                run_id = rt.get("task_id") or rt.get("run_id")
+                run_id = run_id or rt.get("task_id") or rt.get("run_id")
                 if rt.get("progress_stage") in ("waiting_for_confirm", "completed", "failed"):
                     break
+            r = type("R", (), {"status_code": last_http})()
+            results["run_id"] = run_id
             results["run_id"] = run_id
             results["status_http"] = r.status_code
             results["status_stage"] = (status_body.get("generation_runtime") or {}).get("progress_stage")

@@ -36,6 +36,9 @@ FIXED_CHAPTER_TEXT = (
     "此刻山谷里确实安静得异常。他握紧了手中的木匣，指节微微发白。"
 )
 
+E2E_MODE = os.environ.get("E2E_MODE", "stub").lower()  # stub | real
+assert E2E_MODE in ("stub", "real"), f"E2E_MODE must be stub|real, got {E2E_MODE}"
+
 import sys  # noqa: E402
 
 sys.path.insert(0, str(REPO_ROOT))
@@ -47,26 +50,35 @@ _STUB_CALLS = {"text": 0, "json": 0, "embed": 0}
 
 
 async def _fake_get_embedding(self, text, *, user_id=None, **kwargs):
+    """embedding 始终打桩：该账号在网关上无 embedding 通道（实测 503 model_not_found）。"""
     _STUB_CALLS["embed"] += 1
     return [0.0] * int(os.environ.get("EMBEDDING_MODEL_VECTOR_SIZE", "3072"))
 
 
-async def _fake_get_llm_response(
-    self, system_prompt, conversation_history, *, temperature=0.7, user_id=None,
-    timeout=100.0, response_format=None, max_tokens=None, top_p=None,
-    prompt_cache_key=None, allow_truncated_response=False, retry_same_model_once=True,
-    **kwargs,
-):
-    _STUB_CALLS["text"] += 1
-    blob = json.dumps(conversation_history, ensure_ascii=False)
-    wants_prose = any(k in blob for k in ("正文", "章节", "写作", "续写", "草稿", "draft", "小说"))
-    if wants_prose:
-        return FIXED_CHAPTER_TEXT
-    return json.dumps({}, ensure_ascii=False)
-
-
 _llm_mod.LLMService.get_embedding = _fake_get_embedding
-_llm_mod.LLMService.get_llm_response = _fake_get_llm_response
+
+if E2E_MODE == "stub":
+    async def _fake_get_llm_response(
+        self, system_prompt, conversation_history, **kwargs,
+    ):
+        _STUB_CALLS["text"] += 1
+        blob = json.dumps(conversation_history, ensure_ascii=False)
+        wants_prose = any(k in blob for k in ("正文", "章节", "写作", "续写", "草稿", "draft", "小说"))
+        if wants_prose:
+            return FIXED_CHAPTER_TEXT
+        return json.dumps({}, ensure_ascii=False)
+
+    _llm_mod.LLMService.get_llm_response = _fake_get_llm_response
+else:
+    # real 模式：不替换 get_llm_response，走真实 Provider。
+    # 仅计数，便于报告"真实调用次数"。
+    _orig = _llm_mod.LLMService.get_llm_response
+
+    async def _counting_get_llm_response(self, *args, **kwargs):
+        _STUB_CALLS["text"] += 1
+        return await _orig(self, *args, **kwargs)
+
+    _llm_mod.LLMService.get_llm_response = _counting_get_llm_response
 
 from backend.app.main import app  # noqa: E402
 
