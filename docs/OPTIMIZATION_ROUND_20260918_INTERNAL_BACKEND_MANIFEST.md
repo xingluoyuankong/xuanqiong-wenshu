@@ -73,3 +73,22 @@ Cloudflare ingress 配置仅把公网 API 指向 8013，没有把 8099 暴露到
 - 演练：停止 8099 PID `39543`，执行 keepalive 后自动恢复为 PID `39998`。
 - 恢复后 8099 `/api/health` HTTP 200；8013 公网 `/api/health` 仍 HTTP 200。
 - manifest 更新为当前 commit、PID、启动时间和运行时 Python。
+
+## Commit drift 修复
+
+R10 后续审计发现旧 manifest 会用当前 Git HEAD 覆盖进程真实 commit。现已增加：
+
+- `process_commit`：进程启动时的 checkout commit。
+- `current_commit`：当前工作树 HEAD。
+- `code_drift`：两者不一致时为 true。
+- keepalive 检测 `code_drift=true` 后自动调用 manager restart。
+
+这样新提交不会被旧 8099 进程伪装成当前版本。
+
+## Drift 注入最终验收
+
+- 首次 drift 演练发现 `set -u` 下 `current_commit` 未初始化，已修复。
+- 注入 `process_commit=DRIFT_TEST_COMMIT` 后执行 keepalive。
+- 旧 PID `40446` 被停止，新 PID `40581` 启动。
+- manifest 恢复：`process_commit == current_commit`、`code_drift=false`、`status=running`。
+- 8099 与 8013 health 均 HTTP 200。
