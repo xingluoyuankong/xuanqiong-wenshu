@@ -17,10 +17,16 @@ listener_pid() {
   lsof -t -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -1 || true
 }
 
+worktree_dirty_marker() {
+  git -C "$ROOT" status --porcelain --untracked-files=all 2>/dev/null \
+    | grep -vE "^.. storage/.*\.(db-wal|db-shm)$|^.. logs/|^.. backups/|^\?\? .*(__pycache__|\.pyc)$|^\?\? frontend/dist/" \
+    | head -1 || true
+}
+
 write_manifest() {
   local pid="${1:-}" status="${2:-unknown}"
   mkdir -p "$STATE_DIR"
-  XQ_STATE_DIR="$STATE_DIR" XQ_HOST="$HOST" XQ_ROLE="$ROLE" XQ_PID="$pid" XQ_STATUS="$status" XQ_PORT="$PORT" XQ_ROOT="$ROOT" XQ_LOG="$LOG" XQ_ERR="$ERR" XQ_APP="$APP" XQ_PYTHON="$XQ_PYTHON" XQ_CURRENT_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)" XQ_WORKTREE_DIRTY="$(git -C "$ROOT" status --porcelain 2>/dev/null | head -1)" XQ_PROCESS_COMMIT="${XQ_PROCESS_COMMIT:-}" XQ_STARTED="${XQ_STARTED:-}" XQ_PYTHONPATH="$PYTHONPATH" \
+  XQ_STATE_DIR="$STATE_DIR" XQ_HOST="$HOST" XQ_ROLE="$ROLE" XQ_PID="$pid" XQ_STATUS="$status" XQ_PORT="$PORT" XQ_ROOT="$ROOT" XQ_LOG="$LOG" XQ_ERR="$ERR" XQ_APP="$APP" XQ_PYTHON="$XQ_PYTHON" XQ_CURRENT_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)" XQ_WORKTREE_DIRTY="$(worktree_dirty_marker)" XQ_PROCESS_COMMIT="${XQ_PROCESS_COMMIT:-}" XQ_STARTED="${XQ_STARTED:-}" XQ_PYTHONPATH="$PYTHONPATH" \
   "$XQ_PYTHON" - <<'PY'
 import json, os, platform, subprocess
 from datetime import datetime, timezone
@@ -64,9 +70,9 @@ status() {
   local current_commit; current_commit="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
   local pid; pid="$(listener_pid)"
   if [[ -n "$pid" ]]; then
-    XQ_STATE_DIR="$STATE_DIR" XQ_HOST="$HOST" XQ_ROLE="$ROLE" XQ_PID="$pid" XQ_STATUS="running" XQ_PORT="$PORT" XQ_ROOT="$ROOT" XQ_LOG="$LOG" XQ_ERR="$ERR" XQ_APP="$APP" XQ_PYTHON="$XQ_PYTHON" XQ_CURRENT_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)" XQ_WORKTREE_DIRTY="$(git -C "$ROOT" status --porcelain 2>/dev/null | head -1)" XQ_PYTHONPATH="$PYTHONPATH" write_manifest "$pid" running >/dev/null
+    XQ_STATE_DIR="$STATE_DIR" XQ_HOST="$HOST" XQ_ROLE="$ROLE" XQ_PID="$pid" XQ_STATUS="running" XQ_PORT="$PORT" XQ_ROOT="$ROOT" XQ_LOG="$LOG" XQ_ERR="$ERR" XQ_APP="$APP" XQ_PYTHON="$XQ_PYTHON" XQ_CURRENT_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)" XQ_WORKTREE_DIRTY="$(worktree_dirty_marker)" XQ_PYTHONPATH="$PYTHONPATH" write_manifest "$pid" running >/dev/null
   else
-    XQ_STATE_DIR="$STATE_DIR" XQ_HOST="$HOST" XQ_ROLE="$ROLE" XQ_PID=0 XQ_STATUS="stopped" XQ_PORT="$PORT" XQ_ROOT="$ROOT" XQ_LOG="$LOG" XQ_ERR="$ERR" XQ_APP="$APP" XQ_PYTHON="$XQ_PYTHON" XQ_CURRENT_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)" XQ_WORKTREE_DIRTY="$(git -C "$ROOT" status --porcelain 2>/dev/null | head -1)" XQ_PYTHONPATH="$PYTHONPATH" write_manifest 0 stopped >/dev/null
+    XQ_STATE_DIR="$STATE_DIR" XQ_HOST="$HOST" XQ_ROLE="$ROLE" XQ_PID=0 XQ_STATUS="stopped" XQ_PORT="$PORT" XQ_ROOT="$ROOT" XQ_LOG="$LOG" XQ_ERR="$ERR" XQ_APP="$APP" XQ_PYTHON="$XQ_PYTHON" XQ_CURRENT_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)" XQ_WORKTREE_DIRTY="$(worktree_dirty_marker)" XQ_PYTHONPATH="$PYTHONPATH" write_manifest 0 stopped >/dev/null
   fi
   cat "$MANIFEST"
   if [[ -n "$pid" ]]; then curl -fsS --max-time 5 "http://${HOST}:${PORT}/api/health"; echo; fi
@@ -84,7 +90,7 @@ start() {
   pid=$!
   for _ in $(seq 1 60); do
     if curl -fsS --max-time 2 "http://${HOST}:${PORT}/api/health" >/dev/null 2>&1; then
-      XQ_STATE_DIR="$STATE_DIR" XQ_HOST="$HOST" XQ_ROLE="$ROLE" XQ_PID="$(listener_pid)" XQ_STATUS=running XQ_PORT="$PORT" XQ_ROOT="$ROOT" XQ_LOG="$LOG" XQ_ERR="$ERR" XQ_APP="$APP" XQ_PYTHON="$XQ_PYTHON" XQ_CURRENT_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)" XQ_WORKTREE_DIRTY="$(git -C "$ROOT" status --porcelain 2>/dev/null | head -1)" XQ_PYTHONPATH="$PYTHONPATH" write_manifest "$(listener_pid)" running >/dev/null
+      XQ_STATE_DIR="$STATE_DIR" XQ_HOST="$HOST" XQ_ROLE="$ROLE" XQ_PID="$(listener_pid)" XQ_STATUS=running XQ_PORT="$PORT" XQ_ROOT="$ROOT" XQ_LOG="$LOG" XQ_ERR="$ERR" XQ_APP="$APP" XQ_PYTHON="$XQ_PYTHON" XQ_CURRENT_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)" XQ_WORKTREE_DIRTY="$(worktree_dirty_marker)" XQ_PYTHONPATH="$PYTHONPATH" write_manifest "$(listener_pid)" running >/dev/null
       echo "started pid=$(listener_pid)"; status; return 0
     fi
     sleep 1
@@ -101,7 +107,7 @@ stop() {
   for _ in $(seq 1 30); do [[ -z "$(listener_pid)" ]] && break; sleep 1; done
   if [[ -n "$(listener_pid)" ]]; then kill -KILL "$(listener_pid)"; fi
   xq_prepare_runtime
-  XQ_STATE_DIR="$STATE_DIR" XQ_HOST="$HOST" XQ_ROLE="$ROLE" XQ_PID=0 XQ_STATUS=stopped XQ_PORT="$PORT" XQ_ROOT="$ROOT" XQ_LOG="$LOG" XQ_ERR="$ERR" XQ_APP="$APP" XQ_PYTHON="$XQ_PYTHON" XQ_CURRENT_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)" XQ_WORKTREE_DIRTY="$(git -C "$ROOT" status --porcelain 2>/dev/null | head -1)" XQ_PYTHONPATH="$PYTHONPATH" write_manifest 0 stopped >/dev/null
+  XQ_STATE_DIR="$STATE_DIR" XQ_HOST="$HOST" XQ_ROLE="$ROLE" XQ_PID=0 XQ_STATUS=stopped XQ_PORT="$PORT" XQ_ROOT="$ROOT" XQ_LOG="$LOG" XQ_ERR="$ERR" XQ_APP="$APP" XQ_PYTHON="$XQ_PYTHON" XQ_CURRENT_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)" XQ_WORKTREE_DIRTY="$(worktree_dirty_marker)" XQ_PYTHONPATH="$PYTHONPATH" write_manifest 0 stopped >/dev/null
   echo "stopped pid=$pid"
 }
 
