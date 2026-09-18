@@ -15,8 +15,15 @@ if ! "$MANAGER" status >"$LOG_DIR/status.out" 2>"$LOG_DIR/status.err"; then
   exit 0
 fi
 
-if grep -q '"status": "running"' "$LOG_DIR/status.out"; then
-  log "internal backend healthy; manifest refreshed"
+if grep -q '"status": "running"' "$LOG_DIR/status.out" && ! grep -q '"code_drift": true' "$LOG_DIR/status.out"; then
+  log "internal backend healthy and commit-aligned; manifest refreshed"
+  exit 0
+fi
+
+if grep -q '"code_drift": true' "$LOG_DIR/status.out"; then
+  log "internal backend code drift detected; restarting to current checkout"
+  "$MANAGER" restart >>"$LOG_FILE" 2>&1
+  log "internal backend drift restart completed"
   exit 0
 fi
 
