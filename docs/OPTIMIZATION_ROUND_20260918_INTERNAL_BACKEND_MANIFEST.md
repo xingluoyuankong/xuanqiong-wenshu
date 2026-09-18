@@ -110,3 +110,9 @@ R10 后续审计发现旧 manifest 会用当前 Git HEAD 覆盖进程真实 comm
 - 真实 budget smoke：通过并自动删除项目。
 - SQLite integrity：foreign_keys=1、orphan_project_rows={}。
 - 8013 新启动日志未出现 legacy admin email schema fallback warning。
+
+## R12 公网管理器
+
+- `scripts/manage_public_backend.sh`：8013 公网 backend 的同一 manifest 管理器。
+- `scripts/ensure_public_backend.sh`：公网入口健康/commit drift 自动恢复。
+- 8013 保持 `0.0.0.0`，8099 保持 `127.0.0.1`；两者共享当前 checkout 和 runtime resolver。
