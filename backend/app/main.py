@@ -304,118 +304,131 @@ async def lifespan(app: FastAPI):
     
     startup_start = time.time()
     app_logger.info("=" * 60)
-    app_logger.info("🚀 APPLICATION STARTUP INITIATED")
-    app_logger.info("Timestamp: %s", datetime.now().isoformat())
+    app_logger.info("[LIFESPAN] STARTUP | 🚀 APPLICATION STARTUP INITIATED")
+    app_logger.info("[LIFESPAN] Timestamp: %s", datetime.now().isoformat())
     app_logger.info("=" * 60)
     
     # Stage 1: Startup Security Enforcement
-    app_logger.info("[STAGE-1/6] LIFESPAN-START | Enforcing startup security checks...")
+    app_logger.info("[LIFESPAN] [STAGE-1/6] LIFESPAN-START | Enforcing startup security checks...")
     stage1_start = time.time()
     _enforce_startup_security()
     stage1_duration = time.time() - stage1_start
-    app_logger.info("[STAGE-1/6] LIFESPAN-OK | Startup security enforcement complete. Duration: %.2fs", stage1_duration)
+    app_logger.info("[LIFESPAN] [STAGE-1/6] LIFESPAN-OK | Startup security enforcement complete. Duration: %.2fs", stage1_duration)
     
     # Stage 2: Database Initialization & Migration Check
-    app_logger.info("[STAGE-2/6] LIFESPAN-START | Initializing database (Alembic migration check)...")
+    app_logger.info("[LIFESPAN] [STAGE-2/6] LIFESPAN-START | Initializing database (Alembic migration check)...")
     stage2_start = time.time()
     await init_db()
+    migration_status = "unknown"
     try:
         from subprocess import check_output
         from pathlib import Path
         alembic_result = check_output(["alembic", "current"], cwd=str(Path(__file__).parent))
         migration_status = alembic_result.decode().strip()
-        app_logger.info("[STAGE-2/6] LIFESPAN-OK | Database migrations at revision: %s", migration_status)
-        app_logger.info("[STAGE-2/6] PERFORMANCE | Alembic migration check completed in %.2fs", time.time() - stage2_start)
     except Exception as e:
-        error_logger.warning("[STAGE-2/6] LIFESPAN-WARN | Migration check failed with error: %s", str(e))
+        error_logger.warning("[LIFESPAN] [STAGE-2/6] LIFESPAN-WARN | alembic CLI unavailable (%s), falling back to SQL version query", str(e))
+        try:
+            from sqlalchemy import text as _sqltext
+            async with AsyncSessionLocal() as _sess:
+                _rev = (await _sess.execute(_sqltext("SELECT version_num FROM alembic_version ORDER BY version_num DESC LIMIT 1"))).scalar()
+                migration_status = str(_rev) if _rev else "no-revision-row"
+        except Exception as e2:
+            migration_status = f"unavailable ({e2})"
+    app_logger.info("[LIFESPAN] [STAGE-2/6] LIFESPAN-OK | Database ready. Migration revision: %s", migration_status)
+    app_logger.info("[LIFESPAN] [STAGE-2/6] PERFORMANCE | Database init + migration check completed in %.2fs", time.time() - stage2_start)
     
     # Stage 3: Provider Initialization
-    app_logger.info("[STAGE-3/6] LIFESPAN-START | Provider initialization sequence starting...")
+    app_logger.info("[LIFESPAN] [STAGE-3/6] LIFESPAN-START | Provider initialization sequence starting...")
     stage3_start = time.time()
     try:
         from .services.llm_service import LLMService
         from .core.config import settings
         
-        app_logger.info("[STAGE-3/6] PROVIDER-STATUS | Checking configured providers...")
+        app_logger.info("[LIFESPAN] [STAGE-3/6] PROVIDER-STATUS | Checking configured providers...")
         providers_available = []
         
         if settings.openai_api_key and settings.openai_base_url:
-            app_logger.info("[STAGE-3/6] PROVIDER-ATTEMPT | Attempting to initialize OpenAI provider...")
+            app_logger.info("[LIFESPAN] [STAGE-3/6] PROVIDER-ATTEMPT | Attempting to initialize OpenAI provider...")
             try:
                 llm_service = LLMService()
                 # Test basic connectivity by checking if service is ready
                 if hasattr(llm_service, 'client') and llm_service.client is not None:
                     providers_available.append("OpenAI")
-                    app_logger.info("[STAGE-3/6] PROVIDER-OK | OpenAI provider initialized successfully")
+                    app_logger.info("[LIFESPAN] [STAGE-3/6] PROVIDER-OK | OpenAI provider initialized successfully")
                 else:
-                    app_logger.warning("[STAGE-3/6] PROVIDER-WARN | OpenAI client not available")
+                    app_logger.warning("[LIFESPAN] [STAGE-3/6] PROVIDER-WARN | OpenAI client not available")
             except Exception as e:
-                app_logger.error("[STAGE-3/6] PROVIDER-FAIL | Failed to initialize OpenAI: %s", str(e))
+                app_logger.error("[LIFESPAN] [STAGE-3/6] PROVIDER-FAIL | Failed to initialize OpenAI: %s", str(e))
         else:
-            app_logger.info("[STAGE-3/6] PROVIDER-NOTIFY | No OpenAI API key configured, skipping initialization")
+            app_logger.info("[LIFESPAN] [STAGE-3/6] PROVIDER-NOTIFY | No OpenAI API key configured, skipping initialization")
         
         # Note: Additional providers (Ollama, etc.) would be initialized here when implemented
         
         if providers_available:
-            app_logger.info("[STAGE-3/6] PROVIDER-COMPLETE | Available providers: %s", ", ".join(providers_available))
+            app_logger.info("[LIFESPAN] [STAGE-3/6] PROVIDER-COMPLETE | Available providers: %s", ", ".join(providers_available))
         else:
-            app_logger.warning("[STAGE-3/6] PROVIDER-NOTIFY | No providers available - chapter generation will fail until configured")
+            app_logger.warning("[LIFESPAN] [STAGE-3/6] PROVIDER-NOTIFY | No providers available - chapter generation will fail until configured")
             
-        app_logger.info("[STAGE-3/6] PERFORMANCE | Provider initialization completed in %.2fs", time.time() - stage3_start)
+        app_logger.info("[LIFESPAN] [STAGE-3/6] PERFORMANCE | Provider initialization completed in %.2fs", time.time() - stage3_start)
         
     except ImportError as e:
-        app_logger.warning("[STAGE-3/6] IMPORT-WARN | Could not import LLMService: %s", str(e))
+        app_logger.warning("[LIFESPAN] [STAGE-3/6] IMPORT-WARN | Could not import LLMService: %s", str(e))
     except Exception as e:
-        error_logger.error("[STAGE-3/6] LIFESPAN-ERROR | Unexpected error during provider initialization: %s", str(e))
+        error_logger.error("[LIFESPAN] [STAGE-3/6] LIFESPAN-ERROR | Unexpected error during provider initialization: %s", str(e))
     
     # Stage 4: Prompt Preload
-    app_logger.info("[STAGE-4/6] LIFESPAN-START | Loading prompts into cache...")
+    app_logger.info("[LIFESPAN] [STAGE-4/6] LIFESPAN-START | Loading prompts into cache...")
     stage4_start = time.time()
     async with AsyncSessionLocal() as session:
         prompt_service = PromptService(session)
         preload_start = time.time()
         await prompt_service.preload()
         preload_duration = time.time() - preload_start
-        app_logger.info("[STAGE-4/6] PROMPT-STATUS | Preloaded %d prompts", len(prompt_service._prompts))
-        app_logger.info("[STAGE-4/6] PERFORMANCE | Prompt preload completed in %.2fs", preload_duration)
-    app_logger.info("[STAGE-4/6] LIFESPAN-OK | Prompts loaded successfully into cache layer")
+        try:
+            from .services.prompt_service import _CACHE as _PROMPT_CACHE
+            _loaded_count = len(_PROMPT_CACHE)
+        except Exception:
+            _loaded_count = -1
+        app_logger.info("[LIFESPAN] [STAGE-4/6] PROMPT-STATUS | Preloaded %d prompts", _loaded_count)
+        app_logger.info("[LIFESPAN] [STAGE-4/6] PERFORMANCE | Prompt preload completed in %.2fs", preload_duration)
+    app_logger.info("[LIFESPAN] [STAGE-4/6] LIFESPAN-OK | Prompts loaded successfully into cache layer")
     
     # Stage 5: Startup Reconciliation
-    app_logger.info("[STAGE-5/6] LIFESPAN-START | Running startup reconciliation checks...")
+    app_logger.info("[LIFESPAN] [STAGE-5/6] LIFESPAN-START | Running startup reconciliation checks...")
     stage5_start = time.time()
     try:
         # Check database consistency
         async with AsyncSessionLocal() as session:
             from sqlalchemy import text
-            result = await session.execute(text("SELECT COUNT(*) FROM projects"))
+            result = await session.execute(text("SELECT COUNT(*) FROM novel_projects"))
             project_count = result.scalar() or 0
-            app_logger.info("[STAGE-5/6] RECONCILE-DATA | Database contains %d projects", project_count)
+            app_logger.info("[LIFESPAN] [STAGE-5/6] RECONCILE-DATA | Database contains %d novel_projects", project_count)
             
-            result = await session.execute(text("SELECT COUNT(*) FROM novels"))
+            result = await session.execute(text("SELECT COUNT(*) FROM chapters"))
             novel_count = result.scalar() or 0
-            app_logger.info("[STAGE-5/6] RECONCILE-DATA | Database contains %d novels", novel_count)
+            app_logger.info("[LIFESPAN] [STAGE-5/6] RECONCILE-DATA | Database contains %d chapters", novel_count)
         
-        app_logger.info("[STAGE-5/6] LIFESPAN-OK | Startup reconciliation complete. Data integrity verified.")
-        app_logger.info("[STAGE-5/6] PERFORMANCE | Reconciliation checks completed in %.2fs", time.time() - stage5_start)
+        app_logger.info("[LIFESPAN] [STAGE-5/6] LIFESPAN-OK | Startup reconciliation complete. Data integrity verified.")
+        app_logger.info("[LIFESPAN] [STAGE-5/6] PERFORMANCE | Reconciliation checks completed in %.2fs", time.time() - stage5_start)
         
     except Exception as e:
-        error_logger.error("[STAGE-5/6] LIFESPAN-ERROR | Startup reconciliation failed: %s", str(e))
+        error_logger.error("[LIFESPAN] [STAGE-5/6] LIFESPAN-ERROR | Startup reconciliation failed: %s", str(e))
     
     # Stage 6: Background Sweeper Initialization
-    app_logger.info("[STAGE-6/6] LIFESPAN-START | Initializing background sweepers...")
+    app_logger.info("[LIFESPAN] [STAGE-6/6] LIFESPAN-START | Initializing background sweepers...")
     stage6_start = time.time()
     try:
         # Placeholder for sweeper initialization when implemented
         # Future: Initialize token cleanup, unused file deletion, etc.
-        app_logger.info("[STAGE-6/6] SWEEPER-NOTIFY | Background sweepers placeholder - implementation pending")
-        app_logger.info("[STAGE-6/6] LIFESPAN-OK | Background sweepers initialized (placeholder mode)")
-        app_logger.info("[STAGE-6/6] PERFORMANCE | Sweeper initialization completed in %.2fs", time.time() - stage6_start)
+        app_logger.info("[LIFESPAN] [STAGE-6/6] SWEEPER-NOTIFY | Background sweepers placeholder - implementation pending")
+        app_logger.info("[LIFESPAN] [STAGE-6/6] LIFESPAN-OK | Background sweepers initialized (placeholder mode)")
+        app_logger.info("[LIFESPAN] [STAGE-6/6] PERFORMANCE | Sweeper initialization completed in %.2fs", time.time() - stage6_start)
     except Exception as e:
-        error_logger.error("[STAGE-6/6] LIFESPAN-ERROR | Sweeper initialization failed: %s", str(e))
+        error_logger.error("[LIFESPAN] [STAGE-6/6] LIFESPAN-ERROR | Sweeper initialization failed: %s", str(e))
     
     total_duration = time.time() - startup_start
     app_logger.info("=" * 60)
-    app_logger.info("✅ Application startup complete")
+    app_logger.info("[LIFESPAN] STARTUP | ✅ Application startup complete")
     app_logger.info("Total startup duration: %.2fs", total_duration)
     app_logger.info("=" * 60)
     
@@ -423,8 +436,8 @@ async def lifespan(app: FastAPI):
     
     # Shutdown phase
     app_logger.info("=" * 60)
-    app_logger.info("🛑 Application shutting down")
-    app_logger.info("Timestamp: %s", datetime.now().isoformat())
+    app_logger.info("[LIFESPAN] SHUTDOWN | 🛑 Application shutting down")
+    app_logger.info("[LIFESPAN] Timestamp: %s", datetime.now().isoformat())
     app_logger.info("=" * 60)
 
 
