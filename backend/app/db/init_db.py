@@ -172,6 +172,24 @@ async def _ensure_schema_updates() -> None:
                 if "llm_provider_profiles" not in llm_config_columns:
                     sync_conn.execute(text("ALTER TABLE llm_configs ADD COLUMN llm_provider_profiles TEXT"))
 
+            if inspector.has_table("token_usages"):
+                token_usage_columns = {col["name"] for col in inspector.get_columns("token_usages")}
+                if "run_id" not in token_usage_columns:
+                    sync_conn.execute(text("ALTER TABLE token_usages ADD COLUMN run_id VARCHAR(64)"))
+                    sync_conn.execute(
+                        text("CREATE INDEX IF NOT EXISTS ix_token_usages_run_id ON token_usages (run_id)")
+                    )
+                if "stage" not in token_usage_columns:
+                    sync_conn.execute(text("ALTER TABLE token_usages ADD COLUMN stage VARCHAR(48)"))
+                if "attempt_index" not in token_usage_columns:
+                    sync_conn.execute(text("ALTER TABLE token_usages ADD COLUMN attempt_index INTEGER"))
+                if "prompt_tokens" not in token_usage_columns:
+                    sync_conn.execute(text("ALTER TABLE token_usages ADD COLUMN prompt_tokens INTEGER"))
+                if "completion_tokens" not in token_usage_columns:
+                    sync_conn.execute(text("ALTER TABLE token_usages ADD COLUMN completion_tokens INTEGER"))
+                if "is_estimated" not in token_usage_columns:
+                    sync_conn.execute(text("ALTER TABLE token_usages ADD COLUMN is_estimated BOOLEAN DEFAULT 0"))
+
             if inspector.has_table("user_style_libraries"):
                 style_library_columns = {col["name"] for col in inspector.get_columns("user_style_libraries")}
                 if "style_sources_json" not in style_library_columns:

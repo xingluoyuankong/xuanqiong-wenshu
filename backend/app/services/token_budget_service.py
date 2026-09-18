@@ -85,9 +85,20 @@ class TokenBudgetService:
         model_name: Optional[str] = None,
         chapter_id: Optional[int] = None,
         operation_type: Optional[str] = None,
-        description: Optional[str] = None
+        description: Optional[str] = None,
+        *,
+        run_id: Optional[str] = None,
+        stage: Optional[str] = None,
+        attempt_index: Optional[int] = None,
+        prompt_tokens: Optional[int] = None,
+        completion_tokens: Optional[int] = None,
+        is_estimated: bool = False,
     ) -> TokenUsage:
-        """记录一次 Token 使用"""
+        """记录一次 Token 使用。
+
+        ``run_id`` + ``attempt_index`` 一起构成"逻辑调用 / 物理尝试"的归因键：
+        同一次逻辑生成共享 run_id，每次真正打到 Provider 的尝试递增 attempt_index。
+        """
         usage = TokenUsage(
             project_id=project_id,
             chapter_id=chapter_id,
@@ -96,12 +107,43 @@ class TokenBudgetService:
             cost=cost,
             model_name=model_name,
             operation_type=operation_type,
-            description=description
+            description=description,
+            run_id=run_id,
+            stage=stage,
+            attempt_index=attempt_index,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            is_estimated=is_estimated,
         )
         self.db.add(usage)
         await self.db.commit()
         await self.db.refresh(usage)
         return usage
+
+    async def get_run_usage(self, run_id: str) -> dict:
+        """按逻辑调用（run_id）汇总，并拆出物理尝试次数。
+
+        这是回答"重试是否重复计费"的唯一权威口径：
+          - physical_attempts: 打到 Provider 的物理次数（含失败重试）
+          - billed_tokens:     实际记账 token 之和
+          - billable_attempts: 产生计费的尝试数
+        """
+        result = await self.db.execute(
+            select(TokenUsage).where(TokenUsage.run_id == run_id)
+        )
+        usages = list(result.scalars().all())
+        attempt_indexes = {u.attempt_index for u in usages if u.attempt_index is not None}
+        return {
+            "run_id": run_id,
+            "record_count": len(usages),
+            "physical_attempts": len(attempt_indexes),
+            "billed_tokens": sum(u.tokens_used or 0 for u in usages),
+            "billed_cost": round(sum(u.cost or 0.0 for u in usages), 6),
+            "prompt_tokens": sum(u.prompt_tokens or 0 for u in usages),
+            "completion_tokens": sum(u.completion_tokens or 0 for u in usages),
+            "estimated_records": sum(1 for u in usages if u.is_estimated),
+            "stages": sorted({u.stage for u in usages if u.stage}),
+        }
 
     async def get_usage_stats(
         self,

@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db.base import Base
@@ -68,6 +68,20 @@ class TokenUsage(Base):
     # ===== 上下文 =====
     operation_type: Mapped[Optional[str]] = mapped_column(String(32))  # 操作类型：generation/optimization/extraction
     description: Mapped[Optional[str]] = mapped_column(Text)  # 操作描述
+
+    # ===== 逻辑调用 / 物理尝试 归因（US-010）=====
+    # run_id 同一次逻辑生成；attempt_index 第几次物理尝试。
+    # 二者合起来才能回答"重试是否重复计费"。
+    run_id: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+    stage: Mapped[Optional[str]] = mapped_column(String(48))  # 生成阶段，如 draft/self_critique/enrichment
+    attempt_index: Mapped[Optional[int]] = mapped_column(Integer)
+
+    # ===== 计量口径（US-010）=====
+    # prompt/completion 分开计；tokens_used 保持为二者之和以兼容既有查询。
+    prompt_tokens: Mapped[Optional[int]] = mapped_column(Integer)
+    completion_tokens: Mapped[Optional[int]] = mapped_column(Integer)
+    # True 表示 tokens 为本地估算（Provider 未返回 usage）；False/null 表示 Provider 实际值。
+    is_estimated: Mapped[Optional[bool]] = mapped_column(Boolean, default=False)
 
     # ===== 时间戳 =====
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

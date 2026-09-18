@@ -76,6 +76,10 @@ class LLMClient:
 
         stream = await self._client.chat.completions.create(**payload)
         async for chunk in stream:
+            # OpenAI 兼容端点通常在最后一个 chunk（choices 为空）返回 usage。
+            # 保留它，供上层记账使用；缺失时上层会退化为本地估算。
+            if getattr(chunk, "usage", None) is not None:
+                yield {"usage": chunk.usage}
             if not chunk.choices:
                 continue
             choice = chunk.choices[0]
@@ -136,10 +140,11 @@ class LLMClient:
 
         completion = await self._client.chat.completions.create(**payload)
         if not completion.choices:
-            return {"content": "", "finish_reason": None}
+            return {"content": "", "finish_reason": None, "usage": getattr(completion, "usage", None)}
         choice = completion.choices[0]
         content = self._coerce_content(getattr(getattr(choice, "message", None), "content", ""))
         return {
             "content": content,
             "finish_reason": getattr(choice, "finish_reason", None),
+            "usage": getattr(completion, "usage", None),
         }

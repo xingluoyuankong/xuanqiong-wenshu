@@ -224,6 +224,7 @@ async def main():
     from sqlalchemy import select  # noqa: E402
     from backend.app.db.session import AsyncSessionLocal  # noqa: E402
     from backend.app.models.novel import Chapter, ChapterVersion  # noqa: E402
+    from backend.app.models.token_budget import TokenUsage  # noqa: E402
 
     async with AsyncSessionLocal() as s:
         ch = (await s.execute(
@@ -240,6 +241,19 @@ async def main():
         results["db_version_labels"] = [v.version_label for v in vs]
         results["db_version_lens"] = [len(v.content or "") for v in vs]
         results["db_version_content_head"] = (vs[0].content or "")[:120] if vs else ""
+
+        # US-010: 验证预算账本被生成链路自动写入
+        usage_rows = (await s.execute(
+            select(TokenUsage).where(TokenUsage.project_id == project_id)
+        )).scalars().all()
+        results["db_token_usage_rows"] = len(usage_rows)
+        results["db_token_usage_total"] = sum(u.tokens_used or 0 for u in usage_rows)
+        results["db_token_usage_prompt"] = sum(u.prompt_tokens or 0 for u in usage_rows)
+        results["db_token_usage_completion"] = sum(u.completion_tokens or 0 for u in usage_rows)
+        results["db_token_usage_estimated_rows"] = sum(1 for u in usage_rows if u.is_estimated)
+        results["db_token_usage_run_ids"] = sorted({u.run_id for u in usage_rows if u.run_id})
+        results["db_token_usage_stages"] = sorted({u.stage for u in usage_rows if u.stage})
+        results["db_token_usage_models"] = sorted({u.model_name for u in usage_rows if u.model_name})
 
     return results
 

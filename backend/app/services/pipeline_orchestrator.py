@@ -1850,6 +1850,44 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
         flow_config: Optional[Dict[str, Any]] = None,
         generation_run_id: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """章节生成入口。
+
+        这里建立 LLM 用量归因上下文（US-010）。ContextVar 会随 await 与子任务
+        自动传播，因此下层所有 LLM 调用都会被自动记入本项目/本章/本 run 的预算账本，
+        无需逐个调用点传参。
+
+        注意：此处**不预取** chapter —— 保证 "outline 不存在 -> 404" 的既有
+        次序与副作用（不产生章节行）不变。chapter_id 由 impl 内部在取得章节后回填。
+        """
+        from .usage_attribution_service import update_usage_scope_chapter, usage_scope
+
+        async with usage_scope(
+            project_id=project_id,
+            chapter_id=None,
+            run_id=generation_run_id,
+            stage="chapter_generation",
+            module="content",
+        ) as scope:
+            result = await self._generate_chapter_impl(
+                project_id=project_id,
+                chapter_number=chapter_number,
+                user_id=user_id,
+                writing_notes=writing_notes,
+                flow_config=flow_config,
+                generation_run_id=generation_run_id,
+            )
+            return result
+
+    async def _generate_chapter_impl(
+        self,
+        *,
+        project_id: str,
+        chapter_number: int,
+        user_id: int,
+        writing_notes: Optional[str] = None,
+        flow_config: Optional[Dict[str, Any]] = None,
+        generation_run_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         stage_timings: Dict[str, float] = {}
 
         # SSE 订阅标识：把 run_id 串到 GenerationLogService，让
@@ -1930,6 +1968,13 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
             raise HTTPException(status_code=404, detail="蓝图中未找到对应章节纲要")
 
         chapter = await self.novel_service.get_or_create_chapter(project_id, chapter_number)
+        # 回填归因上下文的 chapter_id，使后续所有 LLM 调用都能按章归集成本。
+        try:
+            from .usage_attribution_service import update_usage_scope_chapter
+
+            update_usage_scope_chapter(getattr(chapter, "id", None))
+        except Exception:  # noqa: BLE001 - 归因失败不得阻断生成
+            logger.debug("usage scope chapter backfill skipped", exc_info=True)
         if chapter.status != "generating":
             chapter.real_summary = None
             chapter.selected_version_id = None

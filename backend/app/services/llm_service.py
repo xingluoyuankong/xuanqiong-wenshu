@@ -373,6 +373,20 @@ class LLMService:
         return f"{base}::{model}"
 
     @staticmethod
+    def _flatten_messages_for_usage(chat_messages: List[ChatMessage]) -> str:
+        """把消息拼成纯文本，仅用于 Provider 未返回 usage 时的 token 估算。"""
+        parts: List[str] = []
+        for msg in chat_messages or []:
+            content = getattr(msg, "content", None)
+            if isinstance(content, str) and content:
+                parts.append(content)
+            elif isinstance(msg, dict):
+                text = msg.get("content")
+                if isinstance(text, str) and text:
+                    parts.append(text)
+        return "\n".join(parts)
+
+    @staticmethod
     def _get_provider_semaphore(base_url: Optional[str]) -> asyncio.Semaphore:
         key = (base_url or 'default').rstrip('/').lower() or 'default'
         semaphore = _PROVIDER_SEMAPHORES.get(key)
@@ -476,6 +490,7 @@ class LLMService:
         full_response = ""
         finish_reason: Optional[str] = None
         last_exception: Optional[HTTPException] = None
+        usage_sink: Dict[str, Any] = {}
         client = LLMClient(api_key=primary_api_key, base_url=primary_base_url)
         provider_semaphore = self._get_provider_semaphore(primary_base_url)
         provider_key = self._build_provider_key(primary_base_url, primary_model)
@@ -495,6 +510,7 @@ class LLMService:
                     top_p=top_p,
                     prompt_cache_key=prompt_cache_key,
                     retry_same_model_once=retry_same_model_once,
+                    usage_sink=usage_sink,
                 )
         except HTTPException as exc:
             last_exception = exc
@@ -541,6 +557,20 @@ class LLMService:
             await self.usage_service.increment("api_request_count")
         except Exception as exc:  # noqa: BLE001 - usage 统计失败不应阻断主流程
             logger.warning("接口使用量指标递增失败，但不会阻断响应：key=%s error=%s", "api_request_count", exc)
+
+        # 预算账本自动记账（US-010）：仅在有归因上下文时写入，失败不阻断。
+        try:
+            from .usage_attribution_service import record_llm_usage
+
+            await record_llm_usage(
+                self.session,
+                model_name=primary_model,
+                usage=usage_sink.get("usage"),
+                prompt_text=self._flatten_messages_for_usage(chat_messages),
+                completion_text=full_response,
+            )
+        except Exception as exc:  # noqa: BLE001 - 记账失败不得阻断生成
+            logger.warning("LLM 用量归因记账失败，但不会阻断响应：error=%s", exc)
         logger.debug(
             "LLM response success: model=%s base_url=%s user_id=%s chars=%d",
             primary_model,
@@ -565,12 +595,18 @@ class LLMService:
         top_p: Optional[float] = None,
         prompt_cache_key: Optional[str] = None,
         retry_same_model_once: bool = True,
+        usage_sink: Optional[Dict[str, Any]] = None,
     ) -> tuple[str, Optional[str]]:
         stream_response_format = response_format
         stream_prompt_cache_key = prompt_cache_key
         full_response = ""
         finish_reason = None
         network_retry_used = False
+
+        def _capture_usage(part: Dict[str, Any]) -> None:
+            if usage_sink is not None and part.get("usage") is not None:
+                usage_sink["usage"] = part["usage"]
+                usage_sink["attempts"] = int(usage_sink.get("attempts", 0)) + 1
 
         max_attempts = (2 if retry_same_model_once else 1) + int(bool(response_format)) + int(bool(prompt_cache_key))
         for attempt_index in range(max_attempts):
@@ -588,6 +624,7 @@ class LLMService:
                     top_p=top_p,
                     prompt_cache_key=stream_prompt_cache_key,
                 ):
+                    _capture_usage(part)
                     if part.get("content"):
                         full_response += part["content"]
                     if part.get("finish_reason"):
