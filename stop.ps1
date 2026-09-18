@@ -290,7 +290,20 @@ $zombieCount = $verificationResult.orphans_found.Count
 Write-Host "僵尸进程数：$zombieCount" -ForegroundColor DarkGray
 
 # === US-004: Explicit PASS/FAIL checklist summary ===
+# Evaluated AFTER socket cleanup so sockets_remaining reflects current state,
+# not the pre-cleanup snapshot (fixes false [FAIL] on "no stale sockets").
 Write-Host "`n=== 清理验证清单 ===" -ForegroundColor Cyan
+
+# Re-check socket state now that cleanup has run.
+$socketsNow = @()
+foreach ($sockPattern in @("$logsRoot\uvicorn.sock", "$logsRoot\fastapi.sock", "$env:TEMP\uvicorn*.sock", "$env:TMP\uvicorn*.sock")) {
+    try {
+        $socks = Get-ChildItem -Path $sockPattern -ErrorAction SilentlyContinue
+        if ($socks) { foreach ($s in $socks) { $socketsNow += $s.FullName } }
+    } catch {}
+}
+$verificationResult.sockets_remaining = $socketsNow
+
 $checklist = @(
     @{ Item = '无孤儿 Python 进程'; Ok = (@($verificationResult.orphans_found | Where-Object { $_.Type -eq 'Python' }).Count -eq 0) },
     @{ Item = '无孤儿 Node 进程';   Ok = (@($verificationResult.orphans_found | Where-Object { $_.Type -eq 'Node' }).Count -eq 0) },
@@ -298,6 +311,12 @@ $checklist = @(
     @{ Item = '无残留 socket 文件'; Ok = ($verificationResult.sockets_remaining.Count -eq 0) }
 )
 foreach ($c in $checklist) {
+    if ($c.Ok) {
+        Write-Host "  [PASS] $($c.Item)" -ForegroundColor Green
+    } else {
+        Write-Host "  [FAIL] $($c.Item)" -ForegroundColor Red
+    }
+}
     if ($c.Ok) {
         Write-Host ("  [PASS] " + $c.Item) -ForegroundColor Green
     } else {

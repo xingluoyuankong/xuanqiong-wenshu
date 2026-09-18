@@ -9,6 +9,7 @@ import signal
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -112,8 +113,94 @@ def _find_pid_unix(port: int) -> Optional[int]:
     return None
 
 
+def _proc_state(pid: int) -> Optional[str]:
+    """Read the process state char from /proc (e.g. 'R', 'S', 'Z')."""
+    try:
+        with open(f'/proc/{pid}/stat', 'r') as fh:
+            data = fh.read()
+        # comm may contain spaces/parens; state follows the last ')'
+        return data.rsplit(')', 1)[1].split()[0]
+    except Exception:
+        return None
+
+
+def _process_alive(pid: int) -> bool:
+    """Return True if a process with the given PID is alive and not a zombie."""
+    # A zombie has already exited; only its exit record remains.
+    if _proc_state(pid) == 'Z':
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Process exists but owned by another user — still alive.
+        return True
+    except Exception:
+        return False
+
+
+def _scan_orphans_unix(repo_path_lower: str, markers: tuple, exclude_pids=None) -> list:
+    """
+    Scan /proc for orphaned repo/service processes on Unix.
+
+    A process is reported when its cmdline references the repo path OR one
+    of the service markers (uvicorn / http.server / vite / xuanqiong-wenshu).
+    This process, its parent, and any explicitly excluded PIDs (e.g. live
+    production services) are skipped.
+    """
+    orphans = []
+    exclude = set(exclude_pids or ())
+    exclude.add(os.getpid())
+    exclude.add(os.getppid())
+
+    try:
+        entries = os.listdir('/proc')
+    except Exception as e:
+        logger.debug(f"Could not list /proc: {e}")
+        return orphans
+
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        if pid in exclude:
+            continue
+        try:
+            with open(f'/proc/{pid}/cmdline', 'rb') as fh:
+                raw = fh.read()
+            if not raw:
+                continue
+            cmdline = raw.replace(b'\x00', b' ').decode('utf-8', 'replace').strip()
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        except Exception:
+            continue
+
+        lowered = cmdline.lower()
+        hit_repo = bool(repo_path_lower) and repo_path_lower in lowered
+        hit_marker = any(marker in lowered for marker in markers)
+        if not (hit_repo or hit_marker):
+            continue
+
+        orphans.append({'pid': pid, 'command': cmdline})
+
+    return orphans
+
+
 def stop_process(pid: int, force: bool = True) -> bool:
-    """Stop a process by PID."""
+    """Stop a process by PID.
+
+    Returns True when the process was stopped OR was already gone
+    (idempotent success). Returns False only on a genuine failure to
+    stop a process that is still alive.
+    """
+    # Already reaped / never existed: idempotent success, not an error.
+    if not _process_alive(pid):
+        logger.info(f"✓ Process PID={pid} already exited (no action needed)")
+        return True
+
     try:
         if sys.platform == 'win32':
             # Windows: Stop-Process equivalent
@@ -125,8 +212,28 @@ def stop_process(pid: int, force: bool = True) -> bool:
         else:
             # Unix: kill equivalent
             os.kill(pid, signal.SIGKILL if force else signal.SIGTERM)
-            os.waitpid(pid, 0 if not force else os.WNOHANG)
-        
+            try:
+                os.waitpid(pid, 0 if not force else os.WNOHANG)
+            except ChildProcessError:
+                pass
+
+        # Give the kernel a moment to reap the process before declaring failure.
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            if not _process_alive(pid):
+                logger.info(f"✓ Stopped process PID={pid}")
+                return True
+            time.sleep(0.1)
+
+        if _process_alive(pid):
+            # A zombie (already exited, record not yet reaped) is not a
+            # genuine stop failure — treat as success.
+            if _proc_state(pid) == 'Z':
+                logger.info(f"✓ PID={pid} is a zombie (already exited)")
+                return True
+            logger.warning(f"✗ PID={pid} still alive after stop attempt")
+            return False
+
         logger.info(f"✓ Stopped process PID={pid}")
         return True
     except Exception as e:
@@ -168,42 +275,54 @@ def verify_no_zombie_processes(repo_path: str, ports: list[int] = None) -> dict:
     
     repo_path_lower = repo_path.lower()
     
+    PYTHON_MARKERS = ('uvicorn', 'xuanqiong-wenshu', 'http.server')
+    NODE_MARKERS = ('vite', 'http.server', 'npm', 'xuanqiong-wenshu')
     try:
-        # Get all python and node processes
-        for exe in ['python.exe' if sys.platform == 'win32' else 'python']:
+        # Never report (or later kill) the live production services.
+        prod_pids = set()
+        for _p in (8013, 5174):
+            _pid = find_process_by_port(_p, timeout=0.3)
+            if _pid:
+                prod_pids.add(_pid)
+        # The http.server/vite front-end is usually spawned by a parent
+        # (npm/node supervisor); exclude direct ancestors of prod PIDs too.
+        for _pid in list(prod_pids):
             try:
-                if sys.platform == 'win32':
+                with open(f'/proc/{_pid}/stat', 'r') as fh:
+                    prod_pids.add(int(fh.read().rsplit(')', 1)[1].split()[1]))
+            except Exception:
+                pass
+
+        if sys.platform == 'win32':
+            # Windows: tasklist-based scan (unchanged behaviour)
+            for exe in ['python.exe']:
+                try:
                     cmd = ['tasklist', '/FI', f'Image eq {exe}.exe']
-                else:
-                    cmd = ['ps', '-ef']
-                
-                proc_result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=10
-                )
-                
-                for line in proc_result.stdout.splitlines()[1:]:  # Skip header
-                    if exe in line.lower():
-                        parts = line.split()
-                        
-                        # Extract PID
-                        if sys.platform == 'win32':
+                    proc_result = subprocess.run(
+                        cmd, capture_output=True, text=True, timeout=10
+                    )
+                    for line in proc_result.stdout.splitlines()[1:]:
+                        if exe in line.lower():
+                            parts = line.split()
                             try:
                                 pid = int(parts[1])
                             except (IndexError, ValueError):
                                 continue
-                            
-                            # Check if it's our repo process
                             if repo_path_lower in line.lower():
                                 result['orphan_python'].append({
                                     'pid': pid,
                                     'command': line.strip()
                                 })
-                        else:
-                            # Unix format varies, skip for now
-                            pass
-            except Exception as e:
-                logger.debug(f"Could not check processes: {e}")
-    
+                except Exception as e:
+                    logger.debug(f"Could not check python processes: {e}")
+        else:
+            # Unix: real /proc cmdline scan — no longer a no-op.
+            result['orphan_python'] = _scan_orphans_unix(
+                repo_path_lower, PYTHON_MARKERS, exclude_pids=prod_pids
+            )
+            result['orphan_node'] = _scan_orphans_unix(
+                repo_path_lower, NODE_MARKERS, exclude_pids=prod_pids
+            )
     except Exception as e:
         logger.error(f"Failed to verify zombie processes: {e}")
     
@@ -213,7 +332,11 @@ def verify_no_zombie_processes(repo_path: str, ports: list[int] = None) -> dict:
             if find_process_by_port(port, timeout=0.5):
                 result['ports_in_use'][port] = True
     
-    result['zombie_count'] = len(result['orphan_python']) + len(result['ports_in_use'])
+    result['zombie_count'] = (
+        len(result['orphan_python'])
+        + len(result['orphan_node'])
+        + len(result['ports_in_use'])
+    )
     return result
 
 
@@ -314,7 +437,10 @@ def perform_graceful_cleanup(
     # Verify no zombies remain
     verification = verify_no_zombie_processes(repo_path, ports)
     
-    result['remaining_orphans'] = verification.get('orphan_python', [])
+    result['remaining_orphans'] = (
+        list(verification.get('orphan_python', []))
+        + list(verification.get('orphan_node', []))
+    )
     result['ports_free'] = len(verification.get('ports_in_use', {})) == 0
     
     # Finalize monitoring session and write manifest (US-003)

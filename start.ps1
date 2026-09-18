@@ -280,7 +280,7 @@ result = perform_graceful_cleanup(
     frontend_pid=$FrontendPid,
     repo_path=r'$repo',
     run_dir=r'$runDir',
-    ports=[8013, 5174]
+    ports=[$backendPort, $frontendPort]
 )
 print('sockets=%d remaining_orphans=%d' % (len(result['sockets_cleaned']), len(result['remaining_orphans'])))
 "@
