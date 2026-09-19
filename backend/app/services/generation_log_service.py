@@ -190,6 +190,8 @@ class GenerationLogService:
         metadata = {"type": "failed", "event_kind": "terminal", "stage": stage}
         if code:
             metadata["code"] = code
+        if retryable is None and code in {"PROVIDER_MODEL_UNAVAILABLE", "AUTHENTICATION_FAILED"}:
+            retryable = False
         if retryable is not None:
             metadata["retryable"] = retryable
         await self.log(task_id, message, level="error", metadata=metadata)

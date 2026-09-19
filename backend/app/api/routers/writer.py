@@ -755,8 +755,9 @@ async def _emit_generation_failure_terminal(
     try:
         from ...services.generation_log_service import get_generation_log_service
 
+        retryable = code not in {"PROVIDER_MODEL_UNAVAILABLE", "AUTHENTICATION_FAILED"}
         await get_generation_log_service().fail_task(
-            run_id, reason, stage=stage, code=code, retryable=True
+            run_id, reason, stage=stage, code=code, retryable=retryable
         )
     except Exception as exc:  # noqa: BLE001 - SSE must not mask generation failure
         logger.warning("写入生成失败 terminal SSE 事件失败: run_id=%s error=%s", run_id, exc)

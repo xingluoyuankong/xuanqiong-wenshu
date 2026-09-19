@@ -11,3 +11,4 @@ async def test_fail_task_emits_error_terminal_event():
     assert event.metadata["event_kind"] == "terminal"
     assert event.metadata["type"] == "failed"
     assert event.metadata["code"] == "PROVIDER_MODEL_UNAVAILABLE"
+    assert event.metadata["retryable"] is False
