@@ -34,3 +34,20 @@ message=No available channel for model ...
 - 真实 Provider 无效模型探针：HTTP 503，`error.code=model_not_found`，message 含 `No available channel`。
 - 应用层定向回归：14 passed。
 - 应用层将该类错误分类为 `model_unavailable`、`PROVIDER_MODEL_UNAVAILABLE`、`retryable=false`，不执行无意义 retry/fallback。
+
+## 实际 LLMService 出口回归
+
+新增 `test_llm_service_model_unavailable_does_not_retry`：
+
+- 使用 OpenAI `InternalServerError`，body code=`model_not_found`。
+- 断言 `_stream_single_model` 只调用 Provider 一次。
+- 断言返回 HTTP 404、`PROVIDER_MODEL_UNAVAILABLE`、`retryable=false`。
+
+## R27 LLM 出口回归
+
+新增真实 `LLMService._stream_single_model` 路径测试：
+
+- OpenAI `InternalServerError` body code=`model_not_found`。
+- Provider 调用次数严格为 1。
+- 应用返回 404、`PROVIDER_MODEL_UNAVAILABLE`、`retryable=false`。
+- 定向 3 passed；后端全量 273 passed。
