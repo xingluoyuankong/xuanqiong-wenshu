@@ -175,7 +175,24 @@ class GenerationLogService:
 
     async def complete_task(self, task_id: str) -> None:
         """标记任务完成，通知订阅者结束"""
-        await self.log(task_id, "任务完成", level="success", metadata={"type": "complete"})
+        await self.log(task_id, "任务完成", level="success", metadata={"type": "complete", "event_kind": "terminal"})
+
+    async def fail_task(
+        self,
+        task_id: str,
+        message: str,
+        *,
+        stage: str = "failed",
+        code: Optional[str] = None,
+        retryable: Optional[bool] = None,
+    ) -> None:
+        """Emit an error terminal event so failed SSE subscribers close cleanly."""
+        metadata = {"type": "failed", "event_kind": "terminal", "stage": stage}
+        if code:
+            metadata["code"] = code
+        if retryable is not None:
+            metadata["retryable"] = retryable
+        await self.log(task_id, message, level="error", metadata=metadata)
 
     async def cleanup_expired(self) -> int:
         """清理过期任务日志，返回清理数量"""

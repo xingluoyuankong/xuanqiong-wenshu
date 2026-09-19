@@ -742,6 +742,26 @@ async def _try_claim_chapter_generation(
     return run_id if result.rowcount else None
 
 
+async def _emit_generation_failure_terminal(
+    *,
+    run_id: Optional[str],
+    reason: str,
+    code: Optional[str] = None,
+    stage: str = "failed",
+) -> None:
+    """Close the generation SSE stream with an explicit failure terminal event."""
+    if not run_id:
+        return
+    try:
+        from ...services.generation_log_service import get_generation_log_service
+
+        await get_generation_log_service().fail_task(
+            run_id, reason, stage=stage, code=code, retryable=True
+        )
+    except Exception as exc:  # noqa: BLE001 - SSE must not mask generation failure
+        logger.warning("写入生成失败 terminal SSE 事件失败: run_id=%s error=%s", run_id, exc)
+
+
 async def _mark_busy_chapter_failed(
     session: AsyncSession,
     *,
@@ -2012,6 +2032,7 @@ async def _generate_chapter_async(
                     await session.rollback()
                     chapter = await novel_service.get_or_create_chapter(project_id, chapter_number)
                     await _mark_busy_chapter_failed(session, chapter=chapter, reason=reason, run_id=run_id)
+                    await _emit_generation_failure_terminal(run_id=run_id, reason=reason, code="PROVIDER_TIMEOUT", stage="failed")
                 except Exception as mark_exc:
                     await session.rollback()
                     logger.exception(
@@ -2020,6 +2041,7 @@ async def _generate_chapter_async(
                         chapter_number,
                         mark_exc,
                     )
+                    await _emit_generation_failure_terminal(run_id=run_id, reason=reason, code="PROVIDER_TIMEOUT", stage="failed")
             except Exception as exc:
                 logger.exception(
                     "Background chapter generation failed: user=%s project=%s chapter=%s error=%s",
@@ -2070,12 +2092,18 @@ async def _generate_chapter_async(
                             run_id=run_id,
                             decision="quality_gate_failed",
                         )
+                        await _emit_generation_failure_terminal(
+                            run_id=run_id, reason=reason, code=error_code, stage="evaluation_failed"
+                        )
                     else:
                         await _mark_busy_chapter_failed(
                             session,
                             chapter=chapter,
                             reason=reason,
                             run_id=run_id,
+                        )
+                        await _emit_generation_failure_terminal(
+                            run_id=run_id, reason=reason, code=error_code or "GENERATION_FAILED", stage="failed"
                         )
                 except Exception as mark_exc:
                     await session.rollback()
@@ -2085,6 +2113,7 @@ async def _generate_chapter_async(
                         chapter_number,
                         mark_exc,
                     )
+                    await _emit_generation_failure_terminal(run_id=run_id, reason=reason, code=error_code or "GENERATION_FAILED", stage="failed")
 
 
 async def _schedule_generate_task(
