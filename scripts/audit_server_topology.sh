@@ -38,6 +38,8 @@ done
 
 if "$ROOT/scripts/audit_sqlite_integrity.py" >/tmp/xq-topology-integrity.out; then pass "sqlite integrity"; else fail "sqlite integrity"; fi
 if "$ROOT/scripts/audit_sqlite_schema.sh" >/tmp/xq-topology-schema.out; then pass "sqlite schema drift"; else fail "sqlite schema drift"; fi
+if "$ROOT/scripts/verify_sqlite_baseline.py" >/tmp/xq-topology-baseline.out; then pass "sqlite schema baseline"; else fail "sqlite schema baseline"; fi
+if "$ROOT/scripts/verify_migration_manifest.py" >/tmp/xq-topology-migration.out; then pass "migration provenance"; else fail "migration provenance"; fi
 if git -C "$ROOT" diff --check; then pass "git diff check"; else fail "git diff check"; fi
 remote_counts="$(git -C "$ROOT" rev-list --left-right --count origin/codex/server-us010-r1...HEAD 2>/dev/null || echo "1 1")"
 remote_counts="$(printf '%s' "$remote_counts" | tr '\t' ' ' | xargs)"

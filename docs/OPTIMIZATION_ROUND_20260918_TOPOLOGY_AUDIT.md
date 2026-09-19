@@ -29,3 +29,12 @@ scripts/audit_server_topology.sh
 - 初次审计发现 Git rev-list 的 tab/space 输出格式误判。
 - 已标准化 whitespace 后修复。
 - 最终 `AUDIT_RESULT=PASS`，12 项检查全部通过。
+
+## R23 扩展
+
+总审计现在额外包含：
+
+- SQLite committed baseline verifier。
+- SQL migration fragment provenance verifier。
+
+只有服务 topology、keepalive、数据库 integrity、schema drift、schema baseline、migration provenance 和 Git 同步全部通过，才输出 `AUDIT_RESULT=PASS`。
