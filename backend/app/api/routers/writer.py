@@ -1,4 +1,4 @@
-# AIMETA P=写作API_章节生成和大纲创建|R=章节生成_大纲生成_评审_L2导演脚本_护栏检查|NR=不含数据存储|E=route:POST_/api/writer/*|X=http|A=生成_评审_过滤|D=fastapi,openai|S=net,db|RD=./README.ai
+﻿# AIMETA P=写作API_章节生成和大纲创建|R=章节生成_大纲生成_评审_L2导演脚本_护栏检查|NR=不含数据存储|E=route:POST_/api/writer/*|X=http|A=生成_评审_过滤|D=fastapi,openai|S=net,db|RD=./README.ai
 """
 Writer API Router - 人类化起点长篇写作系统
 
@@ -2564,17 +2564,38 @@ async def cancel_chapter_generation(
         chapter.status,
         cancel_reason,
     )
-    current_run_id = _get_generation_run_id(chapter)
-    chapter.real_summary = _build_failed_generation_runtime_state(
-        chapter,
-        run_id=current_run_id or str(uuid.uuid4()),
-        cancel_requested=True,
-        reason=cancel_reason,
-        level="warning",
-    )
+    current_run_id = _get_generation_run_id(chapter) or str(uuid.uuid4())
+    # 只登记取消请求，保持 Chapter 为 busy，直到后台协程真正退出。
+    # 立即写成 failed 会让删除路由误以为没有活动任务，后台协程随后仍可能
+    # 访问已删除项目并触发 refresh/外键异常。流水线已有
+    # _assert_generation_active，会在下一阶段消费 cancel_requested 并统一收口。
+    payload = _load_generation_runtime_state(chapter)
+    runtime = payload.get("generation_runtime") if isinstance(payload.get("generation_runtime"), dict) else {}
+    now_iso = datetime.now(timezone.utc).isoformat()
+    events = runtime.get("events") if isinstance(runtime.get("events"), list) else []
+    events.append({
+        "at": now_iso,
+        "stage": "cancel_requested",
+        "level": "warning",
+        "message": cancel_reason,
+        "kind": "control",
+    })
+    chapter.real_summary = json.dumps({
+        "generation_runtime": {
+            **runtime,
+            "run_id": current_run_id,
+            "cancel_requested": True,
+            "reason": cancel_reason,
+            "progress_stage": "cancel_requested",
+            "progress_message": "已请求取消，正在等待后台任务安全退出",
+            "allowed_actions": ["refresh_status"],
+            "updated_at": now_iso,
+            "heartbeat_at": now_iso,
+            "events": events[-200:],
+        }
+    }, ensure_ascii=False)
     await session.commit()
     await session.refresh(chapter)
-    await _mark_busy_chapter_failed(session, chapter=chapter, reason=cancel_reason, run_id=current_run_id)
 
     return await _load_project_schema(
         novel_service,
