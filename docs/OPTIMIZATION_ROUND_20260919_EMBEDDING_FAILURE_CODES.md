@@ -64,6 +64,25 @@ R38 live smoke 已证明持久化结构能够记录：
 
 R39 的细分码将在下一次真实 401 请求中验证为 `EMBEDDING_AUTHENTICATION_FAILED`，不把静态配置推断当作 live 证据。
 
+## 当前线上 Live 探针证据
+
+在 R39 提交 `85f7a66` 部署后的服务器运行时中，直接调用 embedding 能力探针，不发起章节生成：
+
+```json
+{
+  "vector_nonempty": false,
+  "vector_dimension": 0,
+  "status": {
+    "provider": "openai",
+    "model": "text-embedding-3-large",
+    "status": "degraded",
+    "code": "EMBEDDING_AUTHENTICATION_FAILED"
+  }
+}
+```
+
+上游原始响应为 HTTP `401 invalid_api_key`。这证明 R39 的细分状态不是静态推断，而是当前服务器真实 Provider 响应映射结果。正文 Provider 仍可独立生成，embedding 能力单独标记为不可用。
+
 ## 未完成项
 
 1. 为 chat completion 与 embedding 配置做独立能力探测；
