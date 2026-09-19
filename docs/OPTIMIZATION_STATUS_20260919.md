@@ -1,0 +1,129 @@
+# 玄穹文枢全面优化总审查（2026-09-19）
+
+## 当前发布锚点
+
+- 服务器：`qwenpaw-sbs-prod-szckq`
+- 仓库分支：`codex/server-us010-r1`
+- GitHub：`https://github.com/xingluoyuankong/xuanqiong-wenshu.git`
+- 当前 HEAD：`7e54456`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
+- 受管公网后端：`0.0.0.0:8013`
+- 受管内网后端：`127.0.0.1:8099`
+- 前端：`127.0.0.1:5174`
+- 生产 SQLite 未执行迁移，R30 计划仍是只生成、不执行
+
+## 已完成并有当前证据的能力
+
+| 区域 | 状态 | 当前证据 |
+|---|---|---|
+| 预算门前后端闭环 | PASS | live HTTP smoke：登录、创建项目、预算更新、蓝图保存、生成请求、门禁状态和删除均符合契约 |
+| 服务器运行时 | PASS | 8013/8099 使用 `scripts/server_runtime.sh` 解析同一依赖路径，manifest 与 HEAD 对齐 |
+| 后端回归 | PASS | `bash scripts/test_backend.sh`：`274 passed, 1 warning` |
+| 前端类型 | PASS | `npm run type-check` |
+| 前端单元回归 | PASS | `23 files passed, 117 tests passed` |
+| 前端生产构建 | PASS | `4710 modules transformed`，构建成功 |
+| 前端 WritingDesk 懒加载边界 | PASS | `INEFFECTIVE_DYNAMIC_IMPORT` 已消失；WritingDesk JS 约 145.86 kB 降至 88.66 kB |
+| 服务拓扑与 keepalive | PASS | `bash scripts/audit_server_topology.sh` 输出 `AUDIT_RESULT=PASS` |
+| SQLite 完整性/漂移/baseline | PASS | topology audit 中 integrity、schema drift、baseline 均通过 |
+| migration provenance | PASS | fragment hash 和 manifest provenance 通过 |
+| 真实 Provider 文学产物 | PARTIAL | 旧轮次有真实非空产物证据；本轮未重新触发计费型真实生成，不把旧证据升级为当前完成 |
+
+## 最近已推送轮次
+
+### R30：迁移计划与 provenance
+
+提交：`a03bf2d`
+
+- 新增 `scripts/plan_migration.py`；
+- 新增 `docs/OPTIMIZATION_ROUND_20260919_MIGRATION_PLAN.md`；
+- SQLite/MySQL 计划都保持 `execute=false`；
+- 当前状态为 `blocked_by_missing_runner`，未修改生产数据库。
+
+### R31：统一后端测试运行时
+
+提交：`d58d965`
+
+- 新增 `scripts/test_backend.sh`；
+- 测试复用生产运行时的 `PYTHONPATH` 和依赖选择；
+- 解决默认 `.venv` 不含外置 FastAPI/SQLAlchemy 等包导致的收集失败；
+- 新增 `docs/OPTIMIZATION_ROUND_20260919_TEST_RUNTIME.md`。
+
+### R32：前端 WritingDesk 懒加载边界
+
+提交：`7e54456`
+
+- `WritingDesk.vue` 从 barrel 导入改为直接导入实际使用组件；
+- 保留 barrel 对外导出兼容性；
+- 去除重复静态/动态弹窗依赖；
+- 新增 `docs/OPTIMIZATION_ROUND_20260919_FRONTEND_CHUNKS.md`。
+
+## 仍需完成的优化任务与验收标准
+
+### P0：真实 Provider 当前入口复验
+
+**任务**：在当前 `7e54456` 服务上重新做一次最小计费/配额可控的真实章节生成，记录 provider、model、attempt、SSE terminal、非空正文、token usage 和数据库归属。
+
+**通过条件**：
+
+1. 真实 provider 返回非空、可解析正文；
+2. SSE 最终事件唯一且为 `complete` 或有结构化 `failed` terminal；
+3. `token_usages` 与对应 project/user/attempt 关联；
+4. 不把 health、stub、队列入列或 HTTP 200 计为真实成功；
+5. 余额/认证/模型不可用时保留原始状态和失败原因。
+
+### P0：迁移 runner 与回滚演练
+
+**任务**：先为 SQLite 和 MySQL 分别建立可重放的 copy dry-run、备份、升级、回滚和人工 review 证据；当前生产库保持不变。
+
+**通过条件**：
+
+1. fragment hash 与 manifest/baseline 绑定；
+2. dry-run 只作用于副本；
+3. upgrade 与 rollback 前后 schema fingerprint 可比较；
+4. 失败时生产库零写入；
+5. 获得人工审查记录后才允许生成可执行计划。
+
+### P1：服务器 Python 依赖可重建性
+
+**任务**：把当前 `/app/user-packages/python` 与 `/app/venv/...` 的运行时依赖来源转成可检查、可重建的部署契约；R31 的测试入口统一只是过渡，不复制未知环境包进仓库。
+
+**通过条件**：
+
+1. 新机器按文档可安装同版本依赖；
+2. `scripts/server_runtime.sh` 在干净环境能明确失败并给出缺失包；
+3. 后端测试和服务启动使用同一锁定依赖集合；
+4. 版本漂移进入 manifest/audit。
+
+### P1：Naive UI 首屏拆分
+
+**任务**：分析 `naive-ui` 约 `557.33 kB`（gzip 约 `156.37 kB`）的实际首屏请求，不调高 warning 阈值掩盖问题；仅在确认路由加载收益后拆分。
+
+**通过条件**：
+
+1. 首屏/写作台/管理页请求瀑布分别有基线；
+2. 按功能域拆分后首屏传输量下降；
+3. `type-check`、117 前端测试和 build 全通过；
+4. 交互页首次打开没有组件加载错误。
+
+### P2：构建与测试噪声收敛
+
+- 处理 Vitest `--localstorage-file` 无有效路径警告；
+- 评估 passlib `crypt` 弃用警告的依赖升级窗口；
+- 记录构建 plugin timing，但不以调高阈值代替优化。
+
+## 受保护不变量
+
+1. 8013 是公网入口，8099 只监听回环地址，5174 是前端入口，角色不混用；
+2. 每次提交后，受管进程的 `process_commit == current_commit`；
+3. 生产数据库迁移前必须有备份、copy dry-run、rollback 和人工 review；
+4. 不提交 `storage/*.db-wal`、`storage/*.db-shm`；当前这两个文件仍只存在服务器本地；
+5. 不用历史绿灯、stub、健康 200 或队列响应替代当前真实 Provider 章节成功；
+6. 每个优化轮次都要有对应 `docs/OPTIMIZATION_ROUND_*.md` 或本总审查更新，并推送 GitHub。
+
+## 当前未提交资产
+
+```text
+storage/e2e_us006.db-shm
+storage/e2e_us006.db-wal
+```
+
+这是测试运行时 SQLite 临时文件，已明确排除出 Git 提交；清理前需要确认没有活动连接和写入者。
