@@ -1,0 +1,29 @@
+{
+  "manifest_type": "sql_fragment_provenance",
+  "created_at": "2026-09-19T00:00:00Z",
+  "git_commit": "d013a09803195e96b0b9c67deeebd1d751b28fc6",
+  "baseline_file": "docs/schema_baselines/20260918-production-sqlite.json",
+  "baseline_schema_sha256": "b3329e0bf443af1d81722e424aed6f9f6f6710a0f972b3ca76c0c90b37731549",
+  "migrations": [
+    {
+      "path": "backend/db/migrations/add_chapter_outline_metadata.sql",
+      "sha256": "5f9f736ccecae15828d79cf9d07079a76989d36c92fedd30ec69f0edb691b95a",
+      "size": 199
+    },
+    {
+      "path": "backend/db/migrations/add_deep_optimization_features.sql",
+      "sha256": "31766fe06b2285cbcec5f80bc7433e005f4c9a66e8ffd59322fdbfe811d66955",
+      "size": 8971
+    },
+    {
+      "path": "backend/db/migrations/add_novel_kit_features.sql",
+      "sha256": "93d70fdbd7701047dfbd364e891618e85466c0ae3ae6a0e62596abc4a69ce108",
+      "size": 7621
+    },
+    {
+      "path": "backend/db/migrations/alter_chapters_real_summary_to_longtext.sql",
+      "sha256": "d7f3a199f4920604d9704d01d197b65302ed0002070ba8f00481bc3b4b441179",
+      "size": 278
+    }
+  ]
+}
