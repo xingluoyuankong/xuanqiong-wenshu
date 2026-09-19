@@ -1,0 +1,85 @@
+{
+  "manifest_type": "xuanqiong_server_runtime_dependencies",
+  "captured_at": "2026-09-19",
+  "runtime": {
+    "fastapi": {
+      "version": "0.110.0",
+      "import": "fastapi",
+      "source_aliases": [
+        "/app/user-packages/python"
+      ]
+    },
+    "sqlalchemy": {
+      "version": "2.0.44",
+      "import": "sqlalchemy",
+      "source_aliases": [
+        "/app/user-packages/python"
+      ]
+    },
+    "uvicorn": {
+      "version": "0.29.0",
+      "import": "uvicorn",
+      "source_aliases": [
+        "/app/user-packages/python"
+      ]
+    },
+    "aiosqlite": {
+      "version": "0.21.0",
+      "import": "aiosqlite",
+      "source_aliases": [
+        "/app/user-packages/python"
+      ]
+    },
+    "httpx": {
+      "version": "0.28.1",
+      "import": "httpx",
+      "source_aliases": [
+        "/app/user-packages/python"
+      ]
+    },
+    "pydantic": {
+      "version": "2.12.2",
+      "import": "pydantic",
+      "source_aliases": [
+        "/app/user-packages/python"
+      ]
+    },
+    "openai": {
+      "version": "2.3.0",
+      "import": "openai",
+      "source_aliases": [
+        "/app/user-packages/python"
+      ]
+    },
+    "passlib": {
+      "version": "1.7.4",
+      "import": "passlib",
+      "source_aliases": [
+        "/app/user-packages/python"
+      ]
+    },
+    "libsql-client": {
+      "version": "0.3.1",
+      "import": "libsql_client",
+      "source_aliases": [
+        "/app/user-packages/python"
+      ]
+    }
+  },
+  "test": {
+    "pytest": {
+      "version": "8.4.1",
+      "import": "pytest",
+      "source_aliases": [
+        ".venv/lib/python3.11/site-packages"
+      ]
+    },
+    "pytest-asyncio": {
+      "version": "1.1.0",
+      "import": "pytest_asyncio",
+      "source_aliases": [
+        ".venv/lib/python3.11/site-packages"
+      ]
+    }
+  }
+}
