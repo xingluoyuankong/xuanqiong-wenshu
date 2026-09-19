@@ -39,7 +39,9 @@ done
 if "$ROOT/scripts/audit_sqlite_integrity.py" >/tmp/xq-topology-integrity.out; then pass "sqlite integrity"; else fail "sqlite integrity"; fi
 if "$ROOT/scripts/audit_sqlite_schema.sh" >/tmp/xq-topology-schema.out; then pass "sqlite schema drift"; else fail "sqlite schema drift"; fi
 if git -C "$ROOT" diff --check; then pass "git diff check"; else fail "git diff check"; fi
-if [[ "$(git -C "$ROOT" rev-list --left-right --count origin/codex/server-us010-r1...HEAD 2>/dev/null || echo 1 1)" == "0 0" ]]; then pass "git remote sync"; else fail "git remote sync"; fi
+remote_counts="$(git -C "$ROOT" rev-list --left-right --count origin/codex/server-us010-r1...HEAD 2>/dev/null || echo "1 1")"
+remote_counts="$(printf '%s' "$remote_counts" | tr '\t' ' ' | xargs)"
+if [[ "$remote_counts" == "0 0" ]]; then pass "git remote sync"; else fail "git remote sync ($remote_counts)"; fi
 
 printf 'AUDIT_RESULT=%s\n' "$([[ $failures -eq 0 ]] && echo PASS || echo FAIL)"
 exit "$failures"

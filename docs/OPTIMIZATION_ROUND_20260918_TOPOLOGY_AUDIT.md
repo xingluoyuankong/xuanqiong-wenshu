@@ -23,3 +23,9 @@ scripts/audit_server_topology.sh
 ## 边界
 
 这是只读审计，不会停止进程、不写数据库、不修改 Cloudflare 配置；WAL/SHM 运行时文件不计为代码 dirty。
+
+## R21 最终结果
+
+- 初次审计发现 Git rev-list 的 tab/space 输出格式误判。
+- 已标准化 whitespace 后修复。
+- 最终 `AUDIT_RESULT=PASS`，12 项检查全部通过。
