@@ -169,6 +169,21 @@ pytest-asyncio=1.1.0
 
 生产依赖实际由容器 canonical path 提供，manifest 保留 `/app/user-packages/python` 别名并通过 realpath 校验，避免容器挂载 ID 变化造成误报。后端全量仍为 `283 passed`，拓扑审计通过。
 
+## R44 最新进展：Naive UI 按组件拆分 chunk
+
+提交：`19ac1d2`。
+
+- 修改前端 Vite `manualChunks`，按 `naive-ui/es/<component>` 拆分；
+- 共享内部模块归入 `naive-ui-runtime`；
+- `type-check` 通过；
+- 前端 `23 files / 117 tests` 通过；
+- 生产构建通过；
+- 原约 `557.33 kB` 的单一 Naive UI chunk 消除；
+- 最大组件 chunk 为 `naive-data-table`，约 `301.06 kB`；
+- 构建不再出现 `Some chunks are larger than 500 kB` 或 `INEFFECTIVE_DYNAMIC_IMPORT`。
+
+真实浏览器请求瀑布和 `naive-data-table` 内部继续拆分仍列入后续 P1，不把静态构建体积替代真实首屏性能证据。
+
 ## 仍需完成的优化任务与验收标准
 
 ### P0：真实 Provider 当前入口复验（R37 已取得当前证据，继续做多轮稳定性复验）
@@ -210,7 +225,7 @@ pytest-asyncio=1.1.0
 3. 后端测试和服务启动使用同一锁定依赖集合；
 4. 版本漂移进入 manifest/audit。
 
-### P1：Naive UI 首屏拆分
+### P1：Naive UI 首屏拆分（R44 组件 chunk 已完成，真实请求瀑布仍待验证）
 
 **任务**：分析 `naive-ui` 约 `557.33 kB`（gzip 约 `156.37 kB`）的实际首屏请求，不调高 warning 阈值掩盖问题；仅在确认路由加载收益后拆分。
 
