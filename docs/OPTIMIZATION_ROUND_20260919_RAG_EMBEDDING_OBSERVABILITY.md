@@ -91,7 +91,45 @@ queued=False
 delete=200
 ```
 
-### 未在本轮宣称完成的内容
+### 当前线上 Live 证据
+
+R38 部署到 `f82351f` 后，在公网入口 `8013` 创建临时项目并完成真实 Provider 章节生成。项目已在验收后删除。
+
+```text
+status_http=200
+chapter_status=waiting_for_confirm
+versions=1
+nonempty_lengths=[521]
+total_tokens=23093
+total_cost=0.031
+usage_record_count=3
+```
+
+持久化章节 runtime 中已读取到：
+
+```json
+{
+  "mode": "simple",
+  "chunks": 1,
+  "summaries": 1,
+  "continuity_injection": true,
+  "degraded": true,
+  "degradation_reason": "EMBEDDING_UNAVAILABLE"
+}
+```
+
+这证明 embedding 401/空向量时，正文生成仍可完成，但运行态明确暴露 RAG 能力降级；同时没有把该降级误报成 Provider 正文失败。
+
+清理审计：
+
+```text
+novel_projects=0
+chapters=0
+token_budgets=0
+orphan_project_rows={}
+```
+
+## 未在本轮宣称完成的内容
 
 本轮解决的是降级可观测性，不是 embedding provider 修复本身。R37 的 `401 invalid_api_key` 仍需下一轮完成：
 
