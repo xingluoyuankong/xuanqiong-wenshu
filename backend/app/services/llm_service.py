@@ -51,6 +51,19 @@ except ImportError:  # pragma: no cover - Ollama 为可选依赖
     OllamaAsyncClient = None
 
 
+def _looks_like_model_unavailable(detail: str) -> bool:
+    lowered = str(detail or "").lower()
+    markers = (
+        "model_not_found",
+        "model not found",
+        "no available channel",
+        "unknown model",
+        "model does not exist",
+        "model unavailable",
+    )
+    return any(marker in lowered for marker in markers)
+
+
 class LLMService:
     """封装与大模型交互的所有逻辑，包括配额控制与配置选择。"""
 
@@ -758,6 +771,16 @@ class LLMService:
                         status_code=401,
                         detail=self._build_provider_auth_detail(detail, status_code=401),
                     ) from exc
+                if _looks_like_model_unavailable(detail):
+                    raise HTTPException(
+                        status_code=404,
+                        detail=self._build_error_detail(
+                            code="PROVIDER_MODEL_UNAVAILABLE",
+                            message=detail,
+                            hint="当前模型没有可用通道，请检查模型名称或切换可用模型。",
+                            retryable=False,
+                        ),
+                    ) from exc
                 if retry_same_model_once and not network_retry_used:
                     network_retry_used = True
                     logger.warning(
@@ -803,6 +826,16 @@ class LLMService:
                     detail,
                     exc_info=exc,
                 )
+                if _looks_like_model_unavailable(detail):
+                    raise HTTPException(
+                        status_code=404,
+                        detail=self._build_error_detail(
+                            code="PROVIDER_MODEL_UNAVAILABLE",
+                            message=detail,
+                            hint="当前模型没有可用通道，请检查模型名称或切换可用模型。",
+                            retryable=False,
+                        ),
+                    ) from exc
                 if status_code >= 500:
                     if retry_same_model_once and not network_retry_used:
                         network_retry_used = True

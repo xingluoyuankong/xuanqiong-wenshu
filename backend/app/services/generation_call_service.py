@@ -69,10 +69,25 @@ class GenerationJSONDecodeError(ValueError):
 
 
 def is_retryable_http_exception(exc: HTTPException) -> bool:
-    if exc.status_code in {408, 409, 425, 429, 500, 502, 503, 504}:
-        return True
     detail = exc.detail
-    if isinstance(detail, dict) and detail.get("retryable") is True:
+    text = json.dumps(detail, ensure_ascii=False).lower() if isinstance(detail, (dict, list)) else str(detail).lower()
+    unavailable_markers = (
+        "provider_model_unavailable",
+        "model_not_found",
+        "model not found",
+        "no available channel",
+        "unknown model",
+        "model does not exist",
+        "model unavailable",
+    )
+    if isinstance(detail, dict):
+        if detail.get("code") == "PROVIDER_MODEL_UNAVAILABLE" or detail.get("retryable") is False:
+            return False
+        if detail.get("retryable") is True and not any(marker in text for marker in unavailable_markers):
+            return True
+    if any(marker in text for marker in unavailable_markers):
+        return False
+    if exc.status_code in {408, 409, 425, 429, 500, 502, 503, 504}:
         return True
     return False
 
@@ -143,6 +158,10 @@ def _looks_like_output_token_limit_error(exc: HTTPException) -> bool:
 def classify_provider_error(exc: HTTPException) -> str:
     detail = exc.detail
     text = json.dumps(detail, ensure_ascii=False).lower() if isinstance(detail, (dict, list)) else str(detail).lower()
+    if isinstance(detail, dict) and detail.get("code") == "PROVIDER_MODEL_UNAVAILABLE":
+        return "model_unavailable"
+    if any(marker in text for marker in ("model_not_found", "no available channel", "model not found", "unknown model")):
+        return "model_unavailable"
     if exc.status_code == 429 or "rate limit" in text or "too many requests" in text:
         return "rate_limit"
     if exc.status_code in {408, 504} or "timeout" in text or "timed out" in text:
