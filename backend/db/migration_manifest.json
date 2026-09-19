@@ -1,9 +1,9 @@
 {
   "manifest_type": "sql_fragment_provenance",
   "created_at": "2026-09-19T00:00:00Z",
-  "git_commit": "d013a09803195e96b0b9c67deeebd1d751b28fc6",
+  "git_commit": "08e86da152ba1c82c2402ffb8043d7dd67d512ca",
   "baseline_file": "docs/schema_baselines/20260918-production-sqlite.json",
-  "baseline_schema_sha256": "b3329e0bf443af1d81722e424aed6f9f6f6710a0f972b3ca76c0c90b37731549",
+  "baseline_schema_sha256": "fda1ec7a5031977e4bfbd88adc1ed577bc462f0d3d1b9b5a4a5297d0f06a9f84",
   "migrations": [
     {
       "path": "backend/db/migrations/add_chapter_outline_metadata.sql",

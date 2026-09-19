@@ -38,10 +38,12 @@ def main() -> int:
     current = current_snapshot(Path(args.db_path))
     expected_hash = digest(expected)
     current_hash = digest(current)
+    stored_hash = baseline.get("database_schema_sha256")
     result = {
-        "status": "match" if expected_hash == current_hash else "drift",
+        "status": "match" if stored_hash == expected_hash == current_hash else "drift",
         "database": args.db_path,
         "baseline": args.baseline,
+        "stored_baseline_schema_sha256": stored_hash,
         "baseline_schema_sha256": expected_hash,
         "current_schema_sha256": current_hash,
         "baseline_commit": baseline.get("git_commit"),

@@ -1,11 +1,11 @@
 {
   "baseline_type": "readonly_schema_baseline",
   "captured_at": "2026-09-18T00:00:00Z",
-  "git_commit": "699e16c155f1cd8014a508fb0e9f8a3003272c2f",
+  "git_commit": "08e86da152ba1c82c2402ffb8043d7dd67d512ca",
   "expected_table_count": 57,
   "actual_table_count": 57,
   "orm_metadata_sha256": "63d4847f3b5b0cf8618ce4c48ee3de3c8a082b50e41934ffa478d34929a8e25a",
-  "database_schema_sha256": "b3329e0bf443af1d81722e424aed6f9f6f6710a0f972b3ca76c0c90b37731549",
+  "database_schema_sha256": "fda1ec7a5031977e4bfbd88adc1ed577bc462f0d3d1b9b5a4a5297d0f06a9f84",
   "missing_tables": [],
   "extra_tables": [],
   "missing_columns": {},
