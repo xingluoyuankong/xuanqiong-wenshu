@@ -45,6 +45,30 @@ R35 的真实闭环证明立即删除和取消请求都返回了预期的 409/20
 6. SQLite integrity、schema baseline、拓扑和 remote sync 全部通过；
 7. 临时项目最终无残留。
 
+## 实际 Live 结果
+
+在提交 `895ceac` 部署后的真实 8013 入口上完成两组验证：
+
+### 重启恢复组
+
+- R35 遗留的已取消项目在服务重启后再次调用取消：HTTP 200；
+- 随后删除项目：HTTP 200；
+- SQLite：`novel_projects=0`、`chapters=0`、`token_budgets=0`、`orphan_project_rows={}`。
+
+### 当前进程 active-task 组
+
+- 生成后立即删除：HTTP 409，`PROJECT_HAS_ACTIVE_GENERATION`；
+- 取消请求：HTTP 200；
+- 取消返回后删除：HTTP 200，证明后台协程已被 drain；
+- 再次查询项目：HTTP 404；
+- 测试项目、章节、预算无残留。
+
+最终 `bash scripts/audit_server_topology.sh` 输出：
+
+```text
+AUDIT_RESULT=PASS
+```
+
 ## 当前 Provider 结论
 
 R33/R35 的真实 Provider 仍在导演脚本/上下文阶段出现 `PROVIDER_TIMEOUT` 或长等待；本轮只修复取消生命周期和删除一致性，未将 Provider 超时冒充为内容生成成功。
