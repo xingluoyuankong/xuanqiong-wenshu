@@ -61,3 +61,7 @@ __pycache__/
 /docs/reports/e2e-*.json
 /优化计划.txt
 **/README.ai
+
+# SQLite runtime journal files stay local and are never versioned.
+storage/*.db-wal
+storage/*.db-shm
