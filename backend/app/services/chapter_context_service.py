@@ -25,6 +25,8 @@ class ChapterRAGContext:
     query: str
     chunks: List[RetrievedChunk]
     summaries: List[RetrievedSummary]
+    degraded: bool = False
+    degradation_reason: Optional[str] = None
 
     def chunk_texts(self) -> List[str]:
         """将检索到的 chunk 转换成带序号的 Markdown 段落。"""
@@ -71,13 +73,19 @@ class ChapterContextService:
         query = self._normalize(query_text)
         if not settings.vector_store_enabled or not self._vector_store:
             logger.info("向量库未启用，跳过章节上下文检索: project=%s", project_id)
-            return ChapterRAGContext(query=query, chunks=[], summaries=[])
+            return ChapterRAGContext(query=query, chunks=[], summaries=[], degraded=False)
 
         # get_embedding 会自动根据配置选择正确的模型
         embedding = await self._llm_service.get_embedding(query, user_id=user_id)
         if not embedding:
             logger.warning("检索查询向量生成失败: project=%s chapter_query=%s", project_id, query)
-            return ChapterRAGContext(query=query, chunks=[], summaries=[])
+            return ChapterRAGContext(
+                query=query,
+                chunks=[],
+                summaries=[],
+                degraded=True,
+                degradation_reason="EMBEDDING_UNAVAILABLE",
+            )
 
         chunks = await self._vector_store.query_chunks(
             project_id=project_id,

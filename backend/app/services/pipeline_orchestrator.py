@@ -2202,7 +2202,18 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
                     "chunks": len(rag_context.get("chunks", [])) if rag_context else 0,
                     "summaries": len(rag_context.get("summaries", [])) if rag_context else 0,
                     "continuity_injection": bool((rag_context or {}).get("continuity_injection")),
+                    "degraded": bool((rag_context or {}).get("degraded")),
+                    "degradation_reason": (rag_context or {}).get("degradation_reason"),
                 }
+        # 将 RAG 能力状态放入持久化 runtime metadata，避免 embedding 失败只存在日志或
+        # 调试返回值中，前端和审计可以明确区分“无向量上下文”和“向量检索成功”。
+        runtime_metadata["retrieval_stats"] = rag_stats or {
+            "mode": "disabled",
+            "chunks": 0,
+            "summaries": 0,
+            "degraded": False,
+            "degradation_reason": None,
+        }
         await mark_stage("prepare_context", prepare_context_started_at, detail="上下文准备阶段完成")
 
         writer_prompt = await self.prompt_service.get_prompt("writing_v2")
@@ -3483,6 +3494,7 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
                 "stage_timings_ms": runtime_metadata["stage_timings_ms"],
                 "pipeline_total_duration_ms": runtime_metadata["pipeline_total_duration_ms"],
                 "degraded_stages": runtime_metadata.get("degraded_stages", []),
+                "retrieval_stats": runtime_metadata.get("retrieval_stats"),
                 "self_critique_final_score": self_critique_summary.get("final_score"),
                 "self_critique_improvement": self_critique_summary.get("improvement"),
                 "self_critique_status": self_critique_summary.get("status"),
@@ -4197,6 +4209,8 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
         return {
             "chunks": rag_context.chunk_texts() if rag_context.chunks else [],
             "summaries": rag_context.summary_lines() if rag_context.summaries else [],
+            "degraded": rag_context.degraded,
+            "degradation_reason": rag_context.degradation_reason,
         }
 
     async def _get_two_stage_rag_context(
