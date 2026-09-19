@@ -2204,6 +2204,7 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
                     "continuity_injection": bool((rag_context or {}).get("continuity_injection")),
                     "degraded": bool((rag_context or {}).get("degraded")),
                     "degradation_reason": (rag_context or {}).get("degradation_reason"),
+                    "embedding_status": (rag_context or {}).get("embedding_status"),
                 }
         # 将 RAG 能力状态放入持久化 runtime metadata，避免 embedding 失败只存在日志或
         # 调试返回值中，前端和审计可以明确区分“无向量上下文”和“向量检索成功”。
@@ -4211,6 +4212,7 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
             "summaries": rag_context.summary_lines() if rag_context.summaries else [],
             "degraded": rag_context.degraded,
             "degradation_reason": rag_context.degradation_reason,
+            "embedding_status": rag_context.embedding_status,
         }
 
     async def _get_two_stage_rag_context(

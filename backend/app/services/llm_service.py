@@ -75,6 +75,7 @@ class LLMService:
         self.admin_setting_service = AdminSettingService(session)
         self.usage_service = UsageService(session)
         self._embedding_dimensions: Dict[str, int] = {}
+        self._embedding_status: Dict[str, Any] = {"status": "not_checked"}
         self._resolved_llm_config_cache: Dict[tuple[int, bool, bool], Dict[str, Any]] = {}
         # Candidate chapter tasks share this service and may resolve the same
         # user config concurrently through one AsyncSession.
@@ -1366,6 +1367,24 @@ class LLMService:
         self._resolved_llm_config_cache[cache_key] = dict(resolved)
         return dict(resolved)
 
+    @staticmethod
+    def _embedding_failure_code(exc: BaseException) -> str:
+        """Map provider failures to stable observability codes without changing call contracts."""
+        status_code = getattr(exc, "status_code", None)
+        if isinstance(exc, AuthenticationError) or status_code == 401:
+            return "EMBEDDING_AUTHENTICATION_FAILED"
+        if isinstance(exc, PermissionDeniedError) or status_code == 403:
+            return "EMBEDDING_PERMISSION_DENIED"
+        if isinstance(exc, APITimeoutError):
+            return "EMBEDDING_TIMEOUT"
+        if isinstance(exc, APIConnectionError):
+            return "EMBEDDING_CONNECTION_FAILED"
+        return "EMBEDDING_REQUEST_FAILED"
+
+    def get_embedding_status(self) -> Dict[str, Any]:
+        """Return the latest embedding capability result for runtime metadata."""
+        return dict(self._embedding_status)
+
     async def get_embedding(
         self,
         text: str,
@@ -1381,10 +1400,16 @@ class LLMService:
             else await self._get_config_value("embedding.model") or "text-embedding-3-large"
         )
         target_model = model or default_model
+        self._embedding_status = {
+            "status": "probing",
+            "provider": provider,
+            "model": target_model,
+        }
 
         if provider == "ollama":
             if OllamaAsyncClient is None:
                 logger.error("未安装 ollama 依赖，无法调用本地嵌入模型。")
+                self._embedding_status = {"status": "degraded", "provider": provider, "model": target_model, "code": "EMBEDDING_DEPENDENCY_MISSING"}
                 raise HTTPException(status_code=500, detail="缺少 Ollama 依赖，请先安装 ollama 包。")
 
             base_url = (
@@ -1395,6 +1420,12 @@ class LLMService:
             try:
                 response = await client.embeddings(model=target_model, prompt=text)
             except Exception as exc:  # pragma: no cover - 本地服务调用失败
+                self._embedding_status = {
+                    "status": "degraded",
+                    "provider": provider,
+                    "model": target_model,
+                    "code": self._embedding_failure_code(exc),
+                }
                 logger.error(
                     "Ollama 嵌入请求失败: model=%s base_url=%s error=%s",
                     target_model,
@@ -1409,6 +1440,12 @@ class LLMService:
             else:
                 embedding = getattr(response, "embedding", None)
             if not embedding:
+                self._embedding_status = {
+                    "status": "degraded",
+                    "provider": provider,
+                    "model": target_model,
+                    "code": "EMBEDDING_EMPTY_RESPONSE",
+                }
                 logger.warning("Ollama 返回空向量: model=%s", target_model)
                 return []
             if not isinstance(embedding, list):
@@ -1424,6 +1461,12 @@ class LLMService:
                     model=target_model,
                 )
             except Exception as exc:  # pragma: no cover - 网络或鉴权失败
+                self._embedding_status = {
+                    "status": "degraded",
+                    "provider": provider,
+                    "model": target_model,
+                    "code": self._embedding_failure_code(exc),
+                }
                 logger.error(
                     "OpenAI 嵌入请求失败: model=%s base_url=%s user_id=%s error=%s",
                     target_model,
@@ -1434,6 +1477,12 @@ class LLMService:
                 )
                 return []
             if not response.data:
+                self._embedding_status = {
+                    "status": "degraded",
+                    "provider": provider,
+                    "model": target_model,
+                    "code": "EMBEDDING_EMPTY_RESPONSE",
+                }
                 logger.warning("OpenAI 嵌入请求返回空数据: model=%s user_id=%s", target_model, user_id)
                 return []
             embedding = response.data[0].embedding
@@ -1441,6 +1490,12 @@ class LLMService:
         if not isinstance(embedding, list):
             embedding = list(embedding)
 
+        self._embedding_status = {
+            "status": "healthy",
+            "provider": provider,
+            "model": target_model,
+            "dimension": len(embedding),
+        }
         dimension = len(embedding)
         if not dimension:
             vector_size_str = await self._get_config_value("embedding.model_vector_size")

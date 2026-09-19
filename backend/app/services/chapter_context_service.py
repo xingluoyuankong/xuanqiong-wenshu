@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from ..core.config import settings
 from ..services.llm_service import LLMService
@@ -27,6 +27,7 @@ class ChapterRAGContext:
     summaries: List[RetrievedSummary]
     degraded: bool = False
     degradation_reason: Optional[str] = None
+    embedding_status: Optional[Dict[str, Any]] = None
 
     def chunk_texts(self) -> List[str]:
         """将检索到的 chunk 转换成带序号的 Markdown 段落。"""
@@ -79,12 +80,19 @@ class ChapterContextService:
         embedding = await self._llm_service.get_embedding(query, user_id=user_id)
         if not embedding:
             logger.warning("检索查询向量生成失败: project=%s chapter_query=%s", project_id, query)
+            embedding_status = getattr(self._llm_service, "get_embedding_status", lambda: {})()
+            degradation_reason = (
+                embedding_status.get("code")
+                if isinstance(embedding_status, dict)
+                else None
+            ) or "EMBEDDING_UNAVAILABLE"
             return ChapterRAGContext(
                 query=query,
                 chunks=[],
                 summaries=[],
                 degraded=True,
-                degradation_reason="EMBEDDING_UNAVAILABLE",
+                degradation_reason=degradation_reason,
+                embedding_status=embedding_status if isinstance(embedding_status, dict) else None,
             )
 
         chunks = await self._vector_store.query_chunks(
