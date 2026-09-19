@@ -39,3 +39,12 @@ Invalid-model terminal event initially carried `retryable=true` because the gene
 - writer failure helper 也按错误码传递 retryability。
 - 定向 4 passed；后端全量 `274 passed in 20.76s`。
 - 下一步重启两个入口并重跑隔离 invalid-model E2E。
+
+## R29 最终线上 E2E
+
+- 8013/8099 已对齐提交 `1d69ec7`。
+- invalid-model 隔离 E2E：HTTP generate=200，章节最终 status=`failed`，版本数=0。
+- SSE terminal event：收到 `level=error`、`type=failed`、`event_kind=terminal`。
+- code=`PROVIDER_MODEL_UNAVAILABLE`。
+- retryable=`false`。
+- E2E exit=0。
