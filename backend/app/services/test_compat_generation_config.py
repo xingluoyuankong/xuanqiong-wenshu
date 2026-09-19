@@ -75,7 +75,7 @@ def test_chapter_generation_timeout_scales_with_target_length():
 
 
 def test_chapter_mission_timeout_scales_with_target_length():
-    assert PipelineOrchestrator._resolve_chapter_mission_timeout(700) == 30.0
+    assert PipelineOrchestrator._resolve_chapter_mission_timeout(700) == 20.0
     assert PipelineOrchestrator._resolve_chapter_mission_timeout(1800) == 45.0
     assert PipelineOrchestrator._resolve_chapter_mission_timeout(3200) == 90.0
     assert PipelineOrchestrator._resolve_chapter_mission_timeout(5000) == 120.0

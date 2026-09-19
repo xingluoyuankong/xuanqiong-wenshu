@@ -1,4 +1,4 @@
-# AIMETA P=写作流水线编排_统一生成入口|R=上下文汇聚_生成_审查_优化|NR=不含API路由|E=PipelineOrchestrator|X=internal|A=编排器|D=fastapi,sqlalchemy|S=db,net|RD=./README.ai
+﻿# AIMETA P=写作流水线编排_统一生成入口|R=上下文汇聚_生成_审查_优化|NR=不含API路由|E=PipelineOrchestrator|X=internal|A=编排器|D=fastapi,sqlalchemy|S=db,net|RD=./README.ai
 from __future__ import annotations
 
 import json
@@ -1305,7 +1305,10 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
         """
         words = max(500, int(target_word_count or 0))
         if words < 1200:
-            return 30.0
+            # Short chapters have a deterministic mission fallback. Keep the
+            # optional provider stage bounded so a timeout does not add a full
+            # 30s tail before the main prose generation can continue.
+            return 20.0
         if words < 2500:
             return 45.0
         if words < 4000:
@@ -4166,7 +4169,9 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
                     json_schema_name="chapter_mission",
                     json_schema_strict=False,
                     max_tokens=self._resolve_chapter_mission_max_tokens(target_word_count),
-                    retry_same_model_once=True,
+                    # The mission stage has a deterministic fallback; avoid a
+                    # second same-model network attempt after a timeout.
+                    retry_same_model_once=False,
                     json_repair_attempts=2,
                 ),
             )
