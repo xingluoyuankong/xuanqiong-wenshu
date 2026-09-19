@@ -63,3 +63,19 @@ async def test_disabled_vector_store_is_not_reported_as_embedding_degradation(mo
 def test_embedding_failure_codes_are_stable(status_code, expected):
     error = type("ProviderError", (), {"status_code": status_code})()
     assert LLMService._embedding_failure_code(error) == expected
+
+
+@pytest.mark.anyio
+async def test_embedding_provider_missing_key_is_classified_without_provider_call(monkeypatch):
+    from app.services.llm_service import LLMService
+
+    service = object.__new__(LLMService)
+    service._embedding_status = {}
+
+    async def config_value(key):
+        return {"embedding.provider": "openai", "embedding.model": "text-embedding-3-large", "embedding.api_key": None}.get(key)
+
+    service._get_config_value = config_value
+    vector = await service.get_embedding("probe", user_id=1)
+    assert vector == []
+    assert service.get_embedding_status()["code"] == "EMBEDDING_CONFIG_MISSING"

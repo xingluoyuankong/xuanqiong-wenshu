@@ -1451,10 +1451,23 @@ class LLMService:
             if not isinstance(embedding, list):
                 embedding = list(embedding)
         else:
+            embedding_api_key = await self._get_config_value("embedding.api_key")
+            if not embedding_api_key:
+                self._embedding_status = {
+                    "status": "degraded",
+                    "provider": provider,
+                    "model": target_model,
+                    "code": "EMBEDDING_CONFIG_MISSING",
+                }
+                logger.warning(
+                    "未配置独立 embedding API Key，跳过向量请求: model=%s user_id=%s",
+                    target_model,
+                    user_id,
+                )
+                return []
             config = await self._resolve_llm_config(user_id)
-            api_key = await self._get_config_value("embedding.api_key") or config["api_key"]
             base_url = await self._get_config_value("embedding.base_url") or config.get("base_url")
-            client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+            client = AsyncOpenAI(api_key=embedding_api_key, base_url=base_url)
             try:
                 response = await client.embeddings.create(
                     input=text,
