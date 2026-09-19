@@ -1,4 +1,4 @@
-# AIMETA P=小说服务_小说管理业务逻辑|R=小说CRUD_章节管理|NR=不含内容生成|E=NovelService|X=internal|A=服务类|D=sqlalchemy|S=db|RD=./README.ai
+﻿# AIMETA P=小说服务_小说管理业务逻辑|R=小说CRUD_章节管理|NR=不含内容生成|E=NovelService|X=internal|A=服务类|D=sqlalchemy|S=db|RD=./README.ai
 from __future__ import annotations
 
 import json
@@ -1850,14 +1850,43 @@ class NovelService:
         return summaries
 
     async def delete_projects(self, project_ids: List[str], user_id: int) -> None:
-        for pid in project_ids:
-            project = await self.ensure_project_owner(pid, user_id)
+        # 后台生成任务使用独立协程，单纯删除项目会让协程继续写入已删除的
+        # Chapter，造成 refresh/外键异常。先对整个批次做忙状态预检，确保
+        # 检查失败时不发生部分删除。
+        projects = [await self.ensure_project_owner(pid, user_id) for pid in project_ids]
+        owned_project_ids = [str(project.id) for project in projects]
+        if owned_project_ids:
+            busy_result = await self.session.execute(
+                select(Chapter.project_id, Chapter.chapter_number, Chapter.status).where(
+                    Chapter.project_id.in_(owned_project_ids),
+                    Chapter.status.in_(list(_BUSY_CHAPTER_STATUSES)),
+                )
+            )
+            busy_chapters = [
+                {
+                    "project_id": str(row[0]),
+                    "chapter_number": int(row[1]),
+                    "status": str(row[2]),
+                }
+                for row in busy_result.all()
+            ]
+            if busy_chapters:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "PROJECT_HAS_ACTIVE_GENERATION",
+                        "message": "请先取消进行中的章节生成，再删除项目。",
+                        "chapters": busy_chapters,
+                    },
+                )
+
+        for project in projects:
             await self.repo.delete(project)
             # 同步清理向量数据
             try:
-                await self._vector_store.delete_by_project(pid)
+                await self._vector_store.delete_by_project(str(project.id))
             except Exception as e:
-                logging.error(f"Failed to delete vector data for project {pid}: {e}")
+                logging.error(f"Failed to delete vector data for project {project.id}: {e}")
         await self.session.commit()
 
     async def count_projects(self) -> int:
