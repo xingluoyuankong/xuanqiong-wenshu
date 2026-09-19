@@ -46,6 +46,9 @@ class _Service:
 async def test_cancel_marks_request_but_keeps_chapter_busy(monkeypatch):
     session = _Session()
     monkeypatch.setattr(writer, "NovelService", _Service)
+    async def fake_drain(_run_id):
+        return False
+    monkeypatch.setattr(writer, "_cancel_registered_generation_task", fake_drain)
     async def fake_load(*_args, **_kwargs):
         return {"ok": True}
     monkeypatch.setattr(writer, "_load_project_schema", fake_load)
@@ -65,3 +68,45 @@ async def test_cancel_marks_request_but_keeps_chapter_busy(monkeypatch):
     assert runtime["cancel_requested"] is True
     assert runtime["progress_stage"] == "cancel_requested"
     assert runtime["allowed_actions"] == ["refresh_status"]
+
+
+@pytest.mark.anyio
+async def test_cancel_marks_failed_only_after_task_is_drained(monkeypatch):
+    session = _Session()
+    calls = {}
+    monkeypatch.setattr(writer, "NovelService", _Service)
+
+    async def fake_load(*_args, **_kwargs):
+        return {"ok": True}
+
+    async def fake_drain(run_id):
+        calls["drain"] = run_id
+        return True
+
+    async def fake_mark(session_arg, *, chapter, reason, run_id):
+        calls["mark"] = (session_arg, chapter.status, reason, run_id)
+
+    async def fake_terminal(**kwargs):
+        calls["terminal"] = kwargs
+
+    monkeypatch.setattr(writer, "_load_project_schema", fake_load)
+    monkeypatch.setattr(writer, "_cancel_registered_generation_task", fake_drain)
+    monkeypatch.setattr(writer, "_mark_busy_chapter_failed", fake_mark)
+    monkeypatch.setattr(writer, "_emit_generation_failure_terminal", fake_terminal)
+
+    result = await writer.cancel_chapter_generation(
+        project_id="project-1",
+        request=CancelChapterRequest(chapter_number=1, reason="drained stop"),
+        session=session,
+        current_user=types.SimpleNamespace(id=7),
+    )
+
+    assert result == {"ok": True}
+    assert calls["drain"] == "run-1"
+    assert calls["mark"][1:] == ("generating", "drained stop", "run-1")
+    assert calls["terminal"] == {
+        "run_id": "run-1",
+        "reason": "drained stop",
+        "code": "GENERATION_CANCELLED",
+        "stage": "cancelled",
+    }

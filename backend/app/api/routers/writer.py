@@ -91,6 +91,9 @@ GENERATION_HEARTBEAT_GRACE_SECONDS = 8 * 60
 BACKGROUND_GENERATION_TIMEOUT_DISABLED = os.getenv("XUANQIONG_WENSHU_DISABLE_GENERATION_TIMEOUT", "0").strip().lower() in {"1", "true", "yes", "on"}
 _GENERATION_TASK_SEMAPHORE = asyncio.Semaphore(2)
 _FINALIZE_TASK_SEMAPHORE = asyncio.Semaphore(1)
+_ACTIVE_GENERATION_TASKS: Dict[str, asyncio.Task[Any]] = {}
+_PENDING_GENERATION_RUNS: set[str] = set()
+_GENERATION_CANCEL_DRAIN_TIMEOUT_SECONDS = 10
 _BUSY_CHAPTER_STATUSES = {
     ChapterGenerationStatus.GENERATING.value,
     ChapterGenerationStatus.EVALUATING.value,
@@ -1973,7 +1976,7 @@ async def _collect_foreshadowing_async(
         logger.warning("章节 %s 自动收集伏笔失败（已跳过）: %s", chapter_number, exc)
 
 
-async def _generate_chapter_async(
+async def _run_generation_task(
     *,
     project_id: str,
     chapter_number: int,
@@ -2117,6 +2120,65 @@ async def _generate_chapter_async(
                     await _emit_generation_failure_terminal(run_id=run_id, reason=reason, code=error_code or "GENERATION_FAILED", stage="failed")
 
 
+async def _cancel_registered_generation_task(run_id: Optional[str]) -> bool:
+    """Cancel and drain the in-process background task for a generation run."""
+    if not run_id:
+        return False
+    task = _ACTIVE_GENERATION_TASKS.get(run_id)
+    if task is None or task.done():
+        # A queued task may not have entered BackgroundTasks yet. Keep it busy
+        # in that narrow window; after a process restart there is neither an
+        # active task nor a pending marker, so the persisted cancel request can
+        # be recovered to a terminal failure safely.
+        return run_id not in _PENDING_GENERATION_RUNS
+    if task is asyncio.current_task():
+        return False
+    task.cancel()
+    try:
+        await asyncio.wait_for(
+            asyncio.shield(task),
+            timeout=_GENERATION_CANCEL_DRAIN_TIMEOUT_SECONDS,
+        )
+    except asyncio.CancelledError:
+        pass
+    except asyncio.TimeoutError:
+        logger.warning("Generation task did not drain after cancellation: run_id=%s", run_id)
+        return False
+    except Exception:
+        # The task's own failure path owns the terminal state; cancellation only
+        # needs to know that the coroutine has stopped before deletion can proceed.
+        pass
+    return task.done()
+
+
+async def _generate_chapter_async(
+    *,
+    project_id: str,
+    chapter_number: int,
+    user_id: int,
+    writing_notes: Optional[str],
+    flow_config: Dict[str, Any],
+    run_id: str,
+) -> None:
+    _PENDING_GENERATION_RUNS.discard(run_id)
+    current_task = asyncio.current_task()
+    if current_task is not None:
+        _ACTIVE_GENERATION_TASKS[run_id] = current_task
+    try:
+        await _run_generation_task(
+            project_id=project_id,
+            chapter_number=chapter_number,
+            user_id=user_id,
+            writing_notes=writing_notes,
+            flow_config=flow_config,
+            run_id=run_id,
+        )
+    finally:
+        if _ACTIVE_GENERATION_TASKS.get(run_id) is current_task:
+            _ACTIVE_GENERATION_TASKS.pop(run_id, None)
+        _PENDING_GENERATION_RUNS.discard(run_id)
+
+
 async def _schedule_generate_task(
     project_id: str,
     chapter_number: int,
@@ -2231,6 +2293,7 @@ async def advanced_generate_chapter(
         getattr(request, "quality_requirements", None),
     )
 
+    _PENDING_GENERATION_RUNS.add(run_id)
     background_tasks.add_task(
         _schedule_generate_task,
         request.project_id,
@@ -2496,6 +2559,7 @@ async def generate_chapter(
         updated_at=datetime.now(timezone.utc),
     )
 
+    _PENDING_GENERATION_RUNS.add(run_id)
     background_tasks.add_task(
         _schedule_generate_task,
         project_id,
@@ -2596,6 +2660,22 @@ async def cancel_chapter_generation(
     }, ensure_ascii=False)
     await session.commit()
     await session.refresh(chapter)
+
+    drained = await _cancel_registered_generation_task(current_run_id)
+    if drained:
+        await session.refresh(chapter)
+        await _mark_busy_chapter_failed(
+            session,
+            chapter=chapter,
+            reason=cancel_reason,
+            run_id=current_run_id,
+        )
+        await _emit_generation_failure_terminal(
+            run_id=current_run_id,
+            reason=cancel_reason,
+            code="GENERATION_CANCELLED",
+            stage="cancelled",
+        )
 
     return await _load_project_schema(
         novel_service,
