@@ -184,6 +184,50 @@ pytest-asyncio=1.1.0
 
 真实浏览器请求瀑布和 `naive-data-table` 内部继续拆分仍列入后续 P1，不把静态构建体积替代真实首屏性能证据。
 
+## R45–R46 最新进展：生成延迟基线与短章 mission 尾部优化
+
+### R45：生成阶段 p50/p95 报告
+
+提交：`cf4a7fd`。
+
+新增只读报告入口：
+
+```text
+scripts/report_generation_latency.py
+scripts/report_generation_latency.sh
+```
+
+基于 25 条真实 pipeline 记录的当前历史基线：
+
+```text
+pipeline total p50=16078.90ms p95=260925.81ms
+ generate_mission p50=29.31ms p95=30005.88ms
+ prepare_context p50=1554.10ms p95=32524.98ms
+ generate_variants p50=280.62ms p95=69194.65ms
+```
+
+报告不发起 Provider 请求、不修改数据库。R45 建立的是基线，不宣称已经改善性能。
+
+### R46：短章节导演脚本尾部收敛
+
+提交：`ecfb94f`。
+
+对于 `target_word_count < 1200` 的可选导演脚本阶段：
+
+- timeout 从 30 秒降至 20 秒；
+- 关闭同模型重复网络重试；
+- 保留 JSON schema 修复和确定性 fallback；
+- 长章节 timeout 档位、正文生成、质量门和取消 drain 不变。
+
+验证：
+
+```text
+后端全量：283 passed, 1 warning
+AUDIT_RESULT=PASS
+```
+
+由于 R46 尚未触发新的计费型真实章节生成，R45 的历史 p50/p95 仍作为基线；下一次真实 smoke 后再用同一报告入口做前后对比。
+
 ## 仍需完成的优化任务与验收标准
 
 ### P0：真实 Provider 当前入口复验（R37 已取得当前证据，继续做多轮稳定性复验）
