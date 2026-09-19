@@ -65,8 +65,16 @@ export default defineConfig(({ command }) => ({
           if (!id.includes('node_modules')) {
             return undefined
           }
-          if (id.includes('naive-ui')) {
-            return 'naive-ui'
+          if (id.includes('/naive-ui/es/') || id.includes('\\naive-ui\\es\\')) {
+            const match = id.match(/[\\/]naive-ui[\\/]es[\\/]([^\\/]+)/)
+            const segment = match?.[1]
+            if (segment && !segment.startsWith('_')) {
+              return `naive-${segment}`
+            }
+            return 'naive-ui-runtime'
+          }
+          if (id.includes('/naive-ui/') || id.includes('\\naive-ui\\')) {
+            return 'naive-ui-runtime'
           }
           if (
             id.includes('@css-render') ||
