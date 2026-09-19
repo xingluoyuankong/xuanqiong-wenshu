@@ -45,6 +45,24 @@ R38/R39 的 live evidence 仍保留：
 - 已配置但被上游拒绝时分类为 `EMBEDDING_AUTHENTICATION_FAILED`；
 - 未配置独立 key 时 R40 本地分类为 `EMBEDDING_CONFIG_MISSING`。
 
+## 当前线上 Live 探针证据
+
+R40 部署后的直接 embedding probe 返回：
+
+```json
+{
+  "vector_nonempty": false,
+  "status": {
+    "provider": "openai",
+    "model": "text-embedding-3-large",
+    "status": "degraded",
+    "code": "EMBEDDING_CONFIG_MISSING"
+  }
+}
+```
+
+服务日志明确记录：未配置独立 embedding API Key，跳过向量请求。与 R39 的 `EMBEDDING_AUTHENTICATION_FAILED` 对比，R40 已将配置缺失和远端鉴权拒绝分开，且不会把 chat key 发往 embedding endpoint。
+
 ## 后续任务
 
 1. 在管理端增加 embedding 专用 key/base URL 的能力探测入口；
