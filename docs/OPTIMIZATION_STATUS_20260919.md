@@ -133,6 +133,42 @@ provenance_failures=[]
 
 `add_chapter_outline_metadata.sql` 在当前库中已存在，因此标记为 `already_applied_on_copy`；其余三个含 MySQL 方言的 fragment 均保持 skipped，没有执行生产迁移。生产 SQLite integrity、schema baseline 和 topology audit 均通过。
 
+## R43 最新进展：服务器依赖运行时可审计
+
+提交：`90a6b57`。
+
+新增：
+
+```text
+deploy/runtime_dependencies.json
+scripts/audit_runtime_dependencies.py
+scripts/audit_runtime_dependencies.sh
+docs/OPTIMIZATION_ROUND_20260919_RUNTIME_DEPENDENCY_MANIFEST.md
+```
+
+审计内容：
+
+- runtime/test 依赖版本；
+- 实际 distribution source root；
+- 关键模块 import；
+- 外置容器挂载路径的 canonical resolve；
+- 版本漂移和来源漂移的失败返回。
+
+真实服务器结果：
+
+```text
+status=PASS
+failures=[]
+fastapi=0.110.0
+sqlalchemy=2.0.44
+uvicorn=0.29.0
+openai=2.3.0
+pytest=8.4.1
+pytest-asyncio=1.1.0
+```
+
+生产依赖实际由容器 canonical path 提供，manifest 保留 `/app/user-packages/python` 别名并通过 realpath 校验，避免容器挂载 ID 变化造成误报。后端全量仍为 `283 passed`，拓扑审计通过。
+
 ## 仍需完成的优化任务与验收标准
 
 ### P0：真实 Provider 当前入口复验（R37 已取得当前证据，继续做多轮稳定性复验）
@@ -163,7 +199,7 @@ provenance_failures=[]
 
 **当前状态**：配置缺少独立 embedding key，探针稳定返回 `EMBEDDING_CONFIG_MISSING`。下一步需要配置专用 key/base URL 后，用 `scripts/probe_embedding.sh` 验证非空向量和维度，再验证 RAG 命中质量。
 
-### P1：服务器 Python 依赖可重建性
+### P1：服务器 Python 依赖可重建性（R43 审计清单已完成，依赖重建仍未完成）
 
 **任务**：把当前 `/app/user-packages/python` 与 `/app/venv/...` 的运行时依赖来源转成可检查、可重建的部署契约；R31 的测试入口统一只是过渡，不复制未知环境包进仓库。
 
