@@ -410,12 +410,10 @@ import {
 } from '@/utils/chapterGeneration'
 import { globalAlert } from '@/composables/useAlert'
 import { getChapterGenerationStatus } from '@/api/modules/chapterWorkflow'
-import {
-  WDHeader,
-  WDSidebar,
-  WDWorkspace,
-  WDGenerateOutlineModal
-} from '@/components/writing-desk'
+import WDHeader from '@/components/writing-desk/layout/WDHeader.vue'
+import WDSidebar from '@/components/writing-desk/layout/WDSidebar.vue'
+import WDWorkspace from '@/components/writing-desk/layout/WDWorkspace.vue'
+import WDGenerateOutlineModal from '@/components/writing-desk/dialogs/WDGenerateOutlineModal.vue'
 
 const WDEvaluationDetailModal = defineAsyncComponent(() => import('@/components/writing-desk/dialogs/WDEvaluationDetailModal.vue'))
 const WDEditChapterModal = defineAsyncComponent(() => import('@/components/writing-desk/dialogs/WDEditChapterModal.vue'))
