@@ -5,7 +5,7 @@
 - 服务器：`qwenpaw-sbs-prod-szckq`
 - 仓库分支：`codex/server-us010-r1`
 - GitHub：`https://github.com/xingluoyuankong/xuanqiong-wenshu.git`
-- 当前 HEAD：`d10bfcc`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
+- 当前 HEAD：`a65d3c7`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
 - 受管公网后端：`0.0.0.0:8013`
 - 受管内网后端：`127.0.0.1:8099`
 - 前端：`127.0.0.1:5174`
@@ -110,6 +110,29 @@ token_budgets=0
 
 不会创建项目、章节、预算或正文生成任务。
 
+## R42 最新进展：SQLite migration copy dry-run
+
+提交：`a65d3c7`。
+
+新增：
+
+```text
+scripts/migration_copy_dry_run.py
+scripts/migration_copy_dry_run.sh
+docs/OPTIMIZATION_ROUND_20260919_MIGRATION_COPY_DRY_RUN.md
+```
+
+当前真实演练结果：
+
+```text
+status=PASS
+source_unchanged=true
+rollback_verified=true
+provenance_failures=[]
+```
+
+`add_chapter_outline_metadata.sql` 在当前库中已存在，因此标记为 `already_applied_on_copy`；其余三个含 MySQL 方言的 fragment 均保持 skipped，没有执行生产迁移。生产 SQLite integrity、schema baseline 和 topology audit 均通过。
+
 ## 仍需完成的优化任务与验收标准
 
 ### P0：真实 Provider 当前入口复验（R37 已取得当前证据，继续做多轮稳定性复验）
@@ -124,7 +147,7 @@ token_budgets=0
 4. 不把 health、stub、队列入列或 HTTP 200 计为真实成功；
 5. 余额/认证/模型不可用时保留原始状态和失败原因。
 
-### P0：迁移 runner 与回滚演练
+### P0：迁移 runner 与回滚演练（SQLite copy dry-run 已完成，MySQL runner 仍未建立）
 
 **任务**：先为 SQLite 和 MySQL 分别建立可重放的 copy dry-run、备份、升级、回滚和人工 review 证据；当前生产库保持不变。
 
