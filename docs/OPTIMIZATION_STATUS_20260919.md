@@ -228,6 +228,35 @@ AUDIT_RESULT=PASS
 
 由于 R46 尚未触发新的计费型真实章节生成，R45 的历史 p50/p95 仍作为基线；下一次真实 smoke 后再用同一报告入口做前后对比。
 
+## R46 Live 结果更新
+
+R46 提交：`ecfb94f`；live 证据文档提交：`7aaaa9e`。
+
+短章节真实 Provider smoke 已完成：
+
+```text
+generate_mission duration_ms=20002.29
+PROVIDER_TIMEOUT timeout_seconds=20.0
+prepare_context duration_ms=20773.60
+候选版本：1
+正文长度：505 字符
+total_tokens：16568
+usage records：2
+最终阶段：waiting_for_confirm
+临时项目删除：HTTP 200
+```
+
+数据库清理后：
+
+```text
+novel_projects=0
+chapters=0
+token_budgets=0
+orphan_project_rows={}
+```
+
+这证明 R46 的短章 mission 超时收敛已经在真实线上入口生效，同时确定性 fallback、正文生成、usage attribution 和项目清理保持正常。R45 历史延迟基线仍保留用于前后对比，后续继续采集新样本。
+
 ## 仍需完成的优化任务与验收标准
 
 ### P0：真实 Provider 当前入口复验（R37 已取得当前证据，继续做多轮稳定性复验）
