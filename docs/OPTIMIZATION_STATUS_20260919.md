@@ -5,7 +5,7 @@
 - 服务器：`qwenpaw-sbs-prod-szckq`
 - 仓库分支：`codex/server-us010-r1`
 - GitHub：`https://github.com/xingluoyuankong/xuanqiong-wenshu.git`
-- 当前 HEAD：`7e54456`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
+- 当前 HEAD：`d10bfcc`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
 - 受管公网后端：`0.0.0.0:8013`
 - 受管内网后端：`127.0.0.1:8099`
 - 前端：`127.0.0.1:5174`
@@ -56,9 +56,63 @@
 - 去除重复静态/动态弹窗依赖；
 - 新增 `docs/OPTIMIZATION_ROUND_20260919_FRONTEND_CHUNKS.md`。
 
+## R38–R41 最新进展
+
+### R38：RAG embedding 降级可观测性
+
+提交：`f82351f`，证据文档更新提交：`3636420`。
+
+- `ChapterRAGContext` 增加 `degraded`、`degradation_reason`、`embedding_status`；
+- `retrieval_stats` 写入持久化 runtime metadata；
+- 真实章节 smoke：`waiting_for_confirm`、1 个候选、521 字符、23093 tokens、3 条 usage；
+- live metadata 明确记录 `degraded=true`、`EMBEDDING_UNAVAILABLE`；
+- 测试项目已删除，SQLite 零孤儿。
+
+### R39：embedding provider 失败分类
+
+提交：`85f7a66`，live 证据提交：`d574718`。
+
+- 401/403/timeout/connection/empty response 具有稳定分类码；
+- 当前真实探针分类为 `EMBEDDING_AUTHENTICATION_FAILED`；
+- 专项 `71 passed`，后端全量 `279 passed`。
+
+### R40：embedding 专用凭据隔离
+
+提交：`a9aa6fe`，live 证据提交：`662946d`。
+
+- 缺少独立 `embedding.api_key` 时不再回退复用 chat key；
+- 本地直接返回 `EMBEDDING_CONFIG_MISSING`；
+- 不向错误 embedding endpoint 发送 chat 凭据；
+- 专项 `75 passed`，后端全量 `283 passed`。
+
+### R41：只读 embedding 能力探针
+
+提交：`d10bfcc`。
+
+新增：
+
+```text
+scripts/probe_embedding.py
+scripts/probe_embedding.sh
+docs/OPTIMIZATION_ROUND_20260919_EMBEDDING_PROBE.md
+```
+
+当前探针实测：
+
+```text
+vector_nonempty=false
+vector_dimension=0
+code=EMBEDDING_CONFIG_MISSING
+novel_projects=0
+chapters=0
+token_budgets=0
+```
+
+不会创建项目、章节、预算或正文生成任务。
+
 ## 仍需完成的优化任务与验收标准
 
-### P0：真实 Provider 当前入口复验
+### P0：真实 Provider 当前入口复验（R37 已取得当前证据，继续做多轮稳定性复验）
 
 **任务**：在当前 `7e54456` 服务上重新做一次最小计费/配额可控的真实章节生成，记录 provider、model、attempt、SSE terminal、非空正文、token usage 和数据库归属。
 
@@ -81,6 +135,10 @@
 3. upgrade 与 rollback 前后 schema fingerprint 可比较；
 4. 失败时生产库零写入；
 5. 获得人工审查记录后才允许生成可执行计划。
+
+### P0：embedding 专用配置补齐与真实非空向量验收
+
+**当前状态**：配置缺少独立 embedding key，探针稳定返回 `EMBEDDING_CONFIG_MISSING`。下一步需要配置专用 key/base URL 后，用 `scripts/probe_embedding.sh` 验证非空向量和维度，再验证 RAG 命中质量。
 
 ### P1：服务器 Python 依赖可重建性
 
