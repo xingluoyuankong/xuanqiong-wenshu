@@ -5,7 +5,7 @@
 - 服务器：`qwenpaw-sbs-prod-szckq`
 - 仓库分支：`codex/server-us010-r1`
 - GitHub：`https://github.com/xingluoyuankong/xuanqiong-wenshu.git`
-- 当前 HEAD：`26225c8`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
+- 当前 HEAD：`bb5d707`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
 - 受管公网后端：`0.0.0.0:8013`
 - 受管内网后端：`127.0.0.1:8099`
 - 前端：`127.0.0.1:5174`
@@ -689,6 +689,31 @@ status=BLOCKED
 ```
 
 preview 还暴露了 `chapters` 与 `chapter_versions` 的互相依赖 FK cycle；后续必须人工设计 MySQL 建表/约束顺序、备份和 rollback，当前不进入 apply。
+
+## R60–R61 最新进展
+
+### R60：MySQL migration 默认执行闸门
+
+提交：`4345271`；状态文档提交：`05d1790`。
+
+迁移脚本默认只 preview：
+
+```text
+execute=false
+connected=false
+writes_performed=false
+status=preview_only
+```
+
+真实 readiness 仍为 `BLOCKED`：当前 db_provider 为 SQLite，MySQL password 未配置；preview 发现 `chapters` 与 `chapter_versions` 存在 FK cycle，apply 继续保持关闭。
+
+### R61：护栏回炉 ceiling 接线回归
+
+提交：`bb5d707`。
+
+新增异步调用级回归，实际捕获 `_rewrite_with_guardrails` 传入 Provider policy 的 `max_tokens`，防止 R52 动态 ceiling 未来被业务接线回退。
+
+当前后端全量：`290 passed, 1 warning`。
 
 ## 仍需完成的优化任务与验收标准
 
