@@ -424,6 +424,27 @@ status=BLOCKED
 
 R53 明确证明当前 MySQL migration runner 不应执行；SQLite copy dry-run 已完成，MySQL 仍等待独立目标配置、备份、copy dry-run、rollback 和人工 review。
 
+## R54 最新进展：候选级延迟聚合
+
+提交：`6a756be`。
+
+延迟报告现在解析 `Pipeline candidate timings`，并单独输出候选级 p50/p95：
+
+```text
+candidate_sample_count=3
+generation_ms p50=60538.99 p95=61276.32
+guardrail_check_ms p50=0.24 p95=0.34
+guardrail_rewrite_ms p50=0.0 p95=17673.5
+total_ms p50=61363.72 p95=78300.24
+```
+
+结论：
+
+- Provider generation 是主要耗时来源；
+- 护栏回炉只在部分样本触发，但触发时约 17–20 秒；
+- 本轮只增强报告聚合，不改变生成行为；
+- 后续优化需要分别针对 Provider 请求长尾和可控违规回炉，不把二者混成一个“generate_variants”数字。
+
 ## 仍需完成的优化任务与验收标准
 
 ### P0：真实 Provider 当前入口复验（R37 已取得当前证据，继续做多轮稳定性复验）
