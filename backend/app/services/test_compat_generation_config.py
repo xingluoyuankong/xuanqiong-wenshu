@@ -84,7 +84,7 @@ def test_chapter_mission_timeout_scales_with_target_length():
 
 
 def test_chapter_generation_max_tokens_scales_with_target_length():
-    assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(700) == 3200
+    assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(700) == 1800
     assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(1800) == 6400
     assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(3200) == 9600
     assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(5000) == 18000
@@ -172,3 +172,8 @@ def test_context_phase_timing_is_non_negative_and_records_named_phase():
 
     assert duration == 125.0
     assert timings == {"pre_mission_context": 125.0}
+
+
+def test_short_chapter_generation_token_ceiling_scales_without_excessive_headroom():
+    assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(500) == 1800
+    assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(1100) == 2750

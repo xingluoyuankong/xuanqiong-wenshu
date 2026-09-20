@@ -1528,7 +1528,11 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
     def _resolve_chapter_generation_max_tokens(target_word_count: int) -> int:
         words = max(500, int(target_word_count or 0))
         if words < 1200:
-            return 3200
+            # Chinese short chapters are measured by characters. A 3.2k token
+            # ceiling for a 500–1,100 character target creates unnecessary
+            # provider tail room; keep a generous floor while scaling with the
+            # requested chapter length.
+            return max(1800, int(words * 2.5))
         if words < 2500:
             return 6400
         if words < 4000:
