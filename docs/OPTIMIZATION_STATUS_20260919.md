@@ -257,6 +257,62 @@ orphan_project_rows={}
 
 这证明 R46 的短章 mission 超时收敛已经在真实线上入口生效，同时确定性 fallback、正文生成、usage attribution 和项目清理保持正常。R45 历史延迟基线仍保留用于前后对比，后续继续采集新样本。
 
+## R47–R49 最新进展
+
+### R47：Prepare Context 子阶段计时
+
+提交：`3f1f130`；live 证据提交：`1000207`。
+
+真实 500 字 smoke 证明：
+
+```text
+pre_mission_context=94.58ms
+post_mission_context=650.80ms
+prepare_context=654.88ms
+generate_mission=20004.85ms
+generate_variants=59412.75ms
+```
+
+此前 `prepare_context` 的 20–56 秒长尾包含 mission 等待，R47 已消除统计双计数。当前真实瓶颈是 Provider mission 和正文候选生成，不是上下文装配。
+
+### R48：短章节正文 Token Ceiling
+
+提交：`fc80cc4`；live 证据提交：`f160e11`。
+
+短章节 `target_word_count < 1200` 的正文 `max_tokens` 改为 `max(1800, target * 2.5)`。真实 500 字 smoke：
+
+```text
+候选版本=1
+正文长度=597
+generate_variants=55661.75ms
+total_tokens=16011
+usage_records=2
+```
+
+项目清理和 SQLite integrity 通过。
+
+### R49：延迟报告覆盖受管服务日志
+
+提交：`4cab24d`。
+
+报告默认同时扫描：
+
+```text
+backend/logs/**/*.log
+logs/**/*.log
+```
+
+当前真实报告：
+
+```text
+source_files=24
+pipeline_samples=28
+parse_errors=[]
+status=PASS
+```
+
+这样 R47/R48 的 `logs/public-backend-8013` 真实运行日志不会漏出统计基线。
+
 ## 仍需完成的优化任务与验收标准
 
 ### P0：真实 Provider 当前入口复验（R37 已取得当前证据，继续做多轮稳定性复验）
