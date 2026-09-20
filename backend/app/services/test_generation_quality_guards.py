@@ -1744,3 +1744,37 @@ def test_canonical_story_quality_scorer_keeps_dialogue_check_not_applicable_for_
 
     assert guard["expected_dialogue"] is False
     assert guard["dialogue_changes_state"] is None
+
+
+@pytest.mark.anyio
+async def test_guardrail_rewrite_uses_dynamic_token_ceiling(monkeypatch):
+    from app.services import pipeline_orchestrator as module
+
+    captured = []
+
+    class PromptStub:
+        async def get_prompt(self, _name):
+            return "rewrite prompt"
+
+    class Result:
+        text = "修复后的正文。" * 120
+
+    async def fake_call_generation_text(**kwargs):
+        captured.append(kwargs["policy"].max_tokens)
+        return Result()
+
+    orchestrator = object.__new__(PipelineOrchestrator)
+    orchestrator.prompt_service = PromptStub()
+    orchestrator.llm_service = object()
+    monkeypatch.setattr(module, "call_generation_text", fake_call_generation_text)
+
+    for length, expected in ((500, 1800), (1100, 2200), (2000, 4000)):
+        original = "原" * length
+        rewritten = await orchestrator._rewrite_with_guardrails(
+            original_text=original,
+            chapter_mission=None,
+            violations_text="测试违规",
+            user_id=1,
+        )
+        assert rewritten
+        assert captured[-1] == expected
