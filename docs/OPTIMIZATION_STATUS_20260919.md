@@ -5,7 +5,7 @@
 - 服务器：`qwenpaw-sbs-prod-szckq`
 - 仓库分支：`codex/server-us010-r1`
 - GitHub：`https://github.com/xingluoyuankong/xuanqiong-wenshu.git`
-- 当前 HEAD：`a65d3c7`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
+- 当前 HEAD：`b60c4ec`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
 - 受管公网后端：`0.0.0.0:8013`
 - 受管内网后端：`127.0.0.1:8099`
 - 前端：`127.0.0.1:5174`
@@ -444,6 +444,62 @@ total_ms p50=61363.72 p95=78300.24
 - 护栏回炉只在部分样本触发，但触发时约 17–20 秒；
 - 本轮只增强报告聚合，不改变生成行为；
 - 后续优化需要分别针对 Provider 请求长尾和可控违规回炉，不把二者混成一个“generate_variants”数字。
+
+## R50–R54 最新进展
+
+### R50/R51：候选级耗时和 runtime 序列化
+
+提交：`43022ba`、`358f054`。
+
+真实候选数据：
+
+```text
+generation_ms=61358.25
+guardrail_check_ms=0.22
+guardrail_rewrite_ms=19637.22
+total_ms=80182.08
+```
+
+R51 将候选 timing 改为扁平 runtime 结构，修复 `[object:5]` 丢失数值的问题。
+
+### R52：短章护栏回炉 token ceiling
+
+提交：`a1a851c`；live 证据：`af03b3c`。
+
+短章回炉上限按原文长度动态计算。正常路径真实 smoke 的 `guardrail_rewrite_ms=0`；R51 的回炉长尾继续保留为基线，后续需要可控违规 fixture 或更多样本验证收益。
+
+### R53：MySQL readiness
+
+提交：`7f0a587`。
+
+只读 readiness 当前明确为：
+
+```text
+execute=false
+connected=false
+writes_performed=false
+db_provider=sqlite
+mysql_password_set=false
+provenance_failures=[]
+status=BLOCKED
+```
+
+SQLite copy dry-run/rollback 已通过；MySQL runner 未执行。
+
+### R54：候选级 p50/p95 聚合
+
+提交：`6a756be`，当前 HEAD 为综合状态更新后的 `b60c4ec`。
+
+当前候选样本：3 条。
+
+```text
+generation_ms p50=60538.99 p95=61276.32
+guardrail_check_ms p50=0.24 p95=0.34
+guardrail_rewrite_ms p50=0.0 p95=17673.5
+total_ms p50=61363.72 p95=78300.24
+```
+
+R54 只读解析 `backend/logs/**/*.log` 与受管服务 `logs/**/*.log`，不触发新的 Provider 请求。
 
 ## 仍需完成的优化任务与验收标准
 
