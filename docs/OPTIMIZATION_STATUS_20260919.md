@@ -5,7 +5,7 @@
 - 服务器：`qwenpaw-sbs-prod-szckq`
 - 仓库分支：`codex/server-us010-r1`
 - GitHub：`https://github.com/xingluoyuankong/xuanqiong-wenshu.git`
-- 当前 HEAD：`520de7a`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
+- 当前 HEAD：`6da689f`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
 - 受管公网后端：`0.0.0.0:8013`
 - 受管内网后端：`127.0.0.1:8099`
 - 前端：`127.0.0.1:5174`
@@ -596,6 +596,47 @@ code=EMBEDDING_CONFIG_MISSING
 - `>500 kB` 和 `INEFFECTIVE_DYNAMIC_IMPORT` 警告均无。
 
 R56 证明公共入口 preload 边界改善；真实浏览器 LCP/网络瀑布仍需独立采集。
+
+## R56–R59 最新进展
+
+### R56：Admin Vendor 首屏 preload 边界
+
+提交：`c8ef176`；综合状态提交：`520de7a`。
+
+公共入口已移除 `admin-vendor` modulepreload，AdminView 继续保持异步路由/面板加载。前端 type-check、117 个测试和 build 全部通过。
+
+### R57：runtime/test 依赖 lock 分层
+
+提交：`2243953`。
+
+- runtime snapshot：94 distributions；
+- test snapshot：6 distributions；
+- runtime/test overlap：空；
+- canonical source root、版本和 import：全部 PASS；
+- 后端全量：287 passed。
+
+### R58：管理台 Embedding health card
+
+提交：`bb6c624`；状态/live 提交：`0030049`、`19d2e0d`。
+
+系统配置页增加手动 Embedding 能力检查卡片，调用只读 health-check API；当前实际返回 `EMBEDDING_CONFIG_MISSING`，不回显密钥、不启动章节生成。
+
+### R59：前端入口 preload budget gate
+
+提交：`6da689f`。
+
+新增 `scripts/audit_frontend_entry.sh`，当前真实结果：
+
+```text
+index_bytes=828
+modulepreload_count=4
+modulepreload_bytes=198345
+admin_vendor_preloads=[]
+failures=[]
+status=PASS
+```
+
+该门禁检查 dist 入口引用资源存在，并防止 `admin-vendor` 重新进入公共入口 preload；它不替代真实浏览器 LCP/网络瀑布验收。
 
 ## 仍需完成的优化任务与验收标准
 
