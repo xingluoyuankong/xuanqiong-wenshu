@@ -60,6 +60,34 @@ total_ms=80182.08
 
 R51 的候选级证据保留为优化前基线；不以单次新样本直接宣称 p95 改善。
 
+## R52 Live 证据
+
+在提交 `a1a851c` 部署后的真实 500 字 smoke 中，候选级 runtime 返回：
+
+```json
+{
+  "generation_ms": 54869.49,
+  "guardrail_check_ms": 0.24,
+  "guardrail_rewrite_ms": 0.0,
+  "total_ms": 54874.86
+}
+```
+
+结果：
+
+```text
+最终阶段：waiting_for_confirm
+候选版本：1
+正文长度：491 字符
+项目删除：HTTP 200
+novel_projects=0
+chapters=0
+token_budgets=0
+orphan_project_rows={}
+```
+
+本次样本未触发护栏回炉，因此只证明动态 ceiling 不影响正常候选路径；R51 已证明回炉路径曾占约 `19637ms`，后续仍需通过可控违规 fixture 或更多真实样本验证 R52 的回炉耗时收益。
+
 ## 回滚
 
 回滚本轮提交即可恢复固定 8000 token 的护栏回炉上限，不涉及数据库和服务拓扑。
