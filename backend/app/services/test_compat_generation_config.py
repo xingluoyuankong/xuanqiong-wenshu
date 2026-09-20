@@ -177,3 +177,10 @@ def test_context_phase_timing_is_non_negative_and_records_named_phase():
 def test_short_chapter_generation_token_ceiling_scales_without_excessive_headroom():
     assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(500) == 1800
     assert PipelineOrchestrator._resolve_chapter_generation_max_tokens(1100) == 2750
+
+
+def test_guardrail_rewrite_token_ceiling_scales_with_original_draft_size():
+    assert PipelineOrchestrator._resolve_guardrail_rewrite_max_tokens("字" * 500) == 1800
+    assert PipelineOrchestrator._resolve_guardrail_rewrite_max_tokens("字" * 1100) == 2200
+    assert PipelineOrchestrator._resolve_guardrail_rewrite_max_tokens("字" * 2000) == 4000
+    assert PipelineOrchestrator._resolve_guardrail_rewrite_max_tokens("字" * 6000) == 8000

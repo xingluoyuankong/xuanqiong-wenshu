@@ -5349,6 +5349,18 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
 
         return preview_result.get("full_chapter", ""), preview_result
 
+    @staticmethod
+    def _resolve_guardrail_rewrite_max_tokens(original_text: str) -> int:
+        """Bound full-text guardrail rewrites by the actual draft size."""
+        compact_length = len(re.sub(r"\s+", "", str(original_text or "")))
+        if compact_length < 1200:
+            return max(1800, int(compact_length * 2.0))
+        if compact_length < 2500:
+            return max(3200, int(compact_length * 2.0))
+        if compact_length < 5000:
+            return max(4800, int(compact_length * 1.8))
+        return 8000
+
     async def _rewrite_with_guardrails(
         self,
         *,
@@ -5386,7 +5398,7 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
                     progress_stage="consistency",
                     retry_attempts=2,
                     response_format=None,
-                    max_tokens=8000,
+                    max_tokens=self._resolve_guardrail_rewrite_max_tokens(original_text),
                     retry_same_model_once=True,
                 ),
             )
