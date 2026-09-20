@@ -5,7 +5,7 @@
 - 服务器：`qwenpaw-sbs-prod-szckq`
 - 仓库分支：`codex/server-us010-r1`
 - GitHub：`https://github.com/xingluoyuankong/xuanqiong-wenshu.git`
-- 当前 HEAD：`bb5d707`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
+- 当前 HEAD：`c22cb96`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
 - 受管公网后端：`0.0.0.0:8013`
 - 受管内网后端：`127.0.0.1:8099`
 - 前端：`127.0.0.1:5174`
@@ -715,6 +715,38 @@ status=preview_only
 
 当前后端全量：`290 passed, 1 warning`。
 
+## R62 最新进展：MySQL FK 依赖顺序只读规划
+
+提交：`c22cb96`。
+
+新增：
+
+```text
+scripts/plan_mysql_fk_order.py
+scripts/plan_mysql_fk_order.sh
+docs/OPTIMIZATION_ROUND_20260920_MYSQL_FK_ORDER.md
+```
+
+真实 ORM metadata 规划结果：
+
+```text
+table_count=57
+edge_count=76
+execute=false
+connected=false
+writes_performed=false
+status=BLOCKED_BY_FK_CYCLES
+```
+
+明确识别的阻断环：
+
+```text
+timeline_events 自引用
+chapters <-> chapter_versions 互相依赖
+```
+
+同时输出无环表的拓扑 phase 顺序，供后续 MySQL 建表/约束顺序人工 review。R60 apply 闸门继续关闭，未连接或写入 MySQL。
+
 ## 仍需完成的优化任务与验收标准
 
 ### P0：真实 Provider 当前入口复验（R37 已取得当前证据，继续做多轮稳定性复验）
@@ -729,7 +761,7 @@ status=preview_only
 4. 不把 health、stub、队列入列或 HTTP 200 计为真实成功；
 5. 余额/认证/模型不可用时保留原始状态和失败原因。
 
-### P0：迁移 runner 与回滚演练（SQLite copy dry-run 已完成，R53/R60 MySQL readiness、apply guard 与 FK cycle 仍阻断 apply）
+### P0：迁移 runner 与回滚演练（SQLite copy dry-run、R60 apply guard、R62 FK order plan 已完成；MySQL apply 仍阻断）
 
 **任务**：先为 SQLite 和 MySQL 分别建立可重放的 copy dry-run、备份、升级、回滚和人工 review 证据；当前生产库保持不变。
 
