@@ -40,6 +40,50 @@ post_mission_context
 4. 候选版本、usage attribution 和清理流程继续正常；
 5. SQLite integrity 和 topology audit 通过。
 
+## R47 Live 证据
+
+在部署 `3f1f130` 后，用受控 500 字真实 Provider smoke 验收：
+
+```text
+generate_mission=20004.85ms
+pre_mission_context=94.58ms
+longform_context=454.14ms
+post_mission_context=650.80ms
+prepare_context=654.88ms
+generate_variants=59412.75ms
+pipeline_total=81366.22ms
+```
+
+持久化章节 runtime 的 `context_phase_timings_ms`：
+
+```json
+{
+  "pre_mission_context": 94.58,
+  "post_mission_context": 650.8
+}
+```
+
+本次候选版本与账本：
+
+```text
+最终阶段：waiting_for_confirm
+候选版本：1
+正文长度：489 字符
+total_tokens：16369
+usage records：2
+```
+
+临时项目删除后：
+
+```text
+novel_projects=0
+chapters=0
+token_budgets=0
+orphan_project_rows={}
+```
+
+结论：此前 R45 中 `prepare_context` 的 20–56 秒长尾包含了导演脚本等待，存在统计双计数；R47 后真实上下文装配约 0.65 秒，当前下一优先级应转向 `generate_variants` 长尾，而不是盲目削减上下文。
+
 ## 后续
 
 R47 先消除阶段统计双计数。拿到新样本后再针对真正较慢的上下文子阶段做缓存、并行或降级优化，不通过删除上下文质量约束制造表面提速。
