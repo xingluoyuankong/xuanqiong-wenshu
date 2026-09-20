@@ -35,11 +35,17 @@ def stats(values: list[float]) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--glob", default="backend/logs/**/*.log")
+    parser.add_argument(
+        "--glob",
+        action="append",
+        dest="globs",
+        help="Log glob; repeat for multiple roots. Defaults to backend/logs and deployed service logs.",
+    )
     parser.add_argument("--output", default="-")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    files = sorted(root.glob(args.glob))
+    globs = args.globs or ["backend/logs/**/*.log", "logs/**/*.log"]
+    files = sorted({path for pattern in globs for path in root.glob(pattern)})
     totals: list[float] = []
     stages: dict[str, list[float]] = {}
     source_files: set[str] = set()
@@ -69,7 +75,7 @@ def main() -> int:
                     stages.setdefault(str(stage), []).append(float(value))
     result = {
         "report_type": "generation_latency_summary",
-        "glob": args.glob,
+        "globs": globs,
         "source_file_count": len(source_files),
         "source_files": sorted(source_files),
         "total_pipeline": stats(totals),

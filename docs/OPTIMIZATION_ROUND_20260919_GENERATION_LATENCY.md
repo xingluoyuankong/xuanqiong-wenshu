@@ -13,7 +13,7 @@ bash scripts/report_generation_latency.sh
 可选参数：
 
 ```bash
-bash scripts/report_generation_latency.sh --glob 'backend/logs/**/*.log'
+bash scripts/report_generation_latency.sh --glob 'backend/logs/**/*.log' --glob 'logs/**/*.log'
 bash scripts/report_generation_latency.sh --output docs/generated_latency_report.json
 ```
 
@@ -35,7 +35,7 @@ bash scripts/report_generation_latency.sh --output docs/generated_latency_report
 
 ## 后续使用
 
-当前默认扫描 `backend/logs/**/*.log`；每次 Provider 或 pipeline 优化后，用相同 glob 重新生成报告，对比：
+当前默认同时扫描 `backend/logs/**/*.log` 与受管服务 `logs/**/*.log`；每次 Provider 或 pipeline 优化后，用相同 glob 重新生成报告，对比：
 
 - `generate_mission`；
 - `prepare_context`；
