@@ -1,4 +1,4 @@
-﻿import { API_BASE_URL, API_PREFIX } from '@/api/config'
+import { API_BASE_URL, API_PREFIX } from '@/api/config'
 
 const LLM_BASE = `${API_BASE_URL}${API_PREFIX}/llm-config`
 
@@ -208,6 +208,31 @@ export const getProviderHealthCheck = async (includeDisabled = true): Promise<LL
   })
   if (!response.ok) {
     throw await parseLLMApiError(response, '执行健康检查失败')
+  }
+  return response.json()
+}
+
+
+export interface EmbeddingHealthResponse {
+  checked_at: string
+  vector_nonempty: boolean
+  vector_dimension: number
+  status: {
+    status: 'healthy' | 'probing' | 'degraded'
+    provider?: string
+    model?: string
+    code?: string
+    dimension?: number
+  }
+}
+
+export const getEmbeddingHealthCheck = async (): Promise<EmbeddingHealthResponse> => {
+  const response = await fetch(`${LLM_BASE}/embedding-health-check`, {
+    method: 'GET',
+    headers: getHeaders(),
+  })
+  if (!response.ok) {
+    throw await parseLLMApiError(response, '执行 Embedding 能力检查失败')
   }
   return response.json()
 }
