@@ -2419,6 +2419,29 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
             guardrail_check_total_ms = round(sum(float(timing.get("guardrail_check_ms", 0) or 0) for timing in generated_version_timings), 2)
             guardrail_rewrite_total_ms = round(sum(float(timing.get("guardrail_rewrite_ms", 0) or 0) for timing in generated_version_timings), 2)
             version_total_ms = round(sum(float(timing.get("total_ms", 0) or 0) for timing in generated_version_timings), 2)
+            candidate_timings = [
+                {
+                    "index": int(item.get("index", offset)),
+                    "generation_ms": round(float(timing.get("generation_ms", 0) or 0), 2),
+                    "guardrail_check_ms": round(float(timing.get("guardrail_check_ms", 0) or 0), 2),
+                    "guardrail_rewrite_ms": round(float(timing.get("guardrail_rewrite_ms", 0) or 0), 2),
+                    "total_ms": round(float(timing.get("total_ms", 0) or 0), 2),
+                }
+                for offset, (item, timing) in enumerate(
+                    zip(attempt_versions, generated_version_timings)
+                )
+            ]
+            runtime_metadata.setdefault("candidate_timings", []).append({
+                "attempt_index": attempt_idx + 1,
+                "timings": candidate_timings,
+            })
+            logger.info(
+                "Pipeline candidate timings: project=%s chapter=%s attempt=%s timings=%s",
+                project_id,
+                chapter_number,
+                attempt_idx + 1,
+                candidate_timings,
+            )
             runtime_metadata["generation_attempts"].append(
                 {
                     "attempt_index": attempt_idx + 1,
@@ -3536,6 +3559,7 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
                 "degraded_stages": runtime_metadata.get("degraded_stages", []),
                 "retrieval_stats": runtime_metadata.get("retrieval_stats"),
                 "context_phase_timings_ms": runtime_metadata.get("context_phase_timings_ms", {}),
+                "candidate_timings": runtime_metadata.get("candidate_timings", []),
                 "self_critique_final_score": self_critique_summary.get("final_score"),
                 "self_critique_improvement": self_critique_summary.get("improvement"),
                 "self_critique_status": self_critique_summary.get("status"),
