@@ -159,3 +159,16 @@ def test_advanced_generate_config_raises_default_candidate_count_for_longform_qu
 
     assert config["preset"] == "ultimate"
     assert config["versions"] == 2
+
+
+def test_context_phase_timing_is_non_negative_and_records_named_phase():
+    timings = {}
+    duration = PipelineOrchestrator._record_context_phase_timing(
+        timings,
+        "pre_mission_context",
+        10.0,
+        ended_at=10.125,
+    )
+
+    assert duration == 125.0
+    assert timings == {"pre_mission_context": 125.0}

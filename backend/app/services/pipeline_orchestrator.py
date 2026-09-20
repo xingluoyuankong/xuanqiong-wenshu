@@ -1066,6 +1066,19 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
         return f"writer:{prefix}:{digest}"
 
     @staticmethod
+    def _record_context_phase_timing(
+        timings: Dict[str, float],
+        phase: str,
+        started_at: float,
+        *,
+        ended_at: Optional[float] = None,
+    ) -> float:
+        """Record a non-negative context substage duration in milliseconds."""
+        duration_ms = round(max(0.0, (ended_at if ended_at is not None else time.perf_counter()) - started_at) * 1000, 2)
+        timings[phase] = duration_ms
+        return duration_ms
+
+    @staticmethod
     def _estimate_tokens(text: Optional[str]) -> int:
         if not text:
             return 0
@@ -2005,7 +2018,8 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
         )
 
         outlines_map = {item.chapter_number: item for item in project.outlines}
-        prepare_context_started_at = time.perf_counter()
+        context_phase_timings: Dict[str, float] = {}
+        pre_mission_context_started_at = time.perf_counter()
         history_context = await self._collect_history_context(
             project_id=project_id,
             chapter_number=chapter_number,
@@ -2032,6 +2046,11 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
         introduced_characters = pre_mission_scope["introduced_characters"]
         planned_characters = pre_mission_scope["planned_characters"]
 
+        self._record_context_phase_timing(
+            context_phase_timings,
+            "pre_mission_context",
+            pre_mission_context_started_at,
+        )
         mission_started_at = time.perf_counter()
         chapter_mission = await self._generate_chapter_mission(
             blueprint_dict=blueprint_dict,
@@ -2049,6 +2068,7 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
             user_id=user_id,
         )
         await mark_stage("generate_mission", mission_started_at, detail="章节导演脚本阶段完成")
+        post_mission_context_started_at = time.perf_counter()
 
         allowed_new_characters = chapter_mission.get("allowed_new_characters", []) if chapter_mission else []
 
@@ -2218,7 +2238,19 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
             "degraded": False,
             "degradation_reason": None,
         }
-        await mark_stage("prepare_context", prepare_context_started_at, detail="上下文准备阶段完成")
+        self._record_context_phase_timing(
+            context_phase_timings,
+            "post_mission_context",
+            post_mission_context_started_at,
+        )
+        runtime_metadata["context_phase_timings_ms"] = dict(context_phase_timings)
+        logger.info(
+            "Pipeline context phases completed: project=%s chapter=%s timings_ms=%s",
+            project_id,
+            chapter_number,
+            context_phase_timings,
+        )
+        await mark_stage("prepare_context", post_mission_context_started_at, detail="导演脚本后的上下文准备阶段完成")
 
         writer_prompt = await self.prompt_service.get_prompt("writing_v2")
         if not writer_prompt:
@@ -3499,6 +3531,7 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
                 "pipeline_total_duration_ms": runtime_metadata["pipeline_total_duration_ms"],
                 "degraded_stages": runtime_metadata.get("degraded_stages", []),
                 "retrieval_stats": runtime_metadata.get("retrieval_stats"),
+                "context_phase_timings_ms": runtime_metadata.get("context_phase_timings_ms", {}),
                 "self_critique_final_score": self_critique_summary.get("final_score"),
                 "self_critique_improvement": self_critique_summary.get("improvement"),
                 "self_critique_status": self_critique_summary.get("status"),
