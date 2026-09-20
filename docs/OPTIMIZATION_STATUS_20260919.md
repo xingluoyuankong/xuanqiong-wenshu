@@ -822,3 +822,99 @@ storage/e2e_us006.db-wal
 ```
 
 这是测试运行时 SQLite 临时文件，已明确排除出 Git 提交；清理前需要确认没有活动连接和写入者。
+## R64-R65 当前服务器复核（2026-09-20）
+
+### R64：Vitest Node Web Storage 测试噪声收敛
+
+提交：`b7ca803`。
+
+- `frontend/src/test/setup.ts` 不再直接调用 Node 25 的 Web Storage accessor；
+- 新增 `frontend/src/test/storageSetup.spec.ts` 锁定 local/session storage 行为；
+- `NODE_OPTIONS=--trace-warnings` 专项测试无 `localstorage-file` 警告；
+- 前端 `vue-tsc`：PASS；
+- 前端测试：24 个文件、118 个测试 PASS；
+- `npm run build-only`：PASS；
+- 构建仍保留 `export-vendor`、`naive-data-table` 等大块，未通过调高阈值掩盖。
+
+### R65：runtime 依赖隔离重建验收
+
+提交：`feecc27`。
+
+新增：
+
+```text
+scripts/verify_runtime_rebuild.py
+scripts/verify_runtime_rebuild.sh
+docs/OPTIMIZATION_ROUND_20260920_RUNTIME_REBUILD.md
+```
+
+真实服务器结果：
+
+```text
+snapshot_count=94
+observed_count=94
+failures=[]
+status=PASS
+```
+
+所有 distribution 版本、关键 import 和 source root 均来自一次性 `/tmp/xq-runtime-rebuild-*/bin/python`，没有使用 `/app/user-packages/python` 或 `/app/venv/lib/python3.11/site-packages`。卸载隔离环境中的 `aiosqlite` 后，审计以 `exit=10`、`status=FAIL` 正确拦截，临时环境已删除。
+
+R65 同时通过：
+
+```text
+backend: 291 passed, 1 warning
+scripts/test_server_runtime.sh: PASS
+scripts/audit_runtime_dependencies.sh: PASS
+```
+
+### 当前部署证据
+
+```text
+HEAD=feecc27268591fa08ee3af1e9532ff6f8a89bbf7
+origin/codex/server-us010-r1=feecc27268591fa08ee3af1e9532ff6f8a89bbf7
+8013 process_commit=current_commit=feecc27268591fa08ee3af1e9532ff6f8a89bbf7
+8099 process_commit=current_commit=feecc27268591fa08ee3af1e9532ff6f8a89bbf7
+topology=AUDIT_RESULT=PASS
+runtime_dependency_audit=PASS
+frontend_entry_budget=PASS
+```
+
+### 2026-09-20 实时阻断审计
+
+Embedding：
+
+```text
+provider=openai
+model=text-embedding-3-large
+code=EMBEDDING_CONFIG_MISSING
+vector_nonempty=false
+vector_dimension=0
+```
+
+MySQL：
+
+```text
+db_provider=sqlite
+mysql_password_set=false
+execute=false
+connected=false
+writes_performed=false
+status=BLOCKED
+```
+
+FK planner 仍识别：
+
+```text
+table_count=57
+edge_count=76
+status=BLOCKED_BY_FK_CYCLES
+```
+
+### 下一轮详细优化计划与验收标准
+
+1. **P0 真实 Provider 当前入口复验**：使用最小预算临时项目，在当前 8013 记录 provider/model/attempt、唯一 SSE terminal、非空正文、usage attribution、候选稿状态和清理结果。通过条件是正文可解析、terminal 唯一、usage 归属正确、删除后无孤儿；余额/认证/模型失败保留原始证据。
+2. **P0 Embedding 能力补齐**：配置独立 embedding key/base URL 后运行 `scripts/probe_embedding.sh`；必须得到 `vector_nonempty=true`、正维度，并执行一次 RAG 命中质量复核；当前缺凭据时继续保持 `EMBEDDING_CONFIG_MISSING`，不伪造成功。
+3. **P0 MySQL migration runner**：在目标库和 backup manifest 具备前，不执行 apply；先把 R62 phase、两个 FK cycle 的两阶段约束和 rollback rehearsal 做成只读/副本验收。通过条件是 source fingerprint、fragment hash、行数、约束清单和 rollback 前后 fingerprint 全部可比。
+4. **P1 真实浏览器首屏基线**：通过可用 Chromium/Playwright 采集 `/`、`/workspace`、`/admin` 的请求瀑布和首屏时间，分别记录 modulepreload、脚本、CSS、路由 chunk；不以静态 dist 大小代替浏览器证据。
+5. **P1 依赖生产切换评估**：R65 只证明可重建，不替换生产 source；若切换，必须在隔离环境完成后端全量、health、topology、rollback 验收。
+6. **P2 警告收敛**：保留 passlib `crypt` 弃用警告作为真实待办，先评估 bcrypt/passlib 兼容窗口，不直接升级生产依赖。
