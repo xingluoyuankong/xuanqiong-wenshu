@@ -5,7 +5,7 @@
 - 服务器：`qwenpaw-sbs-prod-szckq`
 - 仓库分支：`codex/server-us010-r1`
 - GitHub：`https://github.com/xingluoyuankong/xuanqiong-wenshu.git`
-- 当前 HEAD：`b60c4ec`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
+- 当前 HEAD：`bb6c624`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
 - 受管公网后端：`0.0.0.0:8013`
 - 受管内网后端：`127.0.0.1:8099`
 - 前端：`127.0.0.1:5174`
@@ -500,6 +500,28 @@ total_ms p50=61363.72 p95=78300.24
 ```
 
 R54 只读解析 `backend/logs/**/*.log` 与受管服务 `logs/**/*.log`，不触发新的 Provider 请求。
+
+## R55 最新进展：Embedding Health Check API
+
+提交：`bb6c624`。
+
+新增只读接口：
+
+```text
+GET /api/llm-config/embedding-health-check
+```
+
+真实 HTTP 验收：
+
+```text
+login=200
+embedding_health=200
+code=EMBEDDING_CONFIG_MISSING
+vector_nonempty=false
+vector_dimension=0
+```
+
+接口复用用户鉴权和 LLMService，不启动章节生成，不创建项目/章节/预算，不返回任何密钥或上游响应正文。配置独立 embedding key/base URL 后可直接用该接口验证非空向量和维度。
 
 ## 仍需完成的优化任务与验收标准
 
