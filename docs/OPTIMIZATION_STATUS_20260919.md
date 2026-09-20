@@ -313,6 +313,59 @@ status=PASS
 
 这样 R47/R48 的 `logs/public-backend-8013` 真实运行日志不会漏出统计基线。
 
+## R50–R52 最新进展：候选长尾与护栏回炉
+
+### R50：候选级耗时观测
+
+提交：`43022ba`。
+
+runtime 新增扁平 `candidate_timings`，记录每个候选的：
+
+```text
+generation_ms
+guardrail_check_ms
+guardrail_rewrite_ms
+total_ms
+```
+
+R50 真实证据：
+
+```text
+generation_ms=61358.25
+guardrail_check_ms=0.22
+guardrail_rewrite_ms=19637.22
+total_ms=80182.08
+```
+
+这证明单候选正文 Provider 请求和护栏回炉共同构成 `generate_variants` 长尾。
+
+### R51：候选耗时 runtime 序列化修复
+
+提交：`358f054`。
+
+R50 初版嵌套 timing 在 runtime compact 后变成 `[object:5]`。R51 将其改成扁平列表，保留完整数值。后端全量：`285 passed`。
+
+### R52：短章节护栏回炉 ceiling
+
+代码提交：`a1a851c`；live 证据提交：`af03b3c`。
+
+短原文的护栏回炉 `max_tokens` 根据原文长度动态上限，避免 500 字短章固定使用 8000 token。
+
+R52 真实 smoke：
+
+```text
+候选版本：1
+正文长度：491 字符
+generation_ms=54869.49
+guardrail_check_ms=0.24
+guardrail_rewrite_ms=0.0
+total_ms=54874.86
+项目删除：HTTP 200
+SQLite 零残留
+```
+
+该样本未触发回炉，因此只证明动态 ceiling 不影响正常路径；R51 的回炉长尾仍保留为对比基线，后续需要可控违规 fixture 或更多真实样本验证回炉收益。
+
 ## 仍需完成的优化任务与验收标准
 
 ### P0：真实 Provider 当前入口复验（R37 已取得当前证据，继续做多轮稳定性复验）
