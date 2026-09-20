@@ -81,5 +81,13 @@
         ".venv/lib/python3.11/site-packages"
       ]
     }
-  }
+  },
+  "runtime_excluded_test_distributions": [
+    "pytest",
+    "pytest-asyncio",
+    "iniconfig",
+    "packaging",
+    "pluggy",
+    "Pygments"
+  ]
 }
