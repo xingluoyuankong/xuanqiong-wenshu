@@ -5,7 +5,7 @@
 - 服务器：`qwenpaw-sbs-prod-szckq`
 - 仓库分支：`codex/server-us010-r1`
 - GitHub：`https://github.com/xingluoyuankong/xuanqiong-wenshu.git`
-- 当前 HEAD：`0030049`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
+- 当前 HEAD：`c8ef176`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
 - 受管公网后端：`0.0.0.0:8013`
 - 受管内网后端：`127.0.0.1:8099`
 - 前端：`127.0.0.1:5174`
@@ -545,6 +545,22 @@ code=EMBEDDING_CONFIG_MISSING
 
 接口复用用户鉴权和 `LLMService`，不启动章节生成，不创建项目/章节/预算，不返回 API key 或上游响应正文。配置独立 embedding key/base URL 后可直接用同一接口验证非空向量和维度。
 
+## R56 最新进展：Admin Vendor 首屏预加载边界
+
+提交：`c8ef176`。
+
+R56 移除 Vite 专用 `admin-vendor` manual chunk 归类。构建通过后，`dist/index.html` 已不再预加载管理域 vendor，AdminView 仍保持异步路由和异步面板边界。
+
+```text
+前端 type-check：PASS
+前端测试：23 files / 117 tests passed
+生产构建：PASS
+Some chunks are larger than 500 kB：无
+INEFFECTIVE_DYNAMIC_IMPORT：无
+```
+
+这证明公共入口 preload 依赖减少；真实浏览器 LCP/网络瀑布仍需后续独立采集。
+
 ## 仍需完成的优化任务与验收标准
 
 ### P0：真实 Provider 当前入口复验（R37 已取得当前证据，继续做多轮稳定性复验）
@@ -586,7 +602,7 @@ code=EMBEDDING_CONFIG_MISSING
 3. 后端测试和服务启动使用同一锁定依赖集合；
 4. 版本漂移进入 manifest/audit。
 
-### P1：Naive UI 首屏拆分（R44 组件 chunk 已完成，真实请求瀑布仍待验证）
+### P1：Naive UI 首屏拆分（R44 组件 chunk 与 R56 Admin preload 边界已完成，真实请求瀑布仍待验证）
 
 **任务**：分析 `naive-ui` 约 `557.33 kB`（gzip 约 `156.37 kB`）的实际首屏请求，不调高 warning 阈值掩盖问题；仅在确认路由加载收益后拆分。
 

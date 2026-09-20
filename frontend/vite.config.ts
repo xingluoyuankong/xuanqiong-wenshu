@@ -87,14 +87,9 @@ export default defineConfig(({ command }) => ({
           ) {
             return 'naive-ui-runtime'
           }
-          if (
-            id.includes('/lodash/') ||
-            id.includes('\\lodash\\') ||
-            id.includes('/lodash-es/') ||
-            id.includes('\\lodash-es\\')
-          ) {
-            return 'admin-vendor'
-          }
+          // Keep lodash-like dependencies in the normal vendor graph. The admin
+          // route is already lazy-loaded; a dedicated manual admin chunk caused
+          // Vite to emit it in the entry modulepreload list.
           if (id.includes('@headlessui/vue')) {
             return 'headlessui'
           }
