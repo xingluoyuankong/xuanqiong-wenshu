@@ -5,7 +5,7 @@
 - 服务器：`qwenpaw-sbs-prod-szckq`
 - 仓库分支：`codex/server-us010-r1`
 - GitHub：`https://github.com/xingluoyuankong/xuanqiong-wenshu.git`
-- 当前 HEAD：`c8ef176`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
+- 当前 HEAD：`520de7a`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
 - 受管公网后端：`0.0.0.0:8013`
 - 受管内网后端：`127.0.0.1:8099`
 - 前端：`127.0.0.1:5174`
@@ -560,6 +560,42 @@ INEFFECTIVE_DYNAMIC_IMPORT：无
 ```
 
 这证明公共入口 preload 依赖减少；真实浏览器 LCP/网络瀑布仍需后续独立采集。
+
+## R55–R56 最新进展
+
+### R55：Embedding Health Check API
+
+提交：`bb6c624`；live 与综合状态提交：`0030049`、`19d2e0d`。
+
+新增只读接口：
+
+```text
+GET /api/llm-config/embedding-health-check
+```
+
+真实 HTTP 结果：
+
+```text
+login=200
+embedding_health=200
+vector_nonempty=false
+vector_dimension=0
+code=EMBEDDING_CONFIG_MISSING
+```
+
+不启动章节生成、不创建项目/章节/预算，不返回 API key 或上游响应正文。配置独立 embedding key/base URL 后可用同一接口做非空向量和维度验收。
+
+### R56：Admin Vendor 首屏预加载边界
+
+提交：`c8ef176`；综合状态提交：`520de7a`。
+
+- 移除 Vite 专用 `admin-vendor` manual chunk 归类；
+- `dist/index.html` 不再 modulepreload 管理域 vendor；
+- AdminView 继续保持异步路由和异步面板；
+- type-check、23 files/117 tests、build 全部通过；
+- `>500 kB` 和 `INEFFECTIVE_DYNAMIC_IMPORT` 警告均无。
+
+R56 证明公共入口 preload 边界改善；真实浏览器 LCP/网络瀑布仍需独立采集。
 
 ## 仍需完成的优化任务与验收标准
 
