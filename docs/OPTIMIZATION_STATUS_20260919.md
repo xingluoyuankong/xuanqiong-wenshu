@@ -918,3 +918,81 @@ status=BLOCKED_BY_FK_CYCLES
 4. **P1 真实浏览器首屏基线**：通过可用 Chromium/Playwright 采集 `/`、`/workspace`、`/admin` 的请求瀑布和首屏时间，分别记录 modulepreload、脚本、CSS、路由 chunk；不以静态 dist 大小代替浏览器证据。
 5. **P1 依赖生产切换评估**：R65 只证明可重建，不替换生产 source；若切换，必须在隔离环境完成后端全量、health、topology、rollback 验收。
 6. **P2 警告收敛**：保留 passlib `crypt` 弃用警告作为真实待办，先评估 bcrypt/passlib 兼容窗口，不直接升级生产依赖。
+
+## R66-R68：浏览器路由基线与 SPA fallback 部署（2026-09-21）
+
+### R66：真实 Chromium 路由基线
+
+新增：
+
+```text
+scripts/audit_frontend_browser.mjs
+scripts/audit_frontend_browser.sh
+docs/OPTIMIZATION_ROUND_20260920_FRONTEND_BROWSER_BASELINE.md
+```
+
+旧 5174 为 `python3 -m http.server`。真实浏览器基线曾显示：首页 `/` 为 `readyState=complete`、`appRoot=true`，但直接访问 `/workspace`、`/admin`、`/settings` 返回 404，Vue 没有机会启动。入口静态资源必须分项记录：
+
+```text
+modulepreload=198345 bytes
+entry_script=9586 bytes
+stylesheet=142931 bytes
+listed_static_assets_total=350862 bytes
+```
+
+### R67：安全 SPA fallback server
+
+提交：`cd09513`。
+
+新增前端静态服务器和 7 项专项测试：无扩展名 history 路由回退 `index.html`，真实静态文件正常返回，缺失 `.js/.css/.json` 继续 404，`/api` 不被前端吞掉，并拒绝路径遍历、反斜杠和越界符号链接。
+
+### R68：5174 管理化和部署验收
+
+新增：
+
+```text
+scripts/manage_frontend.sh
+scripts/ensure_frontend.sh
+scripts/test_manage_frontend.sh
+```
+
+并扩展 topology audit 为前端 manifest 与深链接门禁。当前 5174 实际绑定为：
+
+```text
+0.0.0.0:5174
+python3 scripts/frontend_spa_server.py --root frontend/dist --host 0.0.0.0 --port 5174
+```
+
+当前 HTTP 边界：
+
+```text
+/                     200
+/workspace            200
+/admin                200
+/settings             200
+/inspiration          200
+/novel/fixture-id     200
+/assets/index-*.js    200
+/missing.js           404
+/api/health           404
+```
+
+当前 Chromium/CDP 直接导航结果：
+
+```text
+/, /workspace, /admin, /settings, /inspiration, /novel/fixture-id
+readyState=complete
+appRoot=true
+```
+
+浏览器审计现在是失败门：若任何目标路由不是 `readyState=complete`、没有 `#app` 或缺少 navigation timing，脚本输出 `status=FAIL` 并以 exit 10 退出。反向访问 `/missing.js` 已得到：
+
+```text
+status=FAIL
+failures=["/missing.js:appRoot=false"]
+exit=10
+```
+
+`/admin` 返回 SPA 入口只证明前端路由可启动；真实管理权限仍需在有/无登录态下分别验收，不能因静态 HTML 200 误报授权功能完成。
+
+外部 keepalive 已增加受标记前端 hook，调用仓库内 `ensure_frontend.sh`；这项容器外配置不提交 Git。每轮后端重启或前端进程消失时，hook 只会管理由 `frontend_spa_server.py` 创建的进程，不会替换未知端口 owner。

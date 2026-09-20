@@ -10,7 +10,7 @@ check_cmd(){ command -v "$1" >/dev/null 2>&1 || fail "missing command: $1"; }
 
 for cmd in bash curl git lsof python3; do check_cmd "$cmd"; done
 
-for manifest in "$ROOT/logs/public-backend-8013/manifest.json" "$ROOT/logs/internal-backend-8099/manifest.json"; do
+for manifest in "$ROOT/logs/public-backend-8013/manifest.json" "$ROOT/logs/internal-backend-8099/manifest.json" "$ROOT/logs/frontend-5174/manifest.json"; do
   if [[ ! -f "$manifest" ]]; then fail "manifest missing: $manifest"; continue; fi
   if python3 - "$manifest" <<'PY'
 import json, sys
@@ -32,8 +32,23 @@ else
   fail "keepalive missing: $KEEPALIVE_PATH"
 fi
 
-for endpoint in "http://127.0.0.1:8013/api/health" "http://127.0.0.1:8099/api/health" "http://127.0.0.1:5174/"; do
+for endpoint in "http://127.0.0.1:8013/api/health" "http://127.0.0.1:8099/api/health"; do
   if curl -fsS --max-time 8 "$endpoint" >/dev/null; then pass "health: $endpoint"; else fail "health: $endpoint"; fi
+done
+
+for route in / /workspace /admin /settings; do
+  if body="$(curl -fsS --max-time 8 "http://127.0.0.1:5174$route")" && [[ "$body" == *'id="app"'* ]]; then
+    pass "frontend route: $route"
+  else
+    fail "frontend route: $route"
+  fi
+done
+for endpoint in "http://127.0.0.1:5174/missing.js" "http://127.0.0.1:5174/api/health"; do
+  if [[ "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 "$endpoint" || true)" == "404" ]]; then
+    pass "frontend boundary: $endpoint"
+  else
+    fail "frontend boundary: $endpoint"
+  fi
 done
 
 if "$ROOT/scripts/audit_sqlite_integrity.py" >/tmp/xq-topology-integrity.out; then pass "sqlite integrity"; else fail "sqlite integrity"; fi

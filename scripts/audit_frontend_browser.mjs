@@ -67,4 +67,19 @@ for (const route of routes) {
   ws.close()
 }
 
-console.log(JSON.stringify({ audit_type: 'frontend_browser_route_baseline', base_url: baseUrl, results }, null, 2))
+const failures = results.flatMap((item) => {
+  const reasons = []
+  if (item.readyState !== 'complete') reasons.push(`readyState=${item.readyState}`)
+  if (!item.appRoot) reasons.push('appRoot=false')
+  if (!(item.navigation || []).length) reasons.push('navigation_timing_missing')
+  return reasons.map((reason) => `${item.route}:${reason}`)
+})
+const payload = {
+  audit_type: 'frontend_browser_route_baseline',
+  base_url: baseUrl,
+  results,
+  failures,
+  status: failures.length ? 'FAIL' : 'PASS',
+}
+console.log(JSON.stringify(payload, null, 2))
+if (failures.length) process.exitCode = 10
