@@ -5,7 +5,7 @@
 - 服务器：`qwenpaw-sbs-prod-szckq`
 - 仓库分支：`codex/server-us010-r1`
 - GitHub：`https://github.com/xingluoyuankong/xuanqiong-wenshu.git`
-- 当前 HEAD：`bb6c624`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
+- 当前 HEAD：`0030049`，本地服务器分支与 `origin/codex/server-us010-r1` 同步
 - 受管公网后端：`0.0.0.0:8013`
 - 受管内网后端：`127.0.0.1:8099`
 - 前端：`127.0.0.1:5174`
@@ -523,6 +523,28 @@ vector_dimension=0
 
 接口复用用户鉴权和 LLMService，不启动章节生成，不创建项目/章节/预算，不返回任何密钥或上游响应正文。配置独立 embedding key/base URL 后可直接用该接口验证非空向量和维度。
 
+## R55 最新进展：Embedding Health Check API
+
+提交：`bb6c624`；live 证据与综合状态更新提交：`0030049`。
+
+新增只读接口：
+
+```text
+GET /api/llm-config/embedding-health-check
+```
+
+真实 HTTP 验收：
+
+```text
+login=200
+embedding_health=200
+vector_nonempty=false
+vector_dimension=0
+code=EMBEDDING_CONFIG_MISSING
+```
+
+接口复用用户鉴权和 `LLMService`，不启动章节生成，不创建项目/章节/预算，不返回 API key 或上游响应正文。配置独立 embedding key/base URL 后可直接用同一接口验证非空向量和维度。
+
 ## 仍需完成的优化任务与验收标准
 
 ### P0：真实 Provider 当前入口复验（R37 已取得当前证据，继续做多轮稳定性复验）
@@ -549,7 +571,7 @@ vector_dimension=0
 4. 失败时生产库零写入；
 5. 获得人工审查记录后才允许生成可执行计划。
 
-### P0：embedding 专用配置补齐与真实非空向量验收
+### P0：embedding 专用配置补齐与真实非空向量验收（R55 health-check API 已完成，当前配置仍缺独立 key）
 
 **当前状态**：配置缺少独立 embedding key，探针稳定返回 `EMBEDDING_CONFIG_MISSING`。下一步需要配置专用 key/base URL 后，用 `scripts/probe_embedding.sh` 验证非空向量和维度，再验证 RAG 命中质量。
 
