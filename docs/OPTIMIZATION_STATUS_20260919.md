@@ -366,6 +366,64 @@ SQLite 零残留
 
 该样本未触发回炉，因此只证明动态 ceiling 不影响正常路径；R51 的回炉长尾仍保留为对比基线，后续需要可控违规 fixture 或更多真实样本验证回炉收益。
 
+## R50–R53 最新进展
+
+### R50–R51：候选级耗时与 runtime 序列化
+
+提交：`43022ba`、`358f054`。
+
+真实候选级数据：
+
+```text
+generation_ms=61358.25
+guardrail_check_ms=0.22
+guardrail_rewrite_ms=19637.22
+total_ms=80182.08
+```
+
+R51 修复嵌套 runtime compact 丢失问题，将候选 timing 改成扁平记录。
+
+### R52：短章护栏回炉 ceiling
+
+提交：`a1a851c`；live 证据：`af03b3c`。
+
+500 字短章回炉 ceiling 按原文长度动态计算。正常路径真实 smoke：
+
+```text
+generation_ms=54869.49
+guardrail_check_ms=0.24
+guardrail_rewrite_ms=0.0
+正文长度=491
+```
+
+该样本未触发回炉，不能单独证明回炉长尾已改善；R51 的回炉长尾仍保留作基线。
+
+### R53：MySQL migration 只读 readiness audit
+
+提交：`7f0a587`。
+
+新增：
+
+```text
+scripts/audit_mysql_migration_readiness.py
+scripts/audit_mysql_migration_readiness.sh
+docs/OPTIMIZATION_ROUND_20260920_MYSQL_MIGRATION_READINESS.md
+```
+
+真实审计结果：
+
+```text
+execute=false
+connected=false
+writes_performed=false
+db_provider=sqlite
+mysql_password_set=false
+provenance_failures=[]
+status=BLOCKED
+```
+
+R53 明确证明当前 MySQL migration runner 不应执行；SQLite copy dry-run 已完成，MySQL 仍等待独立目标配置、备份、copy dry-run、rollback 和人工 review。
+
 ## 仍需完成的优化任务与验收标准
 
 ### P0：真实 Provider 当前入口复验（R37 已取得当前证据，继续做多轮稳定性复验）
@@ -380,7 +438,7 @@ SQLite 零残留
 4. 不把 health、stub、队列入列或 HTTP 200 计为真实成功；
 5. 余额/认证/模型不可用时保留原始状态和失败原因。
 
-### P0：迁移 runner 与回滚演练（SQLite copy dry-run 已完成，MySQL runner 仍未建立）
+### P0：迁移 runner 与回滚演练（SQLite copy dry-run 已完成，R53 MySQL readiness 已明确阻断）
 
 **任务**：先为 SQLite 和 MySQL 分别建立可重放的 copy dry-run、备份、升级、回滚和人工 review 证据；当前生产库保持不变。
 
