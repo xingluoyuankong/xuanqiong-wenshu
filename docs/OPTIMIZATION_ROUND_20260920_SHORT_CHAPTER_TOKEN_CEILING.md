@@ -54,6 +54,34 @@ R47 真实 500 字章节在 `generate_variants` 阶段耗时约 59.4 秒，而�
 4. 项目删除后 SQLite 零残留；
 5. 用 R45 报告收集新样本，不把单次耗时当作 p95 结论。
 
+## R48 Live 证据
+
+在提交 `fc80cc4` 部署后的公网 `8013` 上完成受控 500 字真实 Provider smoke：
+
+```text
+最终阶段：waiting_for_confirm
+候选版本：1
+正文长度：597 字符
+generate_mission：20002.46ms
+generate_variants：55661.75ms
+prepare_context：961.75ms
+pre_mission_context：85.87ms
+post_mission_context：957.06ms
+total_tokens：16011
+usage records：2
+```
+
+项目删除：HTTP `200`；清理审计：
+
+```text
+novel_projects=0
+chapters=0
+token_budgets=0
+orphan_project_rows={}
+```
+
+本轮证明短章节 token ceiling 调整没有破坏正文非空、候选落库、usage attribution 或清理流程。`generate_variants` 仍是当前短章主要耗时段，后续继续基于真实数据优化，不把单次样本当作 p95 结论。
+
 ## 回滚
 
 回滚本轮提交可恢复 3200 token 短章节 ceiling，不涉及数据库迁移或前端构建。
