@@ -2431,10 +2431,15 @@ class PipelineOrchestrator(StoryQualityScoringMixin):
                     zip(attempt_versions, generated_version_timings)
                 )
             ]
-            runtime_metadata.setdefault("candidate_timings", []).append({
-                "attempt_index": attempt_idx + 1,
-                "timings": candidate_timings,
-            })
+            # Keep candidate timing records flat so the runtime compactor can
+            # preserve numeric fields without crossing its nested-depth guard.
+            runtime_metadata.setdefault("candidate_timings", []).extend(
+                {
+                    "attempt_index": attempt_idx + 1,
+                    **timing,
+                }
+                for timing in candidate_timings
+            )
             logger.info(
                 "Pipeline candidate timings: project=%s chapter=%s attempt=%s timings=%s",
                 project_id,
