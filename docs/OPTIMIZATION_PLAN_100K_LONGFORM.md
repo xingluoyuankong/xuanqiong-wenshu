@@ -1,86 +1,46 @@
-# 玄穹文枢 10 万字长篇创作与系统全面优化计划
+# 玄穹文枢 10 万字级长篇处理链路优化方案
 
-> 文档版本：v1.0
-> 编制日期：2026-09-21
-> 适用仓库：`/run/csi/mount-root/nas/4079184d856ecc166ed19d4887083405/qwenpaw-data/xuanqiong-wenshu`
-> 目标分支：`codex/server-us010-r1`
-> 性质：执行计划、验收契约、回滚手册和长篇内容生产规范
+> 版本：v2.0（方向纠正版）
+> 日期：2026-09-20
+> 目标：优化玄穹文枢对约 10 万字长篇项目的规划、生成、记忆、检索、连续性、修订、性能和可靠性
+> 非目标：本方案不要求、也不把“实际生成一部 10 万字小说”作为本轮交付物
 
-## 0. 一页结论
+## 0. 先把目标说清楚
 
-玄穹文枢当前具备继续工程化的基础：后端全量回归 `291 passed`，前端 `118 passed`，8013 公网后端、8099 回环后端和 5174 前端可以启动，拓扑和运行时依赖审计通过，R65 已证明 94 项 runtime snapshot 可以在一次性隔离 venv 中独立重建。
+本方案优化的是**系统处理 10 万字级长篇项目的能力**，不是让系统一次性生成 10 万字小说。
 
-但“服务健康”不等于“10 万字生产链路完成”。当前必须按证据推进四类问题：
+“10 万字”在本文中表示系统需要稳定承载的内容规模，用来设计：
 
-1. **前端深链接阻断**：`/` 正常，但直接访问 `/workspace`、`/admin`、`/settings` 等 history 路由由 `python3 -m http.server` 返回 404，Vue 根节点不存在；这会破坏刷新、分享链接、回退和部署后的路由恢复。
-2. **Embedding 未形成真实能力**：探针结果为 `EMBEDDING_CONFIG_MISSING`，向量为空、维度为 0；正文生成成功不能替代 RAG 成功证据。
-3. **MySQL 未进入可执行状态**：当前仍是 SQLite，MySQL 密码未配置，FK planner 识别 `chapters <-> chapter_versions` 和 `timeline_events` 自引用环；apply 必须继续关闭。
-4. **10 万字生产契约尚未物化**：已有 pipeline、版本、上下文、质量门和取消清理能力，但还需要把 10 万字目标拆成可追踪的卷、章、场景、伏笔、人物状态、上下文快照、成本和验收记录。
+- 上下文裁剪与分层记忆；
+- 章节摘要和事实账本；
+- RAG 检索与隔离；
+- 角色、世界观、时间线、伏笔的连续性检查；
+- 章节版本与修订影响传播；
+- 任务恢复、取消、重试和并发写入；
+- token、延迟、成本和数据库容量；
+- 前端长列表、长正文阅读和导出；
+- 可复现测试、部署和回滚。
 
-完成定义不是“生成一段很长的正文”，而是：系统能够分批生成、审核、修订并恢复一部约 100,000 个中文字符的长篇小说；每章有可追溯的输入、版本、质量门、成本和连续性证据；失败不会误报成功，也不会污染已确认内容。
+本方案的完成标准是：**系统面对 10 万字级项目时不因上下文膨胀、状态漂移、检索混乱、任务长尾、数据库写入或前端长内容而失稳。**
 
-## 1. 范围与不变量
+## 1. 当前真实基线
 
-### 1.1 范围
+### 1.1 已经通过的工程项
 
-| 层面 | 目标 |
+| 项目 | 当前证据 |
 |---|---|
-| 产品链路 | 项目、蓝图、章节、候选稿、确认稿、管理台和导出闭环 |
-| 生成引擎 | Provider、重试、SSE、取消、超时、usage attribution 可审计 |
-| 长篇能力 | 10 万字配额、卷章规划、连续性账本、伏笔回收、角色和世界状态 |
-| 运行部署 | 8013/8099/5174 的进程、提交、依赖、路由和回滚一致 |
-| 数据演进 | SQLite dry-run、MySQL preview、FK cycle 方案、备份和回滚演练 |
+| 后端回归 | `291 passed, 1 warning` |
+| 前端类型检查 | `npm run type-check` PASS |
+| 前端测试 | `24 files, 118 tests passed` |
+| 前端构建 | `npm run build-only` PASS |
+| runtime dependency audit | PASS |
+| runtime 隔离重建 | 94/94 snapshot，PASS |
+| 8013/8099/5174 拓扑 | `AUDIT_RESULT=PASS` |
+| 5174 history fallback | 已接管，浏览器深链接 PASS |
 
-### 1.2 受保护不变量
+### 1.2 当前真实阻断
 
-1. `process_commit == current_commit`，且 `working_tree_dirty=false`；
-2. 8013 是公网入口，8099 是回环内部入口；
-3. 每个生成任务只有一个最终 terminal event；
-4. Provider 超时、余额不足、认证失败、模型不可用保留原始错误分类；
-5. `waiting_for_confirm` 只表示候选稿已落库，不表示最终稿已选定；
-6. superseded/cancelled/failed run 不得写入新的确认版本、usage 归属或错误账本；
-7. 新修复必须有专项回归和反向验证；
-8. 不删测试、不调高阈值、不用静默 fallback 制造绿灯；
-9. 空向量不能写成 RAG 成功；
-10. 没有 readiness、备份和人工审查时不运行 migration apply；
-11. 每轮代码或文档变更都要在服务器提交、推送 GitHub、重启受管服务并做拓扑审计。
-
-## 2. 当前基线证据
-
-### 2.1 提交与服务
-
-```text
-branch=codex/server-us010-r1
-HEAD=1e9f4ae33f1cfb9584fbe2917ab10a297cca06dd
-remote=origin/codex/server-us010-r1
-8013=public_backend, 0.0.0.0
-8099=internal_loopback_backend, 127.0.0.1
-5174=frontend static server
-```
-
-最近轮次：
-
-- R64：Vitest Node 25 Web Storage 噪声收敛，`b7ca803`；
-- R65：runtime 依赖隔离重建，`feecc27`；
-- R66：真实 Chromium 首屏与路由资源基线，当前工作树已采集，待提交。
-
-### 2.2 已通过项
-
-| 检查 | 结果 | 命令 |
-|---|---|---|
-| 后端全量 | `291 passed, 1 warning` | `bash scripts/test_backend.sh` |
-| 前端类型 | PASS | `npm run type-check` |
-| 前端测试 | `24 files, 118 tests` | `npm run test:run` |
-| 前端构建 | PASS | `npm run build-only` |
-| 入口预算 | PASS | `bash scripts/audit_frontend_entry.sh` |
-| runtime audit | PASS | `bash scripts/audit_runtime_dependencies.sh` |
-| 隔离 runtime 重建 | `94/94, failures=[], PASS` | `bash scripts/verify_runtime_rebuild.sh` |
-| 拓扑/SQLite | `AUDIT_RESULT=PASS` | `bash scripts/audit_server_topology.sh` |
-| FK planner | 只读、无连接、无写入 | `bash scripts/plan_mysql_fk_order.sh` |
-
-### 2.3 当前阻断
-
-Embedding：
+Embedding 当前仍为：
 
 ```text
 provider=openai
@@ -90,7 +50,7 @@ vector_nonempty=false
 vector_dimension=0
 ```
 
-MySQL：
+MySQL 当前仍为：
 
 ```text
 db_provider=sqlite
@@ -101,353 +61,447 @@ writes_performed=false
 status=BLOCKED
 ```
 
-FK planner：
+FK planner 当前识别：
 
 ```text
-table_count=57
-edge_count=76
-cycles=timeline_events -> timeline_events; chapters <-> chapter_versions
+chapters <-> chapter_versions
+timeline_events -> timeline_events
 status=BLOCKED_BY_FK_CYCLES
 ```
 
-前端 history fallback：
+这些状态是系统优化的输入条件，不能被计划文字改写成已完成。
 
-```text
-GET /             -> 200, title=玄穹文枢, #app=true
-GET /workspace    -> 404, title=Error response, #app=false
-GET /admin        -> 404, title=Error response, #app=false
-GET /settings     -> 404, title=Error response, #app=false
-```
+## 2. 优化范围和非目标
 
-当前进程为：
+### 2.1 本方案要优化的内容
 
-```text
-python3 -m http.server 5174 --directory frontend/dist --bind 0.0.0.0
-```
+1. 长篇项目的输入、输出和版本数据流；
+2. 10 万字级内容的分层记忆和上下文组装；
+3. 章节摘要、事实、角色状态、世界规则、时间线和伏笔索引；
+4. RAG 的索引、检索、项目隔离和降级可观测性；
+5. 长任务的超时、重试、取消、SSE terminal 和恢复；
+6. 章节修订对后续上下文的影响传播；
+7. token、成本、延迟、缓存和数据库压力；
+8. 前端长正文、章节列表、版本对比和导出体验；
+9. SQLite 当前运行与未来 MySQL 迁移的可审计性；
+10. 真实 Provider、fixture、mock、health 和队列响应的证据分层。
 
-根因是标准静态服务器不会把未知 history 路径回退到 `index.html`。
+### 2.2 本方案明确不做的事
 
-## 2.4 证据分层与权威性规则
+- 不在本轮自动创作一部 10 万字小说；
+- 不用脚本批量灌入小说正文来制造“完成”；
+- 不把章节数量、字符数或 mock 输出当系统优化完成证据；
+- 不在没有 embedding 凭据时伪造向量和 RAG 命中；
+- 不在 MySQL readiness 和 FK cycle 未解决前执行迁移 apply；
+- 不为了通过测试删除长篇相关测试或提高构建阈值；
+- 不把一次成功的短章节请求外推成 10 万字级稳定性证明。
 
-所有结论必须标注证据层，不得把历史报告、测试夹具或计划目标写成当前生产事实：
+## 3. 10 万字级系统容量模型
 
-| 证据层 | 含义 | 可证明什么 | 不能证明什么 |
+### 3.1 内容分层
+
+系统不能把 10 万字全文每次都塞入 Provider prompt。推荐固定为五层：
+
+| 层 | 内容 | 用途 | 更新频率 |
 |---|---|---|---|
-| 历史证据 | 过去某次提交/服务/样本的输出 | 当时行为和结果 | 当前服务仍然如此 |
-| 当前服务器证据 | 当前 SSH 工作树、进程、HTTP、数据库和日志 | 当前部署状态 | 未来优化已经完成 |
-| 测试证据 | 自动化测试、fixture、mock、静态门禁 | 被覆盖的工程行为 | 真实 Provider 或文学质量 |
-| 真实生产证据 | 当前入口、真实 Provider、真实正文和账本 | 生产链路事实 | 人工文学质量（除非有盲审） |
-| 计划目标 | 本文定义的未来门槛 | 后续执行契约 | 已经达标 |
+| L0 项目契约 | 题材、风格、硬约束、禁止事项 | 每次请求都需要的稳定约束 | 低 |
+| L1 全书摘要 | 主线、终局方向、全局冲突 | 跨卷导航 | 低/人工确认 |
+| L2 卷级摘要 | 当前卷目标、已发生事件、未决线索 | 当前卷规划 | 每卷/重大修订 |
+| L3 章节摘要 | 最近章节结果、角色变化、章末压力 | 下一章生成 | 每章 |
+| L4 事实检索 | 人物、地点、道具、时间线、伏笔的结构化事实 | 按查询召回 | 事件变化时 |
 
-10 万字作品还必须建立一个不可覆盖的 `generation-manifest.json`，每章至少记录：
+原始正文是证据源，摘要和向量是派生索引，任何派生层都不能无记录覆盖原文和确认版本。
 
-```text
-project_id, volume_no, chapter_no, version_id, generation_run_id
-provider, model, attempt, prompt_digest, context_digest
-story_bible_digest, input_snapshot_digest, output_digest
-quality_gate_result, human_review_result, accepted_at, accepted_by
-```
+### 3.2 Context budget
 
-自动评分、JSON 评审结果、字数达标和 HTTP 200 都不能单独证明文学质量通过。正式发布前至少抽取盲审样本，由两名独立审阅者按固定量表评分，分歧进入仲裁；审阅结果绑定版本 hash，不能被后续生成覆盖。
-
-## 3. 10 万字长篇目标模型
-
-### 3.1 计量口径
-
-本计划把“10 万字”统一解释为约 100,000 个有效中文字符，以最终确认正文为计量对象；提示词、思考过程、质量报告、失败候选稿、重复重试、Markdown/HTML/JSON 标记、系统元话语、重复章节标题和纯空白不计入正文。
-
-计数器必须同时输出原始字符数、剔除字符数、重复段落剔除数和有效正文字符数，不能直接把数据库 `content.length` 当作最终字数。
+每次 Provider 调用都必须有显式预算，不允许按全文长度无限增长：
 
 ```text
-目标有效正文：100,000 字
-允许范围：97,000—103,000 字
+system_contract_budget
+project_contract_budget
+retrieved_facts_budget
+recent_chapters_budget
+current_chapter_plan_budget
+output_budget
+reserved_safety_margin
 ```
 
-### 3.2 五卷四十章配额
-
-| 卷 | 主题职责 | 章节数 | 字数配额 | 单章均值 |
-|---|---|---:|---:|---:|
-| 第一卷：天穹裂隙 | 世界入口、主角缺口、第一条主线 | 8 | 18,000 | 2,250 |
-| 第二卷：诸域回声 | 阵营展开、伙伴关系、第一次反转 | 8 | 20,000 | 2,500 |
-| 第三卷：星海棋局 | 中段升级、代价、伏笔交叉 | 9 | 22,000 | 2,444 |
-| 第四卷：旧王归墟 | 真相回收、关系决裂、终局压力 | 8 | 20,000 | 2,500 |
-| 第五卷：玄穹终局 | 终极选择、主线闭合、余波落点 | 7 | 20,000 | 2,857 |
-| **合计** |  | **40** | **100,000** | **2,500** |
-
-不采用一次性生成 10 万字。生产层级：
-
-- L0：全书总纲、五卷结构、角色/世界观字典；
-- L1：单卷纲、卷内冲突、伏笔计划；
-- L2：每 2—3 章的 continuity packet；
-- L3：单章候选正文、质量报告、usage；
-- L4：卷末修订版、伏笔回收报告和下一卷交付包。
-
-每章必须有：目标、冲突、代价、信息增量、章末压力、递交给下一章的连续性事实。每章建议 3—5 个场景，不并行写同一项目中相互影响的章节。
-
-## 4. 10 万字内容数据契约
-
-### 4.1 章节对象
+上下文组装器必须输出 `context_manifest`：
 
 ```json
 {
-  "project_id": "project-id",
-  "volume_no": 1,
-  "chapter_no": 1,
-  "target_chars": 2250,
-  "min_chars": 2100,
-  "max_chars": 2700,
-  "chapter_goal": "可验证的本章目标",
-  "conflict": "本章主要阻力",
-  "cost": "本章必须支付的代价",
-  "reveal": "本章新增信息",
-  "end_hook": "章末压力",
-  "required_entities": [],
-  "forbidden_contradictions": [],
-  "foreshadowing_in": [],
-  "foreshadowing_out": [],
-  "continuity_snapshot_id": "snapshot-id"
+  "project_id": "...",
+  "chapter_id": "...",
+  "base_version_id": "...",
+  "snapshot_id": "...",
+  "selected_layers": ["L0", "L1", "L2", "L3", "L4"],
+  "source_ids": [],
+  "token_estimate": 0,
+  "max_tokens": 0,
+  "truncated_layers": [],
+  "omitted_sources": [],
+  "context_digest": "..."
 }
 ```
 
-### 4.2 连续性账本
-
-账本分为人物、世界、道具、伏笔四类：
-
-| 类别 | 记录内容 | 失配后果 |
-|---|---|---|
-| 人物 | 年龄、身份、伤势、能力、关系、秘密 | 行为失真 |
-| 世界 | 地点、规则、势力、资源、时间线 | 世界观矛盾 |
-| 道具 | 所有人、位置、状态、消耗、转移 | 关键道具瞬移 |
-| 伏笔 | 埋设章、提示、预期回收、实际回收、状态 | 伏笔悬空或提前泄底 |
-
-每个确认章节生成不可变 snapshot；修订必须生成新版本和新 snapshot，不覆盖旧账本。
-
-### 4.3 伏笔状态机
-
-```mermaid
-stateDiagram-v2
-    [*] --> planned
-    planned --> planted: 进入章节计划
-    planted --> reinforced: 再次强化
-    reinforced --> paid_off: 事实回收
-    planted --> abandoned: 明确取消并记录原因
-    reinforced --> abandoned: 改纲后取消
-    paid_off --> [*]
-    abandoned --> [*]
-```
-
-卷末通过条件：关键伏笔 `paid_off + explicitly_open` 比例达到 95% 以上；取消伏笔必须有原因和替代作用；超过两个检查周期仍未 planted 的伏笔进入人工审查。
-
-## 5. 系统优化路线图
-
-### Phase 0：证据冻结（第 0—2 天）
-
-固定 commit、PID、端口、数据库 schema fingerprint、291 项后端、118 项前端和 R66 浏览器输出；每轮更新 `OPTIMIZATION_ROUND_*.md` 和综合状态。
-
 通过条件：
 
+- 每次调用都能解释上下文由哪些来源组成；
+- 超预算时按优先级裁剪，不静默截断关键硬约束；
+- 同一 snapshot、同一参数的组装结果可复现；
+- 旧版本内容不会混入新版本 context；
+- context 预算和 output 预算分别统计。
+
+### 3.3 10 万字不是单一容量指标
+
+必须同时观察：
+
 ```text
-git working tree clean
-process_commit == current_commit
-8013/8099/5174 healthy
-topology AUDIT_RESULT=PASS
+全文字符数
+章节数
+场景数
+结构化事实数
+摘要层数
+向量条目数
+单次 prompt tokens
+单章累计 tokens
+全项目累计 tokens
+数据库行数
+版本数量
+修订传播范围
 ```
 
-### Phase 1：P0 SPA history fallback（第 1 轮）
+## 4. 核心优化路线
 
-新增 `scripts/frontend_spa_server.py`，静态文件存在时正常返回；无扩展名且文件不存在时回退 `dist/index.html`；带扩展名的缺失资源仍 404；`/api` 不由静态服务器吞掉。同步更新启动/keepalive 和 manifest。
+### Phase 1：长篇数据流审计
+
+目标：先确认现有代码已经如何保存和读取长篇状态，避免重复造表或破坏已跑通链路。
+
+审计范围：
+
+- `PipelineOrchestrator` 的输入输出；
+- `ChapterVersion` 和章节状态；
+- `longform_context_service`；
+- `memory_layer_service`；
+- `knowledge_retrieval_service`；
+- `style_rag_service`；
+- `timeline`、`foreshadowing`、`character` 相关服务；
+- SSE、retry、cancel、superseded-run 和 persist 阶段；
+- token usage、cost、attempt 和 project/user 归属。
+
+交付物：
+
+```text
+当前长篇数据流图
+模块输入输出表
+上下文来源清单
+写入点清单
+状态机和终态清单
+```
+
+验收：没有只读审计遗漏的持久化写入点；每个摘要、向量、事实和版本都能定位来源。
+
+### Phase 2：分层上下文和裁剪优化
+
+目标：让 10 万字级项目不会因全文拼接导致 token 爆炸、延迟长尾和成本失控。
+
+实施顺序：
+
+1. 把 L0/L1/L2/L3/L4 作为显式 context sections；
+2. 每层设置独立 token ceiling；
+3. 先保留硬约束、当前章计划和最近连续性事实；
+4. 再按相关性加入历史事实和摘要；
+5. 最后才加入低优先级背景正文片段；
+6. 超限时记录裁剪原因和被省略 source；
+7. 生成、评审、改写分别使用各自 context policy；
+8. 对相同 digest 的不可变 context 做版本化缓存。
+
+验收指标：
+
+- 10 万字规模模拟项目下，单次 prompt 不随全文线性增长；
+- context assembly p50/p95 有记录；
+- 裁剪不会删除项目硬约束和当前章必要事实；
+- 缓存命中与未命中产生相同的事实集合；
+- 故意降低 ceiling 时测试失败，而不是静默生成错误 context。
+
+### Phase 3：连续性账本和事实冲突门
+
+目标：避免长篇项目在章节增长后出现角色、地点、道具、时间线和伏笔漂移。
+
+结构化对象：
+
+```text
+CharacterState
+WorldRule
+LocationState
+ItemOwnership
+TimelineEvent
+ForeshadowingLedger
+ChapterDeliveryPacket
+ContinuitySnapshot
+```
+
+每个事实必须带：
+
+```text
+entity_id
+source_chapter_id
+source_version_id
+valid_from
+valid_to
+confidence
+status
+supersedes
+```
+
+冲突分级：
+
+| 等级 | 例子 | 处理 |
+|---|---|---|
+| BLOCKING | 已死亡角色重新正常行动、核心道具同时属于两人 | 阻断确认 |
+| REVIEW | 角色语气变化、非核心地点描述差异 | 人工审查 |
+| INFO | 有来源的新事实或合理成长 | 记录并继续 |
+
+验收：注入一个已知矛盾时，测试必须指出实体、来源章节、冲突字段和阻断等级。
+
+### Phase 4：RAG 和 Embedding 优化
+
+目标：把“配置存在、请求成功、向量非空、检索有效”拆成独立状态。
+
+实施：
+
+1. embedding key/base URL/model 独立于 chat key；
+2. 对输入文本规范化、分块、去重并记录 chunk source；
+3. 向量索引按 project/novel 隔离；
+4. 更新章节时使用版本化 upsert，不删除确认版本证据；
+5. 查询返回 source chapter/version/digest；
+6. 记录 top-k、score、latency 和命中事实；
+7. embedding 失败时返回结构化 degraded 状态；
+8. 无向量模式与真实 RAG 模式分开统计。
+
+真实验收分层：
+
+```text
+config_present
+request_success
+vector_nonempty
+vector_dimension_stable
+index_write_success
+retrieval_relevant
+cross_project_isolation
+```
+
+当前没有独立凭据时，正确结果仍是 `EMBEDDING_CONFIG_MISSING`。
+
+### Phase 5：章节版本、修订传播和并发写入
+
+目标：长篇修订不能无记录地污染后续章节和账本。
+
+每次生成/修订必须绑定：
+
+```text
+project_id
+chapter_id
+generation_run_id
+base_version_id
+context_digest
+snapshot_id
+optimistic_lock_version
+```
+
+规则：
+
+- 接受版本必须幂等；
+- 同一 chapter 不能产生两个同时生效的 confirmed version；
+- 修订旧章后生成 `RevisionImpact`；
+- 受影响的后续章节进入 stale/review 队列；
+- superseded run 不得落库新确认版本；
+- 旧任务晚到不得覆盖新版本；
+- Story Bible 更新采用版本冲突检测。
+
+验收：并发提交、旧任务晚到、取消后回写、修订后读取旧 snapshot 四类测试必须分别覆盖。
+
+### Phase 6：长任务可靠性和可恢复性
+
+目标：10 万字级项目由大量长任务组成，必须把长尾和中断作为正常状态处理。
+
+必须观测：
+
+```text
+queued
+claimed
+running
+retrying
+cancelling
+cancelled
+waiting_for_confirm
+completed
+failed
+superseded
+stale
+```
+
+每个任务必须有唯一 terminal event。超时、Provider 断流、进程重启、网络中断和用户取消都必须能恢复或明确失败。
 
 验收：
 
-```text
-GET /             -> 200, HTML, #app=true
-GET /workspace    -> 200, HTML, #app=true
-GET /admin        -> 200, HTML, #app=true，然后由 Vue 权限守卫处理
-GET /settings     -> 200, HTML, #app=true
-GET /assets/x.js  -> 真实文件 200
-GET /missing.js   -> 404
-```
+- cancel 后不再新增正文/确认版本/usage；
+- retry 不重复计费或重复接受；
+- SSE 断开不把任务误报成功；
+- worker 重启后可从持久化状态恢复；
+- stale run 不得覆盖新结果；
+- 数据库中不存在悬挂 generating 状态。
 
-反向验证：临时移除 fallback 分支时 `/workspace` 必须恢复为 404。
+### Phase 7：性能、成本和缓存
 
-### Phase 2：P0 真实 Provider 与任务终态（第 2—3 轮）
+目标：降低 10 万字级项目的累计成本和长尾，不通过降低质量门制造假优化。
 
-创建独立临时项目，使用可控小预算发起单章生成；保存完整 SSE 帧，读取 chapter/version/usage，删除临时项目并运行 integrity/orphan audit。
-
-通过条件：provider、model、attempt 可定位；terminal 恰好一个；正文非空可解析；usage 与 project/user/attempt 对齐；失败保留原始错误；删除后没有项目、章节、预算、usage 孤儿。health、队列 200、fallback 不计为成功。
-
-### Phase 3：P0 Embedding 与 RAG（第 4—5 轮）
-
-取得独立 embedding key/base URL 后运行 `scripts/probe_embedding.sh`；记录 provider、model、dimension、latency 和错误分类；用固定 20 条事实集比较无 RAG、降级 RAG、真实 RAG 的 top-k 命中；正文 Provider 和 embedding Provider 分开记账。
-
-通过条件：`vector_nonempty=true`、`vector_dimension>0`、维度稳定、固定事实集达到预设命中阈值、embedding 失败不阻断无向量正文链且不伪造 RAG 成功。没有配置时继续保持 `EMBEDDING_CONFIG_MISSING`。
-
-### Phase 4：P1 10 万字连续性引擎（第 6—9 轮）
-
-物化以下模块：
-
-- `LongformPlan`：全书/卷/章配额；
-- `ContinuitySnapshot`：章节确认时的事实快照；
-- `ForeshadowingLedger`：伏笔状态机；
-- `CharacterState`：角色弧和当前状态；
-- `WorldRuleLedger`：世界规则和例外；
-- `ChapterDeliveryPacket`：递交给下一章的事实和压力；
-- `RevisionImpact`：修订影响的后续章节列表。
-
-规则：生成前读取最近确认 snapshot；生成后提取事实增量并检测冲突；阻断冲突不得确认；修订必须标记受影响章节；局部重写不允许无记录覆盖全局状态。
-
-专项验收：跨 10 章人物状态不漂移、道具所有权稳定、时间线可排序、伏笔无非法跳转；故意注入矛盾时测试必须指出实体、章节和冲突字段。
-
-### Phase 5：P1 成本、延迟、缓存（第 10—12 轮）
-
-先统计 mission/context/variant/review/persist 的 p50/p95，再对不可变蓝图、世界规则和旧章摘要做版本化缓存；短章保留质量门和取消 drain；timeout 必须产生结构化 terminal。
-
-通过条件：重复 context 计算下降、p95 有真实日志证据、取消不新增写入、缓存不改变事实、cost/token attribution 与无缓存版本一致。
-
-### Phase 6：P1 依赖生产切换评估（第 13—14 轮）
-
-R65 只证明独立重建可行，尚未替换生产 source。切换前必须用重建 venv 在隔离端口启动完整后端，跑 291 项回归、health、SSE、章节链路，比较 import source、版本和日志，逐个重启 8099/8013，保留旧入口和回滚命令。
-
-### Phase 7：P0 MySQL runner 与回滚演练
-
-只有 readiness、backup manifest、fragment hash、目标空库和人工审查齐全后进入副本演练：先建无环表，再复制主表和子表，最后添加 `chapters.selected_version_id` 外键和 `timeline_events.caused_by_event_id` 自引用约束；对比行数、约束和 schema fingerprint，再演练副本销毁/恢复。最后才允许 `--apply --backup-manifest`。
-
-## 6. 单章、卷级和全书验收
-
-### 6.1 单章
-
-| 维度 | 通过条件 |
-|---|---|
-| 长度 | 目标值 ±10%，不低于 `min_chars` |
-| 结构 | 目标、冲突、代价、信息增量、章末压力齐全 |
-| 连续性 | 无阻断级人物、地点、道具、时间线矛盾 |
-| 伏笔 | 输入处理可解释，输出有状态 |
-| 风格 | 无系统提示、元话语泄漏，符合项目风格 |
-| 质量门 | 结构、人物、节奏、场景、悬念检查完成 |
-| 版本 | 候选/确认状态清晰，旧版可恢复 |
-| 成本 | token、cost、provider、model、attempt 可追溯 |
-| 事件 | SSE terminal 唯一，失败结构化 |
-| 清理 | 无孤儿任务、版本和预算记录 |
-
-### 6.2 卷级
-
-每卷结束输出实际字符数、配额差、章节状态、主线推进、角色弧、世界规则、伏笔统计、未决线索、重复表达、Provider 失败/重试、成本和 p50/p95。主线缺失、关键人物无法解释、伏笔无记录丢弃、成功版本无 usage、账本不一致或有孤儿数据时不得进入下一卷。
-
-### 6.3 全书
+分阶段统计：
 
 ```text
-final_chars ∈ [97000, 103000]
-40 chapters planned and accounted for
-5 volumes have volume reports
-critical foreshadowing closure >= 95%
-zero unresolved blocking continuity conflicts
-all confirmed chapters have version and usage attribution
-no orphan runs / versions / budgets
-final export reproducible from confirmed versions
-rollback can restore the last confirmed volume
+context_assembly_ms
+retrieval_ms
+mission_ms
+provider_ms
+review_ms
+persist_ms
+retry_count
+tokens_in
+tokens_out
+cost
+cache_hit
 ```
 
-## 7. 命令与反向验证矩阵
+缓存原则：
 
-每轮代码变更：
+- 只缓存不可变输入和带 digest 的派生结果；
+- 不缓存实时任务状态；
+- prompt、context、model、policy 变化必须失效；
+- 缓存命中不能改变事实集合；
+- 统计命中/未命中两套 p50/p95。
 
-```bash
-bash scripts/test_backend.sh
-cd frontend && npm run type-check && npm run test:run && npm run build-only
+预算分为单章、单项目、全局三层，状态必须明确为 `budget_blocked`、`awaiting_approval`、`degraded_mode`、`completed` 或 `failed`。
+
+### Phase 8：前端长内容和导出
+
+目标：让长篇项目在浏览器中可用，而不是只让后端能处理。
+
+优化范围：
+
+- 章节列表虚拟滚动或分页；
+- 长正文按章加载，不一次性挂载 10 万字 DOM；
+- 版本对比按差异片段加载；
+- 生成进度和 SSE 状态不阻塞阅读；
+- 修订影响以列表展示；
+- 导出使用后台任务并显示真实状态；
+- 深链接刷新必须保留；
+- 管理路由和 API 错误分开显示。
+
+验收：
+
+- 10 万字模拟项目打开章节列表不出现明显卡死；
+- 单章阅读、切换和返回保持可用；
+- 导出失败不会清空当前编辑状态；
+- `/workspace`、`/admin`、`/settings` 直接刷新可启动 SPA。
+
+### Phase 9：SQLite 当前运行与 MySQL 迁移准备
+
+目标：先保证 SQLite 继续稳定，再为未来 MySQL 做可审计准备。
+
+当前保持：
+
+```text
+SQLite production
+MySQL preview-only
 ```
 
-每轮部署：
+迁移前必须完成：
 
-```bash
-bash scripts/audit_server_topology.sh
-bash scripts/audit_runtime_dependencies.sh
-bash scripts/audit_frontend_entry.sh
-bash scripts/audit_frontend_browser.sh
-```
+1. backup manifest；
+2. source schema fingerprint；
+3. fragment hash；
+4. FK dependency plan；
+5. `chapters <-> chapter_versions` 两阶段约束演练；
+6. `timeline_events` 自引用约束演练；
+7. 行数、约束、索引和 fingerprint 对比；
+8. 副本 rollback rehearsal；
+9. 人工 review；
+10. 最后才允许显式 apply。
 
-专项：
+## 5. 推荐实施轮次
 
-```bash
-bash scripts/probe_embedding.sh
-bash scripts/audit_mysql_migration_readiness.sh
-bash scripts/plan_mysql_fk_order.sh
-bash scripts/verify_runtime_rebuild.sh
-```
-
-反向验证要求：
-
-| 修复 | 破坏动作 | 必须出现的失败 |
-|---|---|---|
-| SPA fallback | 恢复纯静态 server | 深链接 404、appRoot=false |
-| storage getter | 恢复直接 getter 读取 | Node 25 warning 重现 |
-| FK planner | 修改 57/76 或删除 cycle 断言 | 测试失败 |
-| 依赖重建 | 卸载 `aiosqlite` | exit=10、status=FAIL |
-| 连续性门 | 注入人物事实矛盾 | confirmation 被阻断 |
-| cancel drain | 完成前 cancel | 不得新增 confirmed version |
-
-## 8. 提交、回滚和禁止事项
-
-每轮一个主题提交，正文必须写目标、变更文件、测试、真实运行证据、反向验证、未完成项和回滚锚点，然后：
-
-```bash
-git push origin codex/server-us010-r1
-```
-
-回滚顺序：停止新进程、恢复上一提交/构建、恢复 manifest/PID、跑 health/topology；数据库只使用备份恢复，不做未经审查的逐表反向删除。
-
-禁止：`git reset --hard`、`git clean -fd`、批量删除用户资产、提交 `storage/*.db-wal`/`*.db-shm`、提交真实密钥、把 mock/health/队列当真实成功、提高阈值掩盖问题、无 backup manifest 运行 apply。
-
-## 9. 风险矩阵
-
-| 风险 | 当前状态 | 监测 | 处置 |
+| 轮次 | 主题 | 主要交付 | 验收 |
 |---|---|---|---|
-| Provider 余额/认证 | 需复验 | status/error/token | 保留失败证据，暂停计费 smoke |
-| Embedding key | 已阻断 | probe code | 保持降级，配置后单独验收 |
-| 前端深链接 | 已发生 | browser audit | P0 SPA fallback |
-| 上下文过长 | 潜在 | token/latency | snapshot、摘要、分层 context |
-| 伏笔漂移 | 潜在 | ledger audit | 阻断级 continuity gate |
-| SQLite 残留 | 需持续 | integrity/orphan | cancel/delete 回归 |
-| MySQL FK cycle | 已发生 | planner | 两阶段约束、只在副本演练 |
-| 依赖漂移 | 已审计 | runtime audit | 隔离重建和 source gate |
-| Cloudflare 通道 | 外部依赖 | SSH/网页终端 | 每轮先确认通道，保留恢复脚本 |
+| R69 | context manifest | 分层上下文、预算、裁剪原因 | fixture 长上下文回归 |
+| R70 | continuity snapshot | 事实来源、冲突分级、snapshot | 注入冲突必须阻断 |
+| R71 | revision impact | 修订传播、stale 后续章节 | 旧章修订影响可追踪 |
+| R72 | embedding probe | 独立配置、向量和检索分层 | 非空向量和固定事实集 |
+| R73 | long-task recovery | cancel/retry/SSE/restart | terminal 唯一、无脏写 |
+| R74 | cost/cache | digest cache、token/cost 分层 | p50/p95 和账本一致 |
+| R75 | long-content UI | 虚拟列表、按章加载、导出 | 10 万字 fixture 浏览器门禁 |
+| R76 | MySQL rehearsal | 副本迁移、FK cycle、rollback | 无生产写入、fingerprint 可比 |
 
-## 10. 完成门
+每轮只改一个主题，必须更新对应 `docs/OPTIMIZATION_ROUND_*.md`，跑专项测试、反向测试、部署审计并推送 GitHub。
 
-### 基础可用
+## 6. 统一验收标准
 
-SPA fallback 通过；`/`、`/workspace`、`/admin` 浏览器 appRoot 全为 true；8013/8099/5174 健康且提交一致；GitHub 推送和 topology PASS。
-
-### 10 万字可生产
-
-全书/卷/章配额、continuity snapshot、伏笔 ledger、单章生成/审核/确认/修订/取消/删除闭环完成；至少 5 章连续生成和 10 章连续性压力回归通过；成本和 usage 可追溯。
-
-### 真实能力完整
-
-真实 Provider 有非空正文和 usage；Embedding 返回非空向量并通过固定事实检索；RAG 成功/降级分开；MySQL 副本完成 FK migration/rollback rehearsal；依赖切换有隔离启动和生产回滚证据。
-
-最终完成声明必须同时包含：
+### 6.1 长上下文
 
 ```text
-HEAD=<commit>
-origin=<same commit>
-backend=<count> passed
-frontend_typecheck=PASS
-frontend_tests=<count> passed
-frontend_build=PASS
-browser_routes=/,/workspace,/admin all appRoot=true
-spa_fallback=PASS
-provider_real_nonempty=PASS
-sse_terminal_unique=PASS
-usage_attribution=PASS
-embedding_vector_nonempty=PASS
-rag_fact_retrieval=PASS
-mysql_backup_manifest=PASS
-mysql_fk_cycle_rehearsal=PASS
-rollback_rehearsal=PASS
-topology=AUDIT_RESULT=PASS
-working_tree_dirty=false
+context_manifest 可重现
+预算超限有结构化裁剪原因
+硬约束不会被静默裁掉
+摘要/事实/原文来源可追踪
+同输入 digest 结果稳定
 ```
 
-当前下一步顺序：修复 SPA fallback；重跑浏览器基线；复验真实 Provider；配置后验收 Embedding/RAG；物化 10 万字计划和 continuity 数据模型；完成 5/10 章连续性回归；再评估依赖切换；最后进行 MySQL 副本演练。
+### 6.2 连续性
 
-本计划是验收契约，不是完成声明。每个阶段必须回写真实命令、输出、commit、进程、数据库和回滚证据。
+```text
+人物、地点、道具、时间线、伏笔均有来源
+BLOCKING 冲突阻断确认
+REVIEW 冲突进入人工队列
+修订能生成 RevisionImpact
+旧 run 不覆盖新 version
+```
+
+### 6.3 可靠性
+
+```text
+每个任务唯一 terminal
+cancel/retry/restart 可验证
+无悬挂 generating
+usage 与 project/user/attempt 关联
+失败状态不伪装成功
+```
+
+### 6.4 性能成本
+
+```text
+context/retrieval/provider/review/persist 分段计时
+输入/输出 token 分开
+retry 和失败成本单独记录
+cache hit/miss 可比较
+不通过降低质量门制造性能绿灯
+```
+
+### 6.5 部署
+
+```text
+process_commit == current_commit
+working_tree_dirty == false
+8013/8099/5174 health PASS
+所有核心深链接 appRoot=true
+API/静态资源边界正确
+GitHub branch 同步
+```
+
+## 7. 当前下一步
+
+1. R69 先审计现有 context assembler，输出来源、优先级和 token budget，不立即重写主链；
+2. 在隔离 fixture 中模拟 10 万字级项目，验证上下文不按全文线性膨胀；
+3. 再实现 `context_manifest` 和可观察裁剪；
+4. 之后推进 continuity snapshot、revision impact、embedding、长任务恢复和长内容 UI；
+5. MySQL 继续保持 preview-only，直到 readiness、FK cycle 和 rollback rehearsal 全部有证据。
+
+本方案的完成不是“生成十万字小说”，而是让玄穹文枢能够稳定、可审计、可回滚地处理十万字级长篇项目。
