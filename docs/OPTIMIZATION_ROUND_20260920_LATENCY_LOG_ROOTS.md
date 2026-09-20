@@ -31,3 +31,15 @@ status=PASS
 ## 当前性能结论
 
 R45/R46/R47 的数据混合了不同 provider 状态、不同服务进程和不同请求规模；当前报告用于基线与定位，不直接宣称整体 p50/p95 改善。后续性能优化需按 commit、target_word_count、provider/model 和成功/超时终态分组。
+
+## R54：候选级延迟聚合
+
+当前报告同时解析 `Pipeline candidate timings` 日志，并输出：
+
+- `candidate_sample_count`；
+- `generation_ms` p50/p95；
+- `guardrail_check_ms` p50/p95；
+- `guardrail_rewrite_ms` p50/p95；
+- `total_ms` p50/p95。
+
+这样可把 Provider 请求长尾与护栏回炉长尾分开统计。

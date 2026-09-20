@@ -11,6 +11,7 @@ from statistics import median
 from typing import Any
 
 TOTAL_RE = re.compile(r"Pipeline total duration: .*? duration_ms=(?P<duration>[0-9.]+) stages=(?P<stages>\{.*\})")
+CANDIDATE_RE = re.compile(r"Pipeline candidate timings: .*? timings=(?P<timings>\[.*\])")
 
 def percentile(values: list[float], p: float) -> float | None:
     if not values:
@@ -48,6 +49,8 @@ def main() -> int:
     files = sorted({path for pattern in globs for path in root.glob(pattern)})
     totals: list[float] = []
     stages: dict[str, list[float]] = {}
+    candidate_metrics: dict[str, list[float]] = {}
+    candidate_sample_count = 0
     source_files: set[str] = set()
     parse_errors: list[str] = []
     for path in files:
@@ -57,6 +60,23 @@ def main() -> int:
             parse_errors.append(f"{path}:{type(exc).__name__}")
             continue
         for line in lines:
+            candidate_match = CANDIDATE_RE.search(line)
+            if candidate_match:
+                try:
+                    candidate_payload = ast.literal_eval(candidate_match.group("timings"))
+                    if not isinstance(candidate_payload, list):
+                        raise ValueError("candidate timings is not a list")
+                    candidate_sample_count += len(candidate_payload)
+                    for item in candidate_payload:
+                        if not isinstance(item, dict):
+                            continue
+                        for metric in ("generation_ms", "guardrail_check_ms", "guardrail_rewrite_ms", "total_ms"):
+                            value = item.get(metric)
+                            if isinstance(value, (int, float)):
+                                candidate_metrics.setdefault(metric, []).append(float(value))
+                except Exception as exc:  # noqa: BLE001 - report parse failures
+                    parse_errors.append(f"{path}:candidate:{type(exc).__name__}")
+
             match = TOTAL_RE.search(line)
             if not match:
                 continue
@@ -80,6 +100,8 @@ def main() -> int:
         "source_files": sorted(source_files),
         "total_pipeline": stats(totals),
         "stages": {stage: stats(values) for stage, values in sorted(stages.items())},
+        "candidate_sample_count": candidate_sample_count,
+        "candidate_timings": {metric: stats(values) for metric, values in sorted(candidate_metrics.items())},
         "parse_errors": parse_errors,
         "status": "PASS" if totals and not parse_errors else ("EMPTY" if not totals else "PARTIAL"),
     }
