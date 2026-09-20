@@ -67,6 +67,41 @@ def _mask_url(raw_url: str) -> str:
     return make_url(raw_url).render_as_string(hide_password=True)
 
 
+def _load_backup_manifest(path: str | None) -> dict:
+    if not path:
+        raise ValueError("真实迁移必须提供 --backup-manifest")
+    manifest_path = Path(path).expanduser()
+    if not manifest_path.is_file():
+        raise ValueError(f"备份 manifest 不存在：{manifest_path}")
+    import json
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("backup_completed") is not True:
+        raise ValueError("备份 manifest 未确认 backup_completed=true")
+    return manifest
+
+
+def _render_preview(*, source_url: str, target_url: str, chunk_size: int, table_count: int) -> str:
+    import json
+    return json.dumps({
+        "migration_type": "sqlite_to_mysql",
+        "execute": False,
+        "connected": False,
+        "writes_performed": False,
+        "source_url": _mask_url(source_url),
+        "target_url": _mask_url(target_url),
+        "table_count": table_count,
+        "chunk_size": chunk_size,
+        "status": "preview_only",
+        "apply_requirements": [
+            "pass --apply explicitly",
+            "provide --backup-manifest with backup_completed=true",
+            "run dialect-specific copy dry-run",
+            "capture rollback fingerprint",
+            "obtain manual review",
+        ],
+    }, ensure_ascii=False, indent=2)
+
+
 async def _ensure_mysql_database_exists(target_url: str) -> None:
     url = make_url(target_url)
     database = (url.database or "").strip("/")
@@ -181,6 +216,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--source-sqlite-path", help="源 SQLite 文件路径，优先级低于 --source-url")
     parser.add_argument("--target-url", help="目标 MySQL URL，默认读取当前项目 MySQL 配置")
     parser.add_argument("--chunk-size", type=int, default=500, help="单批插入行数，默认 500")
+    parser.add_argument("--apply", action="store_true", help="显式执行迁移；默认只输出 preview，不连接或写入 MySQL")
+    parser.add_argument("--backup-manifest", help="--apply 必填；JSON manifest 必须声明 backup_completed=true")
     return parser.parse_args()
 
 
@@ -204,6 +241,16 @@ async def main() -> None:
     if args.chunk_size <= 0:
         raise ValueError("chunk-size 必须大于 0")
 
+    if not args.apply:
+        print(_render_preview(
+            source_url=source_url,
+            target_url=target_url,
+            chunk_size=args.chunk_size,
+            table_count=len(Base.metadata.sorted_tables),
+        ))
+        return
+
+    _load_backup_manifest(args.backup_manifest)
     print(f"源库：{_mask_url(source_url)}")
     print(f"目标库：{_mask_url(target_url)}")
     await migrate(source_url=source_url, target_url=target_url, chunk_size=args.chunk_size)
