@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -151,6 +152,27 @@ async def health_check_llm_config(
         user_id=current_user.id,
         include_disabled=include_disabled,
     )
+
+
+@router.get("/embedding-health-check")
+async def embedding_health_check(
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> dict:
+    """Probe embedding capability without starting a chapter generation task."""
+    from ...services.llm_service import LLMService
+
+    service = LLMService(session)
+    vector = await service.get_embedding(
+        "玄穹文枢 embedding capability probe",
+        user_id=current_user.id,
+    )
+    return {
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "vector_nonempty": bool(vector),
+        "vector_dimension": len(vector),
+        "status": service.get_embedding_status(),
+    }
 
 
 @router.post("/auto-switch", response_model=LLMAutoSwitchResponse)
